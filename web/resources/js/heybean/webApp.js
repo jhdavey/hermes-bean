@@ -578,7 +578,7 @@ export function mountHeyBeanWebApp(mount) {
         const selectedMode = currentThemeModeKey();
         const resolvedMode = resolvedThemeMode(selectedMode);
         return `
-            <div class="hb-surface-soft hb-card-pad hb-settings-section hb-theme-settings">
+            <div class="hb-surface-soft hb-card-pad hb-settings-section hb-settings-appearance-card hb-theme-settings">
                 ${settingsSectionHeader(icons.palette, 'Appearance', `${selected.label} accent · ${selectedMode === 'auto' ? `Auto (${resolvedMode})` : themeModesByKey.get(selectedMode).label}`)}
                 <div class="hb-theme-select-row">
                     <span class="hb-theme-swatch" style="--hb-theme-swatch: ${escapeAttr(selected.accent)}" aria-hidden="true"></span>
@@ -4258,7 +4258,7 @@ export function mountHeyBeanWebApp(mount) {
         const activeWorkspaceId = String(currentWorkspaceId() || '');
         return `
             <section class="hb-card hb-card-pad hb-settings-grid">
-                ${sectionTitle(icons.settings, 'Settings', 'Focused Hermes Bean preferences')}
+                ${sectionTitle(icons.settings, 'Settings')}
                 <div class="hb-settings-email-row">
                     <span class="hb-settings-email-icon" aria-hidden="true">${icons.mail}</span>
                     <span class="hb-settings-email-text">${escapeHtml(user.email || '')}</span>
@@ -4266,12 +4266,12 @@ export function mountHeyBeanWebApp(mount) {
                 </div>
                 ${errorMarkup(state.error)}
                 ${state.notice ? `<div class="hb-success">${escapeHtml(state.notice)}</div>` : ''}
-                <div class="hb-compact-item">
+                <div class="hb-compact-item hb-settings-profile-card">
                     <span class="hb-compact-icon">${icons.tune}</span>
                     <div><strong>Bean preferences</strong><small>${escapeHtml(personalityLabel(profilePersonality(profile)))} • ${escapeHtml(priorities.length ? priorities.join(', ') : 'No priorities selected yet')}${context ? ` • ${escapeHtml(context)}` : ''}${complete ? '' : ' • Onboarding not finished'}</small></div>
                     <button class="hb-button-ghost" type="button" data-open-agent>Update</button>
                 </div>
-                <form class="hb-surface-soft hb-card-pad hb-settings-section hb-home-city-settings" data-home-city-form>
+                <form class="hb-surface-soft hb-card-pad hb-settings-section hb-settings-location-card hb-home-city-settings" data-home-city-form>
                     ${settingsSectionHeader(icons.spaces, 'Home city', homeCity || 'Used for weather and local context.')}
                     <div class="hb-field-row" style="margin-top:10px">
                         ${labelInput('Home city', 'homeCity', 'text', homeCity, 'autocomplete="address-level2" maxlength="120"')}
@@ -4283,12 +4283,12 @@ export function mountHeyBeanWebApp(mount) {
                 </form>
                 ${themeSettingsMarkup()}
                 ${settingsCategoriesMarkup()}
-                <div class="hb-surface-soft hb-card-pad hb-settings-section">
+                <div class="hb-surface-soft hb-card-pad hb-settings-section hb-settings-notifications-card">
                     ${settingsSectionHeader(icons.bell, 'Notifications', 'Choose how reminders can reach you.')}
                     <label class="hb-switch-row"><input type="checkbox" data-pref="reminder_push" ${prefs.reminder_push !== false ? 'checked' : ''}> Reminder push notifications</label>
                     <label class="hb-switch-row"><input type="checkbox" data-pref="reminder_email" ${prefs.reminder_email === true ? 'checked' : ''}> Reminder emails</label>
                 </div>
-                <div class="hb-surface-soft hb-card-pad hb-settings-section">
+                <div class="hb-surface-soft hb-card-pad hb-settings-section hb-settings-workspaces-card">
                     <div class="hb-settings-header-with-action">
                         ${settingsSectionHeader(icons.spaces, 'Workspaces', 'Personal and shared spaces with their own Bean, calendar, tasks, reminders, and settings.')}
                         <button class="hb-workspace-create-action" type="button" data-create-workspace aria-label="Create workspace" title="Create workspace">${icons.add}</button>
@@ -4315,10 +4315,10 @@ export function mountHeyBeanWebApp(mount) {
                         <button class="hb-button-secondary" type="button" data-accept-workspace>Accept invite</button>
                     </div>
                 </div>
-                <div class="hb-surface-soft hb-card-pad hb-settings-section">
+                <div class="hb-surface-soft hb-card-pad hb-settings-section hb-settings-calendar-card">
                     ${googleCalendarMarkup()}
                 </div>
-                <div class="hb-surface-soft hb-card-pad hb-settings-section">
+                <div class="hb-surface-soft hb-card-pad hb-settings-section hb-settings-calendar-preferences-card">
                     ${settingsSectionHeader(icons.calendar, 'Calendar preferences', 'Day view visible hours.')}
                     <div class="hb-field-row hb-settings-hour-row" style="margin-top:10px">
                         ${settingsHourSelectMarkup('Start hour', 'startHour', Number(localStorage.getItem('heybean.calendar.startHour') || 6), 0, 23)}
@@ -4326,7 +4326,7 @@ export function mountHeyBeanWebApp(mount) {
                     </div>
                 </div>
                 ${billingSettingsMarkup()}
-                <div class="hb-card hb-card-pad hb-settings-section">
+                <div class="hb-card hb-card-pad hb-settings-section hb-settings-account-card">
                     ${settingsSectionHeader(icons.user, 'Account controls', 'Export, sign out, or permanently delete your account.')}
                     <div class="hb-account-actions">
                         <button class="hb-button-secondary" type="button" data-export-account>Export data</button>

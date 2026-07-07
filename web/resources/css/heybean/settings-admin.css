@@ -1,6 +1,15 @@
 .hb-settings-grid {
     display: grid;
-    gap: 10px;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    align-items: start;
+    gap: 16px;
+    width: min(100%, 1180px);
+    margin: 14px auto 96px;
+    padding: 20px;
+    border-color: color-mix(in srgb, var(--hb-border) 82%, transparent);
+    background:
+        linear-gradient(180deg, color-mix(in srgb, var(--hb-surface) 98%, transparent), color-mix(in srgb, var(--hb-surface2) 80%, var(--hb-surface))),
+        var(--hb-surface);
 }
 
 .hb-settings-section {
@@ -8,24 +17,50 @@
     gap: 12px;
 }
 
-.hb-settings-grid > .hb-settings-section {
-    padding: 18px 0 0;
-    border: 0;
-    border-top: 1px solid rgba(var(--hb-accent-rgb), .32);
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
+.hb-settings-grid > .hb-section-title,
+.hb-settings-grid > .hb-settings-email-row,
+.hb-settings-grid > .hb-success,
+.hb-settings-grid > .hb-error,
+.hb-settings-grid > .hb-settings-profile-card,
+.hb-settings-grid > .hb-settings-workspaces-card,
+.hb-settings-grid > .hb-settings-calendar-card,
+.hb-settings-grid > .hb-billing-settings,
+.hb-settings-grid > .hb-settings-account-card,
+.hb-settings-grid > .hb-settings-legal-row {
+    grid-column: 1 / -1;
 }
 
-.hb-settings-grid > .hb-compact-item,
-.hb-settings-grid > .hb-surface-soft:not(.hb-settings-section),
-.hb-settings-grid > .hb-card:not(.hb-settings-section) {
-    padding: 16px 0 0;
-    border: 0;
-    border-top: 1px solid rgba(var(--hb-accent-rgb), .24);
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
+.hb-settings-grid > .hb-settings-location-card,
+.hb-settings-grid > .hb-settings-appearance-card,
+.hb-settings-grid > .hb-settings-categories,
+.hb-settings-grid > .hb-settings-notifications-card,
+.hb-settings-grid > .hb-settings-calendar-preferences-card {
+    grid-column: span 6;
+}
+
+.hb-settings-grid > .hb-settings-section,
+.hb-settings-grid > .hb-settings-profile-card,
+.hb-settings-grid > .hb-settings-email-row,
+.hb-settings-grid > .hb-billing-settings,
+.hb-settings-grid > .hb-settings-account-card {
+    min-width: 0;
+    padding: 18px;
+    border: 1px solid color-mix(in srgb, var(--hb-border) 84%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--hb-surface) 96%, var(--hb-surface2));
+    box-shadow: 0 1px 2px rgba(16, 24, 40, .035);
+}
+
+.hb-settings-grid > .hb-section-title {
+    padding: 2px 0 4px;
+}
+
+.hb-settings-grid > .hb-section-title h2 {
+    font-size: 24px;
+}
+
+.hb-settings-grid > .hb-section-title p {
+    display: none;
 }
 
 .hb-settings-panel-head {
@@ -77,7 +112,7 @@
 .hb-settings-panel-head strong {
     display: block;
     color: var(--hb-text);
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 900;
 }
 
@@ -86,9 +121,9 @@
     display: block;
     margin-top: 3px;
     color: var(--hb-muted);
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 650;
-    line-height: 1.35;
+    line-height: 1.45;
 }
 
 .hb-settings-categories {
@@ -1299,13 +1334,32 @@
     font-weight: 600;
 }
 
+.hb-settings-grid > .hb-settings-profile-card {
+    padding: 18px;
+    border: 1px solid color-mix(in srgb, var(--hb-accent) 22%, var(--hb-border));
+    border-radius: 8px;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--hb-accent) 7%, var(--hb-surface)), var(--hb-surface));
+}
+
+.hb-settings-profile-card .hb-compact-icon {
+    width: 38px;
+    height: 38px;
+}
+
+.hb-settings-profile-card small {
+    display: block;
+    margin-top: 4px;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    line-height: 1.45;
+}
+
 .hb-settings-email-row {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 0 12px;
-    border-top: 1px solid color-mix(in srgb, var(--hb-border) 22%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, var(--hb-border) 22%, transparent);
+    min-height: 58px;
 }
 
 .hb-settings-email-icon {
@@ -1328,7 +1382,7 @@
     overflow: hidden;
     color: var(--hb-muted);
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 700;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
