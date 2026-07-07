@@ -284,8 +284,8 @@ trait NativeToolRuntime
             return false;
         }
 
-        $hasWriteVerb = (bool) preg_match('/\b(add|create|make|schedule|book|set|move|reschedule|change|update|edit|rename|delete|remove|cancel|clear|mark|complete|finish|pin|unpin|lock|unlock)\b/u', $content);
-        $hasAppTarget = (bool) preg_match('/\b(event|events|calendar|calendars|appointment|appointments|meeting|meetings|task|tasks|todo|to\s+do|reminder|reminders|note|notes|folder|folders|list|lists)\b/u', $content);
+        $hasWriteVerb = (bool) preg_match('/\b(add|create|make|plan|schedule|book|set|move|reschedule|change|update|edit|rename|delete|remove|cancel|clear|mark|complete|finish|pin|unpin|lock|unlock)\b/u', $content);
+        $hasAppTarget = (bool) preg_match('/\b(event|events|calendar|calendars|appointment|appointments|meeting|meetings|block|blocks|task|tasks|todo|to\s+do|reminder|reminders|note|notes|folder|folders|list|lists)\b/u', $content);
 
         return $hasWriteVerb && $hasAppTarget;
     }

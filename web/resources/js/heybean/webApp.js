@@ -9387,17 +9387,23 @@ export function mountHeyBeanWebApp(mount) {
                 });
             }
             startBeanWorkEventPolling(state.session.id);
+            const useRunEndpoint = useQueuedRuntime && !editingMessageId;
             const metadata = {
-                source: useQueuedRuntime ? 'web_queued_chat' : 'web_direct_chat',
+                source: useRunEndpoint ? 'web_queued_chat' : 'web_direct_chat',
                 client_request_id: clientRequestId,
                 ...(editingMessageId ? { edited_message_id: editingMessageId } : {}),
             };
-            const path = editingMessageId
+            const path = useRunEndpoint
+                ? `/assistant/sessions/${state.session.id}/runs`
+                : editingMessageId
                 ? `/assistant/sessions/${state.session.id}/messages/${encodeURIComponent(editingMessageId)}/branch`
                 : `/assistant/sessions/${state.session.id}/messages`;
+            const body = useRunEndpoint
+                ? { content, source: 'web_queued_chat', metadata }
+                : { content, metadata };
             result = await api(path, {
                 method: 'POST',
-                body: { content, metadata },
+                body,
             });
             if (cancelledChatRequestIds.has(requestId)) {
                 state.session = result.session || state.session;

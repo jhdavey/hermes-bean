@@ -29,7 +29,7 @@ class RunBeanProductionSmokeSuite extends Command
         {--email=bean-prod-smoke-suite@example.com : Dedicated production smoke user email}
         {--count=100 : Number of prompts to run}
         {--timeout=45 : Seconds to wait for each queued run}
-        {--scenario=single : Smoke scenario to run: single, followups, or kpi}
+        {--scenario=single : Smoke scenario to run: single, followups, kpi, or kpi_complex}
         {--cleanup : Delete created smoke resources after the run}
         {--no-reset : Keep existing data in the default smoke account before running}
         {--suite-id= : Optional suite id for traceability}';
@@ -67,7 +67,11 @@ class RunBeanProductionSmokeSuite extends Command
         if ($scenario === 'followups') {
             return $this->runFollowupSuite($user, $workspace, $runs, $count, $timeout, $suiteId);
         }
-        $prompts = $scenario === 'kpi' ? $this->kpiPrompts() : $this->prompts();
+        $prompts = match ($scenario) {
+            'kpi' => $this->kpiPrompts(),
+            'kpi_complex' => $this->kpiComplexPrompts(),
+            default => $this->prompts(),
+        };
 
         $this->info("Running {$count} Bean production smoke requests as {$user->email} in workspace {$workspace->id}.");
         $this->line("Suite: {$suiteId}");
@@ -1279,6 +1283,45 @@ class RunBeanProductionSmokeSuite extends Command
             'KPI-028: Add three calendar events: KPI Dentist 7/15 at 3pm, KPI Oil Change 7/16 at 8am, and KPI Review 7/17 at 5pm.',
             'KPI-029: Create a home reset plan for Saturday: calendar block at 10am, task to gather supplies, reminder Friday at 5pm, and a note called KPI Saturday Reset.',
             'KPI-030: What request did I make about KPI Dentist earlier in this smoke run?',
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function kpiComplexPrompts(): array
+    {
+        return [
+            'KPI-C001: Set up tomorrow morning: calendar focus block at 8:30am for 45 minutes, task to draft the outline, reminder 20 minutes before, and a note called Morning Outline.',
+            'KPI-C002: Create an admin sprint for Friday: calendar block at 10am, task to scan receipts, reminder Thursday afternoon, and a note called Admin Sprint Checklist.',
+            'KPI-C003: Add three calendar events: KPI Dentist Complex 7/18 at 9am, KPI Vet Complex 7/19 at 11am, and KPI Review Complex 7/20 at 4pm.',
+            'KPI-C004: Create a note called School Prep List with three short bullets, pin it, and remind me tomorrow at 7pm to update it.',
+            'KPI-C005: Create a task to renew the parking pass tomorrow morning, remind me 30 minutes before, and save a note called Parking Renewal Notes.',
+            'KPI-C006: Create a home reset plan for Saturday: calendar block at 9am, task to clear shelves, reminder Friday at 6pm, and a note called Garage Reset.',
+            'KPI-C007: Add a workout tomorrow from 6am to 6:45am, then add grocery shopping after it for 30 minutes.',
+            'KPI-C008: Create a project follow-up workflow for tax prep: calendar focus block Friday at 9am, task to prepare notes, and reminder Thursday afternoon.',
+            'KPI-C009: Create a task to check smoke alarms tomorrow morning, remind me 20 minutes before, and save a note called Smoke Alarm Checklist.',
+            'KPI-C010: Create a calendar event tomorrow at 2pm called KPI-C Call, add a task to prepare questions, and remind me 30 minutes before.',
+            'KPI-C011: Remember that KPI-C updates should mention blockers first, then tell me what you saved.',
+            'KPI-C012: What do you remember about KPI-C updates?',
+            'KPI-C013: What request did I make about KPI Dentist earlier in this smoke run?',
+            'KPI-C014: What do I have coming up today?',
+            'KPI-C015: What tasks, reminders, and events are left today?',
+            'KPI-C016: Find the weather for tomorrow in Orlando and tell me if an evening walk makes sense.',
+            'KPI-C017: Find the weather for tomorrow in Tampa and suggest morning or evening errands.',
+            'KPI-C018: Find the nearest Wawa to 32820 and tell me the address quickly.',
+            'KPI-C019: Find the closest Starbucks to 32820 and give me the address.',
+            'KPI-C020: Find the nearest Home Depot to 32820 and tell me the address quickly.',
+            'KPI-C021: Create a note called Travel Packing List with a compact checklist, pin it, and remind me tomorrow at 5pm to review it.',
+            'KPI-C022: Plan Monday project review: calendar block at 11am, task to collect notes, reminder Monday at 10am, and a note called Monday Project Review.',
+            'KPI-C023: Add three calendar events: KPI Budget Deep Dive 7/21 at 1pm, KPI Parts Pickup 7/22 at 3pm, and KPI Weekly Wrap 7/23 at 5pm.',
+            'KPI-C024: Create a home reset plan for Saturday: calendar block at 10am, task to gather supplies, reminder Friday at 5pm, and a note called KPI Complex Saturday Reset.',
+            'KPI-C025: Set up tomorrow evening: calendar focus block at 7pm for 60 minutes, task to pick priorities, reminder 30 minutes before, and a note called Evening Reset.',
+            'KPI-C026: Create a task to compare service quotes tomorrow morning, remind me 30 minutes before, and save a note called Service Quote Notes.',
+            'KPI-C027: Create a note called Budget Review Notes with three practical bullets, pin it, and add a reminder tomorrow at 4pm to review it.',
+            'KPI-C028: Find the weather for tomorrow in Miami and tell me if an outdoor lunch sounds reasonable.',
+            'KPI-C029: Find the nearest Wawa to 32820 and tell me the address plus one other close option.',
+            'KPI-C030: Review today and suggest my next useful step.',
         ];
     }
 

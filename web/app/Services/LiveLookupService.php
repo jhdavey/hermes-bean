@@ -105,6 +105,11 @@ class LiveLookupService
             if ($this->shouldReturnProviderResult($placesResult)) {
                 return $placesResult;
             }
+
+            $placesResult = $this->osmPlacesLookup($session, $user, $query, $context, $location, $startedAt, $cacheKey);
+            if ($this->shouldReturnProviderResult($placesResult)) {
+                return $placesResult;
+            }
         }
 
         $tavilyResult = $this->tavilySearchLookup($session, $user, $query, $context, $location, $startedAt, $cacheKey);
@@ -139,6 +144,16 @@ class LiveLookupService
                 'mode' => 'Places Text Search + Geocoding',
                 'timeout_ms' => (int) ((float) config('services.hermes_runtime.google_places_timeout', 6) * 1000),
                 'notes' => 'Primary provider for nearby businesses, addresses, branded places, and local place questions before web search.',
+            ],
+            [
+                'key' => 'osm_places',
+                'label' => 'OpenStreetMap Places',
+                'category' => 'Places',
+                'connected' => (bool) config('services.hermes_runtime.osm_places_enabled', true),
+                'configured' => true,
+                'mode' => 'Photon + ZIP centroid',
+                'timeout_ms' => (int) ((float) config('services.hermes_runtime.osm_places_timeout', 5) * 1000),
+                'notes' => 'Keyless fallback for nearby businesses and addresses when Google Places is unavailable.',
             ],
             [
                 'key' => 'tavily_search',
@@ -310,6 +325,112 @@ class LiveLookupService
             ]);
 
             return $this->providerFailure($user, $session, 'google_places', 'google-places', $query, 'places_lookup_timeout', 'The places lookup is taking longer than expected; continue with another source or ask one focused follow-up.', $startedAt);
+        }
+    }
+
+    private function osmPlacesLookup(ConversationSession $session, User $user, string $query, string $context, string $location, float $startedAt, string $cacheKey): ?array
+    {
+        if (! (bool) config('services.hermes_runtime.osm_places_enabled', true)) {
+            return null;
+        }
+
+        $placeName = $this->placeSearchName($query);
+        $locationQuery = $this->placeLocationQuery($query, $location);
+        if ($placeName === '' || $locationQuery === '') {
+            return null;
+        }
+
+        try {
+            $origin = $this->osmLocationOrigin($locationQuery);
+            if ($origin === null) {
+                return $this->providerFailure($user, $session, 'osm_places', 'openstreetmap-photon', $query, 'osm_location_not_found', 'The location needs a more specific city, zip code, or address.', $startedAt, null, ['stage' => 'origin']);
+            }
+
+            $response = Http::acceptJson()
+                ->withUserAgent('HeyBean/1.0')
+                ->connectTimeout((float) config('services.hermes_runtime.osm_places_connect_timeout', 2))
+                ->timeout((float) config('services.hermes_runtime.osm_places_timeout', 5))
+                ->get(rtrim((string) config('services.hermes_runtime.osm_photon_base', 'https://photon.komoot.io'), '/').'/api/', [
+                    'q' => trim($placeName.' '.$locationQuery),
+                    'limit' => 10,
+                    'lat' => $origin['lat'],
+                    'lon' => $origin['lon'],
+                    'lang' => 'en',
+                ]);
+
+            if (! $response->successful()) {
+                return $this->providerFailure($user, $session, 'osm_places', 'openstreetmap-photon', $query, 'osm_places_lookup_failed', 'The OpenStreetMap places lookup failed.', $startedAt, $response->status(), ['stage' => 'photon']);
+            }
+
+            $requestedPostalCode = $this->postalCodeFromLocation($locationQuery);
+            $places = collect((array) data_get($response->json(), 'features'))
+                ->map(function ($feature) use ($origin, $requestedPostalCode, $placeName): array {
+                    $normalized = $this->normalizeOsmPlace(is_array($feature) ? $feature : [], $origin, $requestedPostalCode);
+                    $normalized['name_match_score'] = $this->placeNameMatchScore($normalized, $placeName);
+                    $normalized['ranking_distance_meters'] = $this->placeRankingDistanceMeters($normalized);
+
+                    return $normalized;
+                })
+                ->filter(fn (array $place): bool => ($place['name'] ?? '') !== '')
+                ->filter(fn (array $place): bool => (int) ($place['name_match_score'] ?? 0) > 0)
+                ->unique(fn (array $place): string => mb_strtolower(($place['name'] ?? '').'|'.($place['address'] ?? '')))
+                ->sortBy([
+                    ['postal_code_match', 'desc'],
+                    ['ranking_distance_meters', 'asc'],
+                    ['name_match_score', 'desc'],
+                ])
+                ->take(5)
+                ->values()
+                ->all();
+
+            if ($places === []) {
+                return $this->providerFailure($user, $session, 'osm_places', 'openstreetmap-photon', $query, 'osm_places_not_found', 'I need a more specific place name or a wider location to narrow that down.', $startedAt, null, [
+                    'stage' => 'photon',
+                    'location_query' => $locationQuery,
+                    'place_name' => $placeName,
+                ]);
+            }
+
+            $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
+            $this->usageService->recordDirectCall($user, $session->workspace_id, 'external_lookup', 'openstreetmap-photon', [
+                'tool_call_count' => 2,
+            ], [
+                'conversation_session_id' => $session->id,
+                'provider' => 'openstreetmap',
+                'live_lookup_provider' => 'osm_places',
+                'query' => $query,
+                'place_name' => $placeName,
+                'location_query' => $locationQuery,
+                'result_count' => count($places),
+                'postal_code_match' => data_get($places, '0.postal_code_match'),
+                'latency_ms' => $latencyMs,
+            ], ['external_lookup', 'osm_places']);
+
+            $result = [
+                'ok' => true,
+                'tool' => 'external_lookup',
+                'provider' => 'osm_places',
+                'query' => $query,
+                'context' => $context !== '' ? $context : null,
+                'location' => $locationQuery,
+                'text' => $this->placesText($places, $placeName, $locationQuery),
+                'places' => $places,
+                'sources' => [[
+                    'title' => 'OpenStreetMap Photon',
+                    'url' => 'https://photon.komoot.io/',
+                ]],
+                'latency_ms' => $latencyMs,
+            ];
+            Cache::put($cacheKey, $result, now()->addSeconds((int) config('services.hermes_runtime.live_lookup_cache_seconds', 300)));
+
+            return $result;
+        } catch (ConnectionException $exception) {
+            Log::warning('Live lookup OpenStreetMap Places transport failed.', [
+                'session_id' => $session->id,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            return $this->providerFailure($user, $session, 'osm_places', 'openstreetmap-photon', $query, 'osm_places_lookup_timeout', 'The OpenStreetMap places lookup is taking longer than expected.', $startedAt);
         }
     }
 
@@ -714,6 +835,84 @@ class LiveLookupService
         return $locationQuery;
     }
 
+    private function osmLocationOrigin(string $locationQuery): ?array
+    {
+        $postalCode = $this->postalCodeFromLocation($locationQuery);
+        if ($postalCode !== null) {
+            $zipOrigin = $this->zippopotamOrigin($postalCode);
+            if ($zipOrigin !== null) {
+                return $zipOrigin;
+            }
+        }
+
+        try {
+            $response = Http::acceptJson()
+                ->withUserAgent('HeyBean/1.0')
+                ->connectTimeout((float) config('services.hermes_runtime.osm_places_connect_timeout', 2))
+                ->timeout((float) config('services.hermes_runtime.osm_places_timeout', 5))
+                ->get(rtrim((string) config('services.hermes_runtime.osm_photon_base', 'https://photon.komoot.io'), '/').'/api/', [
+                    'q' => $locationQuery,
+                    'limit' => 1,
+                    'lang' => 'en',
+                ]);
+        } catch (ConnectionException) {
+            return null;
+        }
+
+        if (! $response->successful()) {
+            return null;
+        }
+
+        $feature = collect((array) data_get($response->json(), 'features'))->first();
+        $coordinates = (array) data_get($feature, 'geometry.coordinates', []);
+        $lon = $coordinates[0] ?? null;
+        $lat = $coordinates[1] ?? null;
+        if (! is_numeric($lat) || ! is_numeric($lon)) {
+            return null;
+        }
+
+        return [
+            'lat' => (float) $lat,
+            'lon' => (float) $lon,
+            'formatted_address' => (string) data_get($feature, 'properties.name', $locationQuery),
+            'postal_code' => (string) data_get($feature, 'properties.postcode', ''),
+        ];
+    }
+
+    private function zippopotamOrigin(string $postalCode): ?array
+    {
+        try {
+            $response = Http::acceptJson()
+                ->connectTimeout((float) config('services.hermes_runtime.osm_places_connect_timeout', 2))
+                ->timeout((float) config('services.hermes_runtime.osm_places_timeout', 5))
+                ->get(rtrim((string) config('services.hermes_runtime.zippopotam_base', 'https://api.zippopotam.us'), '/').'/us/'.$postalCode);
+        } catch (ConnectionException) {
+            return null;
+        }
+
+        if (! $response->successful()) {
+            return null;
+        }
+
+        $place = collect((array) data_get($response->json(), 'places'))->first();
+        $lat = data_get($place, 'latitude');
+        $lon = data_get($place, 'longitude');
+        if (! is_numeric($lat) || ! is_numeric($lon)) {
+            return null;
+        }
+
+        return [
+            'lat' => (float) $lat,
+            'lon' => (float) $lon,
+            'formatted_address' => trim(implode(', ', array_filter([
+                $postalCode,
+                data_get($place, 'place name'),
+                data_get($place, 'state abbreviation'),
+            ]))),
+            'postal_code' => $postalCode,
+        ];
+    }
+
     private function normalizeGooglePlace(array $place, array $origin, ?string $requestedPostalCode): array
     {
         $name = trim((string) data_get($place, 'displayName.text', ''));
@@ -737,6 +936,54 @@ class LiveLookupService
             'business_status' => data_get($place, 'businessStatus'),
             'postal_code_match' => $requestedPostalCode !== null && str_contains($address, $requestedPostalCode),
         ];
+    }
+
+    private function normalizeOsmPlace(array $feature, array $origin, ?string $requestedPostalCode): array
+    {
+        $properties = (array) data_get($feature, 'properties', []);
+        $coordinates = (array) data_get($feature, 'geometry.coordinates', []);
+        $lon = $coordinates[0] ?? null;
+        $lat = $coordinates[1] ?? null;
+        $address = $this->osmPlaceAddress($properties);
+        $distanceMeters = is_numeric($lat) && is_numeric($lon)
+            ? $this->distanceMeters((float) $origin['lat'], (float) $origin['lon'], (float) $lat, (float) $lon)
+            : null;
+        $osmType = (string) ($properties['osm_type'] ?? '');
+        $osmId = (string) ($properties['osm_id'] ?? '');
+
+        return [
+            'name' => trim((string) ($properties['name'] ?? '')),
+            'address' => $address !== '' ? $address : null,
+            'distance_meters' => $distanceMeters,
+            'distance_miles' => $distanceMeters !== null ? round($distanceMeters / 1609.344, 1) : null,
+            'lat' => is_numeric($lat) ? (float) $lat : null,
+            'lon' => is_numeric($lon) ? (float) $lon : null,
+            'categories' => array_values(array_filter([
+                $properties['osm_key'] ?? null,
+                $properties['osm_value'] ?? null,
+                $properties['type'] ?? null,
+            ])),
+            'place_id' => $osmType !== '' && $osmId !== '' ? "{$osmType}:{$osmId}" : null,
+            'google_maps_url' => is_numeric($lat) && is_numeric($lon) ? 'https://www.openstreetmap.org/?mlat='.$lat.'&mlon='.$lon.'#map=18/'.$lat.'/'.$lon : null,
+            'business_status' => null,
+            'postal_code_match' => $requestedPostalCode !== null && (string) ($properties['postcode'] ?? '') === $requestedPostalCode,
+        ];
+    }
+
+    private function osmPlaceAddress(array $properties): string
+    {
+        $street = trim(implode(' ', array_filter([
+            $properties['housenumber'] ?? null,
+            $properties['street'] ?? null,
+        ])));
+
+        return trim(implode(', ', array_filter([
+            $street !== '' ? $street : null,
+            $properties['city'] ?? $properties['locality'] ?? null,
+            $properties['state'] ?? null,
+            $properties['postcode'] ?? null,
+            $properties['country'] ?? null,
+        ])));
     }
 
     private function placeMatchesSearchName(array $place, string $placeName): bool

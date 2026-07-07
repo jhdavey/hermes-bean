@@ -165,6 +165,24 @@ class RunBeanProductionSmokeSuiteTest extends TestCase
         $this->assertSame('external_lookup', $classifier->invoke($command, 'KPI-021: Find the weather for tomorrow in Orlando and tell me if an evening walk makes sense.'));
     }
 
+    public function test_complex_kpi_prompt_suite_has_thirty_new_cases_and_expected_classes(): void
+    {
+        $command = new RunBeanProductionSmokeSuite;
+        $prompts = new ReflectionMethod($command, 'kpiComplexPrompts');
+        $prompts->setAccessible(true);
+        $classifier = new ReflectionMethod($command, 'promptBenchmarkClass');
+        $classifier->setAccessible(true);
+
+        $cases = $prompts->invoke($command);
+
+        $this->assertCount(30, $cases);
+        $this->assertSame('complex_crud', $classifier->invoke($command, 'KPI-C001: Set up tomorrow morning: calendar focus block at 8:30am for 45 minutes, task to draft the outline, reminder 20 minutes before, and a note called Morning Outline.'));
+        $this->assertSame('app_context_lookup', $classifier->invoke($command, 'KPI-C013: What request did I make about KPI Dentist earlier in this smoke run?'));
+        $this->assertSame('app_context_lookup', $classifier->invoke($command, 'KPI-C014: What do I have coming up today?'));
+        $this->assertSame('external_lookup', $classifier->invoke($command, 'KPI-C016: Find the weather for tomorrow in Orlando and tell me if an evening walk makes sense.'));
+        $this->assertSame('complex_crud', $classifier->invoke($command, 'KPI-C027: Create a note called Budget Review Notes with three practical bullets, pin it, and add a reminder tomorrow at 4pm to review it.'));
+    }
+
     public function test_kpi_summary_requires_ninety_eight_percent_for_success_and_progress(): void
     {
         $command = new RunBeanProductionSmokeSuite;

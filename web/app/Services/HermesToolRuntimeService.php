@@ -100,9 +100,49 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
     public function sendExistingMessage(ConversationSession $session, ConversationMessage $userMessage): array
     {
+        $runtimeStartedAt = microtime(true);
         $received = $this->recordEvent($session, 'runtime.message_received', [
             'message_id' => $userMessage->id,
         ]);
+
+        $localGeneralAnswer = $this->localGeneralAnswerContent($userMessage);
+        if ($localGeneralAnswer !== null) {
+            $kind = $localGeneralAnswer['kind'];
+            $localRoute = [
+                'mode' => 'local',
+                'tier' => 'local',
+                'model' => 'local-'.$kind,
+                'billing_model' => 'local-'.$kind,
+                'context_mode' => 'none',
+                'reason' => 'Local read fast path for common Bean questions.',
+            ];
+            $started = $this->recordEvent($session, 'runtime.tool_model_started', [
+                'message_id' => $userMessage->id,
+                'provider' => 'local',
+                'model' => 'local-'.$kind,
+                'model_route' => $localRoute,
+                'tool_mode' => 'local_read_fast_path',
+                'tool_count' => 0,
+                'history_message_count' => 0,
+                'context_build_ms' => 0,
+                'read_fast_path' => $kind,
+            ], 'hermes.tools', 'started');
+            $session->update(['status' => 'running', 'last_activity_at' => now()]);
+
+            return $this->completeLocalReadFastPath(
+                $session,
+                $userMessage,
+                $received,
+                $started,
+                $localRoute,
+                'local_read_fast_path:'.$kind,
+                $runtimeStartedAt,
+                0,
+                'local_read_fast_path',
+                $localGeneralAnswer['content'],
+                $kind
+            );
+        }
 
         $modelRoute = $this->modelRouteFor($session);
         $prompt = $this->toolPromptFor($session, $userMessage, $modelRoute);

@@ -260,7 +260,7 @@ trait CrudPlannerRuntime
             return false;
         }
 
-        $hasPlannerWriteVerb = (bool) preg_match('/\b(add|create|make|schedule|book|set|put|block|remind|update|edit|change|move|reschedule|rename|delete|remove|cancel|clear|complete|finish|mark)\b/u', $text);
+        $hasPlannerWriteVerb = (bool) preg_match('/\b(add|create|make|plan|schedule|book|set|put|block|remind|update|edit|change|move|reschedule|rename|delete|remove|cancel|clear|complete|finish|mark)\b/u', $text);
         if (! $hasPlannerWriteVerb && preg_match('/\b(what|when|where|who|which|find|search|show|list|look up|look for|did i|have i)\b/u', $text)) {
             return false;
         }

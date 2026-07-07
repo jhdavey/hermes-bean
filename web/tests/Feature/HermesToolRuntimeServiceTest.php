@@ -982,6 +982,7 @@ class HermesToolRuntimeServiceTest extends TestCase
     public function test_tool_runtime_executes_external_lookup_tool_call(): void
     {
         config()->set('services.hermes_runtime.external_lookup_model', 'gpt-lookup-test');
+        config()->set('services.hermes_runtime.osm_places_enabled', false);
 
         $chatCalls = 0;
         Http::fake(function ($request) use (&$chatCalls) {
@@ -1531,6 +1532,94 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
+    }
+
+    public function test_osm_places_fallback_handles_nearby_places_without_google_key_or_model_call(): void
+    {
+        config()->set('services.hermes_runtime.google_maps_api_key', '');
+        config()->set('services.hermes_runtime.tavily_api_key', '');
+
+        Http::fake(function ($request) {
+            if (str_starts_with($request->url(), 'https://api.zippopotam.us/us/32820')) {
+                return Http::response([
+                    'country' => 'United States',
+                    'post code' => '32820',
+                    'places' => [[
+                        'place name' => 'Orlando',
+                        'longitude' => '-81.1219',
+                        'latitude' => '28.5725',
+                        'state' => 'Florida',
+                        'state abbreviation' => 'FL',
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://photon.komoot.io/api/')) {
+                return Http::response([
+                    'type' => 'FeatureCollection',
+                    'features' => [
+                        [
+                            'type' => 'Feature',
+                            'properties' => [
+                                'osm_type' => 'N',
+                                'osm_id' => 13819800930,
+                                'osm_key' => 'shop',
+                                'osm_value' => 'convenience',
+                                'housenumber' => '16959',
+                                'name' => 'Wawa',
+                                'street' => 'East Colonial Drive',
+                                'city' => 'Orlando',
+                                'state' => 'FL',
+                                'country' => 'United States',
+                                'postcode' => '32820',
+                            ],
+                            'geometry' => [
+                                'type' => 'Point',
+                                'coordinates' => [-81.1289764, 28.5613164],
+                            ],
+                        ],
+                        [
+                            'type' => 'Feature',
+                            'properties' => [
+                                'osm_type' => 'W',
+                                'osm_id' => 832051046,
+                                'osm_key' => 'shop',
+                                'osm_value' => 'convenience',
+                                'housenumber' => '6500',
+                                'name' => 'Wawa',
+                                'street' => 'Lee Vista Boulevard',
+                                'city' => 'Orlando',
+                                'state' => 'FL',
+                                'country' => 'United States',
+                                'postcode' => '32820',
+                            ],
+                            'geometry' => [
+                                'type' => 'Point',
+                                'coordinates' => [-81.3110147, 28.4696185],
+                            ],
+                        ],
+                    ],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('tool-places-osm-fallback@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Find the nearest Wawa to 32820 and tell me the address quickly.',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $content = (string) $response->json('data.assistant_message.content');
+        $this->assertStringContainsString('16959 East Colonial Drive', $content);
+        $this->assertStringContainsString('about 0.9 miles away', $content);
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
+        Http::assertNotSent(fn ($request): bool => str_starts_with($request->url(), 'https://places.googleapis.com/'));
+        Http::assertSentCount(2);
     }
 
     public function test_google_places_strips_generic_store_words_from_brand_place_queries(): void
@@ -3146,6 +3235,34 @@ class HermesToolRuntimeServiceTest extends TestCase
         $this->assertDatabaseHas('calendar_events', ['conversation_session_id' => $sessionId, 'title' => 'Project follow-up focus block']);
         $this->assertDatabaseHas('tasks', ['conversation_session_id' => $sessionId, 'title' => 'Prepare notes for project follow-up']);
         $this->assertDatabaseHas('reminders', ['conversation_session_id' => $sessionId, 'title' => 'Prepare notes for project follow-up']);
+        Http::assertSentCount(0);
+    }
+
+    public function test_app_crud_planner_handles_kpi_friday_plan_without_model_call(): void
+    {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
+        Http::fake();
+
+        $token = $this->premiumApiToken('tool-kpi-friday-plan@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'KPI-020: Plan Friday morning with a calendar focus block at 9am, task to gather notes, and reminder Thursday afternoon.',
+            'metadata' => [
+                'client_context' => [
+                    'current_local_time' => '2026-07-07T20:00:00-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $this->assertDatabaseHas('calendar_events', ['conversation_session_id' => $sessionId, 'title' => 'Focus block']);
+        $this->assertDatabaseHas('tasks', ['conversation_session_id' => $sessionId, 'title' => 'gather notes']);
+        $this->assertDatabaseHas('reminders', ['conversation_session_id' => $sessionId, 'title' => 'Focus block']);
         Http::assertSentCount(0);
     }
 
