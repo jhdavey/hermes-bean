@@ -1009,15 +1009,88 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (command.isEmpty || _beanCommandIsCapabilityQuestion(command)) {
       return null;
     }
+    final multiStep =
+        command.split(RegExp(r'\b(?:and then|then|also|and)\b|[,;]')).length >
+            1 ||
+        RegExp(r'\b(and then|also|as well)\b').hasMatch(command);
+    final action =
+        RegExp(r'\b(delete|remove|cancel|forget)\b').hasMatch(command)
+        ? 'delete'
+        : RegExp(
+            r'\b(update|change|move|reschedule|complete|mark)\b',
+          ).hasMatch(command)
+        ? 'update'
+        : RegExp(
+            r'\b(add|create|make|set|schedule|book|reserve|save|remember)\b',
+          ).hasMatch(command)
+        ? 'create'
+        : '';
+    if (RegExp(r'\b(weather|forecast)\b').hasMatch(command)) {
+      return 'Let me check the forecast.';
+    }
+    if (RegExp(r'\b(traffic|drive|commute)\b').hasMatch(command)) {
+      return 'Let me check the route.';
+    }
+    if (RegExp(r'\b(news|headline|headlines)\b').hasMatch(command)) {
+      return 'Let me look for the latest.';
+    }
     if (RegExp(
-      r'\b(weather|forecast|traffic|news|headline|flight|hotel|price|prices|stock|market|sports|score|available|availability|look up|check|find)\b',
+      r'\b(flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|available|availability|cheapest|price|prices)\b',
     ).hasMatch(command)) {
-      return 'I’ll check that now.';
+      return 'Let me check availability.';
+    }
+    if (RegExp(r'\b(stock|stocks|market|markets)\b').hasMatch(command)) {
+      return 'Let me check the market.';
+    }
+    if (RegExp(r'\b(sports|score|scores|game|games)\b').hasMatch(command)) {
+      return 'Let me check the score.';
     }
     if (RegExp(r'\b(plan|organize|prioritize)\b').hasMatch(command)) {
-      return 'I’ll work through that and show each step here.';
+      return multiStep ? 'Let me map that out.' : 'I’ll think that through.';
     }
-    return 'I’m on it. I’ll show each step as I finish.';
+    if (RegExp(
+          r'\b(calendar|calendars|agenda|schedule|schedules|event|events|meeting|meetings|appointment|appointments)\b',
+        ).hasMatch(command) &&
+        !RegExp(
+          r'\b(reminder|reminders|remind|task|tasks|todo|to do|note|notes|folder|folders|memory|remember|forget)\b',
+        ).hasMatch(command)) {
+      if (action == 'delete') return 'I’ll take that off your calendar.';
+      if (action == 'update') return 'I’ll adjust that on your calendar.';
+      if (action == 'create') {
+        return multiStep
+            ? 'I’ll handle the calendar pieces.'
+            : 'I’ll put that on your calendar.';
+      }
+      return 'Let me check your calendar.';
+    }
+    if (RegExp(r'\b(reminder|reminders|remind)\b').hasMatch(command)) {
+      if (action == 'delete') return 'I’ll remove that reminder.';
+      if (action == 'update') return 'I’ll update that reminder.';
+      if (action == 'create') return 'I’ll set that reminder.';
+      return 'Let me check your reminders.';
+    }
+    if (RegExp(r'\b(task|tasks|todo|to do)\b').hasMatch(command)) {
+      if (action == 'delete') return 'I’ll remove that task.';
+      if (action == 'update') return 'I’ll update that task.';
+      if (action == 'create') return 'I’ll add that to your tasks.';
+      return 'Let me check your tasks.';
+    }
+    if (RegExp(r'\b(note|notes|folder|folders)\b').hasMatch(command)) {
+      if (action == 'delete') return 'I’ll remove that note.';
+      if (action == 'update') return 'I’ll update that note.';
+      if (action == 'create') return 'I’ll create that note.';
+      return 'Let me check your notes.';
+    }
+    if (RegExp(r'\b(memory|remember|forget)\b').hasMatch(command)) {
+      if (action == 'delete') return 'I’ll forget that.';
+      if (action == 'create') return 'I’ll remember that.';
+      return 'Let me check what I have saved.';
+    }
+    if (RegExp(r'\b(look up|check|find)\b').hasMatch(command)) {
+      return 'Let me check on that.';
+    }
+    if (multiStep) return 'I’ll handle those one at a time.';
+    return 'I’ll take care of that.';
   }
 
   String? _beanBackgroundWorkLabelForRequest(String content) {

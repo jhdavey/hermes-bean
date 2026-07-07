@@ -3722,13 +3722,51 @@ export function mountHeyBeanWebApp(mount) {
     function beanAcknowledgementForRequest(content) {
         const command = normalizedBeanText(content);
         if (!command || beanCommandIsCapabilityQuestion(command)) return '';
-        if (/\b(?:weather|forecast|traffic|news|headline|flight|hotel|price|stock|market|sports|score|available|availability|look up|check|find)\b/.test(command)) {
-            return 'I’ll check that now.';
+        const multiStep = beanRequestClauses(command).length > 1 || /\b(?:and then|also|as well)\b/.test(command);
+        const action = /\b(?:delete|remove|cancel|forget)\b/.test(command) ? 'delete'
+            : /\b(?:update|change|move|reschedule|complete|mark)\b/.test(command) ? 'update'
+            : /\b(?:add|create|make|set|schedule|book|reserve|save|remember)\b/.test(command) ? 'create'
+            : '';
+        if (/\b(?:weather|forecast)\b/.test(command)) return 'Let me check the forecast.';
+        if (/\b(?:traffic|drive|commute)\b/.test(command)) return 'Let me check the route.';
+        if (/\b(?:news|headline|headlines)\b/.test(command)) return 'Let me look for the latest.';
+        if (/\b(?:flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|available|availability|cheapest|price|prices)\b/.test(command)) return 'Let me check availability.';
+        if (/\b(?:stock|stocks|market|markets)\b/.test(command)) return 'Let me check the market.';
+        if (/\b(?:sports|score|scores|game|games)\b/.test(command)) return 'Let me check the score.';
+        if (/\b(?:plan|organize|prioritize)\b/.test(command)) return multiStep ? 'Let me map that out.' : 'I’ll think that through.';
+        if (/\b(?:calendar|calendars|agenda|schedule|schedules|event|events|meeting|meetings|appointment|appointments)\b/.test(command)
+            && !/\b(?:reminder|reminders|remind|task|tasks|todo|to do|note|notes|folder|folders|memory|remember|forget)\b/.test(command)) {
+            if (action === 'delete') return 'I’ll take that off your calendar.';
+            if (action === 'update') return 'I’ll adjust that on your calendar.';
+            if (action === 'create') return multiStep ? 'I’ll handle the calendar pieces.' : 'I’ll put that on your calendar.';
+            return 'Let me check your calendar.';
         }
-        if (/\b(?:plan|organize|prioritize)\b/.test(command)) {
-            return 'I’ll work through that and show each step here.';
+        if (/\b(?:reminder|reminders|remind)\b/.test(command)) {
+            if (action === 'delete') return 'I’ll remove that reminder.';
+            if (action === 'update') return 'I’ll update that reminder.';
+            if (action === 'create') return 'I’ll set that reminder.';
+            return 'Let me check your reminders.';
         }
-        return 'I’m on it. I’ll show each step as I finish.';
+        if (/\b(?:task|tasks|todo|to do)\b/.test(command)) {
+            if (action === 'delete') return 'I’ll remove that task.';
+            if (action === 'update') return 'I’ll update that task.';
+            if (action === 'create') return 'I’ll add that to your tasks.';
+            return 'Let me check your tasks.';
+        }
+        if (/\b(?:note|notes|folder|folders)\b/.test(command)) {
+            if (action === 'delete') return 'I’ll remove that note.';
+            if (action === 'update') return 'I’ll update that note.';
+            if (action === 'create') return 'I’ll create that note.';
+            return 'Let me check your notes.';
+        }
+        if (/\b(?:memory|remember|forget)\b/.test(command)) {
+            if (action === 'delete') return 'I’ll forget that.';
+            if (action === 'create') return 'I’ll remember that.';
+            return 'Let me check what I have saved.';
+        }
+        if (/\b(?:look up|check|find)\b/.test(command)) return 'Let me check on that.';
+        if (multiStep) return 'I’ll handle those one at a time.';
+        return 'I’ll take care of that.';
     }
 
     function beanBackgroundWorkSubject(command) {

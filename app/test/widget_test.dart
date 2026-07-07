@@ -2952,7 +2952,7 @@ void main() {
 
     expect(api.queueMessageCalls, 1);
     expect(find.text('working...'), findsNothing);
-    expect(find.text('I’ll check that now.'), findsOneWidget);
+    expect(find.text('Let me check the forecast.'), findsOneWidget);
     expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
     expect(find.textContaining('Checking weather'), findsOneWidget);
 
@@ -3158,6 +3158,8 @@ void main() {
     await tester.pump();
 
     expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(find.text('I’ll set that reminder.'), findsOneWidget);
+    expect(find.textContaining('calendar pieces'), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 600));
     await tester.pump(const Duration(milliseconds: 250));
