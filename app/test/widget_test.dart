@@ -3369,6 +3369,35 @@ void main() {
     expect(find.text('Late response'), findsNothing);
   });
 
+  testWidgets('Bean working indicator keeps a crisp circular border', (
+    WidgetTester tester,
+  ) async {
+    final api = _SlowChatFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('chat-input')), 'Wait');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pump();
+
+    expect(find.byKey(const Key('heybean-working-ring')), findsOneWidget);
+    final beanButton = tester.widget<AnimatedContainer>(
+      find.byKey(const Key('heybean-center-bean-button')),
+    );
+    final decoration = beanButton.decoration! as BoxDecoration;
+    expect(decoration.border, isA<Border>());
+    final border = decoration.border! as Border;
+    expect(border.top.width, 1.6);
+    expect(border.top.color, isNot(Colors.transparent));
+    expect(decoration.boxShadow, hasLength(1));
+    expect(decoration.boxShadow!.single.blurRadius, 14);
+    expect(decoration.boxShadow!.single.spreadRadius, 0);
+  });
+
   testWidgets('critical count opens a dropdown with listed critical items', (
     WidgetTester tester,
   ) async {

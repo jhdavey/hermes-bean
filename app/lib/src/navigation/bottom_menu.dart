@@ -592,19 +592,16 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
                     color: HeyBeanTheme.surface,
                     border: Border.all(
                       color: visuallyWorking
-                          ? Colors.transparent
+                          ? activeColor.withValues(alpha: .38)
                           : widget.selected
                           ? activeColor
                           : _quietBorderColor(alpha: .54),
-                      width: visuallyWorking ? 0 : 1.6,
+                      width: 1.6,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: visuallyWorking
-                            ? activeColor.withValues(alpha: .14)
-                            : Colors.black.withValues(alpha: .08),
-                        blurRadius: visuallyWorking ? 24 : 14,
-                        spreadRadius: visuallyWorking ? 2 : 0,
+                        color: Colors.black.withValues(alpha: .08),
+                        blurRadius: 14,
                         offset: const Offset(0, 6),
                       ),
                     ],
@@ -630,7 +627,7 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
                   key: const Key('heybean-working-ring'),
                   animation: _activityController,
                   builder: (context, child) => CustomPaint(
-                    size: const Size.square(68),
+                    size: const Size.square(64),
                     painter: _BeanActivityRingPainter(
                       color: activeColor,
                       progress: _activityController.value,
@@ -653,35 +650,18 @@ class _BeanActivityRingPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final strokeWidth = 4.0;
+    final strokeWidth = 2.0;
     final rect = Offset.zero & size;
     final arcRect = rect.deflate(strokeWidth / 2);
     final startAngle = (math.pi * 2 * progress) - math.pi / 2;
-    const sweepAngle = math.pi * .82;
-
-    final glowPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 8
-      ..strokeCap = StrokeCap.round
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8)
-      ..color = color.withValues(alpha: .30);
-    canvas.drawArc(arcRect, startAngle, sweepAngle, false, glowPaint);
+    const sweepAngle = math.pi * .72;
 
     final arcPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth
       ..strokeCap = StrokeCap.round
-      ..shader = SweepGradient(
-        startAngle: startAngle,
-        endAngle: startAngle + math.pi * 2,
-        colors: [
-          color.withValues(alpha: .08),
-          color.withValues(alpha: .42),
-          color,
-          color.withValues(alpha: .18),
-        ],
-        stops: const [0, .48, .72, 1],
-      ).createShader(arcRect);
+      ..isAntiAlias = true
+      ..color = color;
     canvas.drawArc(arcRect, startAngle, sweepAngle, false, arcPaint);
   }
 
