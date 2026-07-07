@@ -19,8 +19,6 @@ class AiUsageLog extends Model
         'status',
         'input_tokens',
         'output_tokens',
-        'audio_input_tokens',
-        'audio_output_tokens',
         'total_tokens',
         'tool_call_count',
         'estimated_cost_usd',
@@ -33,8 +31,6 @@ class AiUsageLog extends Model
         return [
             'input_tokens' => 'integer',
             'output_tokens' => 'integer',
-            'audio_input_tokens' => 'integer',
-            'audio_output_tokens' => 'integer',
             'total_tokens' => 'integer',
             'tool_call_count' => 'integer',
             'estimated_cost_usd' => 'decimal:6',

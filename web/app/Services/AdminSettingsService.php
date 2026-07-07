@@ -11,13 +11,9 @@ class AdminSettingsService
 {
     public const MAIN_MODEL = 'models.main';
 
-    public const REALTIME_MODEL = 'models.realtime';
-
     public const EXTERNAL_LOOKUP_MODEL = 'models.external_lookup';
 
     public const BEAN_CHAT_ENABLED = 'kill_switches.bean_chat_enabled';
-
-    public const BEAN_VOICE_ENABLED = 'kill_switches.bean_voice_enabled';
 
     public const BASE_COST_LIMIT = 'usage.base_cost_limit';
 
@@ -38,12 +34,10 @@ class AdminSettingsService
         return [
             'models' => [
                 'main_model' => $this->settingPayload(self::MAIN_MODEL, $this->defaultMainModel()),
-                'realtime_model' => $this->settingPayload(self::REALTIME_MODEL, $this->defaultRealtimeModel()),
                 'external_lookup_model' => $this->settingPayload(self::EXTERNAL_LOOKUP_MODEL, $this->defaultExternalLookupModel()),
             ],
             'kill_switches' => [
                 'bean_chat_enabled' => $this->settingPayload(self::BEAN_CHAT_ENABLED, true),
-                'bean_voice_enabled' => $this->settingPayload(self::BEAN_VOICE_ENABLED, true),
             ],
             'usage_limits' => collect($this->usageLimitDefaults())
                 ->mapWithKeys(fn (mixed $default, string $key): array => [$key => $this->settingPayload('usage.'.$key, $default)])
@@ -55,7 +49,6 @@ class AdminSettingsService
     {
         foreach ([
             self::MAIN_MODEL => $modelSettings['main_model'] ?? null,
-            self::REALTIME_MODEL => $modelSettings['realtime_model'] ?? null,
             self::EXTERNAL_LOOKUP_MODEL => $modelSettings['external_lookup_model'] ?? null,
         ] as $key => $value) {
             $this->set($key, trim((string) $value), 'string', $actor);
@@ -69,7 +62,6 @@ class AdminSettingsService
 
         foreach ([
             self::BEAN_CHAT_ENABLED => $killSwitches['bean_chat_enabled'] ?? null,
-            self::BEAN_VOICE_ENABLED => $killSwitches['bean_voice_enabled'] ?? null,
         ] as $key => $value) {
             if ($value !== null) {
                 $this->set($key, (bool) $value, 'boolean', $actor);
@@ -96,11 +88,6 @@ class AdminSettingsService
         return $this->storedStringValue(self::MAIN_MODEL);
     }
 
-    public function realtimeModel(): string
-    {
-        return $this->stringValue(self::REALTIME_MODEL, $this->defaultRealtimeModel());
-    }
-
     public function externalLookupModel(): string
     {
         return $this->stringValue(self::EXTERNAL_LOOKUP_MODEL, $this->defaultExternalLookupModel());
@@ -109,11 +96,6 @@ class AdminSettingsService
     public function beanChatEnabled(): bool
     {
         return $this->boolValue(self::BEAN_CHAT_ENABLED, true);
-    }
-
-    public function beanVoiceEnabled(): bool
-    {
-        return $this->boolValue(self::BEAN_VOICE_ENABLED, true);
     }
 
     public function usageLimits(): array
@@ -202,11 +184,6 @@ class AdminSettingsService
     private function defaultMainModel(): string
     {
         return (string) config('services.hermes_runtime.default_model', 'gpt-5.5');
-    }
-
-    private function defaultRealtimeModel(): string
-    {
-        return (string) config('services.hermes_realtime.model', 'gpt-realtime');
     }
 
     private function defaultExternalLookupModel(): string

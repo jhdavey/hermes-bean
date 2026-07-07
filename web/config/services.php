@@ -78,12 +78,6 @@ return [
         'assistant_run_recovery_window_seconds' => (int) env('HERMES_ASSISTANT_RUN_RECOVERY_WINDOW_SECONDS', 900),
     ],
 
-    'hermes_realtime' => [
-        'api_key' => $openAiPublicKey,
-        'model' => env('HERMES_REALTIME_MODEL', 'gpt-realtime-mini'),
-        'voice' => env('HERMES_REALTIME_VOICE', 'marin'),
-    ],
-
     'openai' => [
         'server_api_key' => $openAiPublicKey,
         'public_key' => $openAiPublicKey,
@@ -142,9 +136,6 @@ return [
         'pricing_per_million' => [
             'gpt-5-nano' => ['input' => 0.05, 'output' => 0.40],
             'gpt-5-mini' => ['input' => 0.25, 'output' => 2.00],
-            'gpt-realtime-mini' => ['input' => 0.60, 'output' => 2.40, 'audio_input' => 10.00, 'audio_output' => 20.00],
-            'gpt-realtime' => ['input' => 4.00, 'output' => 16.00, 'audio_input' => 32.00, 'audio_output' => 64.00],
-            'gpt-4o-mini-tts' => ['input' => 0.60, 'output' => 12.00],
             'gpt-5.5' => ['input' => 5.00, 'output' => 30.00],
             'gpt-5.4' => ['input' => 2.50, 'output' => 15.00],
             'gpt-5.4-mini' => ['input' => 0.75, 'output' => 4.50],

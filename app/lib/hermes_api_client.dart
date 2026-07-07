@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 const String hermesApiBaseUrl = String.fromEnvironment(
   'HERMES_API_BASE_URL',
@@ -1229,41 +1228,6 @@ class HermesApiClient {
     return HermesMessageResult.fromJson(_expectMap(data['data']));
   }
 
-  Future<HermesTextToSpeechAudio> synthesizeSpeech({
-    required String text,
-    String? voice,
-    int? workspaceId,
-  }) async {
-    final body = <String, Object?>{
-      'text': text,
-      if (voice != null && voice.trim().isNotEmpty) 'voice': voice.trim(),
-      if (workspaceId != null) 'workspace_id': workspaceId,
-    };
-    final headers = <String, String>{
-      'Accept': 'audio/wav',
-      'Content-Type': 'application/json',
-    };
-    if (bearerToken != null) {
-      headers['Authorization'] = 'Bearer $bearerToken';
-    }
-
-    final response = await _sendBinary(
-      HermesApiRequest(
-        method: 'POST',
-        uri: _resolveApiPath('/assistant/tts'),
-        path: '/assistant/tts',
-        headers: headers,
-        body: body,
-        responseTimeout: const Duration(seconds: 30),
-      ),
-    );
-
-    return HermesTextToSpeechAudio(
-      bytes: response.bytes,
-      contentType: response.headers['content-type'] ?? 'audio/wav',
-    );
-  }
-
   Future<HermesMessageResult> branchMessage({
     required int sessionId,
     required int messageId,
@@ -1310,183 +1274,6 @@ class HermesApiClient {
       }),
     );
     return HermesMessageResult.fromJson(_expectMap(data['data']));
-  }
-
-  Future<HermesRealtimeSession> startRealtimeSession({
-    String? title,
-    String? runtimeMode,
-    int? sessionId,
-    int? workspaceId,
-    Map<String, Object?>? metadata,
-    String? voice,
-  }) async {
-    final body = <String, Object?>{};
-    if (title != null) body['title'] = title;
-    if (runtimeMode != null) body['runtime_mode'] = runtimeMode;
-    if (sessionId != null) body['session_id'] = sessionId;
-    if (workspaceId != null) body['workspace_id'] = workspaceId;
-    if (metadata != null) body['metadata'] = metadata;
-    if (voice != null) body['voice'] = voice;
-
-    final data = await _sendJson(
-      'POST',
-      '/assistant/realtime/sessions',
-      body: body,
-    );
-    return HermesRealtimeSession.fromJson(_expectMap(data['data']));
-  }
-
-  Future<String> createRealtimeCall({
-    required int sessionId,
-    required String sdp,
-    String? voice,
-    Map<String, Object?>? metadata,
-  }) async {
-    final headers = <String, String>{
-      'Accept': 'application/sdp',
-      'Content-Type': 'application/json',
-    };
-    if (bearerToken != null) {
-      headers['Authorization'] = 'Bearer $bearerToken';
-    }
-    final response = await _transport(
-      HermesApiRequest(
-        method: 'POST',
-        uri: _resolveApiPath('/assistant/realtime/calls'),
-        path: '/assistant/realtime/calls',
-        headers: headers,
-        body: {
-          'session_id': sessionId,
-          'sdp': sdp,
-          if (voice != null) 'voice': voice,
-          if (metadata != null) 'metadata': metadata,
-        },
-        responseTimeout: const Duration(seconds: 25),
-      ),
-    );
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw HermesApiException(response.statusCode, response.body);
-    }
-    return response.body;
-  }
-
-  Future<Map<String, Object?>> realtimeDashboardContext({
-    int? sessionId,
-    int? workspaceId,
-  }) async {
-    final data = await _sendJson(
-      'GET',
-      _pathWithQuery('/assistant/realtime/dashboard-context', {
-        if (sessionId != null) 'session_id': sessionId.toString(),
-        if (workspaceId != null) 'workspace_id': workspaceId.toString(),
-      }),
-    );
-    return _expectMap(data['data']);
-  }
-
-  Future<Map<String, Object?>> realtimeVoiceQuality({
-    int days = 7,
-    int? sessionId,
-    int? workspaceId,
-  }) async {
-    final data = await _sendJson(
-      'GET',
-      _pathWithQuery('/assistant/realtime/quality', {
-        'days': days.toString(),
-        if (sessionId != null) 'session_id': sessionId.toString(),
-        if (workspaceId != null) 'workspace_id': workspaceId.toString(),
-      }),
-    );
-    return _expectMap(data['data']);
-  }
-
-  Future<Map<String, Object?>> submitRealtimeToolCall({
-    required int sessionId,
-    required String toolName,
-    String? callId,
-    Map<String, Object?> arguments = const {},
-  }) async {
-    final data = await _sendJson(
-      'POST',
-      '/assistant/realtime/tool-calls',
-      body: {
-        'session_id': sessionId,
-        'tool_name': toolName,
-        if (callId != null) 'call_id': callId,
-        'arguments': arguments,
-      },
-    );
-    return _expectMap(data['data']);
-  }
-
-  Future<HermesMessage> persistRealtimeMessage({
-    required int sessionId,
-    required String role,
-    required String content,
-    Map<String, Object?>? metadata,
-  }) async {
-    final data = await _sendJson(
-      'POST',
-      '/assistant/realtime/messages',
-      body: {
-        'session_id': sessionId,
-        'role': role,
-        'content': content,
-        if (metadata != null) 'metadata': metadata,
-      },
-    );
-    return HermesMessage.fromJson(_expectMap(data['data']));
-  }
-
-  Future<void> logRealtimeClientEvent({
-    required String eventType,
-    int? sessionId,
-    String? phase,
-    String? message,
-    Map<String, Object?> details = const {},
-  }) async {
-    await _sendJson(
-      'POST',
-      '/assistant/realtime/client-events',
-      body: {
-        'event_type': eventType,
-        if (sessionId != null) 'session_id': sessionId,
-        if (phase != null) 'phase': phase,
-        if (message != null) 'message': message,
-        if (details.isNotEmpty) 'details': details,
-      },
-    );
-  }
-
-  Future<void> recordRealtimeUsage({
-    required int sessionId,
-    String? model,
-    String? responseId,
-    required Map<String, Object?> usage,
-    double? voiceSeconds,
-    Map<String, Object?> latencyMetrics = const {},
-    Map<String, Object?> speechMetrics = const {},
-    Map<String, Object?> turnMetrics = const {},
-    int? toolCallCount,
-    List<String> actionTypes = const [],
-  }) async {
-    await _sendJson(
-      'POST',
-      '/assistant/realtime/usage',
-      body: {
-        'session_id': sessionId,
-        if (model != null && model.isNotEmpty) 'model': model,
-        if (responseId != null && responseId.isNotEmpty)
-          'response_id': responseId,
-        'usage': usage,
-        if (voiceSeconds != null) 'voice_seconds': voiceSeconds,
-        ...latencyMetrics,
-        ...speechMetrics,
-        ...turnMetrics,
-        if (toolCallCount != null) 'tool_call_count': toolCallCount,
-        if (actionTypes.isNotEmpty) 'action_types': actionTypes,
-      },
-    );
   }
 
   Future<HermesAssistantRun> getAssistantRun(int runId) async {
@@ -1578,47 +1365,6 @@ class HermesApiClient {
     return decoded;
   }
 
-  Future<HermesBinaryResponse> _sendBinary(HermesApiRequest request) async {
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 15);
-    try {
-      final ioRequest = await client
-          .openUrl(request.method, request.uri)
-          .timeout(const Duration(seconds: 15));
-      request.headers.forEach(ioRequest.headers.set);
-      if (request.body != null) {
-        ioRequest.add(utf8.encode(jsonEncode(request.body)));
-      }
-
-      final ioResponse = await ioRequest.close().timeout(
-        request.responseTimeout,
-      );
-      final builder = BytesBuilder(copy: false);
-      await for (final chunk in ioResponse.timeout(request.responseTimeout)) {
-        builder.add(chunk);
-      }
-      final bytes = builder.takeBytes();
-      if (ioResponse.statusCode < 200 || ioResponse.statusCode >= 300) {
-        throw HermesApiException(
-          ioResponse.statusCode,
-          utf8.decode(bytes, allowMalformed: true),
-        );
-      }
-      final headers = <String, String>{};
-      ioResponse.headers.forEach((name, values) {
-        headers[name.toLowerCase()] = values.join(', ');
-      });
-      return HermesBinaryResponse(ioResponse.statusCode, bytes, headers);
-    } on TimeoutException catch (error) {
-      throw HermesApiException(
-        408,
-        "Request timed out: ${error.message ?? 'network timeout'}",
-      );
-    } finally {
-      client.close(force: true);
-    }
-  }
-
   String _pathWithQuery(String path, Map<String, String> queryParameters) {
     if (queryParameters.isEmpty) return path;
     final uri = Uri(path: path, queryParameters: queryParameters);
@@ -1692,24 +1438,6 @@ class HermesApiResponse {
 
   final int statusCode;
   final String body;
-}
-
-class HermesBinaryResponse {
-  const HermesBinaryResponse(this.statusCode, this.bytes, this.headers);
-
-  final int statusCode;
-  final Uint8List bytes;
-  final Map<String, String> headers;
-}
-
-class HermesTextToSpeechAudio {
-  const HermesTextToSpeechAudio({
-    required this.bytes,
-    required this.contentType,
-  });
-
-  final Uint8List bytes;
-  final String contentType;
 }
 
 class HermesApiException implements Exception {
@@ -3688,37 +3416,6 @@ class HermesAssistantRun {
             : HermesMessage.fromJson(_expectMap(json['assistant_message'])),
         error: json['error']?.toString(),
       );
-}
-
-class HermesRealtimeSession {
-  const HermesRealtimeSession({
-    required this.session,
-    required this.clientSecret,
-    this.model,
-    this.voice,
-  });
-
-  final HermesSession session;
-  final String clientSecret;
-  final String? model;
-  final String? voice;
-
-  factory HermesRealtimeSession.fromJson(Map<String, Object?> json) {
-    final secret = json['client_secret'];
-    final secretValue = secret is Map
-        ? (secret['value'] ?? secret['client_secret'])?.toString()
-        : secret?.toString();
-    final openai = json['openai'] is Map
-        ? Map<String, Object?>.from(json['openai'] as Map)
-        : const <String, Object?>{};
-
-    return HermesRealtimeSession(
-      session: HermesSession.fromJson(_expectMap(json['session'])),
-      clientSecret: secretValue ?? '',
-      model: openai['model']?.toString(),
-      voice: openai['voice']?.toString(),
-    );
-  }
 }
 
 class HermesMessage {

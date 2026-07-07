@@ -30,7 +30,6 @@ class AdminSettingsTest extends TestCase
 
         $this->withToken($adminToken)->patchJson('/api/admin/settings', $this->settingsPayload([
             'main_model' => 'gpt-5-mini',
-            'realtime_model' => 'gpt-realtime-mini',
             'external_lookup_model' => 'gpt-5-mini',
         ], [
             'base_cost_limit' => 1.25,
@@ -41,7 +40,6 @@ class AdminSettingsTest extends TestCase
             'pro_external_cost_limit' => 7.50,
         ], true, [
             'bean_chat_enabled' => false,
-            'bean_voice_enabled' => true,
         ]))->assertOk()
             ->assertJsonPath('data.models.main_model.value', 'gpt-5-mini')
             ->assertJsonPath('data.usage_limits.base_cost_limit.value', 1.25)
@@ -62,11 +60,6 @@ class AdminSettingsTest extends TestCase
             ->assertJsonPath('data.settings.models.main_model.value', 'gpt-5-mini')
             ->assertJsonPath('data.settings.usage_limits.base_cost_limit.value', 1.25)
             ->assertJsonPath('data.settings.kill_switches.bean_chat_enabled.value', false);
-
-        $this->withToken($adminToken)->patchJson('/api/admin/settings', $this->settingsPayload([
-            'realtime_model' => 'gpt-5.4',
-        ]))->assertUnprocessable()
-            ->assertJsonValidationErrors('model_settings.realtime_model');
     }
 
     public function test_admin_model_registry_is_admin_only_and_groups_openai_models(): void
@@ -79,7 +72,6 @@ class AdminSettingsTest extends TestCase
                 'data' => [
                     ['id' => 'gpt-5.2'],
                     ['id' => 'gpt-5-mini'],
-                    ['id' => 'gpt-realtime'],
                     ['id' => 'gpt-4o-mini-search-preview'],
                     ['id' => 'text-embedding-3-small'],
                 ],
@@ -99,7 +91,6 @@ class AdminSettingsTest extends TestCase
             ->assertJsonPath('data.openai_available', true)
             ->assertJsonPath('data.groups.main_model.label', 'Main Bean reasoning/chat')
             ->assertJsonFragment(['id' => 'gpt-5.2', 'source' => 'openai'])
-            ->assertJsonFragment(['id' => 'gpt-realtime', 'source' => 'openai'])
             ->assertJsonFragment(['id' => 'gpt-4o-mini-search-preview', 'source' => 'openai']);
     }
 
@@ -258,12 +249,10 @@ SH);
         return [
             'model_settings' => [
                 'main_model' => $models['main_model'] ?? 'gpt-5-mini',
-                'realtime_model' => $models['realtime_model'] ?? 'gpt-realtime-mini',
                 'external_lookup_model' => $models['external_lookup_model'] ?? 'gpt-5-mini',
             ],
             'kill_switches' => [
                 'bean_chat_enabled' => $killSwitches['bean_chat_enabled'] ?? true,
-                'bean_voice_enabled' => $killSwitches['bean_voice_enabled'] ?? true,
             ],
             'usage_limits' => [
                 'base_cost_limit' => $usageLimits['base_cost_limit'] ?? 1.00,

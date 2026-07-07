@@ -8,10 +8,8 @@ class CommandCenterShell extends StatefulWidget {
     required this.launchExternalUrl,
     required this.updateAppIconBadge,
     required this.stripePaymentHandler,
-    required this.playBeanVoiceAudio,
     required this.onThemeChanged,
     required this.onThemeModeChanged,
-    this.realtimeConversation,
   });
 
   final HermesApiClient apiClient;
@@ -19,10 +17,8 @@ class CommandCenterShell extends StatefulWidget {
   final ExternalUrlLauncher launchExternalUrl;
   final AppIconBadgeUpdater updateAppIconBadge;
   final StripePaymentHandler stripePaymentHandler;
-  final BeanVoiceAudioPlayer playBeanVoiceAudio;
   final ValueChanged<String> onThemeChanged;
   final ValueChanged<String> onThemeModeChanged;
-  final BeanRealtimeConversation? realtimeConversation;
 
   @override
   State<CommandCenterShell> createState() => _CommandCenterShellState();
@@ -66,7 +62,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int _beanWorkEventFloorId = 0;
   bool _beanWorkFinalized = false;
   bool _beanWorkAcceptsOrphanPlanEvents = false;
-  bool _beanSpeechRestarting = false;
   final Set<int> _beanWorkAppliedEventIds = <int>{};
   final Set<int> _beanDashboardRefreshEventIds = <int>{};
   final Set<String> _beanWorkStagedCompletionIds = <String>{};
@@ -101,18 +96,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   final FocusNode _chatInputFocusNode = FocusNode();
   bool _beanChatCollapsed = false;
   int? _editingChatMessageId;
-  bool _beanVoiceListening = false;
-  String? _beanVoiceDraft;
-  Timer? _beanRealtimeTtsFallbackTimer;
-  String _lastRealtimeTtsFallbackText = '';
-  bool _forceRealtimeTtsFallbackForNextAssistant = false;
-  int? _dictatedVoiceResponseRunToken;
-  bool _speakQueuedAssistantForDictatedVoice = false;
-  String _lastDictatedVoiceQueuedTtsText = '';
-  final stt.SpeechToText _beanSpeech = stt.SpeechToText();
-  bool _beanSpeechReady = false;
   int _localMessageSequence = -1;
-  late final BeanRealtimeConversation _realtimeConversation;
   final Set<int> _dismissedReminderBannerIds = <int>{};
   final Set<int> _notifiedReminderIds = <int>{};
   int? _shownApprovalSheetId;
@@ -198,8 +182,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _shownApprovalSheetId = null;
     _approvalSheetOpen = false;
     _editingChatMessageId = null;
-    _beanVoiceListening = false;
-    _beanVoiceDraft = null;
     _cancelBeanResponsePreviewTimer();
     _dismissedBeanResponsePreviewKey = null;
     _beanResponsePreviewHeld = false;
@@ -642,13 +624,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int _nextLocalMessageId() => _localMessageSequence--;
   int _nextLocalResourceId() => _localResourceSequence--;
 
-  bool _assistantResponseIsDetailed(String content) {
-    final raw = content.trim();
-    return raw.length > 700 ||
-        raw.split('\n').length >= 4 ||
-        RegExp(r'(?:^|\n)\s*(?:[-*]|\d+[.)])\s+\S').hasMatch(raw);
-  }
-
   void _upsertBeanWorkItem(
     String id,
     String label, {
@@ -678,7 +653,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         for (var i = 0; i < _beanWorkItems.length; i++)
           if (i == existingIndex)
             _beanWorkItems[i].resolvedByEvent &&
-                    id == 'realtime-request' &&
                     !resolvedByEvent &&
                     !_beanWorkItems[i].done
                 ? _beanWorkItems[i].copyWith(status: next.status)
@@ -826,7 +800,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final targetOnlyMatches = <int>[];
     for (var index = 0; index < _beanWorkItems.length; index++) {
       final item = _beanWorkItems[index];
-      if ((!item.id.startsWith('request-') && item.id != 'realtime-request') ||
+      if (!item.id.startsWith('request-') ||
           item.resolvedByEvent ||
           item.done) {
         continue;
@@ -850,9 +824,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     String target,
     String subjectKey,
   ) {
-    if ((!item.id.startsWith('request-') && item.id != 'realtime-request') ||
-        item.resolvedByEvent ||
-        item.done) {
+    if (!item.id.startsWith('request-') || item.resolvedByEvent || item.done) {
       return false;
     }
     final placeholderTarget = _beanWorkTargetForLabel(item.label);
@@ -941,7 +913,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   bool _isGenericBeanWorkLabel(String label) => RegExp(
-    r'^(finish|finished|background work|finish background work|bean started working|read request|follow up on voice request|working on request|work on request)$',
+    r'^(finish|finished|background work|finish background work|bean started working|read request|working on request|work on request)$',
     caseSensitive: false,
   ).hasMatch(label.trim());
 
@@ -953,7 +925,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   bool _beanRequestIsCapabilityQuestion(String content) =>
-      _beanCommandIsCapabilityQuestion(_normalizedVoiceCommand(content));
+      _beanCommandIsCapabilityQuestion(_normalizedBeanCommand(content));
 
   bool _beanCommandIsCapabilityQuestion(String command) {
     if (command.isEmpty) return false;
@@ -1228,125 +1200,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _realtimeConversation =
-        widget.realtimeConversation ??
-        BeanRealtimeConversation(apiClient: widget.apiClient);
-    _configureRealtimeConversationCallbacks();
     unawaited(_reminderNotifications.initialize());
     _reminderDueTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _checkReminderDueState(),
     );
     _bootstrap();
-  }
-
-  void _configureRealtimeConversationCallbacks() {
-    _realtimeConversation.configureCallbacks(
-      onStatus: (status) {
-        if (!mounted) return;
-        setState(() => _chatRunState = status);
-      },
-      onAudioOutput: (eventType, _) {
-        if (eventType == 'remote_audio_attached') {
-          if (!_forceRealtimeTtsFallbackForNextAssistant) {
-            _beanRealtimeTtsFallbackTimer?.cancel();
-            _beanRealtimeTtsFallbackTimer = null;
-          }
-        }
-      },
-      onTranscript: (role, text) {
-        if (!mounted || text.trim().isEmpty) return;
-        var shouldScheduleRealtimeTtsFallback = false;
-        var realtimeFallbackText = '';
-        setState(() {
-          final trimmed = text.trim();
-          if (role == 'user_draft') {
-            _beanVoiceDraft = trimmed;
-            _chatRunState = 'Listening';
-            return;
-          }
-          if (role == 'user') {
-            _lastRealtimeTtsFallbackText = '';
-            final command = _normalizedVoiceCommand(trimmed);
-            if (_beanVoiceListening && _voiceCommandIsCancel(command)) {
-              _chatRunState = 'Bean voice ready';
-              _beanVoiceDraft = null;
-              unawaited(_realtimeConversation.interrupt());
-              return;
-            }
-            _beanVoiceDraft = _beanVoiceListening ? trimmed : null;
-            _chatRunState = _beanVoiceListening ? 'Listening' : 'Ready';
-            if (_beanVoiceListening) return;
-            final alreadyDisplayed =
-                _messages.isNotEmpty &&
-                _messages.last.role == 'user' &&
-                _messages.last.content?.trim() == trimmed;
-            if (!alreadyDisplayed) {
-              _messages.add(
-                HermesMessage(
-                  id: _nextLocalMessageId(),
-                  role: 'user',
-                  content: trimmed,
-                  metadata: const {'realtime': true},
-                ),
-              );
-            }
-            return;
-          }
-          final alreadyDisplayed = _messages.any(
-            (message) =>
-                message.role != 'user' &&
-                message.content?.trim() == trimmed &&
-                message.metadata['realtime'] == true,
-          );
-          if (alreadyDisplayed) return;
-          _messages.add(
-            HermesMessage(
-              id: _nextLocalMessageId(),
-              role: 'assistant',
-              content: trimmed,
-              metadata: const {'realtime': true},
-            ),
-          );
-          _chatRunState = _assistantResponseIsDetailed(trimmed)
-              ? 'Full details are in chat'
-              : (_beanVoiceListening ? 'listening' : 'Ready');
-          shouldScheduleRealtimeTtsFallback =
-              _realtimeConversation.active &&
-              (_forceRealtimeTtsFallbackForNextAssistant ||
-                  !_realtimeConversation.hasRemoteAudioOutput) &&
-              trimmed != _lastRealtimeTtsFallbackText;
-          realtimeFallbackText = trimmed;
-        });
-        if (shouldScheduleRealtimeTtsFallback) {
-          _scheduleRealtimeTtsFallback(realtimeFallbackText);
-        }
-      },
-      onRunQueued: (runId, userContent) {
-        if (!mounted) return;
-        setState(() {
-          _activeAssistantRunId = runId;
-          _chatRunState = 'working...';
-          _beginBeanWorkEventContext(freshRequest: true);
-          if (_dictatedVoiceResponseRunToken == _chatRunToken) {
-            _speakQueuedAssistantForDictatedVoice = true;
-          }
-        });
-        unawaited(_pollQueuedRun(runId, _chatRunToken));
-        unawaited(_pollDashboardChanges());
-      },
-      onSessionEnded: (_) {
-        if (!mounted) return;
-        if (_beanVoiceListening) return;
-        setState(() {
-          _beanVoiceListening = false;
-          _beanVoiceDraft = null;
-          _chatRunState = 'Voice disconnected';
-          _error =
-              'Bean voice lost the live connection. Start voice again or type the request and Bean will handle it from chat.';
-        });
-      },
-    );
   }
 
   @override
@@ -1356,42 +1215,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _cancelBeanClientRetryTimers();
     _beanWorkStatusClearTimer?.cancel();
     _beanResponsePreviewTimer?.cancel();
-    _beanRealtimeTtsFallbackTimer?.cancel();
     _reminderDueTimer?.cancel();
     _stopDashboardChangePolling();
     _chatInputController.dispose();
     _chatInputFocusNode.dispose();
-    unawaited(_beanSpeech.cancel());
     unawaited(_pushNotifications.dispose());
-    unawaited(_realtimeConversation.stop());
     super.dispose();
-  }
-
-  void _scheduleRealtimeTtsFallback(String text) {
-    final clean = beanSafeAssistantDisplayContent(text).trim();
-    if (clean.isEmpty) return;
-    _beanRealtimeTtsFallbackTimer?.cancel();
-    final forceFallback = _forceRealtimeTtsFallbackForNextAssistant;
-    _beanRealtimeTtsFallbackTimer = Timer(
-      forceFallback ? Duration.zero : const Duration(milliseconds: 700),
-      () {
-        if (!mounted) return;
-        final forceFallback = _forceRealtimeTtsFallbackForNextAssistant;
-        if (!forceFallback && !_realtimeConversation.active) return;
-        if (!forceFallback && _realtimeConversation.hasRemoteAudioOutput) {
-          return;
-        }
-        if (clean == _lastRealtimeTtsFallbackText) return;
-        _lastRealtimeTtsFallbackText = clean;
-        unawaited(
-          _speakBeanFallbackText(clean).whenComplete(() {
-            if (forceFallback) {
-              _forceRealtimeTtsFallbackForNextAssistant = false;
-            }
-          }),
-        );
-      },
-    );
   }
 
   @override
@@ -1422,14 +1251,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   bool get _beanStatusTagVisible =>
-      _beanVoiceListening ||
       _busy ||
       _activeAssistantRunId != null ||
       _beanWorkItems.isNotEmpty ||
       _beanWorkStatusHolding;
 
   bool get _beanStopAvailable =>
-      _beanVoiceListening ||
       _busy ||
       _beanVisibleWorkItems.any((item) => !item.done) ||
       RegExp(
@@ -1441,11 +1268,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final items = _beanVisibleWorkItems;
     if (items.isNotEmpty && items.every((item) => item.done)) return 'Done';
     if (items.any((item) => !item.done)) return 'Working...';
-    if (_beanVoiceListening) {
-      return _beanVoiceDraft?.trim().isNotEmpty == true
-          ? 'Ready to send'
-          : 'Listening';
-    }
     if (_busy) {
       final compact = _compactBeanStatusLabel(_chatRunState);
       return compact == 'Ready' ? 'Thinking...' : compact;
@@ -2578,120 +2400,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     );
   }
 
-  Future<void> _startBeanVoiceDraft() async {
-    if (_busy || _beanVoiceListening) return;
-    setState(() {
-      _beanVoiceListening = true;
-      _beanVoiceDraft = '';
-      _editingChatMessageId = null;
-      _chatInputController.clear();
-      _error = null;
-      _chatRunState = 'Listening';
-    });
-
-    try {
-      _beanSpeechReady =
-          _beanSpeechReady ||
-          await _beanSpeech.initialize(
-            onError: _handleBeanSpeechError,
-            onStatus: (status) {
-              if (!mounted || !_beanVoiceListening) return;
-              if (status == 'done' || status == 'notListening') {
-                setState(() => _chatRunState = 'Listening');
-              }
-            },
-          );
-      if (_beanSpeechReady) {
-        await _listenForBeanSpeechDraft();
-      }
-    } catch (error) {
-      if (!mounted) return;
-      await _beanSpeech.cancel();
-      if (!mounted) return;
-      setState(() {
-        _beanVoiceListening = false;
-        _beanVoiceDraft = null;
-        _chatInputController.clear();
-        _chatRunState = 'Voice unavailable';
-        _beanWorkItems = const [];
-        _beanWorkAcceptsOrphanPlanEvents = false;
-        _error =
-            'Voice input is not available. Type the request and Bean will handle it from chat.';
-      });
-    }
-  }
-
-  void _handleBeanSpeechError(Object error) {
-    if (!mounted || !_beanVoiceListening) return;
-    final currentDraft =
-        (_beanVoiceDraft?.trim().isNotEmpty == true
-                ? _beanVoiceDraft ?? ''
-                : _chatInputController.text)
-            .trim();
-    if (currentDraft.isNotEmpty) {
-      setState(() {
-        _beanVoiceDraft = currentDraft;
-        _chatRunState = 'Release to send';
-        _error = null;
-      });
-      return;
-    }
-    final transient =
-        error is speech_error.SpeechRecognitionError &&
-        error.permanent == false;
-    if (transient) {
-      setState(() => _chatRunState = 'Listening');
-      unawaited(_restartBeanSpeechDraftCapture());
-      return;
-    }
-    setState(() {
-      _beanVoiceListening = false;
-      _beanVoiceDraft = null;
-      _chatInputController.clear();
-      _chatRunState = 'Voice unavailable';
-      _error =
-          'Voice input is not available. Type the request and Bean will handle it from chat.';
-    });
-  }
-
-  Future<void> _restartBeanSpeechDraftCapture() async {
-    if (_beanSpeechRestarting || !_beanSpeechReady || !_beanVoiceListening) {
-      return;
-    }
-    _beanSpeechRestarting = true;
-    try {
-      await _listenForBeanSpeechDraft();
-    } catch (_) {
-      // Realtime voice remains available; release will fall back if needed.
-    } finally {
-      _beanSpeechRestarting = false;
-    }
-  }
-
-  Future<void> _listenForBeanSpeechDraft() async {
-    if (!_beanSpeechReady || !_beanVoiceListening) return;
-    await _beanSpeech.listen(
-      listenOptions: stt.SpeechListenOptions(
-        partialResults: true,
-        listenMode: stt.ListenMode.dictation,
-        pauseFor: const Duration(seconds: 30),
-        listenFor: const Duration(seconds: 60),
-      ),
-      onResult: (result) {
-        if (!mounted || !_beanVoiceListening) return;
-        final transcript = result.recognizedWords.trim();
-        setState(() {
-          _beanVoiceDraft = transcript;
-          _chatRunState = 'Listening';
-        });
-      },
-    );
-  }
-
-  void _updateBeanVoiceDraft(String draft) {
-    setState(() => _beanVoiceDraft = draft);
-  }
-
   void _replaceChatMessage(int localMessageId, HermesMessage message) {
     final index = _messages.indexWhere(
       (candidate) => candidate.id == localMessageId,
@@ -2706,7 +2414,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   void _beginEditingChatMessage(HermesMessage message) {
-    if (_busy || _beanVoiceListening || message.role != 'user') return;
+    if (_busy || message.role != 'user') return;
     setState(() {
       _editingChatMessageId = message.id;
       _chatInputController.text = message.content ?? '';
@@ -2734,21 +2442,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _stopAgent() async {
     final session = _session;
-    if (_beanVoiceListening) {
-      await _beanSpeech.cancel();
-      if (!mounted) return;
-      setState(() {
-        _beanVoiceListening = false;
-        _beanVoiceDraft = null;
-        _editingChatMessageId = null;
-        _chatInputController.clear();
-        _chatRunState = 'Ready';
-        _beanWorkItems = const [];
-        _beanWorkAcceptsOrphanPlanEvents = false;
-      });
-      return;
-    }
-
     if (!_beanStopAvailable) return;
     final activeRunId = _activeAssistantRunId;
     _chatRunToken++;
@@ -2791,188 +2484,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     );
   }
 
-  Future<void> _finishBeanVoiceDraft() async {
-    final pendingDraft =
-        (_beanVoiceDraft?.trim().isNotEmpty == true
-                ? _beanVoiceDraft ?? ''
-                : _chatInputController.text)
-            .trim();
-    if (!_beanVoiceListening && pendingDraft.isEmpty) return;
-    setState(() {
-      _chatRunState = 'Thinking…';
-      _beanWorkItems = const [];
-      _beanWorkAcceptsOrphanPlanEvents = false;
-      _beanWorkFinalized = false;
-      _activeBeanWorkMessageId = null;
-      _beanWorkStagedCompletionIds.clear();
-    });
-    _cancelBeanWorkStatusClear();
-    _cancelBeanWorkStageTimers();
-    try {
-      await _beanSpeech.stop();
-    } catch (error) {
-      debugPrint('Bean speech stop failed after dictation: $error');
-    }
-    final dictated =
-        (_beanVoiceDraft?.trim().isNotEmpty == true
-                ? _beanVoiceDraft ?? ''
-                : pendingDraft)
-            .trim();
-    if (!mounted) return;
-    setState(() {
-      _beanVoiceListening = false;
-      _beanVoiceDraft = null;
-      _chatInputController.clear();
-      _chatRunState = dictated.isEmpty ? 'Ready' : 'Bean is responding...';
-      _beanWorkItems = const [];
-      _beanWorkAcceptsOrphanPlanEvents = false;
-    });
-    if (dictated.isEmpty) {
-      return;
-    }
-
-    setState(() {
-      _chatRunState = 'Bean is working...';
-      _error = null;
-    });
-    unawaited(_sendDictatedBeanVoiceRequest(dictated));
-  }
-
-  Future<void> _sendDictatedBeanVoiceRequest(String dictated) async {
-    final sentRealtime = await _sendDictatedRealtimeVoiceRequest(dictated);
-    if (sentRealtime || !mounted) return;
-    await _sendVoiceFallbackChat(dictated);
-  }
-
-  Future<bool> _sendDictatedRealtimeVoiceRequest(String dictated) async {
-    final trimmed = dictated.trim();
-    final session = _session;
-    if (trimmed.isEmpty || session == null) return false;
-
-    final runToken = ++_chatRunToken;
-    int? localUserMessageId;
-    _cancelBeanClientRetryTimers();
-    try {
-      setState(() {
-        _busy = true;
-        _editingChatMessageId = null;
-        _chatRunState = _realtimeConversation.active
-            ? 'Bean is responding...'
-            : 'Bean is waking up...';
-        _beginBeanWorkEventContext(freshRequest: true);
-      });
-
-      if (!_realtimeConversation.active) {
-        await _realtimeConversation
-            .start(
-              sessionId: session.id,
-              workspaceId: _user?.activeWorkspace?.numericId,
-              microphoneEnabled: false,
-              metadata: _flutterChatMetadata(
-                additional: const {
-                  'source': 'flutter_voice_dictation',
-                  'voice_context': {'mode': 'dictated_voice'},
-                },
-              ),
-            )
-            .timeout(const Duration(milliseconds: 1400));
-      }
-      if (!mounted || runToken != _chatRunToken) return true;
-
-      localUserMessageId = _nextLocalMessageId();
-      setState(() {
-        _messages.add(
-          HermesMessage(
-            id: localUserMessageId!,
-            role: 'user',
-            content: trimmed,
-            metadata: const {
-              'realtime': true,
-              'voice_request': true,
-              'source': 'dictation',
-            },
-          ),
-        );
-        _chatRunState = 'Bean is responding...';
-      });
-
-      unawaited(_realtimeConversation.refreshDashboardContext());
-      _forceRealtimeTtsFallbackForNextAssistant = false;
-      _dictatedVoiceResponseRunToken = runToken;
-      _speakQueuedAssistantForDictatedVoice = false;
-      _lastDictatedVoiceQueuedTtsText = '';
-      await _realtimeConversation
-          .sendText(
-            trimmed,
-            audioResponse: true,
-            endConversationAfterResponse: true,
-          )
-          .timeout(const Duration(milliseconds: 1200));
-      if (!mounted || runToken != _chatRunToken) return true;
-      setState(() {
-        _busy = false;
-        _chatRunState = 'Bean is responding...';
-        _error = null;
-      });
-      return true;
-    } catch (error) {
-      debugPrint('Dictated Bean realtime voice failed: $error');
-      _forceRealtimeTtsFallbackForNextAssistant = false;
-      _dictatedVoiceResponseRunToken = null;
-      _speakQueuedAssistantForDictatedVoice = false;
-      if (mounted && runToken == _chatRunToken) {
-        setState(() {
-          _busy = false;
-          if (localUserMessageId != null) {
-            _messages.removeWhere(
-              (message) =>
-                  message.id == localUserMessageId &&
-                  message.metadata['voice_request'] == true,
-            );
-          }
-        });
-      }
-      return false;
-    }
-  }
-
-  Future<void> _sendVoiceFallbackChat(String dictated) async {
-    final existingAssistantIds = _messages
-        .where((message) => message.role == 'assistant')
-        .map((message) => message.id)
-        .toSet();
-    final surfacedAssistantText = await _sendChat(dictated);
-    if (!mounted) return;
-
-    HermesMessage? assistantMessage;
-    for (final message in _messages.reversed) {
-      if (message.role != 'assistant') continue;
-      if (existingAssistantIds.contains(message.id)) break;
-      assistantMessage = message;
-      break;
-    }
-    final text = beanSafeAssistantDisplayContent(
-      surfacedAssistantText ?? assistantMessage?.content ?? '',
-    ).trim();
-    if (text.isEmpty) return;
-    await _speakBeanFallbackText(text);
-  }
-
-  Future<void> _speakBeanFallbackText(String text) async {
-    try {
-      final audio = await widget.apiClient.synthesizeSpeech(
-        text: text,
-        workspaceId: _user?.activeWorkspace?.numericId,
-      );
-      await widget.playBeanVoiceAudio(
-        audio.bytes,
-        contentType: audio.contentType,
-      );
-    } catch (error) {
-      debugPrint('Bean voice TTS fallback failed: $error');
-    }
-  }
-
   Future<void> _sendChatInputDraft() async {
     final text = _chatInputController.text.trim();
     if (text.isEmpty || _busy) return;
@@ -2986,8 +2497,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     var session = _session;
     if (trimmed.isEmpty || session == null) return null;
     final runToken = ++_chatRunToken;
-    _dictatedVoiceResponseRunToken = null;
-    _speakQueuedAssistantForDictatedVoice = false;
     final capabilityQuestion = _beanRequestIsCapabilityQuestion(trimmed);
     final localUserMessageId = _nextLocalMessageId();
     final editingServerMessageId =
@@ -3021,16 +2530,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       );
     });
     try {
-      chatPhase = 'checking realtime text';
-      final sentRealtime = await _trySendRealtimeText(trimmed);
-      if (!mounted || runToken != _chatRunToken) return null;
-      if (sentRealtime) {
-        setState(() {
-          _busy = false;
-          _chatRunState = 'Bean is responding...';
-        });
-        return null;
-      }
       session = _session ?? session;
       final needsBeanIntroduction = _needsBeanIntroduction;
       final useDirectConversationReply =
@@ -3296,10 +2795,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     } finally {
       if (mounted && runToken == _chatRunToken) setState(() => _busy = false);
     }
-    final speechText = beanSafeAssistantDisplayContent(
+    final assistantText = beanSafeAssistantDisplayContent(
       surfacedAssistantText ?? '',
     ).trim();
-    return speechText.isEmpty ? null : speechText;
+    return assistantText.isEmpty ? null : assistantText;
   }
 
   Future<bool> _recoverChatFailureFromServer({
@@ -3737,18 +3236,6 @@ ${_truncateDiagnostic(stack, 2200)}
     }
   }
 
-  Future<bool> _trySendRealtimeText(String trimmed) async {
-    if (!_beanVoiceListening || !_realtimeConversation.active) {
-      return false;
-    }
-    try {
-      await _realtimeConversation.sendText(trimmed, audioResponse: true);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
   Future<void> _pollQueuedRun(int runId, int runToken) async {
     var pollErrors = 0;
     for (var attempt = 0; attempt < 90; attempt++) {
@@ -3808,7 +3295,6 @@ ${_truncateDiagnostic(stack, 2200)}
                     .catchError((_) => const <HermesActivityEvent>[]);
           await _refreshSignedInViews(showLoading: false);
           if (!mounted || runToken != _chatRunToken) return;
-          HermesMessage? voiceReplyMessage;
           setState(() {
             if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
             if (finalEvents.isNotEmpty) {
@@ -3832,19 +3318,12 @@ ${_truncateDiagnostic(stack, 2200)}
               final displayMessage = _displayableChatMessage(message);
               if (displayMessage != null) {
                 _messages.add(displayMessage);
-                voiceReplyMessage = displayMessage;
               }
-            } else if (message != null) {
-              voiceReplyMessage = _displayableChatMessage(message);
             } else if (run.status == 'failed') {
               _chatRunState = 'Ready';
             }
           });
           _refreshDashboardAfterBeanMutationEvents(finalEvents);
-          _speakQueuedAssistantResultForDictatedVoice(
-            voiceReplyMessage,
-            runToken: runToken,
-          );
           return;
         }
         if (attempt > 0 &&
@@ -3898,13 +3377,6 @@ ${_truncateDiagnostic(stack, 2200)}
           .skip(userIndex + 1)
           .any((message) => message.role == 'assistant');
       if (!hasAssistantAfter) return false;
-      HermesMessage? recoveredAssistantMessage;
-      for (final message in messages.skip(userIndex + 1)) {
-        if (message.role != 'assistant') continue;
-        recoveredAssistantMessage = _displayableChatMessage(message);
-        break;
-      }
-
       setState(() {
         if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
         _session = details.session;
@@ -3914,37 +3386,12 @@ ${_truncateDiagnostic(stack, 2200)}
         _error = null;
         _completeActiveBeanWorkItems();
       });
-      _speakQueuedAssistantResultForDictatedVoice(
-        recoveredAssistantMessage,
-        runToken: runToken,
-      );
       unawaited(_refreshSignedInViews(showLoading: false));
 
       return true;
     } catch (_) {
       return false;
     }
-  }
-
-  void _speakQueuedAssistantResultForDictatedVoice(
-    HermesMessage? message, {
-    required int runToken,
-  }) {
-    if (!_speakQueuedAssistantForDictatedVoice ||
-        _dictatedVoiceResponseRunToken != runToken) {
-      return;
-    }
-    _speakQueuedAssistantForDictatedVoice = false;
-    _dictatedVoiceResponseRunToken = null;
-    final text = beanSafeAssistantDisplayContent(message?.content ?? '').trim();
-    if (text.isEmpty) return;
-
-    if (text == _lastRealtimeTtsFallbackText ||
-        text == _lastDictatedVoiceQueuedTtsText) {
-      return;
-    }
-    _lastDictatedVoiceQueuedTtsText = text;
-    unawaited(_speakBeanFallbackText(text));
   }
 
   void _refreshDashboardAfterBeanMutationEvents(
@@ -4480,7 +3927,7 @@ ${_truncateDiagnostic(stack, 2200)}
         await _refreshSignedInViews(showLoading: false);
       }
     } catch (_) {
-      // Realtime refresh is opportunistic; manual pull-to-refresh still works.
+      // Live refresh is opportunistic; manual pull-to-refresh still works.
     } finally {
       _dashboardChangePollInFlight = false;
     }
@@ -6899,23 +6346,15 @@ ${_truncateDiagnostic(stack, 2200)}
                         controller: _chatInputController,
                         focusNode: _chatInputFocusNode,
                         busy: _beanStopAvailable,
-                        listening: _beanVoiceListening,
                         attachedToWorkStrip: beanWorkStripActive,
-                        voiceDraft: _beanVoiceDraft,
-                        onChanged: _updateBeanVoiceDraft,
                         onSend: () => unawaited(_sendChatInputDraft()),
                         onStop: _stopAgent,
                       ),
                       menu: _HeyBeanBottomMenu(
                         selected: _selectedDestination,
-                        beanListening: _beanVoiceListening,
-                        beanWorking: _beanStopAvailable && !_beanVoiceListening,
+                        beanWorking: _beanStopAvailable,
                         onSelected: _selectDestination,
                         onMorePressed: _openMoreMenu,
-                        onBeanLongPressStart: () =>
-                            unawaited(_startBeanVoiceDraft()),
-                        onBeanLongPressEnd: () =>
-                            unawaited(_finishBeanVoiceDraft()),
                       ),
                     )
                   : null,

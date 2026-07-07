@@ -3,13 +3,10 @@ part of '../../main.dart';
 String? _settingsErrorForDisplay(String? error) {
   if (error == null) return null;
   final normalized = error.trim().toLowerCase();
-  if (normalized.startsWith('voice ') ||
-      normalized.startsWith('bean voice ') ||
-      normalized.startsWith('bean is paused') ||
+  if (normalized.startsWith('bean is paused') ||
       normalized.startsWith('bean hit a snag') ||
       normalized.startsWith('bean could not') ||
-      normalized.startsWith('bean lost') ||
-      normalized.startsWith('realtime ')) {
+      normalized.startsWith('bean lost')) {
     return null;
   }
   return error;

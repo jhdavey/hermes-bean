@@ -483,18 +483,18 @@ Map<String, Object?> _flutterChatMetadata({
   ...additional,
 };
 
-String _normalizedVoiceCommand(String transcript) {
-  final normalized = transcript
+String _normalizedBeanCommand(String input) {
+  final normalized = input
       .toLowerCase()
       .replaceAll(RegExp(r"[^a-z0-9\s']"), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
-  return _stripLeadingVoiceFillers(
-    _stripNormalizedWakePhrase(_stripLeadingVoiceFillers(normalized)),
+  return _stripLeadingCommandFillers(
+    _stripNormalizedWakePhrase(_stripLeadingCommandFillers(normalized)),
   ).trim();
 }
 
-String _stripLeadingVoiceFillers(String command) {
+String _stripLeadingCommandFillers(String command) {
   if (command.isEmpty) return command;
   if (RegExp(r'^(?:uh huh|mm hmm|mhm)\b').hasMatch(command)) {
     return command;
@@ -531,22 +531,6 @@ String _stripNormalizedWakePhrase(String command) {
       )
       .trim();
 }
-
-bool _voiceCommandIsCancel(String command) {
-  final directCommand = command.replaceFirst(RegExp(r'\s+bean$'), '').trim();
-  if (RegExp(
-    r"^(?:stop|stop it|stop talking|stop right there|stop for now|pause|pause it|pause for now|pause for a second|hold up|hold on|hold that thought|hang on|hang on a second|wait|wait stop|wait a second|one second|just a second|one sec|give me a second|give me one second|give me a moment|stop for a second|let me stop you|be quiet|quiet|cancel|cancel it|cancel that|cancel this|cancel response|cancel request|cancel the request|cancel my request|never\s*mind|nevermind|forget it|forget that|forget this|scratch that|that's all|that is all|stop listening|we'?re done|we are done)$",
-  ).hasMatch(directCommand)) {
-    return true;
-  }
-  return RegExp(
-    r"\b(?:stop talking|stop right there|stop for now|pause for now|pause for a second|hold up|hold on|hold that thought|hang on|hang on a second|wait stop|wait a second|one second|just a second|one sec|give me (?:a|one) second|give me a moment|stop for a second|let me stop you|be quiet|cancel (?:it|that|this|the request|my request)|never\s*mind|nevermind|forget (?:it|that|this)|scratch that|stop listening)\b",
-  ).hasMatch(command);
-}
-
-@visibleForTesting
-bool realtimeVoiceCancelForTesting(String transcript) =>
-    _voiceCommandIsCancel(_normalizedVoiceCommand(transcript));
 
 String beanFriendlyErrorMessage(Object error, {String? action}) {
   final subscriptionLimitMessage = _subscriptionLimitMessageFromError(error);
@@ -734,11 +718,8 @@ String? _subscriptionLimitMessageFromApiBody(String body) {
   return null;
 }
 
-bool _isBeanUsageLimitCode(String? code) => const {
-  'bean_usage_limit',
-  'bean_voice_usage_limit',
-  'bean_voice_paused',
-}.contains(code);
+bool _isBeanUsageLimitCode(String? code) =>
+    const {'bean_usage_limit'}.contains(code);
 
 bool _isPlanLimitMessage(String? message) {
   final normalized = (message ?? '').toLowerCase();

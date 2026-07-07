@@ -17,7 +17,7 @@ class LegalPagesFeatureTest extends TestCase
                 ->assertSee('support@heybean.org', false)
                 ->assertHeader('X-Content-Type-Options', 'nosniff')
                 ->assertHeader('X-Frame-Options', 'DENY')
-                ->assertHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=(self)')
+                ->assertHeader('Permissions-Policy', 'camera=(), geolocation=(self)')
                 ->assertHeader('Content-Security-Policy');
         }
     }

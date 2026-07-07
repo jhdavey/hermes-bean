@@ -68,12 +68,8 @@ class AiUsageService
         string $requestType = 'agent',
         array $context = [],
     ): array {
-        if (! $user->isAdmin() && ! $this->adminSettings->beanChatEnabled() && ! in_array($requestType, ['voice_turn', 'realtime_voice', 'tts'], true)) {
+        if (! $user->isAdmin() && ! $this->adminSettings->beanChatEnabled()) {
             return $this->blockedPreflight($inputTokens, $reservedOutputTokens, $estimatedCost ?? 0.0, $this->beanPausedMessage('chat'), $this->budgetFor($user));
-        }
-
-        if (! $user->isAdmin() && ! $this->adminSettings->beanVoiceEnabled() && in_array($requestType, ['voice_session', 'voice_turn', 'realtime_voice', 'tts'], true)) {
-            return $this->blockedPreflight($inputTokens, $reservedOutputTokens, $estimatedCost ?? 0.0, $this->beanPausedMessage('voice'), $this->budgetFor($user));
         }
 
         $estimatedCost ??= $this->estimatedCost($model, $inputTokens, $reservedOutputTokens);
@@ -129,7 +125,7 @@ class AiUsageService
         }
         $displayModel = (string) ($modelRoute['model'] ?? 'agent-routed');
         $billingModel = (string) ($modelRoute['billing_model'] ?? $modelRoute['model'] ?? $this->adminSettings->mainModel());
-        $cost = $this->estimatedCostWithAudio($billingModel, $inputTokens, $outputTokens, $actualUsage['audio_input_tokens'], $actualUsage['audio_output_tokens']);
+        $cost = $this->estimatedCost($billingModel, $inputTokens, $outputTokens);
         $actionTypes = $domainEvents
             ->map(fn (ActivityEvent $event): ?string => $event->tool_name ?: $event->event_type)
             ->filter()
@@ -149,8 +145,6 @@ class AiUsageService
             'status' => $status,
             'input_tokens' => $inputTokens,
             'output_tokens' => $outputTokens,
-            'audio_input_tokens' => $actualUsage['audio_input_tokens'],
-            'audio_output_tokens' => $actualUsage['audio_output_tokens'],
             'total_tokens' => $inputTokens + $outputTokens,
             'tool_call_count' => count($actionTypes),
             'estimated_cost_usd' => $cost,
@@ -212,19 +206,6 @@ class AiUsageService
         return round((($inputTokens / 1_000_000) * $pricing['input']) + (($outputTokens / 1_000_000) * $pricing['output']), 6);
     }
 
-    public function estimatedCostWithAudio(string $model, int $inputTokens, int $outputTokens, int $audioInputTokens = 0, int $audioOutputTokens = 0): float
-    {
-        $pricing = $this->pricingFor($model);
-
-        return round(
-            (($inputTokens / 1_000_000) * $pricing['input'])
-            + (($outputTokens / 1_000_000) * $pricing['output'])
-            + (($audioInputTokens / 1_000_000) * ($pricing['audio_input'] ?? $pricing['input']))
-            + (($audioOutputTokens / 1_000_000) * ($pricing['audio_output'] ?? $pricing['output'])),
-            6,
-        );
-    }
-
     public function recordDirectCall(
         User $user,
         ?int $workspaceId,
@@ -237,10 +218,8 @@ class AiUsageService
     ): AiUsageLog {
         $inputTokens = (int) ($usage['input_tokens'] ?? 0);
         $outputTokens = (int) ($usage['output_tokens'] ?? 0);
-        $audioInputTokens = (int) ($usage['audio_input_tokens'] ?? 0);
-        $audioOutputTokens = (int) ($usage['audio_output_tokens'] ?? 0);
         $toolCallCount = (int) ($usage['tool_call_count'] ?? count($actionTypes));
-        $cost = $this->estimatedCostWithAudio($model, $inputTokens, $outputTokens, $audioInputTokens, $audioOutputTokens);
+        $cost = $this->estimatedCost($model, $inputTokens, $outputTokens);
 
         $log = AiUsageLog::create([
             'user_id' => $user->id,
@@ -254,8 +233,6 @@ class AiUsageService
             'status' => $status,
             'input_tokens' => $inputTokens,
             'output_tokens' => $outputTokens,
-            'audio_input_tokens' => $audioInputTokens,
-            'audio_output_tokens' => $audioOutputTokens,
             'total_tokens' => $inputTokens + $outputTokens,
             'tool_call_count' => $toolCallCount,
             'estimated_cost_usd' => $cost,
@@ -267,7 +244,7 @@ class AiUsageService
     }
 
     /**
-     * @return array{input_tokens:int,output_tokens:int,audio_input_tokens:int,audio_output_tokens:int}
+     * @return array{input_tokens:int,output_tokens:int}
      */
     public function usageFromOpenAiResponse(array $response): array
     {
@@ -276,8 +253,6 @@ class AiUsageService
         return [
             'input_tokens' => (int) ($usage['prompt_tokens'] ?? $usage['input_tokens'] ?? 0),
             'output_tokens' => (int) ($usage['completion_tokens'] ?? $usage['output_tokens'] ?? 0),
-            'audio_input_tokens' => (int) data_get($usage, 'input_token_details.audio_tokens', data_get($usage, 'prompt_tokens_details.audio_tokens', 0)),
-            'audio_output_tokens' => (int) data_get($usage, 'output_token_details.audio_tokens', data_get($usage, 'completion_tokens_details.audio_tokens', 0)),
         ];
     }
 
@@ -311,7 +286,7 @@ class AiUsageService
     }
 
     /**
-     * @return array{text_requests:int,voice_turns:int,voice_seconds:float,external_tool_calls:int,web_search_calls:int,external_cost:float}
+     * @return array{text_requests:int,external_tool_calls:int,web_search_calls:int,external_cost:float}
      */
     public function dailyRequestCounts(int $userId): array
     {
@@ -323,8 +298,6 @@ class AiUsageService
 
         return [
             'text_requests' => $logs->where('request_type', 'text')->count(),
-            'voice_turns' => $logs->whereIn('request_type', ['voice_turn', 'realtime_voice'])->count(),
-            'voice_seconds' => (float) $logs->sum(fn (AiUsageLog $log): float => (float) data_get($log->metadata ?? [], 'voice_seconds', 0)),
             'external_tool_calls' => $logs->filter(fn (AiUsageLog $log): bool => $this->isExternalUsageLog($log))->count(),
             'web_search_calls' => $logs->filter(fn (AiUsageLog $log): bool => collect($log->action_types ?? [])->contains('web_search'))->count(),
             'external_cost' => (float) $logs->filter(fn (AiUsageLog $log): bool => $this->isExternalUsageLog($log))->sum('estimated_cost_usd'),
@@ -427,8 +400,6 @@ class AiUsageService
             return [
                 'input' => (float) $prices[$model]['input'],
                 'output' => (float) $prices[$model]['output'],
-                'audio_input' => isset($prices[$model]['audio_input']) ? (float) $prices[$model]['audio_input'] : null,
-                'audio_output' => isset($prices[$model]['audio_output']) ? (float) $prices[$model]['audio_output'] : null,
             ];
         }
 
@@ -437,8 +408,6 @@ class AiUsageService
                 return [
                     'input' => (float) $price['input'],
                     'output' => (float) $price['output'],
-                    'audio_input' => isset($price['audio_input']) ? (float) $price['audio_input'] : null,
-                    'audio_output' => isset($price['audio_output']) ? (float) $price['audio_output'] : null,
                 ];
             }
         }
@@ -461,9 +430,6 @@ class AiUsageService
     private function requestTypeForMessage(ConversationMessage $message): string
     {
         $metadata = $message->metadata ?? [];
-        if ((string) data_get($metadata, 'source') === 'realtime' || data_get($metadata, 'voice_context.mode') === 'live_voice') {
-            return 'voice_background';
-        }
 
         return 'text';
     }
@@ -489,8 +455,6 @@ class AiUsageService
         $usage = [
             'input_tokens' => 0,
             'output_tokens' => 0,
-            'audio_input_tokens' => 0,
-            'audio_output_tokens' => 0,
         ];
         try {
             $decoded = json_decode($payload, true, flags: JSON_THROW_ON_ERROR);
@@ -502,8 +466,6 @@ class AiUsageService
             $itemUsage = is_array($item) ? (array) ($item['usage'] ?? []) : [];
             $usage['input_tokens'] += (int) ($itemUsage['prompt_tokens'] ?? $itemUsage['input_tokens'] ?? 0);
             $usage['output_tokens'] += (int) ($itemUsage['completion_tokens'] ?? $itemUsage['output_tokens'] ?? 0);
-            $usage['audio_input_tokens'] += (int) data_get($itemUsage, 'input_token_details.audio_tokens', data_get($itemUsage, 'prompt_tokens_details.audio_tokens', 0));
-            $usage['audio_output_tokens'] += (int) data_get($itemUsage, 'output_token_details.audio_tokens', data_get($itemUsage, 'completion_tokens_details.audio_tokens', 0));
         }
 
         return $usage;
@@ -511,9 +473,7 @@ class AiUsageService
 
     private function beanPausedMessage(string $kind): string
     {
-        return $kind === 'voice'
-            ? 'Bean voice is paused right now.'
-            : 'Bean chat is paused right now.';
+        return 'Bean chat is paused right now.';
     }
 
     private function humanLimitReason(string $type, float $observed, float $threshold): string

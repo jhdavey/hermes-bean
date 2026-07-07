@@ -298,59 +298,6 @@
     background: color-mix(in srgb, var(--hb-accent) 12%, var(--hb-surface));
 }
 
-.hb-tts-settings {
-    display: grid;
-    gap: 10px;
-}
-
-.hb-tts-voice-picker {
-    min-width: 0;
-}
-
-.hb-tts-preview-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: center;
-}
-
-.hb-tts-preview-button {
-    min-height: 42px;
-    padding-inline: 14px;
-    white-space: nowrap;
-}
-
-.hb-tts-preview-status {
-    min-height: 28px;
-    display: flex;
-    align-items: center;
-    padding: 6px 10px;
-    border: 1px solid rgba(var(--hb-accent-rgb), .18);
-    border-radius: 10px;
-    background: rgba(var(--hb-accent-rgb), .08);
-    color: var(--hb-accent);
-    font-size: 12px;
-    font-weight: 850;
-}
-
-.hb-tts-preview-status[hidden] {
-    display: none;
-}
-
-.hb-tts-preview-status-error {
-    color: var(--hb-destructive);
-    border-color: rgba(220, 38, 38, .22);
-    background: rgba(254, 242, 242, .78);
-}
-
-.hb-tts-preview-status-success {
-    color: var(--hb-accent);
-}
-
-.hb-tts-style {
-    min-height: 78px;
-}
-
 .hb-main-admin {
     min-height: calc(100vh - 58px);
 }

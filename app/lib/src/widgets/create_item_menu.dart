@@ -183,7 +183,7 @@ const List<_SignupPlanOption> _signupPlanOptions = [
     features: [
       '2 workspaces for personal and shared planning',
       'Tasks, reminders, and calendar in one daily view',
-      'Bean chat and voice for everyday requests',
+      'Bean chat for everyday requests',
       '1 connected calendar',
       'Up to 10 Notes for plans, lists, and longer writing',
       'Push reminders for the things you cannot miss',

@@ -7,7 +7,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Pricing | HeyBean</title>
-    <meta name="description" content="Choose a HeyBean plan for AI calendar, tasks, reminders, voice chat, and workspace coordination.">
+    <meta name="description" content="Choose a HeyBean plan for AI calendar, tasks, reminders, and workspace coordination.">
     <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="any">
     <link rel="icon" type="image/png" href="{{ asset('favicon.png') }}">
     <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
@@ -137,7 +137,7 @@
                     <ul class="features">
                         <li>2 workspaces for personal and shared planning</li>
                         <li>Tasks, reminders, and calendar in one daily view</li>
-                        <li>Bean chat and voice for everyday requests</li>
+                        <li>Bean chat for everyday requests</li>
                         <li>1 connected calendar</li>
                         <li>Up to 10 Notes for plans, lists, and longer writing</li>
                         <li>Push reminders for the things you cannot miss</li>

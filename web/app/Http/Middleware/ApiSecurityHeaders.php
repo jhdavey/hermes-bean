@@ -15,7 +15,7 @@ class ApiSecurityHeaders
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('X-Frame-Options', 'DENY');
         $response->headers->set('Referrer-Policy', $request->is('api/*') ? 'no-referrer' : 'strict-origin-when-cross-origin');
-        $response->headers->set('Permissions-Policy', 'camera=(), microphone=(self), geolocation=(self)');
+        $response->headers->set('Permissions-Policy', 'camera=(), geolocation=(self)');
 
         if (app()->environment('production')) {
             $response->headers->set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');

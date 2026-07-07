@@ -196,23 +196,6 @@ class AgentProfileService
         return $profile->refresh();
     }
 
-    public function updateTextToSpeechSettings(AgentProfile $profile, array $data): AgentProfile
-    {
-        $settings = $profile->settings ?? [];
-        $tts = (isset($settings['tts']) && is_array($settings['tts'])) ? $settings['tts'] : [];
-
-        $tts['provider'] = 'openai';
-        $tts['openai_voice'] = (string) ($data['tts_openai_voice'] ?? data_get($tts, 'openai_voice', 'coral'));
-        $tts['openai_model'] = 'gpt-4o-mini-tts';
-        $tts['openai_instructions'] = trim((string) ($data['tts_openai_instructions'] ?? data_get($tts, 'openai_instructions', 'Speak naturally, warmly, and concisely as Bean.')));
-        unset($tts['openai_api_key_encrypted']);
-
-        $settings['tts'] = $tts;
-        $profile->forceFill(['settings' => $settings])->save();
-
-        return $profile->refresh();
-    }
-
     public function updateHomeCitySettings(AgentProfile $profile, ?string $homeCity): AgentProfile
     {
         $settings = $profile->settings ?? [];
@@ -241,11 +224,6 @@ class AgentProfileService
 
     public function publicSettings(array $settings): array
     {
-        if (isset($settings['tts']) && is_array($settings['tts'])) {
-            unset($settings['tts']['openai_api_key_encrypted']);
-            $settings['tts']['openai_app_key_configured'] = trim((string) config('services.openai.server_api_key', '')) !== '';
-        }
-
         return $settings;
     }
 

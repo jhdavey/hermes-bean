@@ -24,11 +24,11 @@ export const subscriptionPlans = {
             label: 'Base',
             price: '$4.99',
             yearlyPrice: '$49.99',
-            summary: '2 workspaces, up to 10 Notes, Bean chat and voice, connected calendar planning, push reminders, and recent context.',
+            summary: '2 workspaces, up to 10 Notes, Bean chat, connected calendar planning, push reminders, and recent context.',
             trial: `Base ${subscriptionTrialDays}-day free trial selected`,
             bestFor: 'For getting your personal day into one organized place.',
             features: [
-                'Tasks, reminders, calendar, chat, and voice',
+                'Tasks, reminders, calendar, and chat',
                 '2 workspaces and 1 connected calendar',
                 'Up to 10 Notes for plans, lists, and longer writing',
                 'Push reminders and recent Bean context',

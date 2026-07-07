@@ -180,15 +180,12 @@ class _ChatMessageTopFade extends StatelessWidget {
   );
 }
 
-class _DockedBeanChatComposer extends StatefulWidget {
+class _DockedBeanChatComposer extends StatelessWidget {
   const _DockedBeanChatComposer({
     required this.controller,
     required this.focusNode,
     required this.busy,
-    required this.listening,
     required this.attachedToWorkStrip,
-    required this.voiceDraft,
-    required this.onChanged,
     required this.onSend,
     required this.onStop,
   });
@@ -196,51 +193,18 @@ class _DockedBeanChatComposer extends StatefulWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool busy;
-  final bool listening;
   final bool attachedToWorkStrip;
-  final String? voiceDraft;
-  final ValueChanged<String> onChanged;
   final VoidCallback onSend;
   final Future<void> Function() onStop;
 
   @override
-  State<_DockedBeanChatComposer> createState() =>
-      _DockedBeanChatComposerState();
-}
-
-class _DockedBeanChatComposerState extends State<_DockedBeanChatComposer> {
-  @override
-  void initState() {
-    super.initState();
-    _syncVoiceDraftToInput();
-  }
-
-  @override
-  void didUpdateWidget(covariant _DockedBeanChatComposer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _syncVoiceDraftToInput();
-  }
-
-  void _syncVoiceDraftToInput() {
-    if (!widget.listening) return;
-    final draft = widget.voiceDraft;
-    if (draft == null || draft == widget.controller.text) return;
-    widget.controller.text = draft;
-    widget.controller.selection = TextSelection.collapsed(
-      offset: widget.controller.text.length,
-    );
-  }
-
-  @override
   Widget build(BuildContext context) => _ChatInputDock(
-    controller: widget.controller,
-    focusNode: widget.focusNode,
-    busy: widget.busy,
-    listening: widget.listening,
-    attachedToWorkStrip: widget.attachedToWorkStrip,
-    onChanged: widget.listening ? widget.onChanged : null,
-    onSend: widget.onSend,
-    onStop: widget.onStop,
+    controller: controller,
+    focusNode: focusNode,
+    busy: busy,
+    attachedToWorkStrip: attachedToWorkStrip,
+    onSend: onSend,
+    onStop: onStop,
   );
 }
 
@@ -249,21 +213,17 @@ class _ChatInputDock extends StatelessWidget {
     required this.controller,
     required this.focusNode,
     required this.busy,
-    required this.listening,
     required this.attachedToWorkStrip,
     required this.onSend,
     required this.onStop,
-    this.onChanged,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool busy;
-  final bool listening;
   final bool attachedToWorkStrip;
   final VoidCallback onSend;
   final Future<void> Function() onStop;
-  final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -275,12 +235,7 @@ class _ChatInputDock extends StatelessWidget {
         topLeft: Radius.circular(attachedToWorkStrip ? 0 : 18),
         topRight: Radius.circular(attachedToWorkStrip ? 0 : 18),
       ),
-      border: Border.all(
-        color: listening
-            ? HeyBeanTheme.accentStrong.withValues(alpha: .72)
-            : _quietBorderColor(alpha: .46),
-        width: listening ? 1.4 : 1,
-      ),
+      border: Border.all(color: _quietBorderColor(alpha: .46), width: 1),
       boxShadow: const [
         BoxShadow(
           color: Color(0x0F000000),
@@ -300,11 +255,10 @@ class _ChatInputDock extends StatelessWidget {
             minLines: 1,
             maxLines: 4,
             keyboardType: TextInputType.multiline,
-            onChanged: onChanged,
             textInputAction: TextInputAction.send,
             onSubmitted: busy ? null : (_) => onSend(),
             decoration: InputDecoration(
-              hintText: listening ? 'Listening' : 'Message Bean…',
+              hintText: 'Message Bean…',
               border: InputBorder.none,
               enabledBorder: InputBorder.none,
               focusedBorder: InputBorder.none,
@@ -313,7 +267,7 @@ class _ChatInputDock extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        if (busy || listening)
+        if (busy)
           FilledButton(
             key: const Key('primary-chat-stop-action'),
             style: FilledButton.styleFrom(

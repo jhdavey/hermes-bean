@@ -93,7 +93,6 @@ class _GuidedBeanOnboardingScreenState
   final _planIntroKey = GlobalKey();
   final _personalityIntroKey = GlobalKey();
   final _locationIntroKey = GlobalKey();
-  final stt.SpeechToText _speech = stt.SpeechToText();
   final List<_GuidedOnboardingMessage> _messages = [
     const _GuidedOnboardingMessage(
       bean: true,
@@ -108,8 +107,6 @@ class _GuidedBeanOnboardingScreenState
   String? _personality;
   String? _homeCity;
   bool _busy = false;
-  bool _listening = false;
-  bool _speechReady = false;
   bool _showNameComposer = true;
   bool _beanThinking = false;
   String? _error;
@@ -119,17 +116,11 @@ class _GuidedBeanOnboardingScreenState
   bool get _inputLocked =>
       _busy || _beanThinking || _step == _GuidedOnboardingStep.plan;
 
-  bool get _textOnlyStep =>
-      _step == _GuidedOnboardingStep.name ||
-      _step == _GuidedOnboardingStep.email ||
-      _step == _GuidedOnboardingStep.password;
-
   @override
   void dispose() {
     _input.dispose();
     _inputFocus.dispose();
     _scrollController.dispose();
-    _speech.stop();
     super.dispose();
   }
 
@@ -435,8 +426,8 @@ class _GuidedBeanOnboardingScreenState
     );
     await _respondBean(
       _nextResponseVariation([
-        'Perfect. You can also select different voices in the settings menu later. Next, can I access your location so I can see what city we are in? This helps with weather related questions and planning.',
-        'Good choice. You can change my personality or voice later in Settings. One more helpful setup step: may I check your city? It helps me answer weather questions and plan around local context.',
+        'Perfect. You can also adjust Bean preferences in the settings menu later. Next, can I access your location so I can see what city we are in? This helps with weather related questions and planning.',
+        'Good choice. You can change my personality later in Settings. One more helpful setup step: may I check your city? It helps me answer weather questions and plan around local context.',
         'That works. I will use that style, and you can always adjust it later. Would you like to share your location now? I only need city-level context for weather and planning help.',
       ]),
       scrollBehavior: _GuidedScrollBehavior.none,
@@ -664,52 +655,6 @@ class _GuidedBeanOnboardingScreenState
       );
     }
     return city;
-  }
-
-  Future<void> _startListening() async {
-    if (_inputLocked || _textOnlyStep || _listening) return;
-    setState(() => _error = null);
-    _speechReady =
-        _speechReady ||
-        await _speech.initialize(
-          onError: (_) {
-            if (mounted) setState(() => _listening = false);
-          },
-          onStatus: (status) {
-            if (mounted && status == 'done') setState(() => _listening = false);
-          },
-        );
-    if (!_speechReady) {
-      _setError(
-        'Voice input is not available. Tap the input to text Bean instead.',
-      );
-      return;
-    }
-    setState(() => _listening = true);
-    await _speech.listen(
-      listenOptions: stt.SpeechListenOptions(
-        listenMode: stt.ListenMode.confirmation,
-      ),
-      onResult: (result) {
-        if (!mounted) return;
-        _input.text = result.recognizedWords;
-        _input.selection = TextSelection.collapsed(offset: _input.text.length);
-        if (result.finalResult) {
-          setState(() => _listening = false);
-        }
-      },
-    );
-  }
-
-  Future<void> _stopListening({bool submit = true}) async {
-    if (_listening) {
-      await _speech.stop();
-      if (!mounted) return;
-      setState(() => _listening = false);
-    }
-    if (submit && _input.text.trim().isNotEmpty) {
-      await _submitDraft();
-    }
   }
 
   String? _personalityFromText(String value) {
@@ -941,7 +886,6 @@ class _GuidedBeanOnboardingScreenState
                 hint: _inputHint,
                 enabled: !_inputLocked,
                 obscureText: _step == _GuidedOnboardingStep.password,
-                listening: _listening,
                 error: _error,
                 onSubmit: () => unawaited(_submitDraft()),
               ),
@@ -955,16 +899,8 @@ class _GuidedBeanOnboardingScreenState
                 child: _BeanFab(
                   widgetKey: const Key('guided-initial-bean-button'),
                   selected: true,
-                  listening: _listening,
                   semanticLabel: 'Start Bean onboarding',
                   onPressed: _inputLocked ? () {} : _focusInput,
-                  longPressEnabled: !_inputLocked && !_textOnlyStep,
-                  onLongPressStart: _inputLocked
-                      ? () {}
-                      : () => unawaited(_startListening()),
-                  onLongPressEnd: _inputLocked
-                      ? () {}
-                      : () => unawaited(_stopListening()),
                 ),
               ),
             ),
@@ -1140,7 +1076,7 @@ class _GuidedBeanInstructionCard extends StatelessWidget {
             const SizedBox(width: 10),
             Flexible(
               child: Text(
-                'Please hold to talk, or tap to text',
+                'Tap to text Bean',
                 style: TextStyle(fontWeight: FontWeight.w900),
               ),
             ),
@@ -1163,7 +1099,6 @@ class _GuidedFloatingInputPill extends StatelessWidget {
     required this.hint,
     required this.enabled,
     required this.obscureText,
-    required this.listening,
     required this.onSubmit,
     this.error,
   });
@@ -1173,7 +1108,6 @@ class _GuidedFloatingInputPill extends StatelessWidget {
   final String hint;
   final bool enabled;
   final bool obscureText;
-  final bool listening;
   final String? error;
   final VoidCallback onSubmit;
 
@@ -1208,10 +1142,7 @@ class _GuidedFloatingInputPill extends StatelessWidget {
         decoration: BoxDecoration(
           color: HeyBeanTheme.surface,
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: listening ? HeyBeanTheme.accentStrong : HeyBeanTheme.border,
-            width: listening ? 2 : 1.2,
-          ),
+          border: Border.all(color: HeyBeanTheme.border, width: 1.2),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(
@@ -1234,7 +1165,7 @@ class _GuidedFloatingInputPill extends StatelessWidget {
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => onSubmit(),
                 decoration: InputDecoration(
-                  hintText: listening ? 'Listening...' : hint,
+                  hintText: hint,
                   filled: false,
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,

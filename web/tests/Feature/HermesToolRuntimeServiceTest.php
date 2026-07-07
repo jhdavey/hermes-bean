@@ -8,13 +8,15 @@ use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\HermesToolRuntimeService;
 use App\Services\WorkspaceItemSyncService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Assert;
 use Tests\TestCase;
 
 class HermesToolRuntimeServiceTest extends TestCase
@@ -619,50 +621,6 @@ class HermesToolRuntimeServiceTest extends TestCase
         $this->assertTrue(data_get($profile->settings, 'onboarding.completed'));
     }
 
-    public function test_tool_runtime_receives_voice_quick_reply_context_for_continuation(): void
-    {
-        Http::fakeSequence()
-            ->push([
-                'id' => 'chatcmpl-voice-context',
-                'model' => 'gpt-test-tools',
-                'choices' => [[
-                    'finish_reason' => 'stop',
-                    'message' => [
-                        'role' => 'assistant',
-                        'content' => 'I would add a protein and something fresh, depending on what you have.',
-                    ],
-                ]],
-            ], 200);
-
-        $token = $this->apiToken('tool-voice-context@example.com');
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
-            ->assertCreated()
-            ->json('data.id');
-
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'what should we have for dinner tonight?',
-            'metadata' => [
-                'client_context' => ['timezone' => 'America/New_York'],
-                'voice_context' => [
-                    'mode' => 'live_voice',
-                    'quick_reply' => 'Got it, a quick easy dinner could be tacos or pasta.',
-                ],
-            ],
-        ])->assertCreated()
-            ->assertJsonPath('data.status', 'completed');
-
-        Http::assertSent(function ($request): bool {
-            $payload = $request->data();
-            $context = json_decode(str_replace("Runtime context:\n", '', (string) data_get($payload, 'messages.1.content')), true, flags: JSON_THROW_ON_ERROR);
-
-            return $request->url() === 'https://api.openai.test/v1/chat/completions'
-                && str_contains((string) data_get($payload, 'messages.0.content'), 'already said that sentence aloud')
-                && data_get($context, 'voice_context.mode') === 'live_voice'
-                && data_get($context, 'voice_context.quick_reply') === 'Got it, a quick easy dinner could be tacos or pasta.'
-                && data_get($context, 'temporal_context.client_context.timezone') === 'America/New_York';
-        });
-    }
-
     public function test_tool_runtime_sends_recent_conversation_history_for_followups(): void
     {
         Http::fakeSequence()
@@ -1115,10 +1073,10 @@ class HermesToolRuntimeServiceTest extends TestCase
                         ->map(fn (array $tool): ?string => data_get($tool, 'function.name'))
                         ->filter()
                         ->values();
-                    \PHPUnit\Framework\Assert::assertTrue($toolNames->contains('external_lookup'));
-                    \PHPUnit\Framework\Assert::assertTrue($toolNames->contains('get_day_context'));
-                    \PHPUnit\Framework\Assert::assertFalse($toolNames->contains('create_calendar_event'));
-                    \PHPUnit\Framework\Assert::assertFalse($toolNames->contains('create_task'));
+                    Assert::assertTrue($toolNames->contains('external_lookup'));
+                    Assert::assertTrue($toolNames->contains('get_day_context'));
+                    Assert::assertFalse($toolNames->contains('create_calendar_event'));
+                    Assert::assertFalse($toolNames->contains('create_task'));
 
                     return Http::response([
                         'id' => 'chatcmpl-weather-tool',
@@ -2149,7 +2107,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                 $messages = $request->data()['messages'] ?? [];
                 $toolOutput = collect($messages)->firstWhere('role', 'tool');
                 $lookupResult = json_decode((string) data_get($toolOutput, 'content'), true, flags: JSON_THROW_ON_ERROR);
-                \PHPUnit\Framework\Assert::assertSame('The live lookup is still taking longer than expected; continue with another available source or ask one focused follow-up.', data_get($lookupResult, 'diagnostic_message'));
+                Assert::assertSame('The live lookup is still taking longer than expected; continue with another available source or ask one focused follow-up.', data_get($lookupResult, 'diagnostic_message'));
 
                 return Http::response([
                     'id' => 'chatcmpl-weather-final',
@@ -3168,7 +3126,7 @@ class HermesToolRuntimeServiceTest extends TestCase
 
     public function test_day_context_fallback_dedupes_identical_items(): void
     {
-        $service = app(\App\Services\HermesToolRuntimeService::class);
+        $service = app(HermesToolRuntimeService::class);
         $method = (new \ReflectionClass($service))->getMethod('dayContextFallbackContent');
         $method->setAccessible(true);
 
@@ -3191,7 +3149,7 @@ class HermesToolRuntimeServiceTest extends TestCase
 
     public function test_native_read_fallback_prefers_day_context_over_request_history_when_both_were_read(): void
     {
-        $service = app(\App\Services\HermesToolRuntimeService::class);
+        $service = app(HermesToolRuntimeService::class);
         $method = (new \ReflectionClass($service))->getMethod('nativeReadFallbackContent');
         $method->setAccessible(true);
 

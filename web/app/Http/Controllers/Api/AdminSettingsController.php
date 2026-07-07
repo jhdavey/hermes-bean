@@ -26,11 +26,9 @@ class AdminSettingsController extends Controller
         $data = $request->validate([
             'model_settings' => ['required', 'array'],
             'model_settings.main_model' => ['required', 'string', 'max:120', 'regex:/^[A-Za-z0-9._:\/-]+$/'],
-            'model_settings.realtime_model' => ['required', 'string', 'max:120', 'regex:/^[A-Za-z0-9._:\/-]+$/'],
             'model_settings.external_lookup_model' => ['required', 'string', 'max:120', 'regex:/^[A-Za-z0-9._:\/-]+$/'],
             'kill_switches' => ['required', 'array'],
             'kill_switches.bean_chat_enabled' => ['required', 'boolean'],
-            'kill_switches.bean_voice_enabled' => ['required', 'boolean'],
             'usage_limits' => ['sometimes', 'array'],
             'usage_limits.base_cost_limit' => ['sometimes', 'numeric', 'min:0', 'max:100000'],
             'usage_limits.base_external_cost_limit' => ['sometimes', 'numeric', 'min:0', 'max:100000'],

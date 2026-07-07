@@ -218,9 +218,6 @@ class AuthController extends Controller
             'theme_mode' => ['sometimes', 'string', Rule::in(self::THEME_MODE_KEYS)],
             'command_center_label' => ['sometimes', 'required', 'string', 'max:80'],
             'preferred_map_app' => ['sometimes', 'string', Rule::in(self::MAP_APP_KEYS)],
-            'tts_provider' => ['sometimes', 'string', Rule::in(['browser', 'openai'])],
-            'tts_openai_voice' => ['sometimes', 'string', Rule::in(['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'])],
-            'tts_openai_instructions' => ['sometimes', 'nullable', 'string', 'max:500'],
             'home_city' => ['sometimes', 'nullable', 'string', 'max:120'],
             'workspace_id' => ['sometimes', 'nullable', 'integer', 'exists:workspaces,id'],
             'notification_preferences' => ['sometimes', 'array'],
@@ -229,10 +226,8 @@ class AuthController extends Controller
         ]);
 
         $profileKeys = ['agent_personality', 'onboarding_priorities', 'onboarding_context'];
-        $ttsKeys = ['tts_provider', 'tts_openai_voice', 'tts_openai_instructions'];
         $homeCityData = array_key_exists('home_city', $data) ? ['home_city' => $data['home_city']] : [];
         $profileData = collect($data)->only($profileKeys)->all();
-        $ttsData = collect($data)->only($ttsKeys)->all();
         $userData = collect($data)->only(['name', 'email', 'theme', 'theme_mode', 'command_center_label', 'preferred_map_app'])->all();
         if (array_key_exists('notification_preferences', $data)) {
             $planLimits = app(PlanLimitService::class);
@@ -249,7 +244,7 @@ class AuthController extends Controller
         $user->fill($userData);
         $user->save();
 
-        if ($profileData !== [] || $ttsData !== [] || $homeCityData !== []) {
+        if ($profileData !== [] || $homeCityData !== []) {
             $workspaceService = app(WorkspaceService::class);
             $activeWorkspace = $workspaceService->resolveWorkspace($user->fresh(), $data['workspace_id'] ?? null);
             $profile = app(AgentProfileService::class)->ensureForWorkspace($activeWorkspace, $user);
@@ -258,9 +253,6 @@ class AuthController extends Controller
                 $profiles->applyOnboarding($profile, $data, 'settings');
                 $user->forceFill(['onboard_complete' => true])->save();
                 $profile = $profile->refresh();
-            }
-            if ($ttsData !== []) {
-                $profile = $profiles->updateTextToSpeechSettings($profile, $data);
             }
             if ($homeCityData !== []) {
                 $profile = $profiles->updateHomeCitySettings($profile, $data['home_city']);

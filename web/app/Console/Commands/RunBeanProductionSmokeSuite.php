@@ -18,10 +18,8 @@ use App\Models\Workspace;
 use App\Services\AgentProfileService;
 use App\Services\AssistantRunService;
 use App\Services\HermesRuntimeService;
-use App\Services\RealtimeVoiceQualityService;
 use App\Services\WorkspaceService;
 use Illuminate\Console\Command;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
@@ -31,12 +29,7 @@ class RunBeanProductionSmokeSuite extends Command
         {--email=bean-prod-smoke-suite@example.com : Dedicated production smoke user email}
         {--count=100 : Number of prompts to run}
         {--timeout=45 : Seconds to wait for each queued run}
-        {--scenario=single : Smoke scenario to run: single, followups, or voice-quality}
-        {--voice-days=7 : Days of realtime voice telemetry to evaluate for voice-quality}
-        {--voice-since= : ISO-8601 timestamp to evaluate realtime voice telemetry from}
-        {--voice-min-turns=10 : Minimum realtime voice turns required for voice-quality}
-        {--user-id= : Existing user id to evaluate for voice-quality}
-        {--workspace-id= : Existing workspace id to evaluate for voice-quality}
+        {--scenario=single : Smoke scenario to run: single or followups}
         {--cleanup : Delete created smoke resources after the run}
         {--no-reset : Keep existing data in the default smoke account before running}
         {--suite-id= : Optional suite id for traceability}';
@@ -47,25 +40,10 @@ class RunBeanProductionSmokeSuite extends Command
         WorkspaceService $workspaces,
         AgentProfileService $profiles,
         AssistantRunService $runs,
-        RealtimeVoiceQualityService $voiceQuality,
     ): int {
         $count = max(1, min(100, (int) $this->option('count')));
         $timeout = max(5, min(180, (int) $this->option('timeout')));
         $suiteId = (string) ($this->option('suite-id') ?: 'prod-smoke-'.now()->format('Ymd-His').'-'.Str::lower(Str::random(5)));
-
-        if ((string) $this->option('scenario') === 'voice-quality') {
-            [$user, $workspace] = $this->resolveVoiceQualitySubject($workspaces);
-
-            return $this->runVoiceQualityGate(
-                $user,
-                $workspace,
-                max(1, min(30, (int) $this->option('voice-days'))),
-                $this->voiceSinceOption(),
-                max(1, min(500, (int) $this->option('voice-min-turns'))),
-                $suiteId,
-                $voiceQuality,
-            );
-        }
 
         $user = User::firstOrCreate(
             ['email' => strtolower(trim((string) $this->option('email')))],
@@ -182,122 +160,6 @@ class RunBeanProductionSmokeSuite extends Command
         }
 
         return $failed->isEmpty() ? self::SUCCESS : self::FAILURE;
-    }
-
-    /**
-     * @return array{0: User, 1: Workspace}
-     */
-    private function resolveVoiceQualitySubject(WorkspaceService $workspaces): array
-    {
-        $userId = $this->option('user-id');
-        if ($userId !== null && $userId !== '') {
-            $user = User::query()->findOrFail((int) $userId);
-            $workspaceId = $this->option('workspace-id');
-            $workspace = $workspaceId !== null && $workspaceId !== ''
-                ? Workspace::query()->findOrFail((int) $workspaceId)
-                : $workspaces->resolveWorkspace($user, null);
-
-            return [$user, $workspace];
-        }
-
-        $user = User::firstOrCreate(
-            ['email' => strtolower(trim((string) $this->option('email')))],
-            [
-                'name' => 'Bean Production Smoke',
-                'password' => Hash::make(Str::random(40)),
-                'subscription_tier' => 'pro',
-            ],
-        );
-        $user->forceFill(['subscription_tier' => 'pro'])->save();
-
-        return [$user, $workspaces->resolveWorkspace($user, null)];
-    }
-
-    private function voiceSinceOption(): ?Carbon
-    {
-        $since = $this->option('voice-since');
-
-        return $since !== null && trim((string) $since) !== ''
-            ? Carbon::parse((string) $since)
-            : null;
-    }
-
-    private function runVoiceQualityGate(User $user, Workspace $workspace, int $days, ?Carbon $sinceOption, int $minTurns, string $suiteId, RealtimeVoiceQualityService $voiceQuality): int
-    {
-        $since = $sinceOption ?? now()->subDays($days);
-        $turns = AiUsageLog::query()
-            ->where('user_id', $user->id)
-            ->where('workspace_id', $workspace->id)
-            ->where('request_type', 'realtime_voice')
-            ->where('created_at', '>=', $since)
-            ->latest('created_at')
-            ->limit(500)
-            ->get(['id', 'conversation_session_id', 'model', 'tool_call_count', 'metadata', 'created_at']);
-        $events = AiUsageLog::query()
-            ->where('user_id', $user->id)
-            ->where('workspace_id', $workspace->id)
-            ->where('request_type', 'realtime_voice_event')
-            ->where('created_at', '>=', $since)
-            ->latest('created_at')
-            ->limit(500)
-            ->get(['id', 'conversation_session_id', 'metadata', 'created_at']);
-
-        $summary = $voiceQuality->benchmarkSummary(
-            $turns,
-            $events,
-            $days,
-            since: $sinceOption?->toIso8601String(),
-            minimumTurns: $minTurns,
-            includeRecentSlowTurns: false,
-        );
-        $failures = $voiceQuality->benchmarkFailures($summary);
-        $summary['suite_id'] = $suiteId;
-        $summary['user_id'] = $user->id;
-        $summary['workspace_id'] = $workspace->id;
-        $summary['failed'] = $failures !== [];
-        $summary['failures'] = $failures;
-        $summary['verification'] = [
-            'scenario' => 'voice-quality',
-            'email' => $user->email,
-            'days' => $days,
-            'since' => $sinceOption?->toIso8601String(),
-            'minimum_turns' => $minTurns,
-            'turn_sample_size' => $turns->count(),
-            'event_sample_size' => $events->count(),
-            'required_micro_follow_up_kinds' => [
-                'confirmation',
-                'decline',
-                'correction',
-                'continuation',
-                'reference',
-            ],
-            'observed_micro_follow_up_kind_counts' => data_get($summary, 'conversation.micro_follow_up_kind_counts', []),
-            'observed_micro_follow_up_ready_kind_counts' => data_get($summary, 'events.follow_up_readiness_quality.micro_follow_up_ready_kind_counts', []),
-            'generated_at' => now()->toIso8601String(),
-            'rerun_command' => $this->voiceQualityRerunCommand($user, $workspace, $days, $sinceOption, $minTurns, $suiteId),
-        ];
-
-        $this->line(json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-
-        return $failures === [] ? self::SUCCESS : self::FAILURE;
-    }
-
-    private function voiceQualityRerunCommand(User $user, Workspace $workspace, int $days, ?Carbon $sinceOption, int $minTurns, string $suiteId): string
-    {
-        $subject = $this->option('user-id') !== null && $this->option('user-id') !== ''
-            ? sprintf('--user-id=%d --workspace-id=%d', $user->id, $workspace->id)
-            : sprintf('--email=%s', $user->email);
-        $window = $sinceOption !== null
-            ? sprintf('--voice-since=%s', $sinceOption->toIso8601String())
-            : sprintf('--voice-days=%d', $days);
-
-        return sprintf(
-            'php artisan bean:production-smoke --scenario=voice-quality %s %s --voice-min-turns=%d --suite-id=%s',
-            $subject,
-            $window,
-            $minTurns,
-            $suiteId,
-        );
     }
 
     private function runFollowupSuite(User $user, Workspace $workspace, AssistantRunService $runs, int $count, int $timeout, string $suiteId): int

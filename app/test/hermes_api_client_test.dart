@@ -204,7 +204,7 @@ void main() {
     expect(requests, hasLength(1));
   });
 
-  test('polls dashboard changes for realtime refreshes', () async {
+  test('polls dashboard changes for live refreshes', () async {
     final requests = <HermesApiRequest>[];
     final client = HermesApiClient(
       baseUrl: Uri.parse('http://local.test/api'),
@@ -248,124 +248,7 @@ void main() {
     expect(feed.changes.single.payload['title'], 'Buy milk');
   });
 
-  test('records realtime usage and latency telemetry', () async {
-    final requests = <HermesApiRequest>[];
-    final client = HermesApiClient(
-      baseUrl: Uri.parse('http://local.test/api'),
-      bearerToken: 'token-123',
-      transport: (request) async {
-        requests.add(request);
-        expect(request.headers['Authorization'], 'Bearer token-123');
-        expect(request.method, 'POST');
-        expect(request.path, '/assistant/realtime/usage');
-        expect(request.body, {
-          'session_id': 42,
-          'model': 'gpt-realtime',
-          'response_id': 'resp_123',
-          'usage': {
-            'input_tokens': 12,
-            'output_tokens': 8,
-            'input_token_details': {'audio_tokens': 6},
-            'output_token_details': {'audio_tokens': 4},
-          },
-          'voice_seconds': 1.25,
-          'transcript_to_response_create_ms': 180,
-          'response_create_to_first_assistant_ms': 340,
-          'transcript_to_first_assistant_ms': 520,
-          'turn_completed_ms': 1250,
-          'spoken_character_count': 38,
-          'spoken_sentence_count': 1,
-          'spoken_brevity_violation': false,
-          'is_follow_up_turn': true,
-          'is_contextual_follow_up_turn': true,
-          'contextual_follow_up_kind': 'confirmation',
-          'realtime_usage_missing': false,
-          'tool_call_count': 1,
-          'action_types': ['realtime_voice'],
-        });
-        return HermesApiResponse(
-          201,
-          jsonEncode({
-            'data': {'ok': true},
-          }),
-        );
-      },
-    );
-
-    await client.recordRealtimeUsage(
-      sessionId: 42,
-      model: 'gpt-realtime',
-      responseId: 'resp_123',
-      usage: {
-        'input_tokens': 12,
-        'output_tokens': 8,
-        'input_token_details': {'audio_tokens': 6},
-        'output_token_details': {'audio_tokens': 4},
-      },
-      voiceSeconds: 1.25,
-      latencyMetrics: const {
-        'transcript_to_response_create_ms': 180,
-        'response_create_to_first_assistant_ms': 340,
-        'transcript_to_first_assistant_ms': 520,
-        'turn_completed_ms': 1250,
-      },
-      speechMetrics: const {
-        'spoken_character_count': 38,
-        'spoken_sentence_count': 1,
-        'spoken_brevity_violation': false,
-      },
-      turnMetrics: const {
-        'is_follow_up_turn': true,
-        'is_contextual_follow_up_turn': true,
-        'contextual_follow_up_kind': 'confirmation',
-        'realtime_usage_missing': false,
-      },
-      toolCallCount: 1,
-      actionTypes: const ['realtime_voice'],
-    );
-
-    expect(requests, hasLength(1));
-  });
-
-  test('fetches realtime voice quality benchmark telemetry', () async {
-    final requests = <HermesApiRequest>[];
-    final client = HermesApiClient(
-      baseUrl: Uri.parse('http://local.test/api'),
-      bearerToken: 'token-123',
-      transport: (request) async {
-        requests.add(request);
-        expect(request.headers['Authorization'], 'Bearer token-123');
-        expect(request.method, 'GET');
-        expect(
-          request.path,
-          '/assistant/realtime/quality?days=7&session_id=42&workspace_id=3',
-        );
-        return HermesApiResponse(
-          200,
-          jsonEncode({
-            'data': {
-              'status': 'world_class',
-              'benchmark': 'siri_alexa_voice_responsiveness',
-              'metrics': {
-                'transcript_to_first_assistant_ms': {'p50_ms': 520},
-              },
-            },
-          }),
-        );
-      },
-    );
-
-    final quality = await client.realtimeVoiceQuality(
-      sessionId: 42,
-      workspaceId: 3,
-    );
-
-    expect(quality['status'], 'world_class');
-    expect(quality['benchmark'], 'siri_alexa_voice_responsiveness');
-    expect(requests, hasLength(1));
-  });
-
-  test('cancels assistant runs for voice background work', () async {
+  test('cancels assistant runs', () async {
     final requests = <HermesApiRequest>[];
     final client = HermesApiClient(
       baseUrl: Uri.parse('http://local.test/api'),
@@ -378,7 +261,7 @@ void main() {
         return HermesApiResponse(
           202,
           jsonEncode({
-            'data': {'id': 77, 'status': 'cancelled', 'source': 'realtime'},
+            'data': {'id': 77, 'status': 'cancelled', 'source': 'flutter'},
           }),
         );
       },
@@ -388,7 +271,7 @@ void main() {
 
     expect(run.id, 77);
     expect(run.status, 'cancelled');
-    expect(run.source, 'realtime');
+    expect(run.source, 'flutter');
     expect(requests, hasLength(1));
   });
 

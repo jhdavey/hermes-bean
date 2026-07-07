@@ -79,20 +79,14 @@ class _HeyBeanBottomMenu extends StatelessWidget {
   const _HeyBeanBottomMenu({
     required this.selected,
     required this.onSelected,
-    required this.beanListening,
     required this.beanWorking,
     required this.onMorePressed,
-    required this.onBeanLongPressStart,
-    required this.onBeanLongPressEnd,
   });
 
   final _HomeDestination selected;
   final ValueChanged<_HomeDestination> onSelected;
-  final bool beanListening;
   final bool beanWorking;
   final VoidCallback onMorePressed;
-  final VoidCallback onBeanLongPressStart;
-  final VoidCallback onBeanLongPressEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -179,11 +173,8 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             top: 12,
             child: _BeanFab(
               selected: selected == _HomeDestination.bean,
-              listening: beanListening,
               working: beanWorking,
               onPressed: () => onSelected(_HomeDestination.bean),
-              onLongPressStart: onBeanLongPressStart,
-              onLongPressEnd: onBeanLongPressEnd,
             ),
           ),
         ],
@@ -519,49 +510,30 @@ class _MenuIconButton extends StatelessWidget {
 class _BeanFab extends StatefulWidget {
   const _BeanFab({
     required this.selected,
-    required this.listening,
     this.working = false,
     required this.onPressed,
-    required this.onLongPressStart,
-    required this.onLongPressEnd,
     this.widgetKey = const Key('nav-bean'),
     this.semanticLabel = 'Bean chat',
-    this.longPressEnabled = true,
   });
 
   final Key widgetKey;
   final bool selected;
-  final bool listening;
   final bool working;
   final String semanticLabel;
-  final bool longPressEnabled;
   final VoidCallback onPressed;
-  final VoidCallback onLongPressStart;
-  final VoidCallback onLongPressEnd;
 
   @override
   State<_BeanFab> createState() => _BeanFabState();
 }
 
 class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
-  static const _pressHoldDelay = Duration(milliseconds: 180);
-
-  late final AnimationController _pulseController;
   late final AnimationController _activityController;
-  bool _pressRecording = false;
-  Timer? _pressHoldTimer;
-  int? _activePointer;
 
-  bool get _visuallyListening => widget.listening || _pressRecording;
-  bool get _visuallyWorking => widget.working && !_visuallyListening;
+  bool get _visuallyWorking => widget.working;
 
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 950),
-    );
     _activityController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1350),
@@ -572,25 +544,12 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
   @override
   void didUpdateWidget(covariant _BeanFab oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.listening != widget.listening ||
-        oldWidget.working != widget.working) {
-      final stoppedListening = oldWidget.listening && !widget.listening;
-      if (!widget.listening &&
-          (stoppedListening || _activePointer == null) &&
-          _pressRecording) {
-        _pressRecording = false;
-      }
+    if (oldWidget.working != widget.working) {
       _syncFabAnimations();
     }
   }
 
   void _syncFabAnimations() {
-    if (_visuallyListening) {
-      _pulseController.repeat(reverse: true);
-    } else {
-      _pulseController.stop();
-      _pulseController.value = 0;
-    }
     if (_visuallyWorking) {
       _activityController.repeat();
     } else {
@@ -601,71 +560,18 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
 
   @override
   void dispose() {
-    _pressHoldTimer?.cancel();
-    _pulseController.dispose();
     _activityController.dispose();
     super.dispose();
-  }
-
-  void _handlePointerDown(PointerDownEvent event) {
-    if (!widget.longPressEnabled) return;
-    if (_activePointer != null) return;
-    _activePointer = event.pointer;
-    _pressHoldTimer?.cancel();
-    _pressHoldTimer = Timer(_pressHoldDelay, _beginPressRecording);
-  }
-
-  void _handlePointerUp(PointerUpEvent event) {
-    if (_activePointer != event.pointer) return;
-    _activePointer = null;
-    final wasRecording = _pressRecording || widget.listening;
-    _pressHoldTimer?.cancel();
-    _pressHoldTimer = null;
-    if (wasRecording) {
-      _endPressRecording();
-    } else {
-      widget.onPressed();
-    }
-  }
-
-  void _handlePointerCancel(PointerCancelEvent event) {
-    if (_activePointer != event.pointer) return;
-    _activePointer = null;
-    _pressHoldTimer?.cancel();
-    _pressHoldTimer = null;
-    _endPressRecording();
-  }
-
-  void _beginPressRecording() {
-    if (!widget.longPressEnabled) return;
-    _pressHoldTimer?.cancel();
-    _pressHoldTimer = null;
-    if (_pressRecording) return;
-    setState(() => _pressRecording = true);
-    _syncFabAnimations();
-    widget.onLongPressStart();
-  }
-
-  void _endPressRecording() {
-    if (!_pressRecording && !widget.listening) return;
-    if (_pressRecording) {
-      setState(() => _pressRecording = false);
-      _syncFabAnimations();
-    }
-    widget.onLongPressEnd();
   }
 
   @override
   Widget build(BuildContext context) {
     final activeColor = HeyBeanTheme.accentStrong;
-    final visuallyListening = _visuallyListening;
     final visuallyWorking = _visuallyWorking;
-    return Listener(
+    return GestureDetector(
       key: widget.widgetKey,
       behavior: HitTestBehavior.opaque,
-      onPointerDown: _handlePointerDown,
-      onPointerUp: _handlePointerUp,
-      onPointerCancel: _handlePointerCancel,
+      onTap: widget.onPressed,
       child: SizedBox(
         width: 88,
         height: 88,
@@ -673,33 +579,6 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
           alignment: Alignment.center,
           clipBehavior: Clip.none,
           children: [
-            if (visuallyListening)
-              AnimatedBuilder(
-                key: const Key('heybean-recording-pulse'),
-                animation: _pulseController,
-                builder: (context, child) {
-                  final pulse = Curves.easeInOut.transform(
-                    _pulseController.value,
-                  );
-                  return Container(
-                    width: 72 + (pulse * 14),
-                    height: 72 + (pulse * 14),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: activeColor.withValues(alpha: .06 + (pulse * .06)),
-                      boxShadow: [
-                        BoxShadow(
-                          color: activeColor.withValues(
-                            alpha: .12 + (pulse * .08),
-                          ),
-                          blurRadius: 18 + (pulse * 14),
-                          spreadRadius: 3 + (pulse * 6),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
             Material(
               color: Colors.transparent,
               child: Ink(
@@ -714,26 +593,18 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
                     border: Border.all(
                       color: visuallyWorking
                           ? Colors.transparent
-                          : visuallyListening || widget.selected
+                          : widget.selected
                           ? activeColor
                           : _quietBorderColor(alpha: .54),
-                      width: visuallyWorking
-                          ? 0
-                          : visuallyListening
-                          ? 3
-                          : 1.6,
+                      width: visuallyWorking ? 0 : 1.6,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: visuallyListening || visuallyWorking
+                        color: visuallyWorking
                             ? activeColor.withValues(alpha: .14)
                             : Colors.black.withValues(alpha: .08),
-                        blurRadius: visuallyListening || visuallyWorking
-                            ? 24
-                            : 14,
-                        spreadRadius: visuallyListening || visuallyWorking
-                            ? 2
-                            : 0,
+                        blurRadius: visuallyWorking ? 24 : 14,
+                        spreadRadius: visuallyWorking ? 2 : 0,
                         offset: const Offset(0, 6),
                       ),
                     ],

@@ -420,27 +420,11 @@
     opacity: .94;
 }
 
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-voice-button .hb-send-bean-logo {
-    filter: brightness(0) invert(1);
-    opacity: .94;
-}
 
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-voice-button {
-    border-color: rgba(255, 255, 255, .70);
-    background: rgba(13, 18, 24, .72);
-}
 
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-voice-button-on,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-voice-button-armed,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-voice-button-listening,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-voice-button-heard,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-voice-button-working,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-voice-button-speaking,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-voice-button-responding,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-voice-button-cancelable {
-    border-color: var(--hb-accent-strong);
-    background: rgba(var(--hb-accent-rgb), .10);
-}
+
+
+
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-item-form .hb-modal-actions {
     border-top-color: rgba(var(--hb-accent-rgb), .28);
@@ -448,22 +432,11 @@
     box-shadow: 0 -18px 36px rgba(0, 0, 0, .26);
 }
 
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-kiosk-voice-pill {
-    border-color: rgba(var(--hb-accent-rgb), .34);
-    background: rgba(17, 24, 32, .94);
-    color: var(--hb-text);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, .28);
-}
 
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-kiosk-voice-pill-disabled {
-    color: var(--hb-text);
-    border-color: rgba(var(--hb-accent-rgb), .24);
-}
 
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-kiosk-voice-work-count {
-    background: rgba(var(--hb-accent-rgb), .16);
-    color: var(--hb-text);
-}
+
+
+
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-settings-grid > .hb-settings-section {
     border-color: rgba(var(--hb-accent-rgb), .24);
@@ -513,8 +486,7 @@
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-bean-work-status,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-bean-work-status-mobile,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-kiosk-voice-work-list {
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-bean-work-status-mobile {
     border-color: var(--hb-border);
     background: rgba(20, 27, 35, .96);
     color: var(--hb-text);

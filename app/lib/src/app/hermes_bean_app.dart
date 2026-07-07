@@ -1,8 +1,5 @@
 part of '../../main.dart';
 
-typedef BeanVoiceAudioPlayer =
-    Future<void> Function(Uint8List bytes, {String contentType});
-
 class HermesBeanApp extends StatefulWidget {
   HermesBeanApp({
     super.key,
@@ -11,23 +8,18 @@ class HermesBeanApp extends StatefulWidget {
     ExternalUrlLauncher? launchExternalUrl,
     AppIconBadgeUpdater? updateAppIconBadge,
     StripePaymentHandler? stripePaymentHandler,
-    this.realtimeConversation,
-    BeanVoiceAudioPlayer? playBeanVoiceAudio,
   }) : apiClient = apiClient ?? HermesApiClient(),
        tokenStore = tokenStore ?? const SharedPreferencesAuthTokenStore(),
        launchExternalUrl = launchExternalUrl ?? _defaultLaunchExternalUrl,
        updateAppIconBadge = updateAppIconBadge ?? _defaultUpdateAppIconBadge,
        stripePaymentHandler =
-           stripePaymentHandler ?? DefaultStripePaymentHandler(),
-       playBeanVoiceAudio = playBeanVoiceAudio ?? _defaultPlayBeanVoiceAudio;
+           stripePaymentHandler ?? DefaultStripePaymentHandler();
 
   final HermesApiClient apiClient;
   final AuthTokenStore tokenStore;
   final ExternalUrlLauncher launchExternalUrl;
   final AppIconBadgeUpdater updateAppIconBadge;
   final StripePaymentHandler stripePaymentHandler;
-  final BeanRealtimeConversation? realtimeConversation;
-  final BeanVoiceAudioPlayer playBeanVoiceAudio;
 
   @override
   State<HermesBeanApp> createState() => _HermesBeanAppState();
@@ -71,113 +63,11 @@ class _HermesBeanAppState extends State<HermesBeanApp> {
         launchExternalUrl: widget.launchExternalUrl,
         updateAppIconBadge: widget.updateAppIconBadge,
         stripePaymentHandler: widget.stripePaymentHandler,
-        realtimeConversation: widget.realtimeConversation,
-        playBeanVoiceAudio: widget.playBeanVoiceAudio,
         onThemeChanged: _setThemeKey,
         onThemeModeChanged: _setThemeModeKey,
       ),
     );
   }
-}
-
-Future<void> _defaultPlayBeanVoiceAudio(
-  Uint8List bytes, {
-  String contentType = 'audio/wav',
-}) async {
-  if (bytes.isEmpty) return;
-  final player = AudioPlayer();
-  final cleanContentType = contentType.split(';').first.trim().toLowerCase();
-  final audioFile = File(
-    '${Directory.systemTemp.path}/bean-tts-${DateTime.now().microsecondsSinceEpoch}.${_audioExtensionForContentType(cleanContentType)}',
-  );
-  try {
-    if (Platform.isIOS) {
-      try {
-        await _playBeanVoiceWithNativeIOS(bytes, cleanContentType);
-        return;
-      } catch (nativePlaybackError) {
-        debugPrint('Bean native iOS playback failed: $nativePlaybackError');
-      }
-    }
-    await player.setAudioContext(
-      AudioContext(
-        iOS: AudioContextIOS(
-          category: AVAudioSessionCategory.playback,
-          options: const {},
-        ),
-      ),
-    );
-    if (Platform.isIOS) {
-      await audioFile.writeAsBytes(bytes, flush: true);
-      await _playBeanVoiceSourceAndConfirm(
-        player,
-        DeviceFileSource(audioFile.path, mimeType: cleanContentType),
-      );
-    } else {
-      try {
-        await _playBeanVoiceSourceAndConfirm(
-          player,
-          BytesSource(bytes, mimeType: cleanContentType),
-        );
-      } catch (memorySourceError) {
-        debugPrint('Bean voice in-memory playback failed: $memorySourceError');
-        await audioFile.writeAsBytes(bytes, flush: true);
-        await _playBeanVoiceSourceAndConfirm(
-          player,
-          DeviceFileSource(audioFile.path, mimeType: cleanContentType),
-        );
-      }
-    }
-    await player.onPlayerComplete.first.timeout(
-      const Duration(seconds: 90),
-      onTimeout: () {},
-    );
-  } finally {
-    await player.dispose();
-    if (await audioFile.exists()) {
-      await audioFile.delete();
-    }
-  }
-}
-
-Future<void> _playBeanVoiceWithNativeIOS(
-  Uint8List bytes,
-  String contentType,
-) async {
-  await _heyBeanPlatformChannel.invokeMethod<Map<Object?, Object?>>(
-    'playAudioBytes',
-    {'bytes': bytes, 'contentType': contentType},
-  );
-}
-
-Future<void> _playBeanVoiceSourceAndConfirm(
-  AudioPlayer player,
-  Source source,
-) async {
-  await player.play(source);
-  if (player.state == PlayerState.playing) return;
-  final started = await player.onPlayerStateChanged
-      .firstWhere(
-        (state) =>
-            state == PlayerState.playing ||
-            state == PlayerState.completed ||
-            state == PlayerState.stopped ||
-            state == PlayerState.disposed,
-      )
-      .timeout(const Duration(seconds: 2), onTimeout: () => player.state);
-  if (started != PlayerState.playing) {
-    throw StateError('Audio playback did not start; current state: $started');
-  }
-}
-
-String _audioExtensionForContentType(String contentType) {
-  if (contentType.contains('mpeg') || contentType.contains('mp3')) {
-    return 'mp3';
-  }
-  if (contentType.contains('aac')) return 'aac';
-  if (contentType.contains('ogg')) return 'ogg';
-  if (contentType.contains('webm')) return 'webm';
-  return 'wav';
 }
 
 class _HeyBeanThemeRuntime extends StatelessWidget {

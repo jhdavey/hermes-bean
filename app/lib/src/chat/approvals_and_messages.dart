@@ -234,7 +234,7 @@ String _compactBeanStatusLabel(String value) {
   final lower = raw.toLowerCase();
   if (lower.contains("unknown parameter: 'response.modalities'") ||
       lower.contains('unknown parameter: response.modalities')) {
-    return 'Bean voice issue';
+    return 'Bean chat issue';
   }
   return switch (lower) {
     'failed' => 'Failed',

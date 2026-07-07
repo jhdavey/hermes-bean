@@ -203,8 +203,7 @@
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 				8F0583830DC264261AD1EB58 /* [CP] Embed Pods Frameworks */,
-				B6D72B1A4F8C4D5BA8E91101 /* Generate WebRTC dSYM */,
-				BBA3DA01F56BF864208F4E0B /* [CP] Copy Pods Resources */,
+					BBA3DA01F56BF864208F4E0B /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -346,21 +345,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" build";
-		};
-		B6D72B1A4F8C4D5BA8E91101 /* Generate WebRTC dSYM */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-			);
-			name = "Generate WebRTC dSYM";
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PROJECT_DIR}/scripts/copy_webrtc_dsym.sh\"\n";
 		};
 		BBA3DA01F56BF864208F4E0B /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;

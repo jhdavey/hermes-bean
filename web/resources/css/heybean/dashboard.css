@@ -813,17 +813,12 @@
     padding: 9px 6px;
 }
 
-.hb-command-center-chat .hb-chat-text-send-button,
-.hb-command-center-chat .hb-chat-voice-button {
+.hb-command-center-chat .hb-chat-text-send-button {
     width: 40px;
     min-width: 40px;
     height: 40px;
 }
 
-.hb-command-center-chat .hb-chat-voice-button {
-    width: 40px;
-    min-width: 40px;
-}
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-card,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-surface-soft,

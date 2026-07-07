@@ -100,10 +100,10 @@ void main() {
 
   test('usage limit messages are shown directly without generic snag copy', () {
     const body =
-        '{"message":"This account has reached today\'s AI usage limit.","code":"bean_voice_paused"}';
+        '{"message":"This account has reached today\'s AI usage limit.","code":"bean_usage_limit"}';
     final message = beanFriendlyErrorMessage(
       const HermesApiException(429, body),
-      action: 'start realtime voice',
+      action: 'start Bean chat',
     );
 
     expect(message, 'This account has reached today\'s AI usage limit.');

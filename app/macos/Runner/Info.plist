@@ -35,8 +35,6 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>$(PRODUCT_COPYRIGHT)</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>HeyBean uses the microphone for realtime voice conversations with Bean.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>HeyBean uses your city-level location when you choose to share it so Bean can help with weather and planning context.</string>
 	<key>NSMainNibFile</key>

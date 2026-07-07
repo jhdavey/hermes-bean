@@ -1,12 +1,10 @@
 import Flutter
-import AVFoundation
 import UIKit
 import UserNotifications
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
   private var platformChannel: FlutterMethodChannel?
-  private var beanAudioPlayer: AVAudioPlayer?
 
   override func application(
     _ application: UIApplication,
@@ -32,8 +30,6 @@ import UserNotifications
         self.handleOpenUrl(call, result: result)
       case "setAppBadge":
         self.handleSetAppBadge(call, result: result)
-      case "playAudioBytes":
-        self.handlePlayAudioBytes(call, result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -96,39 +92,6 @@ import UserNotifications
       } else {
         UIApplication.shared.applicationIconBadgeNumber = count
         result(nil)
-      }
-    }
-  }
-
-  private func handlePlayAudioBytes(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard
-      let args = call.arguments as? [String: Any],
-      let typedData = args["bytes"] as? FlutterStandardTypedData,
-      !typedData.data.isEmpty
-    else {
-      result(FlutterError(code: "invalid-audio", message: "Missing audio bytes", details: nil))
-      return
-    }
-
-    DispatchQueue.main.async {
-      do {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .spokenAudio, options: [])
-        try session.setActive(true)
-
-        let player = try AVAudioPlayer(data: typedData.data)
-        player.volume = 1.0
-        player.prepareToPlay()
-        self.beanAudioPlayer = player
-
-        guard player.play() else {
-          result(FlutterError(code: "playback-failed", message: "AVAudioPlayer did not start", details: nil))
-          return
-        }
-
-        result(true)
-      } catch {
-        result(FlutterError(code: "audio-playback-error", message: error.localizedDescription, details: nil))
       }
     }
   }

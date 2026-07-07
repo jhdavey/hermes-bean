@@ -22,8 +22,6 @@ use App\Http\Controllers\Api\IssueReportController;
 use App\Http\Controllers\Api\OutlookCalendarController;
 use App\Http\Controllers\Api\PlaceController;
 use App\Http\Controllers\Api\PushNotificationDeviceTokenController;
-use App\Http\Controllers\Api\RealtimeSessionController;
-use App\Http\Controllers\Api\TextToSpeechController;
 use App\Http\Controllers\Api\TodaySummaryController;
 use App\Http\Controllers\Api\WorkspaceController;
 use Illuminate\Support\Facades\Route;
@@ -81,17 +79,6 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::get('/assistant/sessions/{session}/events', [ActivityEventController::class, 'index']);
         Route::get('/assistant/runs/{run}', [AssistantRunController::class, 'show']);
         Route::post('/assistant/runs/{run}/cancel', [AssistantRunController::class, 'cancel']);
-        Route::post('/assistant/realtime/sessions', [RealtimeSessionController::class, 'store']);
-        Route::post('/assistant/realtime/calls', [RealtimeSessionController::class, 'call']);
-        Route::post('/assistant/realtime/tool-calls', [RealtimeSessionController::class, 'toolCall']);
-        Route::post('/assistant/realtime/messages', [RealtimeSessionController::class, 'message']);
-        Route::post('/assistant/realtime/usage', [RealtimeSessionController::class, 'usage']);
-        Route::post('/assistant/realtime/client-events', [RealtimeSessionController::class, 'clientEvent']);
-        Route::get('/assistant/realtime/quality', [RealtimeSessionController::class, 'quality']);
-        Route::get('/assistant/realtime/dashboard-context', [RealtimeSessionController::class, 'dashboardContext']);
-        Route::post('/ai/realtime/session', [RealtimeSessionController::class, 'store']);
-        Route::post('/assistant/tts', [TextToSpeechController::class, 'store']);
-
         Route::get('/today', [TodaySummaryController::class, 'show']);
         Route::get('/places/autocomplete', [PlaceController::class, 'autocomplete']);
         Route::get('/places/details', [PlaceController::class, 'details']);
