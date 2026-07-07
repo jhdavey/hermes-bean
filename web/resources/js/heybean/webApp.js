@@ -4056,7 +4056,8 @@ export function mountHeyBeanWebApp(mount) {
         const poll = async (attempt = 0) => {
             if (!sessionId || token !== beanWorkEventPollToken) return;
             try {
-                const events = await api(`/assistant/sessions/${sessionId}/events`);
+                const after = Math.max(maxActivityEventId(state.activity), beanWorkEventFloorId);
+                const events = await api(`/assistant/sessions/${sessionId}/events?after=${encodeURIComponent(after)}&wait=1&limit=50`);
                 if (token !== beanWorkEventPollToken) return;
                 applyBeanWorkEvents(events);
                 if (clientRequestId) {
@@ -4079,10 +4080,11 @@ export function mountHeyBeanWebApp(mount) {
             } catch (_) {}
             if (token !== beanWorkEventPollToken) return;
             if ((clientRequestId || beanWorkStatusActive() || attempt < 3) && attempt < 50) {
-                beanWorkEventPollTimer = window.setTimeout(() => poll(attempt + 1), 1600);
+                const delay = clientRequestId || beanWorkStatusActive() ? 350 : 900;
+                beanWorkEventPollTimer = window.setTimeout(() => poll(attempt + 1), delay);
             }
         };
-        beanWorkEventPollTimer = window.setTimeout(() => poll(0), 900);
+        beanWorkEventPollTimer = window.setTimeout(() => poll(0), 250);
     }
 
     function stopBeanWorkEventPolling() {
@@ -9275,14 +9277,17 @@ export function mountHeyBeanWebApp(mount) {
             if (result.status === 'blocked' && isPlanLimitMessage(assistantContent)) {
                 state.error = assistantContent;
             }
-            if (['queued', 'running', 'processing'].includes(String(result.status || '').toLowerCase())) {
+            const pendingResult = ['queued', 'running', 'processing'].includes(String(result.status || '').toLowerCase());
+            if (pendingResult) {
                 needsAssistantLookup = true;
                 state.chatRunState = 'Working…';
                 ensureBeanWorkItemsForContent(content);
             } else if (state.chatRunState !== 'Working…') {
                 state.chatRunState = result.status === 'blocked' ? 'Blocked' : 'Ready';
             }
-            await refreshOnly(false);
+            if (!pendingResult) {
+                await refreshOnly(false);
+            }
             if (wasOnboarding && !needsBeanOnboarding()) {
                 state.onboardingJustCompleted = true;
                 startOnboardingTourIfNeeded();

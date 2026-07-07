@@ -706,7 +706,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (_beanWorkItems.isEmpty || _beanWorkItems.any((item) => !item.done)) {
       return;
     }
-    if (_activeAssistantRunId != null && !_beanWorkFinalized) {
+    if (_activeAssistantRunId != null) {
       return;
     }
     _scheduleBeanWorkStatusClear(
@@ -730,7 +730,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkStatusHoldUntil = now.add(clearDelay);
     _beanWorkStatusClearTimer = Timer(clearDelay, () {
       if (!mounted) return;
-      if (_busy || (_activeAssistantRunId != null && !_beanWorkFinalized)) {
+      if (_busy || _activeAssistantRunId != null) {
         _scheduleBeanWorkStatusClear(delay);
         return;
       }
@@ -1018,8 +1018,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
     if (!events.any(_beanActivityEventMutatesDashboard)) return;
     _beanWorkFinalized = true;
-    _activeAssistantRunId = null;
-    _chatRunState = 'Updated';
+    _chatRunState = _activeAssistantRunId == null ? 'Updated' : 'Finalizing...';
     _scheduleBeanWorkStatusClearIfDone();
   }
 
@@ -1258,9 +1257,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   bool get _beanStopAvailable =>
       _busy ||
+      _activeAssistantRunId != null ||
       _beanVisibleWorkItems.any((item) => !item.done) ||
       RegExp(
-        r'\b(working|thinking|responding|queued|running)\b',
+        r'\b(working|thinking|responding|queued|running|finalizing)\b',
         caseSensitive: false,
       ).hasMatch(_chatRunState);
 
@@ -2638,6 +2638,48 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         return null;
       }
 
+      if (!needsBeanIntroduction && result.assistantMessage != null) {
+        final suppressedAssistantMessage = _assistantMessageShouldStayOutOfChat(
+          result.assistantMessage!,
+        );
+        setState(() {
+          if (result.userMessage != null) {
+            _replaceChatMessage(localUserMessageId, result.userMessage!);
+            _activeBeanWorkMessageId = result.userMessage!.id;
+          }
+          _session = result.session;
+          _events = _mergeEvents(result.events, _events);
+          _applyBeanWorkEvents(result.events);
+          _applyBeanDashboardMutationEvents(result.events);
+          if (result.status == 'cancelled') {
+            _chatRunState = 'Stopped';
+          } else if (suppressedAssistantMessage) {
+            _chatRunState = 'Working in background';
+            _beginBeanWorkEventContext();
+          } else {
+            final displayMessage = _displayableChatMessage(
+              result.assistantMessage!,
+            );
+            if (displayMessage != null &&
+                !_messages.any(
+                  (candidate) => candidate.id == displayMessage.id,
+                )) {
+              _messages.add(displayMessage);
+              surfacedAssistantText = displayMessage.content;
+            }
+            _chatRunState = result.status == 'blocked' ? 'Blocked' : 'Updated';
+            _completeActiveBeanWorkItems();
+          }
+          final assistantContent = result.assistantMessage!.content;
+          _error = _isPlanLimitMessage(assistantContent)
+              ? assistantContent
+              : null;
+        });
+        _refreshDashboardAfterBeanMutationEvents(result.events);
+        unawaited(_refreshSignedInViews(showLoading: false));
+        return surfacedAssistantText;
+      }
+
       chatPhase = 'refreshing Bean chat results';
       final refreshedEvents = await widget.apiClient
           .pollActivityEvents(session.id)
@@ -3262,6 +3304,10 @@ ${_truncateDiagnostic(stack, 2200)}
         final run = await widget.apiClient.getAssistantRun(runId);
         pollErrors = 0;
         if (!mounted || runToken != _chatRunToken) return;
+        final runTerminal =
+            run.status == 'completed' ||
+            run.status == 'failed' ||
+            run.status == 'cancelled';
         if (run.userMessageId != null) {
           setState(() {
             _activeBeanWorkMessageId = run.userMessageId;
@@ -3273,7 +3319,7 @@ ${_truncateDiagnostic(stack, 2200)}
               .pollActivityEvents(
                 sessionId,
                 after: _latestActivityEventId(),
-                waitSeconds: 2,
+                waitSeconds: runTerminal ? 0 : 1,
               )
               .catchError((_) => const <HermesActivityEvent>[]);
           if (!mounted || runToken != _chatRunToken) return;
@@ -3286,9 +3332,7 @@ ${_truncateDiagnostic(stack, 2200)}
             _refreshDashboardAfterBeanMutationEvents(events);
           }
         }
-        if (run.status == 'completed' ||
-            run.status == 'failed' ||
-            run.status == 'cancelled') {
+        if (runTerminal) {
           if (run.status == 'completed' && run.assistantMessage == null) {
             if (await _recoverQueuedRunFromSession(
               runId: runId,
@@ -3309,7 +3353,6 @@ ${_truncateDiagnostic(stack, 2200)}
                       waitSeconds: 1,
                     )
                     .catchError((_) => const <HermesActivityEvent>[]);
-          await _refreshSignedInViews(showLoading: false);
           if (!mounted || runToken != _chatRunToken) return;
           setState(() {
             if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
@@ -3340,6 +3383,7 @@ ${_truncateDiagnostic(stack, 2200)}
             }
           });
           _refreshDashboardAfterBeanMutationEvents(finalEvents);
+          unawaited(_refreshSignedInViews(showLoading: false));
           return;
         }
         if (attempt > 0 &&
@@ -3941,6 +3985,7 @@ ${_truncateDiagnostic(stack, 2200)}
     try {
       final feed = await widget.apiClient.dashboardChanges(
         after: previousLatestId,
+        waitSeconds: _busy || _activeAssistantRunId != null ? 1 : 0,
       );
       if (!mounted ||
           _phase != _AuthPhase.signedIn ||

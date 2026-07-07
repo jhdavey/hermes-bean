@@ -3302,7 +3302,7 @@ void main() {
   });
 
   testWidgets(
-    'completed note work events clear dock even while run poll stays running',
+    'completed note work events keep Bean indicator active while run poll stays running',
     (WidgetTester tester) async {
       final api = _NoteMutationStillRunningFakeHermesApiClient();
       await tester.pumpWidget(
@@ -3327,13 +3327,16 @@ void main() {
       expect(find.text('Create note: Shopping list'), findsOneWidget);
       expect(find.text('Done'), findsOneWidget);
       expect(find.text('1/1'), findsOneWidget);
+      expect(find.byKey(const Key('heybean-working-ring')), findsOneWidget);
       expect(api.noteListIncludedCreatedNote, isTrue);
 
       await tester.pump(const Duration(seconds: 5));
       await tester.pump(const Duration(milliseconds: 250));
 
-      expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
-      expect(find.text('Working...'), findsNothing);
+      expect(
+        find.text('Done - I created the shopping list note.'),
+        findsOneWidget,
+      );
     },
   );
 

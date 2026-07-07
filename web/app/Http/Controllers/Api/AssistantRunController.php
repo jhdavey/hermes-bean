@@ -355,7 +355,7 @@ class AssistantRunController extends Controller
 
         if (in_array($run->status, ['queued', 'running'], true)) {
             try {
-                ProcessAssistantRun::dispatch($run->id);
+                ProcessAssistantRun::dispatchAfterResponse($run->id);
             } catch (Throwable $dispatchException) {
                 Log::warning('Bean async run redispatch failed after queue fallback.', [
                     'session_id' => $session->id,

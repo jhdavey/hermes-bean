@@ -10,7 +10,7 @@ enum _AuthPhase {
 
 enum _HomeDestination { today, tasks, bean, reminders, notes, memory, settings }
 
-const _dashboardChangePollInterval = Duration(seconds: 15);
+const _dashboardChangePollInterval = Duration(seconds: 3);
 const _pendingCalendarEventWriteTtl = Duration(minutes: 2);
 const _pendingDashboardWriteTtl = Duration(minutes: 2);
 const _onboardingTourSeenPreferencePrefix = 'heybean.onboarding_tour_seen';

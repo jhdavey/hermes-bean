@@ -52,7 +52,7 @@ class AssistantRunService
             return ['run' => $run, 'user_message' => $userMessage, 'event' => $event];
         });
 
-        ProcessAssistantRun::dispatch($queued['run']->id);
+        $this->dispatchRunAfterResponse($queued['run']->id);
 
         return $queued;
     }
@@ -89,7 +89,7 @@ class AssistantRunService
             return ['run' => $run, 'user_message' => $userMessage, 'event' => $event];
         });
 
-        ProcessAssistantRun::dispatch($queued['run']->id);
+        $this->dispatchRunAfterResponse($queued['run']->id);
 
         return $queued;
     }
@@ -338,7 +338,7 @@ class AssistantRunService
                         'attempt' => $attempts + 1,
                     ], 'hermes.runs', 'queued');
 
-                    ProcessAssistantRun::dispatch($run->id);
+                    $this->dispatchRunAfterResponse($run->id);
 
                     return $run->refresh();
                 }
@@ -382,7 +382,7 @@ class AssistantRunService
                 'attempt' => $attempts + 1,
             ], 'hermes.runs', 'queued');
 
-            ProcessAssistantRun::dispatch($run->id);
+            $this->dispatchRunAfterResponse($run->id);
 
             return $run->refresh();
         }
@@ -573,5 +573,16 @@ class AssistantRunService
             'status' => $status,
             'payload' => $payload ?: null,
         ]);
+    }
+
+    private function dispatchRunAfterResponse(int $runId): void
+    {
+        if (app()->runningInConsole()) {
+            ProcessAssistantRun::dispatch($runId);
+
+            return;
+        }
+
+        ProcessAssistantRun::dispatchAfterResponse($runId);
     }
 }

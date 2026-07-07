@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ProcessAssistantRun;
 use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
@@ -79,6 +80,32 @@ class HermesRuntimeApiTest extends TestCase
             'runtime.tool_model_completed',
             'runtime.message_completed',
         ], collect($events)->pluck('event_type')->all());
+    }
+
+    public function test_web_queued_chat_returns_background_run_without_inline_model_call(): void
+    {
+        Queue::fake();
+        Http::fake([
+            'https://api.openai.test/v1/chat/completions' => Http::response($this->assistantResponse('Should not run inline.'), 200),
+        ]);
+
+        $token = $this->apiToken('web-queued-chat@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Add a task to take out trash tonight.',
+            'metadata' => [
+                'source' => 'web_queued_chat',
+                'client_request_id' => 'web-chat-test-1',
+            ],
+        ])->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.assistant_message', null)
+            ->assertJsonPath('data.user_message.content', 'Add a task to take out trash tonight.')
+            ->assertJsonPath('data.run.status', 'queued');
+
+        Queue::assertPushed(ProcessAssistantRun::class);
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
     }
 
     public function test_message_branch_replaces_the_selected_message_and_later_chat_history(): void
