@@ -315,8 +315,9 @@
     overflow: auto;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 8px 2px 12px;
+    gap: 5px;
+    padding: 6px 0 8px;
+    scrollbar-width: thin;
 }
 
 .hb-chat-onboarding-card {
@@ -361,14 +362,16 @@
 }
 
 .hb-message {
-    max-width: 560px;
+    width: min(560px, 100%);
+    max-width: 100%;
     display: grid;
-    gap: 4px;
+    gap: 2px;
     align-self: flex-start;
-    padding: 12px;
+    padding: 8px 11px;
     border: 1px solid var(--hb-border);
-    border-radius: 8px;
-    background: var(--hb-surface2);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--hb-surface2) 54%, transparent);
+    box-shadow: none;
 }
 
 .hb-message-user {
@@ -385,8 +388,11 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    color: var(--hb-accent-strong);
-    font-weight: 650;
+    min-height: 18px;
+    color: var(--hb-muted);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.12;
 }
 
 .hb-message-actions-inline {
@@ -434,6 +440,9 @@
 .hb-message-body {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    color: var(--hb-text);
+    font-size: 15px;
+    line-height: 1.28;
 }
 
 .hb-message-actions {
@@ -457,8 +466,8 @@
     gap: 8px;
     align-items: end;
     padding: 8px;
-    border: 1px solid var(--hb-border);
-    border-radius: 16px;
+    border: 1px solid color-mix(in srgb, var(--hb-border) 74%, transparent);
+    border-radius: 18px 18px 0 0;
     background: var(--hb-surface);
     box-shadow: 0 6px 14px rgba(0, 0, 0, .06);
 }
@@ -548,6 +557,18 @@
     box-shadow: 0 8px 18px rgba(var(--hb-accent-rgb), .18);
 }
 
+.hb-chat-text-stop-button {
+    border-color: color-mix(in srgb, var(--hb-destructive) 42%, transparent);
+    background: var(--hb-destructive);
+    color: #fff;
+    box-shadow: 0 8px 18px color-mix(in srgb, var(--hb-destructive) 18%, transparent);
+}
+
+.hb-chat-text-stop-button:hover {
+    border-color: color-mix(in srgb, var(--hb-destructive) 56%, transparent);
+    background: var(--hb-destructive);
+}
+
 .hb-chat-text-send-button:hover {
     border-color: rgba(var(--hb-accent-rgb), .58);
     background: var(--hb-accent-strong);
@@ -582,11 +603,96 @@
     box-sizing: border-box;
     border: 0;
     background: transparent;
-    padding: 11px 8px;
+    padding: 10px 8px;
+    color: var(--hb-text);
+    font-size: 15px;
     line-height: 20px;
     overflow-y: hidden;
     resize: none;
     outline: 0;
+}
+
+.hb-chat-dock textarea::placeholder {
+    color: var(--hb-muted);
+    opacity: .72;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-message {
+    border-color: color-mix(in srgb, var(--hb-border) 72%, transparent);
+    background: color-mix(in srgb, var(--hb-surface2) 54%, transparent);
+    box-shadow: none;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-message-user {
+    border-color: color-mix(in srgb, var(--hb-border) 76%, rgba(var(--hb-accent-rgb), .18));
+    background: rgba(var(--hb-accent-rgb), .075);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-dock {
+    border-color: color-mix(in srgb, var(--hb-border) 78%, transparent);
+    background: var(--hb-surface);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, .18);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-text-stop-button,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-text-stop-button:hover {
+    border-color: rgba(251, 113, 133, .42);
+    background: var(--hb-destructive);
+    color: #fff;
+    box-shadow: 0 10px 22px rgba(251, 113, 133, .18);
+}
+
+.hb-command-center-chat .hb-chat {
+    gap: 4px;
+}
+
+.hb-command-center-chat .hb-chat-messages {
+    gap: 5px;
+    padding: 6px 0 8px;
+}
+
+.hb-command-center-chat .hb-message {
+    width: min(560px, 100%);
+    max-width: 100%;
+    padding: 8px 11px;
+    border-radius: 12px;
+    font-size: inherit;
+}
+
+.hb-command-center-chat .hb-message-head {
+    color: var(--hb-muted);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.12;
+}
+
+.hb-command-center-chat .hb-message-body {
+    color: var(--hb-text);
+    font-size: 15px;
+    line-height: 1.28;
+}
+
+.hb-command-center-chat .hb-chat-dock {
+    border-radius: 18px 18px 0 0;
+    padding: 8px;
+}
+
+.hb-command-center-chat .hb-chat-dock-with-work {
+    border-radius: 0 0 14px 14px;
+}
+
+.hb-command-center-chat .hb-chat-dock textarea {
+    min-height: 44px;
+    max-height: var(--hb-chat-input-max-height);
+    padding: 10px 8px;
+    font-size: 15px;
+    line-height: 20px;
+}
+
+.hb-command-center-chat .hb-chat-text-send-button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
 }
 
 .hb-bottom-menu {

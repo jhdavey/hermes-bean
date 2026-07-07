@@ -4112,7 +4112,9 @@ export function mountHeyBeanWebApp(mount) {
                     ${workStrip}
                     <form class="hb-chat-dock ${workStrip ? 'hb-chat-dock-with-work' : ''}" data-action="chat">
                         <textarea name="message" placeholder="${escapeAttr(chatInputPlaceholder())}" rows="1" ${state.busy ? 'disabled' : ''}>${escapeHtml(inputValue)}</textarea>
-                        <button class="hb-button-secondary hb-chat-text-send-button" type="submit" ${state.busy ? 'disabled' : ''} aria-label="Send message">${icons.send}</button>
+                        ${state.busy
+                            ? `<button class="hb-button-secondary hb-chat-text-send-button hb-chat-text-stop-button" type="button" data-cancel-turn aria-label="Stop Bean">${icons.stop}</button>`
+                            : `<button class="hb-button-secondary hb-chat-text-send-button" type="submit" aria-label="Send message">${icons.send}</button>`}
                     </form>
                 </div>
             </section>`;
@@ -4123,7 +4125,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function chatInputPlaceholder() {
-        return 'Message Bean...';
+        return 'Message Bean…';
     }
 
     function chatDockedWorkStripMarkup() {
