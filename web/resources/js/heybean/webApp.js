@@ -4048,19 +4048,37 @@ export function mountHeyBeanWebApp(mount) {
         return null;
     }
 
-    function startBeanWorkEventPolling(sessionId) {
+    function startBeanWorkEventPolling(sessionId, options = {}) {
         stopBeanWorkEventPolling();
         const token = ++beanWorkEventPollToken;
+        const clientRequestId = String(options.clientRequestId || '').trim();
+        const content = String(options.content || '');
         const poll = async (attempt = 0) => {
             if (!sessionId || token !== beanWorkEventPollToken) return;
             try {
                 const events = await api(`/assistant/sessions/${sessionId}/events`);
                 if (token !== beanWorkEventPollToken) return;
                 applyBeanWorkEvents(events);
+                if (clientRequestId) {
+                    const recovered = await recoverChatFailureFromServer({
+                        sessionId,
+                        clientRequestId,
+                        content,
+                    });
+                    if (token !== beanWorkEventPollToken) return;
+                    if (recovered && (recovered.assistantContent || !['queued', 'running', 'processing'].includes(String(recovered.result?.status || '').toLowerCase()))) {
+                        if (state.beanWorkItems.length && state.beanWorkItems.every((item) => beanWorkItemDone(item))) {
+                            scheduleBeanWorkStatusClear();
+                        }
+                        render();
+                        scrollChatToBottom();
+                        return;
+                    }
+                }
                 render();
             } catch (_) {}
             if (token !== beanWorkEventPollToken) return;
-            if ((beanWorkStatusActive() || attempt < 3) && attempt < 50) {
+            if ((clientRequestId || beanWorkStatusActive() || attempt < 3) && attempt < 50) {
                 beanWorkEventPollTimer = window.setTimeout(() => poll(attempt + 1), 1600);
             }
         };
@@ -9191,6 +9209,7 @@ export function mountHeyBeanWebApp(mount) {
         const clientRequestId = `web-chat-${Date.now()}-${requestId}`;
         let result = null;
         let assistantContent = '';
+        let needsAssistantLookup = false;
 
         if (options.autoOpenChat && state.selected !== 'bean') {
             state.selected = 'bean';
@@ -9246,6 +9265,7 @@ export function mountHeyBeanWebApp(mount) {
                 assistantContent = safeAssistantDisplayContent(conversationalMessageContent(result.assistant_message.content || ''));
                 if (!pushVisibleAssistantMessage(result.assistant_message, assistantContent)) {
                     assistantContent = '';
+                    needsAssistantLookup = true;
                     state.chatRunState = 'Working…';
                     ensureBeanWorkItemsForContent(content);
                 }
@@ -9254,6 +9274,7 @@ export function mountHeyBeanWebApp(mount) {
                 state.error = assistantContent;
             }
             if (['queued', 'running', 'processing'].includes(String(result.status || '').toLowerCase())) {
+                needsAssistantLookup = true;
                 state.chatRunState = 'Working…';
                 ensureBeanWorkItemsForContent(content);
             } else if (state.chatRunState !== 'Working…') {
@@ -9289,10 +9310,13 @@ export function mountHeyBeanWebApp(mount) {
                 activeChatRequestId = 0;
                 state.busy = false;
                 const shouldKeepPollingWork = result
-                    && ['queued', 'running', 'processing'].includes(String(result.status || '').toLowerCase())
+                    && (needsAssistantLookup || ['queued', 'running', 'processing'].includes(String(result.status || '').toLowerCase()))
                     && state.session?.id;
                 if (shouldKeepPollingWork) {
-                    startBeanWorkEventPolling(state.session.id);
+                    startBeanWorkEventPolling(state.session.id, {
+                        clientRequestId,
+                        content,
+                    });
                 } else {
                     stopBeanWorkEventPolling();
                 }
@@ -9318,7 +9342,11 @@ export function mountHeyBeanWebApp(mount) {
             });
             if (userIndex < 0) return null;
 
-            const assistant = messages.slice(userIndex + 1).find((message) => message?.role === 'assistant') || null;
+            const assistant = messages.slice(userIndex + 1).find((message) => {
+                if (message?.role !== 'assistant') return false;
+                const assistantContent = safeAssistantDisplayContent(conversationalMessageContent(message.content || ''));
+                return !assistantMessageShouldStayOutOfChat({ ...message, content: assistantContent });
+            }) || null;
             state.session = sessionPayload.session || sessionPayload;
             state.messages = messages;
             state.activity = normalizeList(sessionPayload.activity_events || sessionPayload.events).length
@@ -9328,11 +9356,6 @@ export function mountHeyBeanWebApp(mount) {
             if (assistant) {
                 const assistantContent = safeAssistantDisplayContent(conversationalMessageContent(assistant.content || ''));
                 assistant.content = assistantContent;
-                if (assistantMessageShouldStayOutOfChat(assistant)) {
-                    state.chatRunState = 'Working…';
-                    ensureBeanWorkItemsForContent(content);
-                    return { result: { status: 'queued', session: state.session, user_message: messages[userIndex], assistant_message: null, events: [] }, assistantContent: '' };
-                }
                 state.chatRunState = 'Ready';
                 completeActiveBeanWorkItems();
                 refreshOnly(false).catch(() => {});
