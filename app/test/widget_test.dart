@@ -4490,7 +4490,7 @@ void main() {
     final eventBlockDecoration =
         eventBlockContainer.decoration! as BoxDecoration;
     expect(eventBlockDecoration.borderRadius, BorderRadius.circular(6));
-    expect(eventBlockDecoration.color?.a, closeTo(.60, .01));
+    expect(eventBlockDecoration.color?.a, closeTo(.14, .01));
     expect(
       find.byKey(const PageStorageKey<String>('apple-style-day-page-view')),
       findsOneWidget,

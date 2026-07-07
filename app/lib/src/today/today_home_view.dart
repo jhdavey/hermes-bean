@@ -482,6 +482,8 @@ const _calendarDayHeaderHeight = 36.0;
 const _calendarMultiDayRowHeight = 42.0;
 const _calendarAllDayRowHeight = 42.0;
 const _calendarCurrentTimeLabelHeight = 14.0;
+const _calendarEventBlockFillAlpha = .14;
+const _calendarEventBlockBorderAlpha = .35;
 
 class _AppleStyleTodayTimeline extends StatefulWidget {
   const _AppleStyleTodayTimeline({
@@ -1819,6 +1821,7 @@ class _MultiDayEventSpan extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = _calendarEventColor(event);
     final hasNotes = _eventHasNotes(event);
+    final foregroundColor = HeyBeanTheme.text;
     return InkWell(
       key: Key('calendar-multi-day-event-${event.id}'),
       borderRadius: BorderRadius.circular(12),
@@ -1892,9 +1895,11 @@ class _MultiDayEventSpan extends StatelessWidget {
       ),
       child: Container(
         decoration: BoxDecoration(
-          color: color.withValues(alpha: .60),
+          color: color.withValues(alpha: _calendarEventBlockFillAlpha),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: .35)),
+          border: Border.all(
+            color: color.withValues(alpha: _calendarEventBlockBorderAlpha),
+          ),
         ),
         clipBehavior: Clip.hardEdge,
         child: Stack(
@@ -1917,7 +1922,7 @@ class _MultiDayEventSpan extends StatelessWidget {
                 child: Icon(
                   Icons.notes_rounded,
                   key: Key('event-notes-icon-${event.id}'),
-                  color: Colors.black.withValues(alpha: .82),
+                  color: foregroundColor.withValues(alpha: .82),
                   size: 13,
                 ),
               ),
@@ -1959,7 +1964,7 @@ class _MultiDayEventSpan extends StatelessWidget {
                           ? TextAlign.left
                           : TextAlign.center,
                       style: TextStyle(
-                        color: Colors.black,
+                        color: foregroundColor,
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
                         height: 1,
@@ -2053,6 +2058,7 @@ class _AllDayEventRow extends StatelessWidget {
       itemBuilder: (context, index) {
         final event = events[index];
         final color = _calendarEventColor(event);
+        final foregroundColor = HeyBeanTheme.text;
         return InkWell(
           key: Key('calendar-all-day-event-${event.id}'),
           borderRadius: BorderRadius.circular(12),
@@ -2132,9 +2138,11 @@ class _AllDayEventRow extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 180),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: .60),
+              color: color.withValues(alpha: _calendarEventBlockFillAlpha),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: color.withValues(alpha: .35)),
+              border: Border.all(
+                color: color.withValues(alpha: _calendarEventBlockBorderAlpha),
+              ),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -2152,7 +2160,7 @@ class _AllDayEventRow extends StatelessWidget {
                   Icon(
                     Icons.notes_rounded,
                     key: Key('event-notes-icon-${event.id}'),
-                    color: Colors.black.withValues(alpha: .82),
+                    color: foregroundColor.withValues(alpha: .82),
                     size: 13,
                   ),
                   const SizedBox(width: 4),
@@ -2163,7 +2171,7 @@ class _AllDayEventRow extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: Colors.black,
+                      color: foregroundColor,
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
                       height: 1,
@@ -2285,6 +2293,8 @@ class _TimelineEventBlock extends StatelessWidget {
       horizontal: compactEventBlock ? 6 : 8,
       vertical: compactEventBlock ? 2 : 4,
     );
+    final eventColor = _calendarEventColor(event);
+    final foregroundColor = HeyBeanTheme.text;
     return Positioned(
       top: hourPosition + 2,
       left: left,
@@ -2367,10 +2377,12 @@ class _TimelineEventBlock extends StatelessWidget {
           height: eventHeight,
           padding: eventPadding,
           decoration: BoxDecoration(
-            color: _calendarEventColor(event).withValues(alpha: .60),
+            color: eventColor.withValues(alpha: _calendarEventBlockFillAlpha),
             borderRadius: BorderRadius.circular(6),
             border: Border.all(
-              color: _calendarEventColor(event).withValues(alpha: .35),
+              color: eventColor.withValues(
+                alpha: _calendarEventBlockBorderAlpha,
+              ),
             ),
           ),
           child: Row(
@@ -2389,7 +2401,7 @@ class _TimelineEventBlock extends StatelessWidget {
                 Icon(
                   Icons.notes_rounded,
                   key: Key('event-notes-icon-${event.id}'),
-                  color: Colors.black.withValues(alpha: .82),
+                  color: foregroundColor.withValues(alpha: .82),
                   size: 13,
                 ),
                 const SizedBox(width: 4),
@@ -2404,7 +2416,7 @@ class _TimelineEventBlock extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: Colors.black,
+                        color: foregroundColor,
                         fontWeight: FontWeight.w800,
                         fontSize: titleFontSize,
                         height: .98,
@@ -2416,7 +2428,7 @@ class _TimelineEventBlock extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: Colors.black,
+                          color: foregroundColor.withValues(alpha: .82),
                           fontWeight: FontWeight.w700,
                           fontSize: timeFontSize,
                           height: .98,
