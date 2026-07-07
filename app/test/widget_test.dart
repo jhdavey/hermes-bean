@@ -5918,7 +5918,7 @@ void main() {
     },
   );
 
-  testWidgets('dictated Bean voice requests are spoken with TTS', (
+  testWidgets('dictated Bean voice requests use realtime audio first', (
     WidgetTester tester,
   ) async {
     final api = _SignedInFakeHermesApiClient();
@@ -5944,12 +5944,16 @@ void main() {
     await tester.pump();
 
     await gesture.up();
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 250));
 
-    expect(realtime.sentTexts, isEmpty);
-    expect(api.sentMessages, ['Plan today']);
-    expect(api.synthesizedSpeechTexts, ['Done — I updated your day.']);
-    expect(playedAudio, ['audio/wav:fake-wav']);
+    expect(realtime.started, isTrue);
+    expect(realtime.startMicrophoneValues, [false]);
+    expect(realtime.sentTexts, ['Plan today']);
+    expect(realtime.sentTextAudioResponses, [true]);
+    expect(realtime.sentTextEndConversationValues, [true]);
+    expect(api.sentMessages, isEmpty);
+    expect(api.synthesizedSpeechTexts, isEmpty);
+    expect(playedAudio, isEmpty);
 
     final secondGesture = await tester.startGesture(
       tester.getCenter(find.byKey(const Key('nav-bean'))),
@@ -5962,59 +5966,58 @@ void main() {
     await tester.pump();
 
     await secondGesture.up();
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 250));
 
-    expect(api.sentMessages, ['Plan today', 'Plan tomorrow']);
-    expect(api.synthesizedSpeechTexts, [
-      'Done — I updated your day.',
-      'Done — I updated your day.',
-    ]);
-    expect(playedAudio, ['audio/wav:fake-wav', 'audio/wav:fake-wav']);
+    expect(realtime.startMicrophoneValues, [false]);
+    expect(realtime.sentTexts, ['Plan today', 'Plan tomorrow']);
+    expect(realtime.sentTextAudioResponses, [true, true]);
+    expect(realtime.sentTextEndConversationValues, [true, true]);
+    expect(api.sentMessages, isEmpty);
+    expect(api.synthesizedSpeechTexts, isEmpty);
+    expect(playedAudio, isEmpty);
   });
 
-  testWidgets(
-    'dictated fallback does not leave stale voice unavailable error',
-    (WidgetTester tester) async {
-      final api = _SignedInFakeHermesApiClient();
-      final realtime = _DelayedFailingBeanRealtimeConversation(api);
-      final playedAudio = <String>[];
-      await tester.pumpWidget(
-        HermesBeanApp(
-          apiClient: api,
-          tokenStore: _MemoryAuthTokenStore(),
-          realtimeConversation: realtime,
-          playBeanVoiceAudio: (bytes, {contentType = 'audio/wav'}) async {
-            playedAudio.add('$contentType:${String.fromCharCodes(bytes)}');
-          },
-        ),
-      );
-      await tester.pumpAndSettle();
+  testWidgets('dictated voice falls back to chat and TTS when realtime fails', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    final realtime = _FailingBeanRealtimeConversation(api);
+    final playedAudio = <String>[];
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        realtimeConversation: realtime,
+        playBeanVoiceAudio: (bytes, {contentType = 'audio/wav'}) async {
+          playedAudio.add('$contentType:${String.fromCharCodes(bytes)}');
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
 
-      final gesture = await tester.startGesture(
-        tester.getCenter(find.byKey(const Key('nav-bean'))),
-      );
-      await tester.pump(const Duration(milliseconds: 650));
-      await tester.enterText(
-        find.byKey(const Key('chat-input')),
-        'Hey Ben can you hear me right now',
-      );
-      await tester.pump();
-      await gesture.up();
-      await tester.pump(const Duration(milliseconds: 50));
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('nav-bean'))),
+    );
+    await tester.pump(const Duration(milliseconds: 650));
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'Hey Ben can you hear me right now',
+    );
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
 
-      await tester.pumpAndSettle();
-
-      expect(realtime.started, isFalse);
-      expect(api.sentMessages, ['Hey Ben can you hear me right now']);
-      expect(
-        find.textContaining('Voice is not available right now'),
-        findsNothing,
-      );
-      expect(find.text('Done — I updated your day.'), findsOneWidget);
-      expect(api.synthesizedSpeechTexts, ['Done — I updated your day.']);
-      expect(playedAudio, ['audio/wav:fake-wav']);
-    },
-  );
+    expect(realtime.started, isTrue);
+    expect(realtime.startMicrophoneValues, [false]);
+    expect(api.sentMessages, ['Hey Ben can you hear me right now']);
+    expect(
+      find.textContaining('Voice is not available right now'),
+      findsNothing,
+    );
+    expect(find.text('Done — I updated your day.'), findsOneWidget);
+    expect(api.synthesizedSpeechTexts, ['Done — I updated your day.']);
+    expect(playedAudio, ['audio/wav:fake-wav']);
+  });
 
   testWidgets(
     'realtime assistant text falls back to TTS without remote audio',
@@ -16031,31 +16034,6 @@ class _FailingBeanRealtimeConversation extends _FakeBeanRealtimeConversation {
     started = true;
     startMicrophoneValues.add(microphoneEnabled);
     throw StateError('Realtime unavailable');
-  }
-}
-
-class _DelayedFailingBeanRealtimeConversation
-    extends _FakeBeanRealtimeConversation {
-  _DelayedFailingBeanRealtimeConversation(super.apiClient);
-
-  final Completer<HermesSession> _startCompleter = Completer<HermesSession>();
-
-  @override
-  Future<HermesSession> start({
-    int? sessionId,
-    int? workspaceId,
-    Map<String, Object?> metadata = const {},
-    bool microphoneEnabled = true,
-  }) {
-    started = true;
-    startMicrophoneValues.add(microphoneEnabled);
-    this.microphoneEnabled = microphoneEnabled;
-    return _startCompleter.future;
-  }
-
-  void failStart() {
-    if (_startCompleter.isCompleted) return;
-    _startCompleter.completeError(StateError('Realtime unavailable'));
   }
 }
 

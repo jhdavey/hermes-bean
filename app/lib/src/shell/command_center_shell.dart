@@ -2602,6 +2602,19 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   void _handleBeanSpeechError(Object error) {
     if (!mounted || !_beanVoiceListening) return;
+    final currentDraft =
+        (_beanVoiceDraft?.trim().isNotEmpty == true
+                ? _beanVoiceDraft ?? ''
+                : _chatInputController.text)
+            .trim();
+    if (currentDraft.isNotEmpty) {
+      setState(() {
+        _beanVoiceDraft = currentDraft;
+        _chatRunState = 'Release to send';
+        _error = null;
+      });
+      return;
+    }
     final transient =
         error is speech_error.SpeechRecognitionError &&
         error.permanent == false;
@@ -2774,7 +2787,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     });
     _cancelBeanWorkStatusClear();
     _cancelBeanWorkStageTimers();
-    await _beanSpeech.stop();
+    try {
+      await _beanSpeech.stop();
+    } catch (error) {
+      debugPrint('Bean speech stop failed after dictation: $error');
+    }
     final dictated =
         (_beanVoiceDraft?.trim().isNotEmpty == true
                 ? _beanVoiceDraft ?? ''
@@ -2797,7 +2814,98 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _chatRunState = 'Bean is working...';
       _error = null;
     });
-    unawaited(_sendVoiceFallbackChat(dictated));
+    unawaited(_sendDictatedBeanVoiceRequest(dictated));
+  }
+
+  Future<void> _sendDictatedBeanVoiceRequest(String dictated) async {
+    final sentRealtime = await _sendDictatedRealtimeVoiceRequest(dictated);
+    if (sentRealtime || !mounted) return;
+    await _sendVoiceFallbackChat(dictated);
+  }
+
+  Future<bool> _sendDictatedRealtimeVoiceRequest(String dictated) async {
+    final trimmed = dictated.trim();
+    final session = _session;
+    if (trimmed.isEmpty || session == null) return false;
+
+    final runToken = ++_chatRunToken;
+    int? localUserMessageId;
+    _cancelBeanClientRetryTimers();
+    try {
+      setState(() {
+        _busy = true;
+        _editingChatMessageId = null;
+        _chatRunState = _realtimeConversation.active
+            ? 'Bean is responding...'
+            : 'Bean is waking up...';
+        _beginBeanWorkEventContext(freshRequest: true);
+      });
+
+      if (!_realtimeConversation.active) {
+        await _realtimeConversation
+            .start(
+              sessionId: session.id,
+              workspaceId: _user?.activeWorkspace?.numericId,
+              microphoneEnabled: false,
+              metadata: _flutterChatMetadata(
+                additional: const {
+                  'source': 'flutter_voice_dictation',
+                  'voice_context': {'mode': 'dictated_voice'},
+                },
+              ),
+            )
+            .timeout(const Duration(seconds: 5));
+      }
+      if (!mounted || runToken != _chatRunToken) return true;
+
+      localUserMessageId = _nextLocalMessageId();
+      setState(() {
+        _messages.add(
+          HermesMessage(
+            id: localUserMessageId!,
+            role: 'user',
+            content: trimmed,
+            metadata: const {
+              'realtime': true,
+              'voice_request': true,
+              'source': 'dictation',
+            },
+          ),
+        );
+        _chatRunState = 'Bean is responding...';
+      });
+
+      unawaited(_realtimeConversation.refreshDashboardContext());
+      await _realtimeConversation
+          .sendText(
+            trimmed,
+            audioResponse: true,
+            endConversationAfterResponse: true,
+          )
+          .timeout(const Duration(seconds: 5));
+      if (!mounted || runToken != _chatRunToken) return true;
+      setState(() {
+        _busy = false;
+        _chatRunState = 'Bean is responding...';
+        _error = null;
+      });
+      return true;
+    } catch (error) {
+      debugPrint('Dictated Bean realtime voice failed: $error');
+      if (mounted && runToken == _chatRunToken) {
+        setState(() {
+          _busy = false;
+          if (localUserMessageId != null) {
+            _messages.removeWhere(
+              (message) =>
+                  message.id == localUserMessageId &&
+                  message.metadata['voice_request'] == true,
+            );
+          }
+        });
+      }
+      return false;
+    }
   }
 
   Future<void> _sendVoiceFallbackChat(String dictated) async {

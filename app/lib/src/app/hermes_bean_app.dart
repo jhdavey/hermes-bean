@@ -100,10 +100,15 @@ Future<void> _defaultPlayBeanVoiceAudio(
       ),
     );
     try {
-      await player.play(BytesSource(bytes, mimeType: cleanContentType));
-    } catch (_) {
+      await _playBeanVoiceSourceAndConfirm(
+        player,
+        BytesSource(bytes, mimeType: cleanContentType),
+      );
+    } catch (memorySourceError) {
+      debugPrint('Bean voice in-memory playback failed: $memorySourceError');
       await audioFile.writeAsBytes(bytes, flush: true);
-      await player.play(
+      await _playBeanVoiceSourceAndConfirm(
+        player,
         DeviceFileSource(audioFile.path, mimeType: cleanContentType),
       );
     }
@@ -116,6 +121,26 @@ Future<void> _defaultPlayBeanVoiceAudio(
     if (await audioFile.exists()) {
       await audioFile.delete();
     }
+  }
+}
+
+Future<void> _playBeanVoiceSourceAndConfirm(
+  AudioPlayer player,
+  Source source,
+) async {
+  await player.play(source);
+  if (player.state == PlayerState.playing) return;
+  final started = await player.onPlayerStateChanged
+      .firstWhere(
+        (state) =>
+            state == PlayerState.playing ||
+            state == PlayerState.completed ||
+            state == PlayerState.stopped ||
+            state == PlayerState.disposed,
+      )
+      .timeout(const Duration(seconds: 2), onTimeout: () => player.state);
+  if (started != PlayerState.playing) {
+    throw StateError('Audio playback did not start; current state: $started');
   }
 }
 
