@@ -3959,6 +3959,7 @@ ${_truncateDiagnostic(stack, 2200)}
   }
 
   Future<void> _pollQueuedRun(int runId, int runToken) async {
+    var pollErrors = 0;
     for (var attempt = 0; attempt < 90; attempt++) {
       await Future<void>.delayed(
         attempt == 0
@@ -3968,6 +3969,7 @@ ${_truncateDiagnostic(stack, 2200)}
       if (!mounted || runToken != _chatRunToken) return;
       try {
         final run = await widget.apiClient.getAssistantRun(runId);
+        pollErrors = 0;
         if (!mounted || runToken != _chatRunToken) return;
         if (run.userMessageId != null) {
           setState(() {
@@ -3996,6 +3998,14 @@ ${_truncateDiagnostic(stack, 2200)}
         if (run.status == 'completed' ||
             run.status == 'failed' ||
             run.status == 'cancelled') {
+          if (run.status == 'completed' &&
+              run.assistantMessage == null &&
+              await _recoverQueuedRunFromSession(
+                runId: runId,
+                runToken: runToken,
+              )) {
+            return;
+          }
           final finalEvents = sessionId == null
               ? const <HermesActivityEvent>[]
               : await widget.apiClient
@@ -4038,15 +4048,73 @@ ${_truncateDiagnostic(stack, 2200)}
           _refreshDashboardAfterBeanMutationEvents(finalEvents);
           return;
         }
+        if (attempt > 0 &&
+            attempt % 12 == 0 &&
+            await _recoverQueuedRunFromSession(
+              runId: runId,
+              runToken: runToken,
+            )) {
+          return;
+        }
       } catch (_) {
-        // Background polling is opportunistic; dashboard polling still refreshes app state.
+        pollErrors++;
+        if (pollErrors >= 2 &&
+            await _recoverQueuedRunFromSession(
+              runId: runId,
+              runToken: runToken,
+            )) {
+          return;
+        }
       }
+    }
+    if (await _recoverQueuedRunFromSession(runId: runId, runToken: runToken)) {
+      return;
     }
     if (!mounted || runToken != _chatRunToken) return;
     setState(() {
       _busy = false;
       _chatRunState = 'Working in background';
     });
+  }
+
+  Future<bool> _recoverQueuedRunFromSession({
+    required int runId,
+    required int runToken,
+  }) async {
+    final session = _session;
+    final activeMessageId = _activeBeanWorkMessageId;
+    if (session == null || activeMessageId == null) return false;
+
+    try {
+      final details = await widget.apiClient.resumeSessionDetails(session.id);
+      if (!mounted || runToken != _chatRunToken) return true;
+
+      final messages = details.messages;
+      final userIndex = messages.indexWhere(
+        (message) => message.id == activeMessageId && message.role == 'user',
+      );
+      if (userIndex == -1) return false;
+
+      final hasAssistantAfter = messages
+          .skip(userIndex + 1)
+          .any((message) => message.role == 'assistant');
+      if (!hasAssistantAfter) return false;
+
+      setState(() {
+        if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
+        _session = details.session;
+        _replaceMessagesFromSession(details, user: _user);
+        _chatRunState = 'Updated';
+        _busy = false;
+        _error = null;
+        _completeActiveBeanWorkItems();
+      });
+      unawaited(_refreshSignedInViews(showLoading: false));
+
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   void _refreshDashboardAfterBeanMutationEvents(

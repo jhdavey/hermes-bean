@@ -276,6 +276,38 @@ class HermesToolRuntimeServiceTest extends TestCase
         });
     }
 
+    public function test_crud_planner_creates_shopping_list_from_previous_assistant_response_without_model_call(): void
+    {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+        Http::fake();
+
+        $token = $this->apiToken('tool-shopping-list-follow-up@example.com');
+        $user = User::where('email', 'tool-shopping-list-follow-up@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'assistant',
+            'content' => "Tomorrow dinner is lemon chicken sheet-pan bowls.\n\nShopping list:\n- Chicken thighs\n- Lemons\n- Rice\n- Green beans\n- Olive oil\n- Garlic",
+        ]);
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Create a shopping list based on that previous response.',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.metadata.planner_source', 'local')
+            ->assertJsonFragment(['event_type' => 'assistant.note.created']);
+
+        $note = Note::where('user_id', $user->id)->where('title', 'Shopping list')->firstOrFail();
+        $this->assertStringContainsString('- Chicken thighs', $note->plain_text);
+        $this->assertStringContainsString('- Green beans', $note->plain_text);
+
+        Http::assertSentCount(0);
+    }
+
     public function test_tool_runtime_emits_ordered_work_items_for_write_tool_calls(): void
     {
         Http::fakeSequence()

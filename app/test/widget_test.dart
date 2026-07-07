@@ -6185,6 +6185,37 @@ void main() {
     expect(find.text('It should be warm and cloudy tomorrow.'), findsOneWidget);
   });
 
+  testWidgets('queued Bean chat recovers completed response from session', (
+    WidgetTester tester,
+  ) async {
+    final api = _SessionRecoveryQueuedRunFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'whats for dinner tomorrow according to my meal plan note?',
+    );
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pump();
+
+    expect(find.text('Planning request'), findsOneWidget);
+    expect(find.text('0/1'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 800));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Tomorrow dinner is the lemon chicken sheet-pan meal.'),
+      findsOneWidget,
+    );
+    expect(find.text('1/1'), findsOneWidget);
+  });
+
   testWidgets(
     'stale Bean work events do not appear without an active request',
     (WidgetTester tester) async {
@@ -11575,6 +11606,64 @@ class _DelayedQueueFakeHermesApiClient extends _SignedInFakeHermesApiClient {
       ),
     );
   }
+}
+
+class _SessionRecoveryQueuedRunFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  static const _userMessage = HermesMessage(
+    id: 7601,
+    role: 'user',
+    content: 'whats for dinner tomorrow according to my meal plan note?',
+    metadata: {'client_request_id': 'test-request'},
+  );
+
+  static const _assistantMessage = HermesMessage(
+    id: 7602,
+    role: 'assistant',
+    content: 'Tomorrow dinner is the lemon chicken sheet-pan meal.',
+  );
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    return const HermesMessageResult(
+      status: 'queued',
+      session: HermesSession(id: 42, status: 'queued', title: 'Today'),
+      userMessage: _userMessage,
+      run: HermesAssistantRun(id: 76, status: 'running', source: 'flutter'),
+      events: [
+        HermesActivityEvent(
+          id: 76,
+          eventType: 'runtime.run_queued',
+          status: 'queued',
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<HermesAssistantRun> getAssistantRun(int runId) async =>
+      const HermesAssistantRun(
+        id: 76,
+        status: 'completed',
+        source: 'flutter',
+        userMessageId: 7601,
+        assistantMessageId: 7602,
+      );
+
+  @override
+  Future<HermesSessionDetails> resumeSessionDetails(int sessionId) async =>
+      HermesSessionDetails(
+        session: HermesSession(id: sessionId, status: 'active', title: 'Today'),
+        messages: const [_userMessage, _assistantMessage],
+      );
 }
 
 class _NotesFakeHermesApiClient extends _SignedInFakeHermesApiClient {

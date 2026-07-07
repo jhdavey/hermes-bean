@@ -36,7 +36,7 @@ trait CrudPlannerRuntime
 
         $promptPayload = $this->crudPlannerPromptPayload($session, $userMessage, $contextPayload, $conversationMessages, $expectedWriteActionCount);
         $plannerSource = 'local';
-        $actions = $this->deterministicCrudActions($session, $userMessage, $contextPayload);
+        $actions = $this->deterministicCrudActions($session, $userMessage, $contextPayload, $conversationMessages);
         $response = $this->localPlannerResponse($plannerRoute, $actions);
         $modelCallDurationsMs = [];
 
@@ -317,7 +317,7 @@ If the request is not a clear app CRUD request, return {"actions":[]}.
 PROMPT;
     }
 
-    private function deterministicCrudActions(ConversationSession $session, ConversationMessage $message, array $contextPayload): array
+    private function deterministicCrudActions(ConversationSession $session, ConversationMessage $message, array $contextPayload, array $conversationMessages = []): array
     {
         $content = str((string) $message->content)->squish()->toString();
         if ($content === '') {
@@ -371,6 +371,11 @@ PROMPT;
         $afternoonPlanActions = $this->deterministicAfternoonPlanActions($content, $contextPayload, $timezone);
         if ($afternoonPlanActions !== []) {
             return $afternoonPlanActions;
+        }
+
+        $previousShoppingListActions = $this->deterministicPreviousResponseShoppingListActions($content, $conversationMessages);
+        if ($previousShoppingListActions !== []) {
+            return $previousShoppingListActions;
         }
 
         $taskReminderNoteActions = $this->deterministicTaskReminderNoteActions($content, $contextPayload, $timezone);
@@ -818,6 +823,133 @@ PROMPT;
         }
 
         return $actions;
+    }
+
+    private function deterministicPreviousResponseShoppingListActions(string $content, array $conversationMessages): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (! preg_match('/\b(add|create|make|save|write|turn)\b/u', $normalized)) {
+            return [];
+        }
+        if (! preg_match('/\b(shopping|grocery|groceries)\s+(?:list|checklist)\b/u', $normalized)) {
+            return [];
+        }
+        if (! preg_match('/\b(previous|last|above|that|this|it|response|answer|based on|from that|from the)\b/u', $normalized)) {
+            return [];
+        }
+
+        $source = $this->latestAssistantConversationContent($conversationMessages);
+        if ($source === '') {
+            return [];
+        }
+
+        $items = $this->shoppingListItemsFromText($source);
+        $plainText = $items === []
+            ? str($source)->limit(1200, '')->toString()
+            : collect($items)->map(fn (string $item): string => '- '.$item)->implode("\n");
+
+        $title = preg_match('/\bgrocery|groceries\b/u', $normalized)
+            ? 'Grocery list'
+            : 'Shopping list';
+        if (preg_match('/\b(?:called|titled|named)\s+(.+?)(?:\.|$)/iu', $content, $titleMatch)) {
+            $candidateTitle = $this->cleanDeterministicTitle((string) ($titleMatch[1] ?? ''));
+            if ($candidateTitle !== '') {
+                $title = $candidateTitle;
+            }
+        } elseif (preg_match('/\bdinner|meal\b/u', $normalized)) {
+            $title = 'Dinner shopping list';
+        }
+
+        return [[
+            'type' => 'note.create',
+            'risk' => 'low',
+            'client_action_key' => 'note_shopping_list',
+            'parameters' => [
+                'title' => $title,
+                'plain_text' => $plainText,
+            ],
+        ]];
+    }
+
+    private function latestAssistantConversationContent(array $conversationMessages): string
+    {
+        foreach (array_reverse($conversationMessages) as $message) {
+            if (! is_array($message) || ($message['role'] ?? null) !== 'assistant') {
+                continue;
+            }
+
+            $content = trim(str((string) ($message['content'] ?? ''))->limit(4000, '')->toString());
+            if ($content !== '') {
+                return $content;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function shoppingListItemsFromText(string $text): array
+    {
+        $items = [];
+        $lines = preg_split('/\R/u', $text) ?: [];
+
+        foreach ($lines as $line) {
+            $clean = trim((string) $line);
+            if ($clean === '') {
+                continue;
+            }
+
+            if (preg_match('/^\s*(?:[-*•]|\d+[\).])\s*(.+)$/u', $clean, $match)) {
+                $this->pushShoppingListItem($items, (string) ($match[1] ?? ''));
+                continue;
+            }
+
+            if (preg_match('/\b(?:ingredients?|shopping list|grocery list|groceries|you(?:\'ll| will)? need|buy|get|pick up)\b\s*(?:are|include|includes|:)?\s*(.+)$/iu', $clean, $match)) {
+                foreach ($this->splitShoppingListItems((string) ($match[1] ?? '')) as $item) {
+                    $this->pushShoppingListItem($items, $item);
+                }
+            }
+        }
+
+        return array_values(array_unique(array_slice($items, 0, 30)));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function splitShoppingListItems(string $text): array
+    {
+        $text = preg_replace('/\s+(?:and|plus)\s+/iu', ', ', $text) ?? $text;
+
+        return array_values(array_filter(
+            array_map(
+                fn (string $item): string => trim($item),
+                preg_split('/[,;]+/u', $text) ?: []
+            ),
+            fn (string $item): bool => $item !== ''
+        ));
+    }
+
+    /**
+     * @param  array<int, string>  $items
+     */
+    private function pushShoppingListItem(array &$items, string $item): void
+    {
+        $clean = $this->cleanDeterministicTitle($item);
+        $clean = preg_replace('/^(?:and|plus|with)\s+/iu', '', $clean) ?? $clean;
+        $clean = trim($clean, " \t\n\r\0\x0B,.;:");
+
+        if ($clean === '' || mb_strlen($clean) > 120) {
+            return;
+        }
+
+        if (preg_match('/\b(?:dinner|meal|recipe|option|tomorrow|tonight|according|based)\b/iu', $clean) && ! preg_match('/\b(?:chicken|beef|pork|fish|rice|pasta|bean|beans|vegetable|vegetables|milk|egg|eggs|bread|cheese|oil|garlic|onion|lemon|tomato|potato|lettuce|fruit|yogurt|flour|sugar|salt|pepper)\b/iu', $clean)) {
+            return;
+        }
+
+        $items[] = str($clean)->ucfirst()->toString();
     }
 
     private function deterministicTaskReminderNoteActions(string $content, array $contextPayload, string $timezone): array
