@@ -2145,6 +2145,13 @@ void main() {
     expect(task, findsOneWidget);
     expect(event, findsOneWidget);
     expect(reminder, findsOneWidget);
+    final taskTimeRect = tester.getRect(
+      find.byKey(const Key('command-center-agenda-time-task-501')),
+    );
+    final taskDotRect = tester.getRect(
+      find.byKey(const Key('command-center-agenda-dot-task-501')),
+    );
+    expect(taskDotRect.left - taskTimeRect.right, closeTo(5, .1));
     expect(tester.getTopLeft(task).dy, lessThan(tester.getTopLeft(event).dy));
     expect(
       tester.getTopLeft(event).dy,
@@ -2223,6 +2230,18 @@ void main() {
       expect(task, findsOneWidget);
       expect(reminder, findsOneWidget);
       expect(event, findsOneWidget);
+      final today = DateTime.now();
+      final overdueDateLabel =
+          '${_testShortMonthNames[today.month - 1]} '
+          '${today.day}';
+      expect(
+        find.descendant(of: task, matching: find.text(overdueDateLabel)),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: reminder, matching: find.text(overdueDateLabel)),
+        findsOneWidget,
+      );
       expect(find.text('overdue'), findsNWidgets(2));
       expect(
         tester.getTopLeft(reminder).dy,
@@ -2954,6 +2973,7 @@ void main() {
     expect(find.text('working...'), findsNothing);
     expect(find.text('Let me check the forecast.'), findsOneWidget);
     expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(find.byKey(const Key('heybean-working-ring')), findsOneWidget);
     expect(find.textContaining('Checking weather'), findsOneWidget);
 
     api.completeQueue();

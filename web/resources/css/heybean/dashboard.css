@@ -591,9 +591,9 @@
     min-width: 0;
     height: 42px;
     display: grid;
-    grid-template-columns: 78px 7px minmax(0, 1fr) auto;
+    grid-template-columns: 60px 7px minmax(0, 1fr) auto;
     align-items: center;
-    gap: 10px;
+    gap: 7px;
     border: 0;
     border-bottom: 1px solid color-mix(in srgb, var(--hb-border) 62%, transparent);
     border-radius: 0;

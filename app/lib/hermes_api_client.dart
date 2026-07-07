@@ -548,9 +548,9 @@ class HermesApiClient {
       'POST',
       '/notes',
       body: {
-        'title': title,
-        'body_html': bodyHtml,
-        'plain_text': plainText,
+        'title': _sanitizeVisibleText(title),
+        'body_html': _sanitizeVisibleText(bodyHtml),
+        'plain_text': _sanitizeVisibleText(plainText),
         'note_folder_id': folderId,
         'is_pinned': isPinned,
         if (metadata != null) 'metadata': metadata,
@@ -576,9 +576,9 @@ class HermesApiClient {
       'PATCH',
       '/notes/$noteId',
       body: {
-        if (title != null) 'title': title,
-        if (bodyHtml != null) 'body_html': bodyHtml,
-        if (plainText != null) 'plain_text': plainText,
+        if (title != null) 'title': _sanitizeVisibleText(title),
+        if (bodyHtml != null) 'body_html': _sanitizeVisibleText(bodyHtml),
+        if (plainText != null) 'plain_text': _sanitizeVisibleText(plainText),
         if (folderId != null || clearFolder) 'note_folder_id': folderId,
         if (isPinned != null) 'is_pinned': isPinned,
         if (metadata != null) 'metadata': metadata,
@@ -2755,9 +2755,9 @@ class HermesNote {
 
   factory HermesNote.fromJson(Map<String, Object?> json) => HermesNote(
     id: _readIntOrNull(json['id']) ?? 0,
-    title: _readString(json['title']) ?? 'New Note',
-    bodyHtml: _readString(json['body_html'] ?? json['bodyHtml']),
-    plainText: _readString(json['plain_text'] ?? json['plainText']),
+    title: _readVisibleString(json['title']) ?? 'New Note',
+    bodyHtml: _readVisibleString(json['body_html'] ?? json['bodyHtml']),
+    plainText: _readVisibleString(json['plain_text'] ?? json['plainText']),
     folderId: _readIntOrNull(
       json['note_folder_id'] ?? json['noteFolderId'] ?? json['folder_id'],
     ),
@@ -3451,7 +3451,7 @@ class HermesMessage {
   factory HermesMessage.fromJson(Map<String, Object?> json) => HermesMessage(
     id: _expectInt(json['id']),
     role: _expectString(json['role']),
-    content: json['content'] as String?,
+    content: _readVisibleString(json['content']),
     metadata: json['metadata'] == null
         ? const {}
         : _expectMap(json['metadata']),
@@ -3538,8 +3538,9 @@ class HermesBlocker {
   );
 }
 
-String _readTitle(Map<String, Object?> json) =>
-    (json['title'] ?? json['name'] ?? json['content'] ?? 'Untitled').toString();
+String _readTitle(Map<String, Object?> json) => _sanitizeVisibleText(
+  (json['title'] ?? json['name'] ?? json['content'] ?? 'Untitled').toString(),
+);
 
 Map<String, Object?> _expectMap(Object? value) {
   if (value is Map<String, Object?>) return value;
@@ -3618,6 +3619,21 @@ String? _readString(Object? value) {
   if (value == null) return null;
   if (value is String) return value;
   return value.toString();
+}
+
+String? _readVisibleString(Object? value) {
+  final text = _readString(value);
+  return text == null ? null : _sanitizeVisibleText(text);
+}
+
+String _sanitizeVisibleText(String value) {
+  if (value.isEmpty) return value;
+  return value
+      .replaceAll(RegExp(r'[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]'), '')
+      .replaceAll(
+        RegExp('[\u{FFFD}\u{FE0E}\u{FE0F}\u{200B}-\u{200F}]', unicode: true),
+        '',
+      );
 }
 
 bool _readBool(Object? value) {

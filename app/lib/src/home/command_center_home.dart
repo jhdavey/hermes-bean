@@ -751,7 +751,7 @@ class _CommandCenterAgendaRow extends StatelessWidget {
       _CommandCenterAgendaKind.reminder => 'Reminder',
     };
     final hasEventNotes = item.event != null && _eventHasNotes(item.event!);
-    const timeWidth = 76.0;
+    const timeWidth = 62.0;
 
     return Material(
       color: Colors.transparent,
@@ -769,6 +769,7 @@ class _CommandCenterAgendaRow extends StatelessWidget {
           child: Row(
             children: [
               SizedBox(
+                key: Key('command-center-agenda-time-${item.key}'),
                 width: timeWidth,
                 child: _CommandCenterAgendaTimeLabel(
                   label: item.timeLabel,
@@ -776,8 +777,9 @@ class _CommandCenterAgendaRow extends StatelessWidget {
                       item.kind == _CommandCenterAgendaKind.event,
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 5),
               Container(
+                key: Key('command-center-agenda-dot-${item.key}'),
                 width: 7,
                 height: 7,
                 decoration: BoxDecoration(
@@ -785,7 +787,7 @@ class _CommandCenterAgendaRow extends StatelessWidget {
                   shape: BoxShape.circle,
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,

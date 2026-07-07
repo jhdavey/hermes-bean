@@ -306,7 +306,10 @@ class _SubtaskRow extends StatelessWidget {
             ),
             if ((task.dueAt ?? '').trim().isNotEmpty)
               Text(
-                _compactDueTimeLabel(task.dueAt),
+                _compactDueTimeLabel(
+                  task.dueAt,
+                  showDateForOverdue: _taskIsOverdue(task),
+                ),
                 style: TextStyle(color: HeyBeanTheme.muted, fontSize: 11),
               ),
           ],

@@ -180,6 +180,74 @@ void main() {
     expect(note.metadata, isEmpty);
   });
 
+  test('sanitizes replacement characters from Bean messages and notes', () {
+    final message = HermesMessage.fromJson({
+      'id': 1,
+      'role': 'assistant',
+      'content': 'Dinner plan Jul 7\uFFFD\uFFFD\uFFFD?',
+    });
+    final note = HermesNote.fromJson({
+      'id': 2,
+      'title': 'Dinner plan Jul 7\uFFFD\uFFFD\uFFFD?',
+      'body_html': '<p>2026-07-07\uFFFD</p>',
+      'plain_text': '2026-07-07\uFFFD',
+    });
+
+    expect(message.content, 'Dinner plan Jul 7?');
+    expect(note.title, 'Dinner plan Jul 7?');
+    expect(note.bodyHtml, '<p>2026-07-07</p>');
+    expect(note.plainText, '2026-07-07');
+  });
+
+  test('sanitizes replacement characters before saving notes', () async {
+    final requests = <HermesApiRequest>[];
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        requests.add(request);
+        if (request.path == '/notes') {
+          return HermesApiResponse(
+            201,
+            jsonEncode({
+              'data': {'id': 7, 'title': request.body?['title']},
+            }),
+          );
+        }
+        if (request.path == '/notes/7') {
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {'id': 7, 'title': request.body?['title']},
+            }),
+          );
+        }
+        throw StateError(
+          'Unexpected request ${request.method} ${request.path}',
+        );
+      },
+    );
+
+    await client.createNote(
+      title: 'Dinner plan Jul 7\uFFFD\uFFFD\uFFFD?',
+      bodyHtml: '<p>2026-07-07\uFFFD</p>',
+      plainText: '2026-07-07\uFFFD',
+    );
+    await client.updateNote(
+      7,
+      title: 'Updated Jul 7\uFFFD?',
+      bodyHtml: '<p>Updated\uFFFD</p>',
+      plainText: 'Updated\uFFFD',
+    );
+
+    expect(requests[0].body, containsPair('title', 'Dinner plan Jul 7?'));
+    expect(requests[0].body, containsPair('body_html', '<p>2026-07-07</p>'));
+    expect(requests[0].body, containsPair('plain_text', '2026-07-07'));
+    expect(requests[1].body, containsPair('title', 'Updated Jul 7?'));
+    expect(requests[1].body, containsPair('body_html', '<p>Updated</p>'));
+    expect(requests[1].body, containsPair('plain_text', 'Updated'));
+  });
+
   test('requests a password reset link without authenticating', () async {
     final requests = <HermesApiRequest>[];
     final client = HermesApiClient(

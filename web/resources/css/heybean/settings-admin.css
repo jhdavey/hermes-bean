@@ -1,6 +1,6 @@
 .hb-settings-grid {
     display: grid;
-    grid-template-columns: repeat(12, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     align-items: start;
     gap: 16px;
     width: min(100%, 1180px);
@@ -12,22 +12,14 @@
         var(--hb-surface);
 }
 
+.hb-settings-grid > * {
+    grid-column: 1 / -1;
+    width: 100%;
+}
+
 .hb-settings-section {
     display: grid;
     gap: 12px;
-}
-
-.hb-settings-grid > .hb-section-title,
-.hb-settings-grid > .hb-settings-email-row,
-.hb-settings-grid > .hb-success,
-.hb-settings-grid > .hb-error,
-.hb-settings-grid > .hb-settings-profile-card,
-.hb-settings-grid > .hb-settings-workspaces-card,
-.hb-settings-grid > .hb-settings-calendar-card,
-.hb-settings-grid > .hb-billing-settings,
-.hb-settings-grid > .hb-settings-account-card,
-.hb-settings-grid > .hb-settings-legal-row {
-    grid-column: 1 / -1;
 }
 
 .hb-settings-grid > .hb-settings-location-card,
@@ -35,7 +27,7 @@
 .hb-settings-grid > .hb-settings-categories,
 .hb-settings-grid > .hb-settings-notifications-card,
 .hb-settings-grid > .hb-settings-calendar-preferences-card {
-    grid-column: span 6;
+    grid-column: 1 / -1;
 }
 
 .hb-settings-grid > .hb-settings-section,

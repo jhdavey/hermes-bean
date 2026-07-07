@@ -305,11 +305,15 @@ bool _reminderIsCompleted(HermesReminder reminder) {
 }
 
 String _taskSubtitle(HermesTask task) {
-  final dueLabel = _compactDueTimeLabel(task.dueAt);
+  final overdue = _taskIsOverdue(task);
+  final dueLabel = _compactDueTimeLabel(
+    task.dueAt,
+    showDateForOverdue: overdue,
+  );
   final parts = <String>[
     if (_taskIsCompleted(task)) 'Completed',
     if ((task.category ?? '').trim().isNotEmpty) task.category!.trim(),
-    if (_taskIsOverdue(task)) 'overdue',
+    if (overdue) 'overdue',
     if (dueLabel.isNotEmpty) 'Due $dueLabel',
     if (_taskIsRecurring(task)) _recurrenceSummaryFromMetadata(task.metadata),
   ];
@@ -317,11 +321,15 @@ String _taskSubtitle(HermesTask task) {
 }
 
 String _reminderSubtitle(HermesReminder reminder) {
-  final dueLabel = _compactDueTimeLabel(reminder.dueAt);
+  final overdue = _reminderIsOverdue(reminder);
+  final dueLabel = _compactDueTimeLabel(
+    reminder.dueAt,
+    showDateForOverdue: overdue,
+  );
   final parts = <String>[
     _reminderIsCompleted(reminder) ? 'Completed' : 'Pending',
     if ((reminder.category ?? '').trim().isNotEmpty) reminder.category!.trim(),
-    if (_reminderIsOverdue(reminder)) 'overdue',
+    if (overdue) 'overdue',
     if (dueLabel.isNotEmpty) dueLabel else 'No time set',
     if (reminder.calendarEventId != null) 'Linked event',
     if ((reminder.metadata?['recurrence']?.toString() ?? '').isNotEmpty &&
@@ -447,23 +455,45 @@ String _eventTimeRangeShort(HermesCalendarEvent event) {
   return startLabel;
 }
 
-String _compactDueTimeLabel(String? value) {
+String _compactDueTimeLabel(String? value, {bool showDateForOverdue = false}) {
   final trimmed = value?.trim() ?? '';
   if (trimmed.isEmpty) return '';
+  final today = _dateOnly(DateTime.now());
   if (_wireValueLooksDateOnly(trimmed)) {
     final date = _calendarEventStoredDate(trimmed);
     if (date == null) return trimmed;
-    final today = _dateOnly(DateTime.now());
+    return _compactDueDateLabel(
+      date,
+      today: today,
+      useRelativeTodayAndTomorrow: !showDateForOverdue,
+    );
+  }
+  final parsed = _parseCalendarEventDateTime(trimmed);
+  if (parsed == null) return trimmed;
+  if (showDateForOverdue && parsed.isBefore(DateTime.now())) {
+    return _compactDueDateLabel(
+      parsed,
+      today: today,
+      useRelativeTodayAndTomorrow: false,
+    );
+  }
+  return _naturalTimeLabel(parsed);
+}
+
+String _compactDueDateLabel(
+  DateTime date, {
+  required DateTime today,
+  bool useRelativeTodayAndTomorrow = true,
+}) {
+  if (useRelativeTodayAndTomorrow) {
     if (_sameCalendarDay(date, today)) return 'Today';
     if (_sameCalendarDay(date, today.add(const Duration(days: 1)))) {
       return 'Tomorrow';
     }
-    return date.year == today.year
-        ? '${_shortMonthName(date.month)} ${date.day}'
-        : '${_shortMonthName(date.month)} ${date.day}, ${date.year}';
   }
-  final parsed = _parseCalendarEventDateTime(trimmed);
-  return parsed == null ? trimmed : _naturalTimeLabel(parsed);
+  return date.year == today.year
+      ? '${_shortMonthName(date.month)} ${date.day}'
+      : '${_shortMonthName(date.month)} ${date.day}, ${date.year}';
 }
 
 String _compactTimeRangeLabel(DateTime start, DateTime end) {
@@ -566,8 +596,8 @@ List<_CommandCenterAgendaItem> _commandCenterAgendaItems({
             : dateOnly
             ? endOfToday.subtract(const Duration(minutes: 1))
             : due,
-        timeLabel: overdue && dateOnly
-            ? 'Overdue'
+        timeLabel: overdue
+            ? _compactDueTimeLabel(task.dueAt, showDateForOverdue: true)
             : dateOnly
             ? 'Today'
             : _naturalTimeLabel(due),
@@ -597,8 +627,8 @@ List<_CommandCenterAgendaItem> _commandCenterAgendaItems({
             : dateOnly
             ? endOfToday.subtract(const Duration(minutes: 1))
             : due,
-        timeLabel: overdue && dateOnly
-            ? 'Overdue'
+        timeLabel: overdue
+            ? _compactDueTimeLabel(reminder.dueAt, showDateForOverdue: true)
             : dateOnly
             ? 'Today'
             : _naturalTimeLabel(due),
