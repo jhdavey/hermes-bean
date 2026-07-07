@@ -618,7 +618,7 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
   void _handlePointerUp(PointerUpEvent event) {
     if (_activePointer != event.pointer) return;
     _activePointer = null;
-    final wasRecording = _pressRecording;
+    final wasRecording = _pressRecording || widget.listening;
     _pressHoldTimer?.cancel();
     _pressHoldTimer = null;
     if (wasRecording) {
@@ -647,9 +647,11 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
   }
 
   void _endPressRecording() {
-    if (!_pressRecording) return;
-    setState(() => _pressRecording = false);
-    _syncFabAnimations();
+    if (!_pressRecording && !widget.listening) return;
+    if (_pressRecording) {
+      setState(() => _pressRecording = false);
+      _syncFabAnimations();
+    }
     widget.onLongPressEnd();
   }
 

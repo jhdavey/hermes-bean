@@ -5950,6 +5950,26 @@ void main() {
     expect(api.sentMessages, ['Plan today']);
     expect(api.synthesizedSpeechTexts, ['Done — I updated your day.']);
     expect(playedAudio, ['audio/wav:fake-wav']);
+
+    final secondGesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('nav-bean'))),
+    );
+    await tester.pump(const Duration(milliseconds: 650));
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'Plan tomorrow',
+    );
+    await tester.pump();
+
+    await secondGesture.up();
+    await tester.pumpAndSettle();
+
+    expect(api.sentMessages, ['Plan today', 'Plan tomorrow']);
+    expect(api.synthesizedSpeechTexts, [
+      'Done — I updated your day.',
+      'Done — I updated your day.',
+    ]);
+    expect(playedAudio, ['audio/wav:fake-wav', 'audio/wav:fake-wav']);
   });
 
   testWidgets(

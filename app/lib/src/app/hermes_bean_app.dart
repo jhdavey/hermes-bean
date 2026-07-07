@@ -87,6 +87,15 @@ Future<void> _defaultPlayBeanVoiceAudio(
   if (bytes.isEmpty) return;
   final player = AudioPlayer();
   try {
+    await player.setPlayerMode(PlayerMode.lowLatency);
+    await player.setAudioContext(
+      AudioContext(
+        iOS: AudioContextIOS(
+          category: AVAudioSessionCategory.playback,
+          options: const {AVAudioSessionOptions.duckOthers},
+        ),
+      ),
+    );
     await player.play(BytesSource(bytes, mimeType: contentType));
     await player.onPlayerComplete.first.timeout(
       const Duration(seconds: 90),

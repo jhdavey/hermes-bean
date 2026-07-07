@@ -3291,7 +3291,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   Future<void> _finishBeanVoiceDraft() async {
-    if (!_beanVoiceListening) return;
+    final pendingDraft =
+        (_beanVoiceDraft?.trim().isNotEmpty == true
+                ? _beanVoiceDraft ?? ''
+                : _chatInputController.text)
+            .trim();
+    if (!_beanVoiceListening && pendingDraft.isEmpty) return;
     final startFuture = _beanVoiceStartFuture;
     setState(() {
       _chatRunState = 'Thinking…';
@@ -3304,7 +3309,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _cancelBeanWorkStatusClear();
     _cancelBeanWorkStageTimers();
     await _beanSpeech.stop();
-    final dictated = _beanVoiceDraft?.trim() ?? '';
+    final dictated =
+        (_beanVoiceDraft?.trim().isNotEmpty == true
+                ? _beanVoiceDraft ?? ''
+                : pendingDraft)
+            .trim();
     if (!mounted) return;
     setState(() {
       _beanVoiceListening = false;
@@ -3344,7 +3353,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         .where((message) => message.role == 'assistant')
         .map((message) => message.id)
         .toSet();
-    await _sendChat(dictated);
+    final surfacedAssistantText = await _sendChat(dictated);
     if (!mounted) return;
 
     HermesMessage? assistantMessage;
@@ -3355,7 +3364,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       break;
     }
     final text = beanSafeAssistantDisplayContent(
-      assistantMessage?.content ?? '',
+      surfacedAssistantText ?? assistantMessage?.content ?? '',
     ).trim();
     if (text.isEmpty) return;
     await _speakBeanFallbackText(text);
@@ -3384,10 +3393,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     await _sendChat(text, editingMessageId: editingMessageId);
   }
 
-  Future<void> _sendChat(String content, {int? editingMessageId}) async {
+  Future<String?> _sendChat(String content, {int? editingMessageId}) async {
     final trimmed = content.trim();
     var session = _session;
-    if (trimmed.isEmpty || session == null) return;
+    if (trimmed.isEmpty || session == null) return null;
     final runToken = ++_chatRunToken;
     final capabilityQuestion = _beanRequestIsCapabilityQuestion(trimmed);
     final localUserMessageId = _nextLocalMessageId();
@@ -3398,6 +3407,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     var chatPhase = 'preparing message';
     String? clientRequestId;
     Map<String, Object?>? messageMetadataForRecovery;
+    String? surfacedAssistantText;
     _cancelBeanClientRetryTimers();
     setState(() {
       _busy = true;
@@ -3423,13 +3433,13 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     try {
       chatPhase = 'checking realtime text';
       final sentRealtime = await _trySendRealtimeText(trimmed);
-      if (!mounted || runToken != _chatRunToken) return;
+      if (!mounted || runToken != _chatRunToken) return null;
       if (sentRealtime) {
         setState(() {
           _busy = false;
           _chatRunState = 'Bean is responding...';
         });
-        return;
+        return null;
       }
       session = _session ?? session;
       final needsBeanIntroduction = _needsBeanIntroduction;
@@ -3497,7 +3507,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           metadata: messageMetadata,
         );
       }
-      if (!mounted || runToken != _chatRunToken) return;
+      if (!mounted || runToken != _chatRunToken) return null;
       if (result.status == 'queued') {
         setState(() {
           if (result.userMessage != null) {
@@ -3528,7 +3538,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             ),
           );
         }
-        return;
+        return null;
       }
 
       chatPhase = 'refreshing Bean chat results';
@@ -3554,7 +3564,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final refreshedTasks = await widget.apiClient.listTasks().catchError(
         (_) => refreshedSummary.tasks,
       );
-      if (!mounted || runToken != _chatRunToken) return;
+      if (!mounted || runToken != _chatRunToken) return null;
       final completedBeanIntroduction =
           needsBeanIntroduction && !_userNeedsBeanIntroduction(refreshedUser);
       final suppressedAssistantMessage =
@@ -3576,6 +3586,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           );
           if (displayMessage != null) {
             _messages.add(displayMessage);
+            surfacedAssistantText = displayMessage.content;
           } else {
             _chatRunState = 'Working in background';
             _ensureBeanRequestWorkItem(trimmed);
@@ -3596,13 +3607,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             ),
           );
         } else if (result.assistantMessage == null) {
+          const fallbackAssistantText =
+              'Done — I’m refreshing the latest app details now.';
           _messages.add(
             HermesMessage(
               id: _messages.length + 1,
               role: 'assistant',
-              content: 'Done — I’m refreshing the latest app details now.',
+              content: fallbackAssistantText,
             ),
           );
+          surfacedAssistantText = fallbackAssistantText;
         }
         _chatRunState = suppressedAssistantMessage
             ? 'Working in background'
@@ -3660,7 +3674,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         originalContent: trimmed,
       );
       if (recovered) {
-        return;
+        return null;
       }
       debugPrint('Bean chat failed during $chatPhase: $error\n$stackTrace');
       unawaited(
@@ -3673,7 +3687,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           contentLength: trimmed.length,
         ),
       );
-      if (!mounted || runToken != _chatRunToken) return;
+      if (!mounted || runToken != _chatRunToken) return null;
+      final friendlyFailureMessage = beanFriendlyChatFailureMessage(error);
       setState(() {
         _chatRunState = 'Checking…';
         _beanWorkItems = const [];
@@ -3682,14 +3697,19 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           HermesMessage(
             id: _messages.length + 1,
             role: 'assistant',
-            content: beanFriendlyChatFailureMessage(error),
+            content: friendlyFailureMessage,
           ),
         );
         _error = null;
       });
+      surfacedAssistantText = friendlyFailureMessage;
     } finally {
       if (mounted && runToken == _chatRunToken) setState(() => _busy = false);
     }
+    final speechText = beanSafeAssistantDisplayContent(
+      surfacedAssistantText ?? '',
+    ).trim();
+    return speechText.isEmpty ? null : speechText;
   }
 
   Future<bool> _recoverChatFailureFromServer({
