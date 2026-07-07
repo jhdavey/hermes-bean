@@ -91,26 +91,42 @@ Future<void> _defaultPlayBeanVoiceAudio(
     '${Directory.systemTemp.path}/bean-tts-${DateTime.now().microsecondsSinceEpoch}.${_audioExtensionForContentType(cleanContentType)}',
   );
   try {
+    if (Platform.isIOS) {
+      try {
+        await _playBeanVoiceWithNativeIOS(bytes, cleanContentType);
+        return;
+      } catch (nativePlaybackError) {
+        debugPrint('Bean native iOS playback failed: $nativePlaybackError');
+      }
+    }
     await player.setAudioContext(
       AudioContext(
         iOS: AudioContextIOS(
           category: AVAudioSessionCategory.playback,
-          options: const {AVAudioSessionOptions.duckOthers},
+          options: const {},
         ),
       ),
     );
-    try {
-      await _playBeanVoiceSourceAndConfirm(
-        player,
-        BytesSource(bytes, mimeType: cleanContentType),
-      );
-    } catch (memorySourceError) {
-      debugPrint('Bean voice in-memory playback failed: $memorySourceError');
+    if (Platform.isIOS) {
       await audioFile.writeAsBytes(bytes, flush: true);
       await _playBeanVoiceSourceAndConfirm(
         player,
         DeviceFileSource(audioFile.path, mimeType: cleanContentType),
       );
+    } else {
+      try {
+        await _playBeanVoiceSourceAndConfirm(
+          player,
+          BytesSource(bytes, mimeType: cleanContentType),
+        );
+      } catch (memorySourceError) {
+        debugPrint('Bean voice in-memory playback failed: $memorySourceError');
+        await audioFile.writeAsBytes(bytes, flush: true);
+        await _playBeanVoiceSourceAndConfirm(
+          player,
+          DeviceFileSource(audioFile.path, mimeType: cleanContentType),
+        );
+      }
     }
     await player.onPlayerComplete.first.timeout(
       const Duration(seconds: 90),
@@ -122,6 +138,16 @@ Future<void> _defaultPlayBeanVoiceAudio(
       await audioFile.delete();
     }
   }
+}
+
+Future<void> _playBeanVoiceWithNativeIOS(
+  Uint8List bytes,
+  String contentType,
+) async {
+  await _heyBeanPlatformChannel.invokeMethod<Map<Object?, Object?>>(
+    'playAudioBytes',
+    {'bytes': bytes, 'contentType': contentType},
+  );
 }
 
 Future<void> _playBeanVoiceSourceAndConfirm(

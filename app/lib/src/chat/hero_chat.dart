@@ -113,37 +113,40 @@ class _HeroChatCardState extends State<_HeroChatCard> {
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    return SingleChildScrollView(
-                      key: const Key('chat-message-list'),
-                      controller: _scrollController,
-                      padding: const EdgeInsets.only(bottom: 8, top: 6),
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(
-                          minWidth: constraints.maxWidth,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            for (final message in widget.messages)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 6),
-                                child: _MessageBubble(
-                                  sender: message.role == 'user'
-                                      ? 'You'
-                                      : 'Bean',
-                                  message: message.content ?? '',
-                                  alignRight: message.role == 'user',
-                                  onCopy: message.role == 'user'
-                                      ? () => unawaited(
-                                          widget.onMessageCopied(message),
-                                        )
-                                      : null,
-                                  onEdit: message.role == 'user' && !widget.busy
-                                      ? () => widget.onMessageEdited(message)
-                                      : null,
+                    return _ChatMessageTopFade(
+                      child: SingleChildScrollView(
+                        key: const Key('chat-message-list'),
+                        controller: _scrollController,
+                        padding: const EdgeInsets.only(bottom: 8, top: 6),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minWidth: constraints.maxWidth,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              for (final message in widget.messages)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 5),
+                                  child: _MessageBubble(
+                                    sender: message.role == 'user'
+                                        ? 'You'
+                                        : 'Bean',
+                                    message: message.content ?? '',
+                                    alignRight: message.role == 'user',
+                                    onCopy: message.role == 'user'
+                                        ? () => unawaited(
+                                            widget.onMessageCopied(message),
+                                          )
+                                        : null,
+                                    onEdit:
+                                        message.role == 'user' && !widget.busy
+                                        ? () => widget.onMessageEdited(message)
+                                        : null,
+                                  ),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     );
@@ -156,6 +159,25 @@ class _HeroChatCardState extends State<_HeroChatCard> {
       ),
     );
   }
+}
+
+class _ChatMessageTopFade extends StatelessWidget {
+  const _ChatMessageTopFade({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ShaderMask(
+    key: const Key('chat-message-top-fade'),
+    blendMode: BlendMode.dstIn,
+    shaderCallback: (bounds) => const LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [Colors.transparent, Colors.black, Colors.black],
+      stops: [0, .18, 1],
+    ).createShader(bounds),
+    child: child,
+  );
 }
 
 class _DockedBeanChatComposer extends StatefulWidget {

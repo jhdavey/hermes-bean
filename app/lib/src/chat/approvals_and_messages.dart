@@ -335,12 +335,12 @@ class _MessageBubble extends StatelessWidget {
         width: bubbleWidth,
         child: Container(
           key: alignRight ? const Key('user-message-bubble') : null,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
           decoration: BoxDecoration(
             color: alignRight
                 ? HeyBeanTheme.accent.withValues(alpha: .08)
                 : _quietMutedSurfaceColor(alpha: .54),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: _quietBorderColor(alpha: .38)),
           ),
           child: Column(
@@ -354,6 +354,8 @@ class _MessageBubble extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: HeyBeanTheme.muted,
+                        fontSize: 13,
+                        height: 1.12,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -433,8 +435,15 @@ class _MessageBubble extends StatelessWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 4),
-              Text(message),
+              const SizedBox(height: 2),
+              Text(
+                message,
+                style: TextStyle(
+                  color: HeyBeanTheme.text,
+                  fontSize: 15,
+                  height: 1.28,
+                ),
+              ),
             ],
           ),
         ),

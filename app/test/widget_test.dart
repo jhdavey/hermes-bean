@@ -5221,6 +5221,29 @@ void main() {
     expect(find.byKey(const Key('command-center-title')), findsNothing);
     expect(find.byKey(const Key('command-center-chat-panel')), findsOneWidget);
     expect(find.byKey(const Key('chat-view')), findsOneWidget);
+    final commandCenterHeight = tester
+        .getSize(find.byKey(const Key('command-center-home')))
+        .height;
+    final chatPanelHeight = tester
+        .getSize(find.byKey(const Key('command-center-chat-panel')))
+        .height;
+    final glanceHeight = tester
+        .getSize(find.byKey(const Key('command-center-glance-list')))
+        .height;
+    final resizerHeight = tester
+        .getSize(find.byKey(const Key('command-center-chat-resizer')))
+        .height;
+    final agendaHeight = tester
+        .getSize(find.byKey(const Key('command-center-agenda-stack')))
+        .height;
+    final sharedHeight =
+        agendaHeight + glanceHeight + resizerHeight + chatPanelHeight;
+    final expectedChatHeight = math.min(
+      math.max(128.0, sharedHeight * .40),
+      math.max(0.0, sharedHeight - 150.0 - glanceHeight),
+    );
+    expect(commandCenterHeight, greaterThanOrEqualTo(sharedHeight));
+    expect(chatPanelHeight, closeTo(expectedChatHeight, 1));
 
     final task = find.byKey(const Key('command-center-agenda-task-501'));
     final event = find.byKey(const Key('command-center-agenda-event-503'));
@@ -5981,6 +6004,45 @@ void main() {
     expect(playedAudio, ['audio/wav:fake-wav']);
   });
 
+  testWidgets('dictated queued voice replies play final assistant TTS', (
+    WidgetTester tester,
+  ) async {
+    final api = _DictatedVoiceQueuedRunFakeHermesApiClient();
+    final realtime = _FakeBeanRealtimeConversation(api);
+    final playedAudio = <String>[];
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        realtimeConversation: realtime,
+        playBeanVoiceAudio: (bytes, {contentType = 'audio/wav'}) async {
+          playedAudio.add('$contentType:${String.fromCharCodes(bytes)}');
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('nav-bean'))),
+    );
+    await tester.pump(const Duration(milliseconds: 650));
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'What is on my list today?',
+    );
+    await tester.pump();
+
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 250));
+    realtime.emitRunQueued(5150, 'What is on my list today?');
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+
+    expect(find.text('You have two tasks today.'), findsOneWidget);
+    expect(api.synthesizedSpeechTexts, ['You have two tasks today.']);
+    expect(playedAudio, ['audio/wav:fake-wav']);
+  });
+
   testWidgets('dictated voice falls back to chat and TTS when realtime fails', (
     WidgetTester tester,
   ) async {
@@ -6005,7 +6067,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 650));
     await tester.enterText(
       find.byKey(const Key('chat-input')),
-      'Hey Ben can you hear me right now',
+      'Hey Bean add a task called fallback check',
     );
     await tester.pump();
     await gesture.up();
@@ -6013,7 +6075,7 @@ void main() {
 
     expect(realtime.started, isTrue);
     expect(realtime.startMicrophoneValues, [false]);
-    expect(api.sentMessages, ['Hey Ben can you hear me right now']);
+    expect(api.sentMessages, ['Hey Bean add a task called fallback check']);
     expect(
       find.textContaining('Voice is not available right now'),
       findsNothing,
@@ -7835,6 +7897,7 @@ void main() {
       await tester.tap(find.byKey(const Key('nav-bean')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('chat-view')), findsOneWidget);
+      expect(find.byKey(const Key('chat-message-top-fade')), findsOneWidget);
       expect(find.byKey(const Key('signed-in-refresh-scroll')), findsNothing);
       expect(find.byKey(const Key('quick-plan-today')), findsNothing);
       final chatTopBeforeDrag = tester.getTopLeft(
@@ -11991,6 +12054,31 @@ class _DelayedQueueFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   }
 }
 
+class _DictatedVoiceQueuedRunFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<HermesAssistantRun> getAssistantRun(int runId) async =>
+      const HermesAssistantRun(
+        id: 5150,
+        status: 'completed',
+        source: 'flutter',
+        userMessageId: 5151,
+        assistantMessage: HermesMessage(
+          id: 5152,
+          role: 'assistant',
+          content: 'You have two tasks today.',
+        ),
+      );
+
+  @override
+  Future<List<HermesActivityEvent>> pollActivityEvents(
+    int sessionId, {
+    int? after,
+    int waitSeconds = 0,
+    int limit = 100,
+  }) async => const [];
+}
+
 class _SessionRecoveryQueuedRunFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
   static const _userMessage = HermesMessage(
@@ -15999,6 +16087,10 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
 
   void emitAudioOutput(String eventType) {
     onAudioOutput?.call(eventType, const {});
+  }
+
+  void emitRunQueued(int runId, String userContent) {
+    onRunQueued?.call(runId, userContent);
   }
 
   void emitSessionEnded(String reason) {

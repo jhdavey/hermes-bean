@@ -106,6 +106,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   Timer? _beanRealtimeTtsFallbackTimer;
   String _lastRealtimeTtsFallbackText = '';
   bool _forceRealtimeTtsFallbackForNextAssistant = false;
+  int? _dictatedVoiceResponseRunToken;
+  bool _speakQueuedAssistantForDictatedVoice = false;
+  String _lastDictatedVoiceQueuedTtsText = '';
   final stt.SpeechToText _beanSpeech = stt.SpeechToText();
   bool _beanSpeechReady = false;
   int _localMessageSequence = -1;
@@ -1325,6 +1328,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _activeAssistantRunId = runId;
           _chatRunState = 'working...';
           _beginBeanWorkEventContext(freshRequest: true);
+          if (_dictatedVoiceResponseRunToken == _chatRunToken) {
+            _speakQueuedAssistantForDictatedVoice = true;
+          }
         });
         unawaited(_pollQueuedRun(runId, _chatRunToken));
         unawaited(_pollDashboardChanges());
@@ -1365,11 +1371,13 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final clean = beanSafeAssistantDisplayContent(text).trim();
     if (clean.isEmpty) return;
     _beanRealtimeTtsFallbackTimer?.cancel();
+    final forceFallback = _forceRealtimeTtsFallbackForNextAssistant;
     _beanRealtimeTtsFallbackTimer = Timer(
-      const Duration(milliseconds: 700),
+      forceFallback ? Duration.zero : const Duration(milliseconds: 700),
       () {
-        if (!mounted || !_realtimeConversation.active) return;
+        if (!mounted) return;
         final forceFallback = _forceRealtimeTtsFallbackForNextAssistant;
+        if (!forceFallback && !_realtimeConversation.active) return;
         if (!forceFallback && _realtimeConversation.hasRemoteAudioOutput) {
           return;
         }
@@ -2867,7 +2875,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                 },
               ),
             )
-            .timeout(const Duration(seconds: 5));
+            .timeout(const Duration(milliseconds: 1400));
       }
       if (!mounted || runToken != _chatRunToken) return true;
 
@@ -2890,13 +2898,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
       unawaited(_realtimeConversation.refreshDashboardContext());
       _forceRealtimeTtsFallbackForNextAssistant = true;
+      _dictatedVoiceResponseRunToken = runToken;
+      _speakQueuedAssistantForDictatedVoice = false;
+      _lastDictatedVoiceQueuedTtsText = '';
       await _realtimeConversation
           .sendText(
             trimmed,
             audioResponse: false,
             endConversationAfterResponse: true,
           )
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(milliseconds: 1200));
       if (!mounted || runToken != _chatRunToken) return true;
       setState(() {
         _busy = false;
@@ -2907,6 +2918,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     } catch (error) {
       debugPrint('Dictated Bean realtime voice failed: $error');
       _forceRealtimeTtsFallbackForNextAssistant = false;
+      _dictatedVoiceResponseRunToken = null;
+      _speakQueuedAssistantForDictatedVoice = false;
       if (mounted && runToken == _chatRunToken) {
         setState(() {
           _busy = false;
@@ -2973,6 +2986,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     var session = _session;
     if (trimmed.isEmpty || session == null) return null;
     final runToken = ++_chatRunToken;
+    _dictatedVoiceResponseRunToken = null;
+    _speakQueuedAssistantForDictatedVoice = false;
     final capabilityQuestion = _beanRequestIsCapabilityQuestion(trimmed);
     final localUserMessageId = _nextLocalMessageId();
     final editingServerMessageId =
@@ -3793,6 +3808,7 @@ ${_truncateDiagnostic(stack, 2200)}
                     .catchError((_) => const <HermesActivityEvent>[]);
           await _refreshSignedInViews(showLoading: false);
           if (!mounted || runToken != _chatRunToken) return;
+          HermesMessage? voiceReplyMessage;
           setState(() {
             if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
             if (finalEvents.isNotEmpty) {
@@ -3816,12 +3832,19 @@ ${_truncateDiagnostic(stack, 2200)}
               final displayMessage = _displayableChatMessage(message);
               if (displayMessage != null) {
                 _messages.add(displayMessage);
+                voiceReplyMessage = displayMessage;
               }
+            } else if (message != null) {
+              voiceReplyMessage = _displayableChatMessage(message);
             } else if (run.status == 'failed') {
               _chatRunState = 'Ready';
             }
           });
           _refreshDashboardAfterBeanMutationEvents(finalEvents);
+          _speakQueuedAssistantResultForDictatedVoice(
+            voiceReplyMessage,
+            runToken: runToken,
+          );
           return;
         }
         if (attempt > 0 &&
@@ -3875,6 +3898,12 @@ ${_truncateDiagnostic(stack, 2200)}
           .skip(userIndex + 1)
           .any((message) => message.role == 'assistant');
       if (!hasAssistantAfter) return false;
+      HermesMessage? recoveredAssistantMessage;
+      for (final message in messages.skip(userIndex + 1)) {
+        if (message.role != 'assistant') continue;
+        recoveredAssistantMessage = _displayableChatMessage(message);
+        break;
+      }
 
       setState(() {
         if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
@@ -3885,12 +3914,37 @@ ${_truncateDiagnostic(stack, 2200)}
         _error = null;
         _completeActiveBeanWorkItems();
       });
+      _speakQueuedAssistantResultForDictatedVoice(
+        recoveredAssistantMessage,
+        runToken: runToken,
+      );
       unawaited(_refreshSignedInViews(showLoading: false));
 
       return true;
     } catch (_) {
       return false;
     }
+  }
+
+  void _speakQueuedAssistantResultForDictatedVoice(
+    HermesMessage? message, {
+    required int runToken,
+  }) {
+    if (!_speakQueuedAssistantForDictatedVoice ||
+        _dictatedVoiceResponseRunToken != runToken) {
+      return;
+    }
+    _speakQueuedAssistantForDictatedVoice = false;
+    _dictatedVoiceResponseRunToken = null;
+    final text = beanSafeAssistantDisplayContent(message?.content ?? '').trim();
+    if (text.isEmpty) return;
+
+    if (text == _lastRealtimeTtsFallbackText ||
+        text == _lastDictatedVoiceQueuedTtsText) {
+      return;
+    }
+    _lastDictatedVoiceQueuedTtsText = text;
+    unawaited(_speakBeanFallbackText(text));
   }
 
   void _refreshDashboardAfterBeanMutationEvents(
