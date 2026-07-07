@@ -123,41 +123,7 @@ class HermesToolRuntimeServiceTest extends TestCase
 
     public function test_capability_question_does_not_execute_write_tool_call(): void
     {
-        Http::fakeSequence()
-            ->push([
-                'id' => 'chatcmpl-capability-write-attempt',
-                'model' => 'gpt-test-tools',
-                'choices' => [[
-                    'finish_reason' => 'tool_calls',
-                    'message' => [
-                        'role' => 'assistant',
-                        'content' => null,
-                        'tool_calls' => [[
-                            'id' => 'call_create_calendar_event',
-                            'type' => 'function',
-                            'function' => [
-                                'name' => 'create_calendar_event',
-                                'arguments' => json_encode([
-                                    'title' => 'New calendar event',
-                                    'starts_at' => now()->addHour()->toIso8601String(),
-                                    'ends_at' => now()->addHours(2)->toIso8601String(),
-                                ], JSON_THROW_ON_ERROR),
-                            ],
-                        ]],
-                    ],
-                ]],
-            ], 200)
-            ->push([
-                'id' => 'chatcmpl-capability-answer',
-                'model' => 'gpt-test-tools',
-                'choices' => [[
-                    'finish_reason' => 'stop',
-                    'message' => [
-                        'role' => 'assistant',
-                        'content' => 'Yes - I can create calendar events when you give me the details.',
-                    ],
-                ]],
-            ], 200);
+        Http::fake();
 
         $token = $this->apiToken('tool-capability-question@example.com');
         $user = User::where('email', 'tool-capability-question@example.com')->firstOrFail();
@@ -166,27 +132,65 @@ class HermesToolRuntimeServiceTest extends TestCase
             ->json('data.id');
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Can you create calendar events?',
+            'content' => 'KPI-001: Can you create calendar events?',
             'metadata' => [
                 'source' => 'web',
             ],
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'Yes - I can create calendar events when you give me the details.');
+            ->assertJsonPath('data.assistant_message.content', 'Yes - I can create calendar events when you give me the details.')
+            ->assertJsonFragment(['read_fast_path' => 'capability_question']);
 
         $this->assertDatabaseMissing('calendar_events', [
             'user_id' => $user->id,
             'title' => 'New calendar event',
         ]);
 
-        Http::assertSentCount(2);
-        Http::assertSent(function ($request): bool {
-            $messages = collect($request->data()['messages'] ?? []);
+        Http::assertNothingSent();
+    }
 
-            return $messages->contains(fn (mixed $message): bool => is_array($message)
-                && ($message['role'] ?? null) === 'system'
-                && str_contains((string) ($message['content'] ?? ''), 'not to do it'));
-        });
+    public function test_common_general_bean_questions_use_local_fast_path(): void
+    {
+        Http::fake();
+
+        $token = $this->apiToken('tool-general-fast-path@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $expectations = [
+            [
+                'content' => 'What can you help me manage in HeyBean?',
+                'path' => 'heybean_help',
+                'contains' => 'calendar, tasks, reminders, notes',
+            ],
+            [
+                'content' => 'What is the difference between a task and a reminder?',
+                'path' => 'task_reminder_difference',
+                'contains' => 'A task is something to finish.',
+            ],
+            [
+                'content' => 'How should I think about using Bean for my day?',
+                'path' => 'using_bean_for_day',
+                'contains' => 'Use Bean for quick changes and day context',
+            ],
+        ];
+
+        foreach ($expectations as $expectation) {
+            $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+                'content' => $expectation['content'],
+                'metadata' => ['source' => 'web'],
+            ])->assertCreated()
+                ->assertJsonPath('data.status', 'completed')
+                ->assertJsonFragment(['read_fast_path' => $expectation['path']]);
+
+            $this->assertStringContainsString(
+                $expectation['contains'],
+                (string) $response->json('data.assistant_message.content')
+            );
+        }
+
+        Http::assertNothingSent();
     }
 
     public function test_stale_prior_completion_claim_cannot_skip_requested_app_write(): void

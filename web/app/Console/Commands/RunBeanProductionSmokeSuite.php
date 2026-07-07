@@ -29,7 +29,7 @@ class RunBeanProductionSmokeSuite extends Command
         {--email=bean-prod-smoke-suite@example.com : Dedicated production smoke user email}
         {--count=100 : Number of prompts to run}
         {--timeout=45 : Seconds to wait for each queued run}
-        {--scenario=single : Smoke scenario to run: single or followups}
+        {--scenario=single : Smoke scenario to run: single, followups, or kpi}
         {--cleanup : Delete created smoke resources after the run}
         {--no-reset : Keep existing data in the default smoke account before running}
         {--suite-id= : Optional suite id for traceability}';
@@ -63,9 +63,11 @@ class RunBeanProductionSmokeSuite extends Command
             $this->resetSmokeUserData($user);
         }
 
-        if ((string) $this->option('scenario') === 'followups') {
+        $scenario = (string) $this->option('scenario');
+        if ($scenario === 'followups') {
             return $this->runFollowupSuite($user, $workspace, $runs, $count, $timeout, $suiteId);
         }
+        $prompts = $scenario === 'kpi' ? $this->kpiPrompts() : $this->prompts();
 
         $this->info("Running {$count} Bean production smoke requests as {$user->email} in workspace {$workspace->id}.");
         $this->line("Suite: {$suiteId}");
@@ -73,7 +75,7 @@ class RunBeanProductionSmokeSuite extends Command
         $results = [];
         $startedAt = microtime(true);
 
-        foreach (array_slice($this->prompts(), 0, $count) as $index => $prompt) {
+        foreach (array_slice($prompts, 0, $count) as $index => $prompt) {
             $case = $index + 1;
             $session = ConversationSession::create([
                 'user_id' => $user->id,
@@ -90,6 +92,7 @@ class RunBeanProductionSmokeSuite extends Command
                 'last_activity_at' => now(),
             ]);
 
+            $queueStartedAt = microtime(true);
             $queued = $runs->queueRun($session, $prompt, [
                 'source' => 'production_smoke',
                 'prod_smoke' => true,
@@ -103,6 +106,7 @@ class RunBeanProductionSmokeSuite extends Command
                     'current_utc_time' => now('UTC')->toIso8601String(),
                 ],
             ], 'production_smoke');
+            $queueLatencyMs = $this->elapsedMs($queueStartedAt);
 
             $run = $this->waitForRun($queued['run'], $timeout);
             $assistant = $run->assistantMessage?->content ?? '';
@@ -113,16 +117,26 @@ class RunBeanProductionSmokeSuite extends Command
                 $this->assistantQualityFailures($prompt, $assistant),
                 $this->workItemQualityFailures($run),
             )));
-            $failed = $run->status !== 'completed' || $this->containsFailureCopy($assistant) || $qualityFailures !== [];
+            $benchmark = $this->benchmarkMetricsForRun($prompt, $run, $queueLatencyMs, $qualityFailures);
+            $failed = $run->status !== 'completed'
+                || $this->containsFailureCopy($assistant)
+                || $qualityFailures !== []
+                || ! $benchmark['meets_kpi'];
 
             $results[] = [
                 'case' => $case,
                 'run_id' => $run->id,
                 'session_id' => $session->id,
                 'status' => $run->status,
+                'benchmark_class' => $benchmark['class'],
+                'first_response_ms' => $benchmark['first_response_ms'],
                 'duration_ms' => $durationMs,
+                'completion_target_ms' => $benchmark['completion_target_ms'],
+                'first_planned_work_ms' => $benchmark['first_planned_work_ms'],
+                'dashboard_freshness_ms' => $benchmark['dashboard_freshness_ms'],
                 'failed' => $failed,
                 'quality_failures' => $qualityFailures,
+                'kpi_failures' => $benchmark['failures'],
                 'prompt' => $prompt,
                 'assistant' => str($assistant)->squish()->limit(220)->toString(),
                 'error' => $run->error,
@@ -135,19 +149,22 @@ class RunBeanProductionSmokeSuite extends Command
                 $failed ? '<fg=red>FAIL</>' : '<fg=green>PASS</>',
                 $run->id,
                 $durationMs ?? '?',
-                str(($qualityFailures === [] ? '' : '['.implode(', ', $qualityFailures).'] ').($assistant ?: $run->error ?: 'No response'))->squish()->limit(150)->toString(),
+                str((($qualityFailures === [] && $benchmark['failures'] === []) ? '' : '['.implode(', ', array_merge($qualityFailures, $benchmark['failures'])).'] ').($assistant ?: $run->error ?: 'No response'))->squish()->limit(150)->toString(),
             ));
         }
 
         $failed = collect($results)->where('failed', true)->values();
         $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
+        $kpis = $this->kpiSummary($results);
 
         $summary = [
             'suite_id' => $suiteId,
+            'scenario' => $scenario,
             'count' => count($results),
             'passed' => count($results) - $failed->count(),
             'failed' => $failed->count(),
             'elapsed_ms' => $elapsedMs,
+            'kpis' => $kpis,
             'results' => $results,
         ];
 
@@ -159,7 +176,7 @@ class RunBeanProductionSmokeSuite extends Command
             $this->warn('Cleaned up resources for suite '.$suiteId.'.');
         }
 
-        return $failed->isEmpty() ? self::SUCCESS : self::FAILURE;
+        return $failed->isEmpty() && $this->kpiSummaryMeetsTargets($kpis) ? self::SUCCESS : self::FAILURE;
     }
 
     private function runFollowupSuite(User $user, Workspace $workspace, AssistantRunService $runs, int $count, int $timeout, string $suiteId): int
@@ -412,7 +429,7 @@ class RunBeanProductionSmokeSuite extends Command
 
     private function promptLooksLikeWriteRequest(string $promptText): bool
     {
-        if ($this->promptLooksLikeRequestHistoryRecall($promptText)) {
+        if ($this->promptLooksLikeRequestHistoryRecall($promptText) || $this->promptLooksLikeCapabilityQuestion($promptText)) {
             return false;
         }
 
@@ -816,6 +833,318 @@ class RunBeanProductionSmokeSuite extends Command
         }
     }
 
+    private function elapsedMs(float $startedAt): int
+    {
+        return (int) round((microtime(true) - $startedAt) * 1000);
+    }
+
+    /**
+     * @param  list<string>  $qualityFailures
+     * @return array{
+     *     class:string,
+     *     first_response_ms:int,
+     *     completion_target_ms:int,
+     *     first_planned_work_ms:int|null,
+     *     dashboard_freshness_ms:int|null,
+     *     failures:list<string>,
+     *     meets_kpi:bool
+     * }
+     */
+    private function benchmarkMetricsForRun(string $prompt, AssistantRun $run, int $firstResponseMs, array $qualityFailures): array
+    {
+        $class = $this->promptBenchmarkClass($prompt);
+        $completionTargetMs = $class === 'general_question' ? 3000 : 10000;
+        $durationMs = $run->created_at && $run->updated_at
+            ? (int) $run->created_at->diffInMilliseconds($run->updated_at, true)
+            : null;
+        $firstPlannedWorkMs = $this->firstPlannedWorkMs($run);
+        $dashboardFreshnessMs = $this->dashboardFreshnessMs($run);
+        $progressFailures = $this->progressTransparencyFailures($run, $class);
+        $failures = [];
+
+        if ($firstResponseMs > 3000) {
+            $failures[] = 'first_response_over_3s';
+        }
+
+        if ($durationMs === null || $durationMs > $completionTargetMs) {
+            $failures[] = 'completion_over_target';
+        }
+
+        if ($dashboardFreshnessMs !== null && $dashboardFreshnessMs > 1000) {
+            $failures[] = 'dashboard_freshness_over_1s';
+        }
+
+        $failures = array_values(array_unique(array_merge($failures, $progressFailures)));
+
+        return [
+            'class' => $class,
+            'first_response_ms' => $firstResponseMs,
+            'completion_target_ms' => $completionTargetMs,
+            'first_planned_work_ms' => $firstPlannedWorkMs,
+            'dashboard_freshness_ms' => $dashboardFreshnessMs,
+            'failures' => $failures,
+            'meets_kpi' => $failures === [] && $qualityFailures === [],
+        ];
+    }
+
+    private function promptBenchmarkClass(string $prompt): string
+    {
+        $promptText = str($prompt)->lower()->squish()->toString();
+
+        if ($this->promptLooksLikeCapabilityQuestion($promptText)) {
+            return 'general_question';
+        }
+
+        if ($this->promptLooksLikeWriteRequest($promptText)) {
+            return $this->promptLooksMultiStep($promptText) ? 'complex_crud' : 'simple_crud';
+        }
+
+        if ($this->promptLooksLikeExternalLookup($promptText) || $this->promptLooksLikePlacesLookup($promptText)) {
+            return 'external_lookup';
+        }
+
+        if ($this->promptLooksLikeDayContextRequest($promptText) || $this->promptLooksLikeRequestHistoryRecall($promptText) || $this->promptLooksLikeMemoryRecall($promptText)) {
+            return 'app_context_lookup';
+        }
+
+        return 'general_question';
+    }
+
+    private function promptLooksLikeCapabilityQuestion(string $promptText): bool
+    {
+        $text = preg_replace('/^kpi-\d{3}:\s*|^req-\d{3}:\s*/u', '', $promptText) ?: $promptText;
+        $text = str(str_replace('’', "'", $text))
+            ->lower()
+            ->replaceMatches('/[^\pL\pN\s\'?.-]+/u', ' ')
+            ->squish()
+            ->toString();
+
+        if ($text === '') {
+            return false;
+        }
+
+        if (
+            ! preg_match('/\?$/u', $text)
+            && ! preg_match('/^(can|could|would|will|do|does|are|is)\b/u', $text)
+        ) {
+            return false;
+        }
+
+        if (preg_match('/\b(that says|saying|called|titled|named|at\s+\d|on\s+\d|tomorrow|today|tonight|this\s+(morning|afternoon|evening|week|month)|next\s+\w+|from\s+\d|to\s+\d|\d{1,2}:\d{2}|for\s+(tomorrow|today|tonight|next|monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/u', $text)) {
+            return false;
+        }
+
+        return (bool) preg_match(
+            '/^(can|could|would|will|do|does|are|is)\s+(you|bean)\b.{0,120}\b(create|add|make|schedule|book|set|update|change|move|reschedule|delete|remove|cancel|complete|mark|remember|forget|look up|find|search|sync|manage|handle|help)\b.{0,80}\??$/u',
+            $text
+        );
+    }
+
+    private function promptLooksMultiStep(string $promptText): bool
+    {
+        return substr_count($promptText, ' and ') >= 2
+            || str_contains($promptText, ' then ')
+            || str_contains($promptText, ' after that ')
+            || str_contains($promptText, ' as well ')
+            || str_contains($promptText, 'also ')
+            || str_contains($promptText, ',');
+    }
+
+    private function promptLooksLikeExternalLookup(string $promptText): bool
+    {
+        return (bool) preg_match('/\b(weather|forecast|traffic|news|headline|headlines|flight|flights|hotel|hotels|airfare|ticket|tickets|stock|stocks|market|markets|sports|score|scores|nearest|closest|nearby|current|right now|latest)\b/u', $promptText);
+    }
+
+    private function firstPlannedWorkMs(AssistantRun $run): ?int
+    {
+        if (! $run->created_at) {
+            return null;
+        }
+
+        $messageId = (int) $run->user_message_id;
+        $event = ActivityEvent::query()
+            ->where('conversation_session_id', $run->conversation_session_id)
+            ->where('event_type', 'assistant.work_item.planned')
+            ->when($messageId > 0, function ($query) use ($messageId): void {
+                $query->where(function ($query) use ($messageId): void {
+                    $query->where('payload->message_id', $messageId)
+                        ->orWhere('payload->user_message_id', $messageId);
+                });
+            })
+            ->orderBy('id')
+            ->first();
+
+        return $event?->created_at
+            ? (int) $run->created_at->diffInMilliseconds($event->created_at, true)
+            : null;
+    }
+
+    private function dashboardFreshnessMs(AssistantRun $run): ?int
+    {
+        $events = $this->dashboardMutationEventsForRun($run);
+        if ($events->isEmpty()) {
+            return null;
+        }
+
+        $worstMs = 0;
+        foreach ($events as $event) {
+            $visibleAt = $this->dashboardResourceVisibleAt($event) ?? $event->created_at;
+            if (! $event->created_at || ! $visibleAt) {
+                continue;
+            }
+            $worstMs = max($worstMs, max(0, (int) $event->created_at->diffInMilliseconds($visibleAt, false)));
+        }
+
+        return $worstMs;
+    }
+
+    private function dashboardMutationEventsForRun(AssistantRun $run)
+    {
+        $messageId = (int) $run->user_message_id;
+
+        return ActivityEvent::query()
+            ->where('conversation_session_id', $run->conversation_session_id)
+            ->whereIn('status', ['succeeded', 'completed', 'recorded'])
+            ->where(function ($query): void {
+                $query->where('event_type', 'like', 'assistant.task.%')
+                    ->orWhere('event_type', 'like', 'assistant.reminder.%')
+                    ->orWhere('event_type', 'like', 'assistant.calendar_event.%')
+                    ->orWhere('event_type', 'like', 'assistant.note.%')
+                    ->orWhere('event_type', 'like', 'assistant.note_folder.%')
+                    ->orWhere('event_type', 'like', 'assistant.memory.%');
+            })
+            ->when($messageId > 0, function ($query) use ($messageId): void {
+                $query->where(function ($query) use ($messageId): void {
+                    $query->where('payload->source_message_id', $messageId)
+                        ->orWhere('payload->message_id', $messageId)
+                        ->orWhere('payload->user_message_id', $messageId)
+                        ->orWhere('payload->request_message_id', $messageId)
+                        ->orWhere('payload->work_item_id', 'like', 'crud-plan-'.$messageId.'-%');
+                });
+            })
+            ->orderBy('id')
+            ->get();
+    }
+
+    private function dashboardResourceVisibleAt(ActivityEvent $event): mixed
+    {
+        $payload = is_array($event->payload) ? $event->payload : [];
+        $type = (string) $event->event_type;
+        $id = data_get($payload, 'task_id')
+            ?? data_get($payload, 'reminder_id')
+            ?? data_get($payload, 'calendar_event_id')
+            ?? data_get($payload, 'event_id')
+            ?? data_get($payload, 'note_id')
+            ?? data_get($payload, 'memory_item_id');
+
+        if (! $id) {
+            return $event->created_at;
+        }
+
+        $model = match (true) {
+            str_contains($type, '.task.') => Task::find($id),
+            str_contains($type, '.reminder.') => Reminder::find($id),
+            str_contains($type, '.calendar_event.') => CalendarEvent::find($id),
+            str_contains($type, '.note.') => Note::withTrashed()->find($id),
+            str_contains($type, '.memory.') => MemoryItem::withTrashed()->find($id),
+            default => null,
+        };
+
+        return $model?->updated_at ?? $model?->created_at ?? $event->created_at;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function progressTransparencyFailures(AssistantRun $run, string $class): array
+    {
+        if (in_array($class, ['simple_crud', 'complex_crud'], true)) {
+            return $this->workItemQualityFailures($run);
+        }
+
+        if (in_array($class, ['external_lookup', 'app_context_lookup'], true)) {
+            $messageId = (int) $run->user_message_id;
+            $hasRuntimeProgress = ActivityEvent::query()
+                ->where('conversation_session_id', $run->conversation_session_id)
+                ->when($messageId > 0, function ($query) use ($messageId): void {
+                    $query->where(function ($query) use ($messageId): void {
+                        $query->where('payload->message_id', $messageId)
+                            ->orWhereNull('payload->message_id');
+                    });
+                })
+                ->whereIn('event_type', ['runtime.run_queued', 'runtime.tool_model_started', 'runtime.tool_model_completed', 'runtime.message_completed'])
+                ->exists();
+
+            return $hasRuntimeProgress ? [] : ['runtime_progress_missing'];
+        }
+
+        return [];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $results
+     * @return array<string, mixed>
+     */
+    private function kpiSummary(array $results): array
+    {
+        $count = max(1, count($results));
+        $dashboardApplicable = collect($results)->filter(fn (array $result): bool => $result['dashboard_freshness_ms'] !== null)->values();
+
+        return [
+            'targets' => [
+                'first_meaningful_response_under_ms' => 3000,
+                'completion_under_ms' => ['general_question' => 3000, 'external_lookup_or_complex_action' => 10000],
+                'action_success_without_user_correction_rate' => 0.98,
+                'progress_transparency_accuracy_rate' => 0.98,
+                'dashboard_freshness_under_ms' => 1000,
+            ],
+            'first_meaningful_response' => $this->rateMetric($results, fn (array $result): bool => ($result['first_response_ms'] ?? PHP_INT_MAX) <= 3000),
+            'completed_under_target' => $this->rateMetric($results, fn (array $result): bool => ($result['duration_ms'] ?? PHP_INT_MAX) <= ($result['completion_target_ms'] ?? 10000)),
+            'action_success_without_user_correction' => $this->rateMetric($results, fn (array $result): bool => ($result['status'] ?? null) === 'completed' && ($result['quality_failures'] ?? []) === [] && ! $this->containsFailureCopy((string) ($result['assistant'] ?? ''))),
+            'progress_transparency_accuracy' => $this->rateMetric($results, fn (array $result): bool => ! collect($result['kpi_failures'] ?? [])->contains(fn (string $failure): bool => str_starts_with($failure, 'work_item_') || $failure === 'runtime_progress_missing')),
+            'dashboard_freshness' => $dashboardApplicable->isEmpty()
+                ? ['applicable' => 0, 'passed' => 0, 'rate' => null, 'p95_ms' => null, 'max_ms' => null]
+                : $this->rateMetric($dashboardApplicable->all(), fn (array $result): bool => ($result['dashboard_freshness_ms'] ?? PHP_INT_MAX) <= 1000, 'dashboard_freshness_ms'),
+            'sample_size' => $count,
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $results
+     * @return array{applicable:int,passed:int,rate:float,p95_ms:int|null,max_ms:int|null}
+     */
+    private function rateMetric(array $results, callable $passes, ?string $latencyField = null): array
+    {
+        $applicable = count($results);
+        $passed = collect($results)->filter(fn (array $result): bool => (bool) $passes($result))->count();
+        $latencies = $latencyField
+            ? collect($results)->map(fn (array $result): mixed => $result[$latencyField] ?? null)->filter(fn (mixed $value): bool => is_numeric($value))->map(fn (mixed $value): int => (int) $value)->sort()->values()
+            : collect();
+
+        return [
+            'applicable' => $applicable,
+            'passed' => $passed,
+            'rate' => $applicable > 0 ? round($passed / $applicable, 4) : 0.0,
+            'p95_ms' => $latencies->isEmpty() ? null : $latencies->get((int) floor(($latencies->count() - 1) * 0.95)),
+            'max_ms' => $latencies->isEmpty() ? null : $latencies->max(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $kpis
+     */
+    private function kpiSummaryMeetsTargets(array $kpis): bool
+    {
+        return (float) data_get($kpis, 'first_meaningful_response.rate', 0) >= 0.98
+            && (float) data_get($kpis, 'completed_under_target.rate', 0) >= 0.98
+            && (float) data_get($kpis, 'action_success_without_user_correction.rate', 0) >= 0.98
+            && (float) data_get($kpis, 'progress_transparency_accuracy.rate', 0) >= 0.98
+            && (
+                data_get($kpis, 'dashboard_freshness.rate') === null
+                || (float) data_get($kpis, 'dashboard_freshness.rate', 0) >= 0.98
+            );
+    }
+
     /**
      * @return list<array{name: string, steps: list<string>, assertions: array<string, mixed>}>
      */
@@ -907,6 +1236,45 @@ class RunBeanProductionSmokeSuite extends Command
                     ],
                 ],
             ],
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function kpiPrompts(): array
+    {
+        return [
+            'KPI-001: Can you create calendar events for me?',
+            'KPI-002: What can you help me manage in HeyBean?',
+            'KPI-003: What is the difference between a task and a reminder?',
+            'KPI-004: Can you help me organize notes into folders?',
+            'KPI-005: How should I think about using Bean for my day?',
+            'KPI-006: What do I have coming up today?',
+            'KPI-007: What tasks, reminders, and events are left today?',
+            'KPI-008: Review today and suggest my next useful step.',
+            'KPI-009: What is on my calendar and reminders today?',
+            'KPI-010: What do you remember about my preferences?',
+            'KPI-011: Create a calendar event called KPI Focus Block tomorrow at 9am for 30 minutes.',
+            'KPI-012: Add a task to review KPI notes tomorrow morning.',
+            'KPI-013: Set a reminder tomorrow at 8am to check the KPI dashboard.',
+            'KPI-014: Create a note called KPI Test Note with three short bullets.',
+            'KPI-015: Remember that I prefer concise KPI updates.',
+            'KPI-016: Create a calendar event tomorrow at 10am called KPI Planning, add a task to prepare the agenda, and remind me 30 minutes before.',
+            'KPI-017: Create a note called KPI Errand Plan, pin it, and remind me tomorrow at 4pm to review it.',
+            'KPI-018: Add a workout tomorrow from 5pm to 6pm, then add grocery shopping after it for 45 minutes.',
+            'KPI-019: Create a task to organize receipts tomorrow, a reminder 20 minutes before, and a note called Receipt Checklist.',
+            'KPI-020: Plan Friday morning with a calendar focus block at 9am, task to gather notes, and reminder Thursday afternoon.',
+            'KPI-021: Find the weather for tomorrow in Orlando and tell me if an evening walk makes sense.',
+            'KPI-022: Find the weather for tomorrow in Tampa and suggest morning or evening errands.',
+            'KPI-023: Find the nearest Wawa to 32820 and tell me the address quickly.',
+            'KPI-024: Find the closest Starbucks to 32820 and give me the address.',
+            'KPI-025: Find the nearest Home Depot to 32820 and tell me the address quickly.',
+            'KPI-026: Remember that KPI errands should be short and practical, then tell me what you saved.',
+            'KPI-027: What did you just save about KPI errands?',
+            'KPI-028: Add three calendar events: KPI Dentist 7/15 at 3pm, KPI Oil Change 7/16 at 8am, and KPI Review 7/17 at 5pm.',
+            'KPI-029: Create a home reset plan for Saturday: calendar block at 10am, task to gather supplies, reminder Friday at 5pm, and a note called KPI Saturday Reset.',
+            'KPI-030: What request did I make about KPI Dentist earlier in this smoke run?',
         ];
     }
 

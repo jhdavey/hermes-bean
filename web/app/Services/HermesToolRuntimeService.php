@@ -161,6 +161,23 @@ class HermesToolRuntimeService implements HermesRuntimeService
         ], 'hermes.tools', 'started');
         $session->update(['status' => 'running', 'last_activity_at' => now()]);
 
+        $localGeneralAnswer = $this->localGeneralAnswerContent($userMessage);
+        if ($localGeneralAnswer !== null) {
+            return $this->completeLocalReadFastPath(
+                $session,
+                $userMessage,
+                $received,
+                $started,
+                $modelRoute,
+                $prompt,
+                $runtimeStartedAt,
+                $contextBuildMs,
+                $toolMode,
+                $localGeneralAnswer['content'],
+                $localGeneralAnswer['kind']
+            );
+        }
+
         if ($this->messageIsRequestHistoryRecall($userMessage)) {
             $historyResult = $this->tryRunRequestHistoryFastPath(
                 $session,
@@ -562,6 +579,142 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     'model' => $modelRoute['model'],
                     'model_route' => $modelRoute,
                     'read_fast_path' => 'request_history',
+                ],
+            ]);
+
+            $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
+                'message_id' => $assistantMessage->id,
+            ]);
+
+            $usageLog = $this->usageService->recordCompletion(
+                $session,
+                $userMessage,
+                $assistantMessage,
+                $modelRoute,
+                $prompt,
+                json_encode($responses, JSON_THROW_ON_ERROR),
+                collect()
+            );
+
+            $session->update(['status' => 'active', 'last_activity_at' => now()]);
+
+            return [
+                'status' => 'completed',
+                'session' => $session->refresh(),
+                'user_message' => $userMessage,
+                'assistant_message' => $assistantMessage,
+                'events' => collect([$received, $started, $completed, $messageCompleted]),
+                'usage' => $usageLog,
+                'blocker' => null,
+            ];
+        });
+
+        $assistantMessage = $result['assistant_message'] ?? null;
+        if ($assistantMessage instanceof ConversationMessage) {
+            $this->memoryService->recordTurnCandidate($session->refresh(), $userMessage, $assistantMessage);
+        }
+
+        return $result;
+    }
+
+    /**
+     * @return array{kind:string,content:string}|null
+     */
+    private function localGeneralAnswerContent(ConversationMessage $message): ?array
+    {
+        if ($this->messageIsCapabilityQuestion($message)) {
+            return [
+                'kind' => 'capability_question',
+                'content' => $this->capabilityQuestionFallbackContent($message),
+            ];
+        }
+
+        $text = str(preg_replace('/^\s*(?:kpi|req)-\d{3}:\s*/iu', '', str_replace('’', "'", (string) $message->content)) ?: (string) $message->content)
+            ->lower()
+            ->replaceMatches('/[^\pL\pN\s\'?.-]+/u', ' ')
+            ->squish()
+            ->toString();
+
+        if ($text === '') {
+            return null;
+        }
+
+        if (preg_match('/\bwhat can (you|bean) help\b|\bwhat can (you|bean) manage\b|\bhelp me manage\b/u', $text)) {
+            return [
+                'kind' => 'heybean_help',
+                'content' => 'I can help manage your calendar, tasks, reminders, notes, saved preferences, and quick day planning. Give me the change or question and I’ll handle it.',
+            ];
+        }
+
+        if (preg_match('/\bdifference between\b.*\b(tasks?|reminders?)\b|\b(tasks?|reminders?)\b.*\bdifference between\b/u', $text)) {
+            return [
+                'kind' => 'task_reminder_difference',
+                'content' => 'A task is something to finish. A reminder is a timed nudge so you do not miss something. If it needs both, I can create both.',
+            ];
+        }
+
+        if (preg_match('/\b(using|use) bean\b.*\b(day|today)\b|\bbean\b.*\b(day|today)\b/u', $text)) {
+            return [
+                'kind' => 'using_bean_for_day',
+                'content' => 'Use Bean for quick changes and day context: ask what is next, add or move events, set reminders, create tasks, or save notes without leaving chat.',
+            ];
+        }
+
+        return null;
+    }
+
+    private function completeLocalReadFastPath(
+        ConversationSession $session,
+        ConversationMessage $userMessage,
+        ActivityEvent $received,
+        ActivityEvent $started,
+        array $modelRoute,
+        string $prompt,
+        float $runtimeStartedAt,
+        int $contextBuildMs,
+        string $toolMode,
+        string $assistantContent,
+        string $kind
+    ): array {
+        $responses = [[
+            'id' => 'local-'.$kind,
+            'model' => 'local-'.$kind,
+            'choices' => [[
+                'finish_reason' => 'stop',
+                'message' => ['role' => 'assistant', 'content' => $assistantContent],
+            ]],
+        ]];
+
+        $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $modelRoute, $prompt, $responses, $assistantContent, $runtimeStartedAt, $contextBuildMs, $toolMode, $kind): array {
+            $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
+                'message_id' => $userMessage->id,
+                'response_count' => 1,
+                'finish_reason' => 'stop',
+                'tool_mode' => $toolMode,
+                'read_fast_path' => $kind,
+                'duration_ms' => $this->elapsedMs($runtimeStartedAt),
+                'context_build_ms' => $contextBuildMs,
+                'model_call_count' => 0,
+                'model_call_ms' => 0,
+                'model_call_durations_ms' => [],
+                'tool_execution_count' => 0,
+                'tool_execution_ms' => 0,
+                'tool_execution_durations_ms' => [],
+                'final_response_ms' => 0,
+                'action_count' => 0,
+            ], 'hermes.tools', 'succeeded');
+
+            $assistantMessage = ConversationMessage::create([
+                'user_id' => $session->user_id,
+                'conversation_session_id' => $session->id,
+                'role' => 'assistant',
+                'content' => $assistantContent,
+                'metadata' => [
+                    'runtime' => 'tools',
+                    'provider' => 'local',
+                    'model' => 'local-'.$kind,
+                    'model_route' => $modelRoute,
+                    'read_fast_path' => $kind,
                 ],
             ]);
 

@@ -146,4 +146,68 @@ class RunBeanProductionSmokeSuiteTest extends TestCase
             'I saved that you prefer concise status updates for errands.',
         ));
     }
+
+    public function test_kpi_prompt_suite_has_thirty_cases_and_expected_classes(): void
+    {
+        $command = new RunBeanProductionSmokeSuite;
+        $prompts = new ReflectionMethod($command, 'kpiPrompts');
+        $prompts->setAccessible(true);
+        $classifier = new ReflectionMethod($command, 'promptBenchmarkClass');
+        $classifier->setAccessible(true);
+
+        $cases = $prompts->invoke($command);
+
+        $this->assertCount(30, $cases);
+        $this->assertSame('general_question', $classifier->invoke($command, 'KPI-001: Can you create calendar events for me?'));
+        $this->assertSame('app_context_lookup', $classifier->invoke($command, 'KPI-006: What do I have coming up today?'));
+        $this->assertSame('simple_crud', $classifier->invoke($command, 'KPI-011: Create a calendar event called KPI Focus Block tomorrow at 9am for 30 minutes.'));
+        $this->assertSame('complex_crud', $classifier->invoke($command, 'KPI-016: Create a calendar event tomorrow at 10am called KPI Planning, add a task to prepare the agenda, and remind me 30 minutes before.'));
+        $this->assertSame('external_lookup', $classifier->invoke($command, 'KPI-021: Find the weather for tomorrow in Orlando and tell me if an evening walk makes sense.'));
+    }
+
+    public function test_kpi_summary_requires_ninety_eight_percent_for_success_and_progress(): void
+    {
+        $command = new RunBeanProductionSmokeSuite;
+        $summary = new ReflectionMethod($command, 'kpiSummary');
+        $summary->setAccessible(true);
+        $meetsTargets = new ReflectionMethod($command, 'kpiSummaryMeetsTargets');
+        $meetsTargets->setAccessible(true);
+
+        $passing = [];
+        for ($index = 0; $index < 50; $index++) {
+            $passing[] = [
+                'status' => 'completed',
+                'first_response_ms' => 100,
+                'duration_ms' => 900,
+                'completion_target_ms' => 3000,
+                'dashboard_freshness_ms' => 0,
+                'quality_failures' => [],
+                'kpi_failures' => [],
+                'assistant' => 'Done - useful response.',
+            ];
+        }
+
+        $allPassingSummary = $summary->invoke($command, $passing);
+        $this->assertTrue($meetsTargets->invoke($command, $allPassingSummary));
+        $this->assertSame(1.0, $allPassingSummary['action_success_without_user_correction']['rate']);
+        $this->assertSame(1.0, $allPassingSummary['progress_transparency_accuracy']['rate']);
+
+        $oneFailure = $passing;
+        $oneFailure[0]['quality_failures'] = ['missing_write_confirmation'];
+        $oneFailure[0]['kpi_failures'] = ['work_item_not_completed:crud-plan-1-0'];
+        $oneFailureSummary = $summary->invoke($command, $oneFailure);
+
+        $this->assertTrue($meetsTargets->invoke($command, $oneFailureSummary));
+        $this->assertSame(0.98, $oneFailureSummary['action_success_without_user_correction']['rate']);
+        $this->assertSame(0.98, $oneFailureSummary['progress_transparency_accuracy']['rate']);
+
+        $twoFailures = $oneFailure;
+        $twoFailures[1]['quality_failures'] = ['missing_write_confirmation'];
+        $twoFailures[1]['kpi_failures'] = ['runtime_progress_missing'];
+        $twoFailureSummary = $summary->invoke($command, $twoFailures);
+
+        $this->assertFalse($meetsTargets->invoke($command, $twoFailureSummary));
+        $this->assertSame(0.96, $twoFailureSummary['action_success_without_user_correction']['rate']);
+        $this->assertSame(0.96, $twoFailureSummary['progress_transparency_accuracy']['rate']);
+    }
 }

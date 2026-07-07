@@ -816,7 +816,7 @@ PROMPT;
 
     private function messageIsCapabilityQuestion(ConversationMessage $message): bool
     {
-        $text = str(str_replace('’', "'", (string) $message->content))
+        $text = str(preg_replace('/^\s*(?:kpi|req)-\d{3}:\s*/iu', '', str_replace('’', "'", (string) $message->content)) ?: (string) $message->content)
             ->lower()
             ->replaceMatches('/[^\pL\pN\s\'?.-]+/u', ' ')
             ->squish()
