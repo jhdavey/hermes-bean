@@ -15011,9 +15011,10 @@ export function mountHeyBeanWebApp(mount) {
 
     function criticalTaskSubtitle(task) {
         const parts = [];
-        const dueLabel = task.due_at || task.dueAt ? formatDueTime(task.due_at || task.dueAt) : '';
+        const overdue = itemOverdue(task, 'task');
+        const dueLabel = task.due_at || task.dueAt ? formatDueTime(task.due_at || task.dueAt, { includeDate: overdue }) : '';
         if (task.category) parts.push(task.category);
-        if (itemOverdue(task, 'task')) parts.push('overdue');
+        if (overdue) parts.push('overdue');
         if (dueLabel) parts.push(`Due ${dueLabel}`);
         if (taskIsRecurring(task)) parts.push(recurrenceSummary(task));
         return parts.join(' · ');
@@ -15021,9 +15022,10 @@ export function mountHeyBeanWebApp(mount) {
 
     function criticalReminderSubtitle(reminder) {
         const parts = [];
-        const dateLabel = reminderDateValue(reminder) ? formatDueTime(reminderDateValue(reminder)) : '';
+        const overdue = itemOverdue(reminder, 'reminder');
+        const dateLabel = reminderDateValue(reminder) ? formatDueTime(reminderDateValue(reminder), { includeDate: overdue }) : '';
         if (reminder.category) parts.push(reminder.category);
-        if (itemOverdue(reminder, 'reminder')) parts.push('overdue');
+        if (overdue) parts.push('overdue');
         if (dateLabel) parts.push(dateLabel);
         if (itemIsRecurring(reminder)) parts.push(recurrenceSummary(reminder));
         return parts.join(' · ') || 'No reminder time';
@@ -15203,16 +15205,18 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function taskSubtitle(task) {
+        const dueValue = task.due_at || task.dueAt || '';
         return [
-            task.due_at || task.dueAt ? formatDueTime(task.due_at || task.dueAt) : '',
+            dueValue ? formatDueTime(dueValue, { includeDate: itemOverdue(task, 'task') }) : '',
             recurrenceSummary(task),
         ].filter(Boolean).join(' · ');
     }
 
     function reminderSubtitle(reminder) {
         const bits = [];
+        const dueValue = reminder.remind_at || reminder.due_at || reminder.dueAt || '';
         if (reminder.category) bits.push(reminder.category);
-        if (reminder.remind_at || reminder.due_at || reminder.dueAt) bits.push(formatDueTime(reminder.remind_at || reminder.due_at || reminder.dueAt));
+        if (dueValue) bits.push(formatDueTime(dueValue, { includeDate: itemOverdue(reminder, 'reminder') }));
         if (itemIsRecurring(reminder)) bits.push(recurrenceSummary(reminder));
         return bits.join(' · ') || 'No reminder time';
     }
@@ -15657,20 +15661,36 @@ export function mountHeyBeanWebApp(mount) {
         return new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     }
 
-    function formatDueTime(value) {
+    function formatDueTime(value, options = {}) {
         if (!value) return '';
+        const includeDate = Boolean(options.includeDate);
         if (wireValueLooksDateOnly(value)) {
             const date = parseLocalDate(value);
             if (Number.isNaN(date.getTime())) return String(value).trim();
-            const today = parseLocalDate(dateOnly(new Date()));
-            const tomorrow = addDays(today, 1);
-            if (sameDate(date, today)) return 'Today';
-            if (sameDate(date, tomorrow)) return 'Tomorrow';
-            return date.getFullYear() === today.getFullYear()
-                ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-                : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+            return relativeDueDateLabel(date);
+        }
+        if (includeDate) {
+            const date = parseLocalDate(value);
+            if (!Number.isNaN(date.getTime())) {
+                const time = formatCompactMeridiemTime(value);
+                if (time) return `${relativeDueDateLabel(date)} ${time}`;
+            }
         }
         return formatCompactMeridiemTime(value) || String(value).trim();
+    }
+
+    function relativeDueDateLabel(value) {
+        const date = parseLocalDate(value);
+        if (Number.isNaN(date.getTime())) return String(value || '').trim();
+        const today = parseLocalDate(dateOnly(new Date()));
+        const yesterday = addDays(today, -1);
+        const tomorrow = addDays(today, 1);
+        if (sameDate(date, today)) return 'Today';
+        if (sameDate(date, yesterday)) return 'Yesterday';
+        if (sameDate(date, tomorrow)) return 'Tomorrow';
+        return date.getFullYear() === today.getFullYear()
+            ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+            : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
     }
 
     function formatDateOnly(value) {
