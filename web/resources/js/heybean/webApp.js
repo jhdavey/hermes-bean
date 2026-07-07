@@ -5897,10 +5897,106 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function labelInput(label, name, type, value = '', attrs = '') {
+        if (type === 'date' || type === 'datetime-local') {
+            return dateTimePickerInputMarkup(label, name, type, value, attrs);
+        }
         const stepAttr = (type === 'datetime-local' || type === 'time') && !/\bstep\s*=/.test(attrs)
             ? 'step="300" '
             : '';
         return `<label class="hb-label">${escapeHtml(label)}<input class="hb-input" type="${type}" name="${escapeAttr(name)}" value="${escapeAttr(value)}" placeholder="${escapeAttr(label)}" ${stepAttr}${attrs}></label>`;
+    }
+
+    function dateTimePickerInputMarkup(label, name, type, value = '', attrs = '') {
+        const mode = type === 'date' ? 'date' : 'datetime-local';
+        const cleanValue = normalizeDateTimePickerValue(value, mode);
+        const pickerId = `hb-dtp-${name}-${Math.random().toString(36).slice(2, 9)}`;
+        return `
+            <label class="hb-label hb-date-time-label">${escapeHtml(label)}
+                <span class="hb-date-time-picker" data-date-time-picker data-picker-mode="${escapeAttr(mode)}" data-picker-id="${escapeAttr(pickerId)}">
+                    <input class="hb-date-time-value" type="hidden" name="${escapeAttr(name)}" value="${escapeAttr(cleanValue)}" data-date-time-value ${attrs}>
+                    <button class="hb-date-time-trigger" type="button" data-date-time-trigger aria-expanded="false" aria-controls="${escapeAttr(pickerId)}">
+                        <span data-date-time-display>${escapeHtml(dateTimePickerDisplay(cleanValue, mode))}</span>
+                    </button>
+                    <div class="hb-date-time-popover" id="${escapeAttr(pickerId)}" data-date-time-panel hidden>
+                        ${dateTimePickerPanelMarkup(cleanValue, mode)}
+                    </div>
+                </span>
+            </label>`;
+    }
+
+    function dateTimePickerPanelMarkup(value = '', mode = 'datetime-local', visibleMonthValue = '') {
+        const selected = dateTimePickerDate(value, mode);
+        const visible = visibleMonthValue ? parseLocalDate(visibleMonthValue) : new Date(selected.getFullYear(), selected.getMonth(), 1);
+        const visibleMonth = new Date(visible.getFullYear(), visible.getMonth(), 1);
+        const firstOfMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1);
+        const gridStart = addDays(firstOfMonth, -firstOfMonth.getDay());
+        const previousMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1);
+        const nextMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1);
+        const weekdays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+        const dayButtons = Array.from({ length: 42 }, (_, index) => {
+            const date = addDays(gridStart, index);
+            const inMonth = date.getMonth() === visibleMonth.getMonth();
+            const selectedDay = sameDate(date, selected);
+            const today = sameDate(date, new Date());
+            return `<button class="hb-date-time-day ${inMonth ? '' : 'hb-date-time-day-adjacent'} ${selectedDay ? 'hb-date-time-day-selected' : ''} ${today ? 'hb-date-time-day-today' : ''}" type="button" data-date-time-day="${escapeAttr(dateOnly(date))}" aria-pressed="${selectedDay}" aria-label="${escapeAttr(date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }))}${today ? ' today' : ''}">${date.getDate()}</button>`;
+        }).join('');
+
+        return `
+            <div class="hb-date-time-calendar" data-visible-month="${escapeAttr(dateOnly(visibleMonth))}">
+                <div class="hb-date-time-calendar-head">
+                    <button class="hb-date-time-nav" type="button" data-date-time-month="${escapeAttr(dateOnly(previousMonth))}" aria-label="Previous month">${icons.chevronLeft || '&lsaquo;'}</button>
+                    <strong>${escapeHtml(visibleMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }))}</strong>
+                    <button class="hb-date-time-nav" type="button" data-date-time-month="${escapeAttr(dateOnly(nextMonth))}" aria-label="Next month">${icons.chevronRight || '&rsaquo;'}</button>
+                </div>
+                <div class="hb-date-time-weekdays">${weekdays.map((day) => `<span>${day}</span>`).join('')}</div>
+                <div class="hb-date-time-days">${dayButtons}</div>
+                ${mode === 'datetime-local' ? dateTimePickerTimeMarkup(selected) : ''}
+                <div class="hb-date-time-actions">
+                    <button class="hb-button-secondary hb-date-time-done" type="button" data-date-time-done>Done</button>
+                </div>
+            </div>`;
+    }
+
+    function dateTimePickerTimeMarkup(date) {
+        const hour12 = date.getHours() % 12 || 12;
+        const roundedMinute = Math.round(date.getMinutes() / 5) * 5;
+        const minute = roundedMinute >= 60 ? 55 : roundedMinute;
+        const meridiem = date.getHours() >= 12 ? 'PM' : 'AM';
+        return `
+            <div class="hb-date-time-time-row">
+                <label>Hour<select class="hb-select" data-date-time-hour>
+                    ${Array.from({ length: 12 }, (_, index) => index + 1).map((hour) => `<option value="${hour}" ${hour === hour12 ? 'selected' : ''}>${hour}</option>`).join('')}
+                </select></label>
+                <label>Minute<select class="hb-select" data-date-time-minute>
+                    ${Array.from({ length: 12 }, (_, index) => index * 5).map((value) => `<option value="${value}" ${value === minute ? 'selected' : ''}>${String(value).padStart(2, '0')}</option>`).join('')}
+                </select></label>
+                <label>AM/PM<select class="hb-select" data-date-time-meridiem>
+                    ${['AM', 'PM'].map((value) => `<option value="${value}" ${value === meridiem ? 'selected' : ''}>${value}</option>`).join('')}
+                </select></label>
+            </div>`;
+    }
+
+    function normalizeDateTimePickerValue(value = '', mode = 'datetime-local') {
+        if (!value) return '';
+        if (mode === 'date') return storedDateOnly(value);
+        return toDatetimeLocal(value);
+    }
+
+    function dateTimePickerDate(value = '', mode = 'datetime-local') {
+        const parsed = value ? parseLocalDate(value) : new Date();
+        if (!Number.isNaN(parsed.getTime())) return parsed;
+        return new Date();
+    }
+
+    function dateTimePickerDisplay(value = '', mode = 'datetime-local') {
+        if (!value) return mode === 'date' ? 'Choose date' : 'Choose date and time';
+        if (mode === 'date') {
+            const date = parseLocalDate(value);
+            return Number.isNaN(date.getTime()) ? 'Choose date' : formatDateOnly(date);
+        }
+        const date = parseLocalDate(value);
+        if (Number.isNaN(date.getTime())) return 'Choose date and time';
+        return `${formatDateOnly(date)} at ${date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
     }
 
     function modalMarkup(modal) {
@@ -7574,6 +7670,7 @@ export function mountHeyBeanWebApp(mount) {
         mount.querySelectorAll('[data-delete-category]').forEach((button) => button.addEventListener('click', () => deleteCategory(button.dataset.deleteCategory)));
         mount.querySelectorAll('[data-category-select]').forEach((select) => select.addEventListener('change', syncSelectedCategoryColor));
         mount.querySelector('[data-preview-tts-voice]')?.addEventListener('click', previewSelectedTtsVoice);
+        mount.querySelectorAll('[data-date-time-picker]').forEach(bindDateTimePicker);
         mount.querySelectorAll('form[data-modal-form="event"]').forEach(bindEventTimeInputs);
         mount.querySelectorAll('form[data-modal-form="event"]').forEach(bindEventLocationInput);
         mount.querySelectorAll('input[name="workspaceAssignmentIds"]').forEach((input) => input.addEventListener('change', handleWorkspaceAssignmentChange));
@@ -8000,6 +8097,109 @@ export function mountHeyBeanWebApp(mount) {
         target.classList.toggle('hb-inline-category-message-error', tone === 'error');
     }
 
+    function bindDateTimePicker(picker) {
+        const input = picker.querySelector('[data-date-time-value]');
+        const trigger = picker.querySelector('[data-date-time-trigger]');
+        const panel = picker.querySelector('[data-date-time-panel]');
+        if (!input || !trigger || !panel) return;
+        const close = () => {
+            panel.hidden = true;
+            trigger.setAttribute('aria-expanded', 'false');
+        };
+        trigger.addEventListener('click', () => {
+            if (input.disabled) return;
+            const open = panel.hidden;
+            mount.querySelectorAll('[data-date-time-panel]').forEach((candidate) => {
+                if (candidate !== panel) {
+                    candidate.hidden = true;
+                    candidate.closest('[data-date-time-picker]')?.querySelector('[data-date-time-trigger]')?.setAttribute('aria-expanded', 'false');
+                }
+            });
+            panel.hidden = !open;
+            trigger.setAttribute('aria-expanded', String(open));
+        });
+        panel.addEventListener('click', (event) => {
+            const monthButton = event.target.closest('[data-date-time-month]');
+            if (monthButton) {
+                refreshDateTimePickerPanel(picker, monthButton.dataset.dateTimeMonth);
+                return;
+            }
+            const dayButton = event.target.closest('[data-date-time-day]');
+            if (dayButton) {
+                setDateTimePickerDate(picker, dayButton.dataset.dateTimeDay);
+                return;
+            }
+            if (event.target.closest('[data-date-time-done]')) {
+                close();
+            }
+        });
+        panel.addEventListener('change', (event) => {
+            if (event.target.matches('[data-date-time-hour], [data-date-time-minute], [data-date-time-meridiem]')) {
+                setDateTimePickerTimeFromControls(picker);
+            }
+        });
+        input.addEventListener('change', () => refreshDateTimePickerDisplay(picker));
+    }
+
+    function setDateTimePickerDate(picker, dayValue) {
+        const input = picker?.querySelector('[data-date-time-value]');
+        if (!input || !dayValue) return;
+        const mode = picker.dataset.pickerMode || 'datetime-local';
+        if (mode === 'date') {
+            setDateTimePickerValue(input, dayValue, { dispatch: true });
+            refreshDateTimePickerPanel(picker, dayValue);
+            return;
+        }
+        const current = dateTimePickerDate(input.value, mode);
+        const date = parseLocalDate(dayValue);
+        date.setHours(current.getHours(), current.getMinutes(), 0, 0);
+        setDateTimePickerValue(input, toDatetimeLocal(date), { dispatch: true });
+        refreshDateTimePickerPanel(picker, dayValue);
+    }
+
+    function setDateTimePickerTimeFromControls(picker) {
+        const input = picker?.querySelector('[data-date-time-value]');
+        if (!input) return;
+        const date = dateTimePickerDate(input.value, 'datetime-local');
+        const hour12 = Number(picker.querySelector('[data-date-time-hour]')?.value || 12);
+        const minute = Number(picker.querySelector('[data-date-time-minute]')?.value || 0);
+        const meridiem = picker.querySelector('[data-date-time-meridiem]')?.value || 'AM';
+        let hour = hour12 % 12;
+        if (meridiem === 'PM') hour += 12;
+        date.setHours(hour, minute, 0, 0);
+        setDateTimePickerValue(input, toDatetimeLocal(date), { dispatch: true });
+        refreshDateTimePickerPanel(picker, dateOnly(date));
+    }
+
+    function setDateTimePickerValue(input, value, options = {}) {
+        if (!input) return;
+        const picker = input.closest('[data-date-time-picker]');
+        const mode = picker?.dataset.pickerMode || input.dataset.pickerMode || 'datetime-local';
+        input.value = normalizeDateTimePickerValue(value, mode);
+        refreshDateTimePickerDisplay(picker);
+        if (options.refreshPanel !== false && picker) {
+            refreshDateTimePickerPanel(picker, input.value ? dateOnly(input.value) : '');
+        }
+        if (options.dispatch) {
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }
+
+    function refreshDateTimePickerDisplay(picker) {
+        if (!picker) return;
+        const input = picker.querySelector('[data-date-time-value]');
+        const display = picker.querySelector('[data-date-time-display]');
+        if (!input || !display) return;
+        display.textContent = dateTimePickerDisplay(input.value, picker.dataset.pickerMode || 'datetime-local');
+    }
+
+    function refreshDateTimePickerPanel(picker, visibleMonthValue = '') {
+        const panel = picker?.querySelector('[data-date-time-panel]');
+        const input = picker?.querySelector('[data-date-time-value]');
+        if (!panel || !input) return;
+        panel.innerHTML = dateTimePickerPanelMarkup(input.value, picker.dataset.pickerMode || 'datetime-local', visibleMonthValue);
+    }
+
     function bindEventTimeInputs(form) {
         const startInput = form.querySelector('input[name="time"]');
         const endInput = form.querySelector('input[name="endsAt"]');
@@ -8032,7 +8232,9 @@ export function mountHeyBeanWebApp(mount) {
             const duration = previousStart && previousEnd
                 ? Math.max(15, Math.round((new Date(previousEnd) - new Date(previousStart)) / 60000))
                 : 60;
-            endInput.value = toDatetimeLocal(addMinutes(startInput.value, Number.isFinite(duration) ? duration : 60));
+            setDateTimePickerValue(endInput, toDatetimeLocal(addMinutes(startInput.value, Number.isFinite(duration) ? duration : 60)), {
+                dispatch: false,
+            });
             endInput.dataset.userEdited = 'false';
         }
         startInput.dataset.previousValue = startInput.value;
@@ -9153,7 +9355,9 @@ export function mountHeyBeanWebApp(mount) {
             const startInput = form.querySelector('input[name="time"]');
             const allDayStart = form.querySelector('input[name="allDayStart"]');
             if (startInput?.value && allDayStart) {
-                allDayStart.value = dateOnly(startInput.value);
+                setDateTimePickerValue(allDayStart, dateOnly(startInput.value), {
+                    dispatch: false,
+                });
             }
         } else {
             const startInput = form.querySelector('input[name="time"]');
@@ -9162,8 +9366,12 @@ export function mountHeyBeanWebApp(mount) {
             if (allDayStart?.value && startInput && endInput && !startInput.value) {
                 const start = parseLocalDate(allDayStart.value);
                 start.setHours(9, 0, 0, 0);
-                startInput.value = toDatetimeLocal(start);
-                endInput.value = toDatetimeLocal(defaultEventEnd(start));
+                setDateTimePickerValue(startInput, toDatetimeLocal(start), {
+                    dispatch: false,
+                });
+                setDateTimePickerValue(endInput, toDatetimeLocal(defaultEventEnd(start)), {
+                    dispatch: false,
+                });
             }
         }
         const timedFields = form.querySelector('[data-timed-fields]');
@@ -9180,6 +9388,9 @@ export function mountHeyBeanWebApp(mount) {
             if (field.name === 'time' || field.name === 'allDayStart') {
                 field.required = enabled && field.name !== 'endsAt';
             }
+        });
+        group.querySelectorAll('button').forEach((button) => {
+            button.disabled = !enabled;
         });
     }
 

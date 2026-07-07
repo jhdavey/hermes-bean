@@ -91,6 +91,207 @@
     grid-template-columns: minmax(0, 1fr) 92px;
 }
 
+.hb-date-time-label {
+    position: relative;
+}
+
+.hb-date-time-picker {
+    position: relative;
+    display: block;
+}
+
+.hb-date-time-trigger {
+    width: 100%;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--hb-border);
+    border-radius: 14px;
+    background: var(--hb-surface);
+    color: var(--hb-text);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 800;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+
+.hb-date-time-trigger::after {
+    content: "";
+    width: 8px;
+    height: 8px;
+    flex: 0 0 auto;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    opacity: .62;
+    transform: rotate(45deg) translateY(-2px);
+}
+
+.hb-date-time-trigger:hover,
+.hb-date-time-trigger:focus-visible,
+.hb-date-time-trigger[aria-expanded="true"] {
+    border-color: rgba(var(--hb-accent-rgb), .46);
+    box-shadow: 0 0 0 4px rgba(var(--hb-accent-rgb), .10);
+    outline: 0;
+}
+
+.hb-date-time-trigger:active {
+    transform: translateY(1px);
+}
+
+.hb-date-time-trigger:disabled {
+    cursor: not-allowed;
+    opacity: .55;
+    box-shadow: none;
+}
+
+.hb-date-time-popover {
+    position: absolute;
+    z-index: 8;
+    top: calc(100% + 8px);
+    left: 0;
+    width: min(336px, calc(100vw - 64px));
+    padding: 12px;
+    border: 1px solid var(--hb-border);
+    border-radius: 18px;
+    background: var(--hb-surface);
+    box-shadow: 0 20px 50px rgba(15, 23, 42, .18);
+}
+
+.hb-field-row > .hb-label:last-child .hb-date-time-popover {
+    left: auto;
+    right: 0;
+}
+
+.hb-date-time-calendar {
+    display: grid;
+    gap: 8px;
+}
+
+.hb-date-time-calendar-head {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr) 36px;
+    align-items: center;
+    gap: 6px;
+}
+
+.hb-date-time-calendar-head strong {
+    color: var(--hb-text);
+    font-size: 14px;
+    font-weight: 800;
+    text-align: center;
+}
+
+.hb-date-time-nav {
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--hb-border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--hb-surface) 82%, transparent);
+    color: var(--hb-text);
+    cursor: pointer;
+}
+
+.hb-date-time-nav svg {
+    width: 18px;
+    height: 18px;
+}
+
+.hb-date-time-weekdays,
+.hb-date-time-days {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.hb-date-time-weekdays span {
+    padding: 2px 0;
+    color: var(--hb-muted);
+    font-size: 11px;
+    font-weight: 950;
+    text-align: center;
+}
+
+.hb-date-time-days {
+    gap: 2px;
+}
+
+.hb-date-time-day {
+    height: 32px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--hb-text);
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
+}
+
+.hb-date-time-day:hover,
+.hb-date-time-day:focus-visible {
+    border-color: rgba(var(--hb-accent-rgb), .34);
+    background: rgba(var(--hb-accent-rgb), .10);
+    outline: 0;
+}
+
+.hb-date-time-day:active {
+    transform: translateY(1px);
+}
+
+.hb-date-time-day-adjacent {
+    color: color-mix(in srgb, var(--hb-muted) 62%, transparent);
+}
+
+.hb-date-time-day-today {
+    border-color: rgba(var(--hb-accent-rgb), .46);
+    background: rgba(var(--hb-accent-rgb), .10);
+    color: var(--hb-accent-strong);
+}
+
+.hb-date-time-day-selected {
+    border-color: var(--hb-accent-strong);
+    background: var(--hb-accent-strong);
+    color: #fff;
+}
+
+.hb-date-time-time-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding-top: 4px;
+}
+
+.hb-date-time-time-row label {
+    display: grid;
+    gap: 4px;
+    color: var(--hb-muted);
+    font-size: 10px;
+    font-weight: 950;
+    text-transform: uppercase;
+}
+
+.hb-date-time-time-row .hb-select {
+    min-height: 38px;
+    padding: 8px 10px;
+}
+
+.hb-date-time-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 2px;
+}
+
+.hb-date-time-done {
+    min-height: 34px;
+    padding: 7px 13px;
+}
+
 .hb-form-switch {
     min-height: 54px;
     align-items: flex-start;
