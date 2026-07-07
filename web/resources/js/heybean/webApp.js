@@ -3722,7 +3722,7 @@ export function mountHeyBeanWebApp(mount) {
     function beanAcknowledgementForRequest(content) {
         const command = normalizedBeanText(content);
         if (!command || beanCommandIsCapabilityQuestion(command)) return '';
-        const multiStep = beanRequestClauses(command).length > 1 || /\b(?:and then|also|as well)\b/.test(command);
+        const multiStep = beanWorkRequestClauses(command).length > 1 || /\b(?:and then|also|as well)\b/.test(command);
         const action = /\b(?:delete|remove|cancel|forget)\b/.test(command) ? 'delete'
             : /\b(?:update|change|move|reschedule|complete|mark)\b/.test(command) ? 'update'
             : /\b(?:add|create|make|set|schedule|book|reserve|save|remember)\b/.test(command) ? 'create'
