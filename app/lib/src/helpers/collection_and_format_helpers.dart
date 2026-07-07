@@ -305,9 +305,7 @@ bool _reminderIsCompleted(HermesReminder reminder) {
 }
 
 String _taskSubtitle(HermesTask task) {
-  final dueLabel = (task.dueAt != null && task.dueAt!.trim().isNotEmpty)
-      ? _formatCalendarEventDateTime(task.dueAt)
-      : '';
+  final dueLabel = _compactDueTimeLabel(task.dueAt);
   final parts = <String>[
     if (_taskIsCompleted(task)) 'Completed',
     if ((task.category ?? '').trim().isNotEmpty) task.category!.trim(),
@@ -319,14 +317,12 @@ String _taskSubtitle(HermesTask task) {
 }
 
 String _reminderSubtitle(HermesReminder reminder) {
+  final dueLabel = _compactDueTimeLabel(reminder.dueAt);
   final parts = <String>[
     _reminderIsCompleted(reminder) ? 'Completed' : 'Pending',
     if ((reminder.category ?? '').trim().isNotEmpty) reminder.category!.trim(),
     if (_reminderIsOverdue(reminder)) 'overdue',
-    if (reminder.dueAt != null && reminder.dueAt!.trim().isNotEmpty)
-      _formatCalendarEventDateTime(reminder.dueAt)
-    else
-      'No time set',
+    if (dueLabel.isNotEmpty) dueLabel else 'No time set',
     if (reminder.calendarEventId != null) 'Linked event',
     if ((reminder.metadata?['recurrence']?.toString() ?? '').isNotEmpty &&
         reminder.metadata?['recurrence'] != 'none')
@@ -441,16 +437,42 @@ DateTime? _multiDayEventEndDay(HermesCalendarEvent event) {
 }
 
 String _eventTimeRangeShort(HermesCalendarEvent event) {
-  String shortTime(String? value) {
-    final parsed = _parseCalendarEventDateTime(value, event.startsAt);
-    if (parsed == null) return '';
-    return _naturalTimeLabel(parsed);
+  final start = _parseCalendarEventDateTime(event.startsAt);
+  final end = _parseCalendarEventDateTime(event.endsAt, event.startsAt);
+  if (start != null && end != null && end.isAfter(start)) {
+    return _compactTimeRangeLabel(start, end);
   }
+  final startLabel = start == null ? '' : _naturalTimeLabel(start);
+  if (startLabel.isEmpty) return '';
+  return startLabel;
+}
 
-  final start = shortTime(event.startsAt);
-  final end = shortTime(event.endsAt);
-  if (start.isEmpty) return '';
-  return end.isEmpty ? start : '$start – $end';
+String _compactDueTimeLabel(String? value) {
+  final trimmed = value?.trim() ?? '';
+  if (trimmed.isEmpty) return '';
+  if (_wireValueLooksDateOnly(trimmed)) {
+    final date = _calendarEventStoredDate(trimmed);
+    if (date == null) return trimmed;
+    final today = _dateOnly(DateTime.now());
+    if (_sameCalendarDay(date, today)) return 'Today';
+    if (_sameCalendarDay(date, today.add(const Duration(days: 1)))) {
+      return 'Tomorrow';
+    }
+    return date.year == today.year
+        ? '${_shortMonthName(date.month)} ${date.day}'
+        : '${_shortMonthName(date.month)} ${date.day}, ${date.year}';
+  }
+  final parsed = _parseCalendarEventDateTime(trimmed);
+  return parsed == null ? trimmed : _naturalTimeLabel(parsed);
+}
+
+String _compactTimeRangeLabel(DateTime start, DateTime end) {
+  final startLabel = _naturalTimeLabel(start);
+  final endLabel = _naturalTimeLabel(end);
+  final startMeridiem = start.hour >= 12 ? 'pm' : 'am';
+  final endMeridiem = end.hour >= 12 ? 'pm' : 'am';
+  if (startMeridiem != endMeridiem) return '$startLabel-$endLabel';
+  return '${startLabel.replaceFirst(RegExp('$startMeridiem\$'), '')}-$endLabel';
 }
 
 String _multiDayEventLabelForDay(HermesCalendarEvent event, DateTime day) {

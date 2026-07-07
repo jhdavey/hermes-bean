@@ -575,7 +575,7 @@ class _CommandCenterGlanceEventPill extends StatelessWidget {
           child: Row(
             children: [
               SizedBox(
-                width: 48,
+                width: 76,
                 child: Text(
                   _commandCenterGlanceEventTime(event),
                   maxLines: 1,
@@ -596,7 +596,7 @@ class _CommandCenterGlanceEventPill extends StatelessWidget {
                   style: TextStyle(
                     color: HeyBeanTheme.text,
                     fontSize: 12,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
@@ -751,7 +751,7 @@ class _CommandCenterAgendaRow extends StatelessWidget {
       _CommandCenterAgendaKind.reminder => 'Reminder',
     };
     final hasEventNotes = item.event != null && _eventHasNotes(item.event!);
-    const timeWidth = 58.0;
+    const timeWidth = 76.0;
 
     return Material(
       color: Colors.transparent,

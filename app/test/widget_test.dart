@@ -5211,6 +5211,21 @@ void main() {
       find.byKey(const Key('command-center-glance-event-504')),
     );
     await tester.pumpAndSettle();
+    final glanceEventTitle = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(const Key('command-center-glance-event-504')),
+        matching: find.text('Planning sync'),
+      ),
+    );
+    expect(glanceEventTitle.style?.fontWeight, FontWeight.w500);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('command-center-glance-event-504')),
+        matching: find.text('10-10:45am'),
+      ),
+      findsOneWidget,
+    );
+
     await tester.tap(find.byKey(const Key('command-center-glance-event-504')));
     await tester.pumpAndSettle();
     expect(find.text('Event Details'), findsOneWidget);
@@ -8080,7 +8095,10 @@ void main() {
       expect(find.byKey(const Key('task-critical-star-103')), findsOneWidget);
       expect(find.text('Recurring vitamins'), findsOneWidget);
       expect(find.textContaining('Travel'), findsWidgets);
-      expect(find.textContaining('Due today at'), findsWidgets);
+      expect(
+        find.textContaining(RegExp(r'Due \d{1,2}(:\d{2})?(am|pm)')),
+        findsWidgets,
+      );
       final taskSurface = tester.widget<Container>(
         find.byKey(const Key('task-row-surface-101')),
       );
@@ -8129,7 +8147,10 @@ void main() {
       await tester.tap(find.byKey(const Key('nav-tasks')));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Due today at'), findsWidgets);
+      expect(
+        find.textContaining(RegExp(r'Due \d{1,2}(:\d{2})?(am|pm)')),
+        findsWidgets,
+      );
       expect(find.textContaining(RegExp(r'\d{4}-\d{2}-\d{2}T')), findsNothing);
       expect(find.textContaining(RegExp(r'\.\d{3,6}Z')), findsNothing);
     },

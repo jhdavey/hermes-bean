@@ -4894,7 +4894,7 @@ export function mountHeyBeanWebApp(mount) {
         const color = itemColor(event);
         return `
             <button class="hb-glance-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
-                <div class="hb-event-time">${escapeHtml(eventStartTime(event))}</div>
+                <div class="hb-event-time">${escapeHtml(commandCenterEventTime(event))}</div>
                 ${eventPillTitleMarkup(event)}
             </button>`;
     }
@@ -5181,7 +5181,7 @@ export function mountHeyBeanWebApp(mount) {
         const color = itemColor(event);
         return `
             <button class="hb-month-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
-                <span class="hb-month-event-time">${escapeHtml(monthEventStartTime(event))}</span>
+                <span class="hb-month-event-time">${escapeHtml(monthEventTime(event))}</span>
                 ${eventPillTitleMarkup(event, 'hb-month-event-title', { showLocation: false })}
             </button>`;
     }
@@ -5350,7 +5350,7 @@ export function mountHeyBeanWebApp(mount) {
         const shortClass = style.minutes <= 30 ? ' hb-timed-event-short' : '';
         return `
             <button class="hb-event hb-timed-event${shortClass}" type="button" data-edit-event="${event.id}" style="${style.css};background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}" data-duration-minutes="${style.minutes}">
-                <div class="hb-event-time">${escapeHtml(eventStartTime(event))}</div>
+                <div class="hb-event-time">${escapeHtml(commandCenterEventTime(event))}</div>
                 ${eventPillTitleMarkup(event)}
             </button>`;
     }
@@ -14388,7 +14388,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function criticalTaskSubtitle(task) {
         const parts = [];
-        const dueLabel = task.due_at || task.dueAt ? formatDateTime(task.due_at || task.dueAt) : '';
+        const dueLabel = task.due_at || task.dueAt ? formatDueTime(task.due_at || task.dueAt) : '';
         if (task.category) parts.push(task.category);
         if (itemOverdue(task, 'task')) parts.push('overdue');
         if (dueLabel) parts.push(`Due ${dueLabel}`);
@@ -14398,7 +14398,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function criticalReminderSubtitle(reminder) {
         const parts = [];
-        const dateLabel = reminderDateValue(reminder) ? formatDateTime(reminderDateValue(reminder)) : '';
+        const dateLabel = reminderDateValue(reminder) ? formatDueTime(reminderDateValue(reminder)) : '';
         if (reminder.category) parts.push(reminder.category);
         if (itemOverdue(reminder, 'reminder')) parts.push('overdue');
         if (dateLabel) parts.push(dateLabel);
@@ -14581,7 +14581,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function taskSubtitle(task) {
         return [
-            task.due_at || task.dueAt ? formatDateTime(task.due_at || task.dueAt) : '',
+            task.due_at || task.dueAt ? formatDueTime(task.due_at || task.dueAt) : '',
             recurrenceSummary(task),
         ].filter(Boolean).join(' · ');
     }
@@ -14589,7 +14589,7 @@ export function mountHeyBeanWebApp(mount) {
     function reminderSubtitle(reminder) {
         const bits = [];
         if (reminder.category) bits.push(reminder.category);
-        if (reminder.remind_at || reminder.due_at || reminder.dueAt) bits.push(formatDateTime(reminder.remind_at || reminder.due_at || reminder.dueAt));
+        if (reminder.remind_at || reminder.due_at || reminder.dueAt) bits.push(formatDueTime(reminder.remind_at || reminder.due_at || reminder.dueAt));
         if (itemIsRecurring(reminder)) bits.push(recurrenceSummary(reminder));
         return bits.join(' · ') || 'No reminder time';
     }
@@ -14617,17 +14617,11 @@ export function mountHeyBeanWebApp(mount) {
         const start = event.starts_at || event.startsAt;
         const end = event.ends_at || event.endsAt;
         if (!start) return 'All day';
-        const startLabel = formatTime(start);
-        return end ? `${startLabel} – ${formatTime(end)}` : startLabel;
+        return end ? formatCompactTimeRange(start, end) : formatCompactMeridiemTime(start);
     }
 
     function commandCenterEventTime(event) {
-        if (eventAllDay(event)) return 'All day';
-        const start = event.starts_at || event.startsAt;
-        const end = event.ends_at || event.endsAt;
-        if (!start) return 'All day';
-        const startLabel = formatCompactMeridiemTime(start);
-        return end ? `${startLabel} – ${formatCompactMeridiemTime(end)}` : startLabel;
+        return eventTime(event);
     }
 
     function eventStartTime(event) {
@@ -14640,6 +14634,10 @@ export function mountHeyBeanWebApp(mount) {
         if (eventAllDay(event)) return 'All day';
         const start = event.starts_at || event.startsAt;
         return start ? formatCompactMeridiemTime(start) : 'All day';
+    }
+
+    function monthEventTime(event) {
+        return eventTime(event);
     }
 
     function eventEndTime(event) {
@@ -15036,6 +15034,22 @@ export function mountHeyBeanWebApp(mount) {
         return new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     }
 
+    function formatDueTime(value) {
+        if (!value) return '';
+        if (wireValueLooksDateOnly(value)) {
+            const date = parseLocalDate(value);
+            if (Number.isNaN(date.getTime())) return String(value).trim();
+            const today = parseLocalDate(dateOnly(new Date()));
+            const tomorrow = addDays(today, 1);
+            if (sameDate(date, today)) return 'Today';
+            if (sameDate(date, tomorrow)) return 'Tomorrow';
+            return date.getFullYear() === today.getFullYear()
+                ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+        return formatCompactMeridiemTime(value) || String(value).trim();
+    }
+
     function formatDateOnly(value) {
         if (!value) return '';
         return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
@@ -15101,11 +15115,27 @@ export function mountHeyBeanWebApp(mount) {
 
     function formatCompactMeridiemTime(value) {
         if (!value) return '';
-        return new Date(value)
+        const date = value instanceof Date ? value : new Date(value);
+        if (Number.isNaN(date.getTime())) return '';
+        return date
             .toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
             .replace(/:00(?=\s)/, '')
             .replace(/\s/g, '')
             .toLowerCase();
+    }
+
+    function formatCompactTimeRange(startValue, endValue) {
+        const start = parseLocalDate(startValue);
+        const end = parseLocalDate(endValue);
+        if (Number.isNaN(start.getTime())) return '';
+        if (Number.isNaN(end.getTime()) || end <= start) return formatCompactMeridiemTime(start);
+        const startLabel = formatCompactMeridiemTime(start);
+        const endLabel = formatCompactMeridiemTime(end);
+        const startMeridiem = start.getHours() >= 12 ? 'pm' : 'am';
+        const endMeridiem = end.getHours() >= 12 ? 'pm' : 'am';
+        return startMeridiem === endMeridiem
+            ? `${startLabel.replace(new RegExp(`${startMeridiem}$`), '')}-${endLabel}`
+            : `${startLabel}-${endLabel}`;
     }
 
     function hourLabel(hour) {

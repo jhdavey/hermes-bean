@@ -306,7 +306,7 @@ class _SubtaskRow extends StatelessWidget {
             ),
             if ((task.dueAt ?? '').trim().isNotEmpty)
               Text(
-                _formatCalendarEventDateTime(task.dueAt),
+                _compactDueTimeLabel(task.dueAt),
                 style: TextStyle(color: HeyBeanTheme.muted, fontSize: 11),
               ),
           ],

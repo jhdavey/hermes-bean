@@ -568,7 +568,7 @@
 }
 
 .hb-command-center-glance .hb-glance-event {
-    grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-columns: 78px minmax(0, 1fr);
     gap: 6px;
     min-height: 32px;
     border: 0 !important;
@@ -591,7 +591,7 @@
     min-width: 0;
     height: 42px;
     display: grid;
-    grid-template-columns: 50px 7px minmax(0, 1fr) auto;
+    grid-template-columns: 78px 7px minmax(0, 1fr) auto;
     align-items: center;
     gap: 10px;
     border: 0;
