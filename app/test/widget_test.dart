@@ -5239,7 +5239,7 @@ void main() {
     final sharedHeight =
         agendaHeight + glanceHeight + resizerHeight + chatPanelHeight;
     final expectedChatHeight = math.min(
-      math.max(128.0, sharedHeight * .40),
+      math.max(128.0, sharedHeight * .30),
       math.max(0.0, sharedHeight - 150.0 - glanceHeight),
     );
     expect(commandCenterHeight, greaterThanOrEqualTo(sharedHeight));
@@ -5941,68 +5941,71 @@ void main() {
     },
   );
 
-  testWidgets('dictated Bean voice requests use realtime text and local TTS', (
-    WidgetTester tester,
-  ) async {
-    final api = _SignedInFakeHermesApiClient();
-    final realtime = _FakeBeanRealtimeConversation(api);
-    final playedAudio = <String>[];
-    await tester.pumpWidget(
-      HermesBeanApp(
-        apiClient: api,
-        tokenStore: _MemoryAuthTokenStore(),
-        realtimeConversation: realtime,
-        playBeanVoiceAudio: (bytes, {contentType = 'audio/wav'}) async {
-          playedAudio.add('$contentType:${String.fromCharCodes(bytes)}');
-        },
-      ),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'dictated Bean voice requests use realtime audio with TTS backup',
+    (WidgetTester tester) async {
+      final api = _SignedInFakeHermesApiClient();
+      final realtime = _FakeBeanRealtimeConversation(api);
+      final playedAudio = <String>[];
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: api,
+          tokenStore: _MemoryAuthTokenStore(),
+          realtimeConversation: realtime,
+          playBeanVoiceAudio: (bytes, {contentType = 'audio/wav'}) async {
+            playedAudio.add('$contentType:${String.fromCharCodes(bytes)}');
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    final gesture = await tester.startGesture(
-      tester.getCenter(find.byKey(const Key('nav-bean'))),
-    );
-    await tester.pump(const Duration(milliseconds: 650));
-    await tester.enterText(find.byKey(const Key('chat-input')), 'Plan today');
-    await tester.pump();
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const Key('nav-bean'))),
+      );
+      await tester.pump(const Duration(milliseconds: 650));
+      await tester.enterText(find.byKey(const Key('chat-input')), 'Plan today');
+      await tester.pump();
 
-    await gesture.up();
-    await tester.pump(const Duration(milliseconds: 250));
+      await gesture.up();
+      await tester.pump(const Duration(milliseconds: 250));
 
-    expect(realtime.started, isTrue);
-    expect(realtime.startMicrophoneValues, [false]);
-    expect(realtime.sentTexts, ['Plan today']);
-    expect(realtime.sentTextAudioResponses, [false]);
-    expect(realtime.sentTextEndConversationValues, [true]);
-    expect(api.sentMessages, isEmpty);
-    realtime.remoteAudioOutput = true;
-    realtime.emitAudioOutput('remote_audio_attached');
-    realtime.emitTranscript('assistant', 'Today is planned.');
-    await tester.pump(const Duration(milliseconds: 800));
-    expect(api.synthesizedSpeechTexts, ['Today is planned.']);
-    expect(playedAudio, ['audio/wav:fake-wav']);
+      expect(realtime.started, isTrue);
+      expect(realtime.startMicrophoneValues, [false]);
+      expect(realtime.sentTexts, ['Plan today']);
+      expect(realtime.sentTextAudioResponses, [true]);
+      expect(realtime.sentTextEndConversationValues, [true]);
+      expect(api.sentMessages, isEmpty);
+      realtime.emitTranscript('assistant', 'Today is planned.');
+      await tester.pump(const Duration(milliseconds: 800));
+      expect(api.synthesizedSpeechTexts, ['Today is planned.']);
+      expect(playedAudio, ['audio/wav:fake-wav']);
 
-    final secondGesture = await tester.startGesture(
-      tester.getCenter(find.byKey(const Key('nav-bean'))),
-    );
-    await tester.pump(const Duration(milliseconds: 650));
-    await tester.enterText(
-      find.byKey(const Key('chat-input')),
-      'Plan tomorrow',
-    );
-    await tester.pump();
+      final secondGesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const Key('nav-bean'))),
+      );
+      await tester.pump(const Duration(milliseconds: 650));
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'Plan tomorrow',
+      );
+      await tester.pump();
 
-    await secondGesture.up();
-    await tester.pump(const Duration(milliseconds: 250));
+      await secondGesture.up();
+      await tester.pump(const Duration(milliseconds: 250));
 
-    expect(realtime.startMicrophoneValues, [false]);
-    expect(realtime.sentTexts, ['Plan today', 'Plan tomorrow']);
-    expect(realtime.sentTextAudioResponses, [false, false]);
-    expect(realtime.sentTextEndConversationValues, [true, true]);
-    expect(api.sentMessages, isEmpty);
-    expect(api.synthesizedSpeechTexts, ['Today is planned.']);
-    expect(playedAudio, ['audio/wav:fake-wav']);
-  });
+      expect(realtime.startMicrophoneValues, [false]);
+      expect(realtime.sentTexts, ['Plan today', 'Plan tomorrow']);
+      expect(realtime.sentTextAudioResponses, [true, true]);
+      expect(realtime.sentTextEndConversationValues, [true, true]);
+      expect(api.sentMessages, isEmpty);
+      realtime.remoteAudioOutput = true;
+      realtime.emitAudioOutput('remote_audio_attached');
+      realtime.emitTranscript('assistant', 'Tomorrow is planned.');
+      await tester.pump(const Duration(milliseconds: 800));
+      expect(api.synthesizedSpeechTexts, ['Today is planned.']);
+      expect(playedAudio, ['audio/wav:fake-wav']);
+    },
+  );
 
   testWidgets('dictated queued voice replies play final assistant TTS', (
     WidgetTester tester,

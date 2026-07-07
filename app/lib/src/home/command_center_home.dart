@@ -160,7 +160,7 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
         );
         final minChatHeight = math.min(72.0, maxChatHeight);
         final fallbackChatHeight = math.min(
-          math.max(128.0, constraints.maxHeight * .40),
+          math.max(128.0, constraints.maxHeight * .30),
           maxChatHeight,
         );
         final expandedChatHeight = (_expandedChatHeight ?? fallbackChatHeight)

@@ -2897,14 +2897,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       });
 
       unawaited(_realtimeConversation.refreshDashboardContext());
-      _forceRealtimeTtsFallbackForNextAssistant = true;
+      _forceRealtimeTtsFallbackForNextAssistant = false;
       _dictatedVoiceResponseRunToken = runToken;
       _speakQueuedAssistantForDictatedVoice = false;
       _lastDictatedVoiceQueuedTtsText = '';
       await _realtimeConversation
           .sendText(
             trimmed,
-            audioResponse: false,
+            audioResponse: true,
             endConversationAfterResponse: true,
           )
           .timeout(const Duration(milliseconds: 1200));
