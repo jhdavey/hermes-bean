@@ -3587,8 +3587,15 @@ export function mountHeyBeanWebApp(mount) {
 
     function ensureBeanWorkItemsForContent(content) {
         if (state.beanWorkItems.some((item) => !beanWorkItemDone(item))) return;
-        const labels = beanWorkLabelsForTurn(content);
+        const labels = beanInitialWorkLabelsForRequest(content);
         if (labels.length) resetBeanWorkItems(labels);
+    }
+
+    function beanInitialWorkLabelsForRequest(content) {
+        const labels = beanWorkLabelsForTurn(content);
+        if (labels.length) return labels;
+        const backgroundLabel = beanBackgroundWorkLabelForRequest(content);
+        return backgroundLabel ? [backgroundLabel] : [];
     }
 
     function maxActivityEventId(events = []) {
@@ -3677,6 +3684,7 @@ export function mountHeyBeanWebApp(mount) {
         if (/\b(?:calendar|calendars|agenda|schedule|schedules|event|events|meeting|meetings|appointment|appointments)\b/.test(command)) return withSubject('Checking calendar');
         if (/\b(?:task|tasks|todo|to do)\b/.test(command)) return withSubject('Checking tasks');
         if (/\b(?:reminder|reminders)\b/.test(command)) return withSubject('Checking reminders');
+        if (/\b(?:note|notes)\b/.test(command)) return withSubject('Checking notes');
         if (/\b(?:approval|approvals)\b/.test(command)) return withSubject('Checking approvals');
         if (/\b(?:workspace|workspaces)\b/.test(command)) return withSubject('Checking workspace');
         if (/\b(?:plan|organize|prioritize)\b/.test(command)) return withSubject('Planning request');
@@ -3698,11 +3706,29 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function beanCommandRequiresBackgroundWork(command) {
-        return /\b(?:weather|forecast|traffic|news|headline|flight|hotel|price|stock|market|sports|score|calendar|agenda|schedule|event|meeting|appointment|task|todo|reminder|approval|workspace|plan|organize|prioritize)\b/.test(command);
+        return /\b(?:weather|forecast|traffic|news|headline|flight|hotel|price|stock|market|sports|score|calendar|agenda|schedule|event|meeting|appointment|task|todo|note|notes|reminder|approval|workspace|plan|organize|prioritize)\b/.test(command);
     }
 
     function beanCommandNeedsAgentWork(command) {
-        return /\b(?:add|create|make|set|delete|remove|update|change|move|reschedule|complete|mark|save|remember|forget|schedule|find|check|look up)\b/.test(command);
+        return /\b(?:add|create|make|set|delete|remove|update|change|move|reschedule|complete|mark|save|remember|forget|schedule|book|reserve|find|check|look up)\b/.test(command);
+    }
+
+    function beanRequestShouldUseQueuedRuntime(content) {
+        const command = normalizedBeanText(content);
+        if (!command || beanCommandIsCapabilityQuestion(command)) return false;
+        return beanCommandRequiresBackgroundWork(command) || beanCommandNeedsAgentWork(command);
+    }
+
+    function beanAcknowledgementForRequest(content) {
+        const command = normalizedBeanText(content);
+        if (!command || beanCommandIsCapabilityQuestion(command)) return '';
+        if (/\b(?:weather|forecast|traffic|news|headline|flight|hotel|price|stock|market|sports|score|available|availability|look up|check|find)\b/.test(command)) {
+            return 'I’ll check that now.';
+        }
+        if (/\b(?:plan|organize|prioritize)\b/.test(command)) {
+            return 'I’ll work through that and show each step here.';
+        }
+        return 'I’m on it. I’ll show each step as I finish.';
     }
 
     function beanBackgroundWorkSubject(command) {
@@ -3959,8 +3985,15 @@ export function mountHeyBeanWebApp(mount) {
         return /\.(?:task|reminder|calendar_event|note|note_folder|memory|approval|blocker)\.(?:created|updated|deleted)$/.test(type);
     }
 
-    function beanActivityEventsIncludeFreshDashboardMutation(events = []) {
-        let shouldRefresh = false;
+    function refreshDashboardAfterBeanMutationEvents(events = []) {
+        const freshEvents = freshBeanDashboardMutationEvents(events);
+        if (!freshEvents.length) return;
+        refreshDashboardResourcesAfterBeanMutations(freshEvents).catch(() => {});
+        refreshRealtimeDashboardContext('bean_mutation_event').catch(() => {});
+    }
+
+    function freshBeanDashboardMutationEvents(events = []) {
+        const fresh = [];
         normalizeList(events).forEach((event) => {
             const eventId = Number(event?.id || 0);
             const key = Number.isFinite(eventId) && eventId > 0
@@ -3969,15 +4002,81 @@ export function mountHeyBeanWebApp(mount) {
             if (beanDashboardRefreshEventIds.has(key)) return;
             if (!beanActivityEventMutatesDashboard(event)) return;
             beanDashboardRefreshEventIds.add(key);
-            shouldRefresh = true;
+            fresh.push(event);
         });
-        return shouldRefresh;
+        return fresh;
     }
 
-    function refreshDashboardAfterBeanMutationEvents(events = []) {
-        if (!beanActivityEventsIncludeFreshDashboardMutation(events)) return;
-        refreshOnly(true, { skipCalendarSync: true, deferRender: false }).catch(() => {});
-        refreshRealtimeDashboardContext('bean_mutation_event').catch(() => {});
+    function beanMutationTargets(events = []) {
+        const targets = new Set();
+        normalizeList(events).forEach((event) => {
+            const type = String(event?.event_type || event?.eventType || '');
+            if (type.includes('.task.')) targets.add('tasks');
+            if (type.includes('.reminder.')) targets.add('reminders');
+            if (type.includes('.calendar_event.')) targets.add('calendar');
+            if (type.includes('.note_folder.')) targets.add('noteFolders');
+            if (type.includes('.note.')) targets.add('notes');
+            if (type.includes('.memory.')) targets.add('memory');
+            if (type.includes('.approval.') || type.includes('.blocker.')) targets.add('summary');
+        });
+        return targets;
+    }
+
+    async function refreshDashboardResourcesAfterBeanMutations(events = []) {
+        const targets = beanMutationTargets(events);
+        if (!targets.size) return;
+        const workspaceId = currentWorkspaceId();
+        const updates = [];
+        if (targets.has('tasks')) {
+            updates.push(Promise.all([
+                api(workspaceScopedPath('/tasks', workspaceId)),
+                api(workspaceScopedPath('/tasks/past', workspaceId)).catch(() => []),
+            ]).then(([tasks, pastTasks]) => {
+                state.tasks = reconcileTaskRefresh(mergeById(normalizeList(tasks), normalizeList(pastTasks)));
+            }));
+        }
+        if (targets.has('reminders')) {
+            updates.push(api(workspaceScopedPath('/reminders', workspaceId)).then((reminders) => {
+                state.reminders = reconcileReminderRefresh(reminders);
+            }));
+        }
+        if (targets.has('calendar')) {
+            updates.push(api(workspaceScopedPath('/calendar-events?skip_google_sync=1&skip_outlook_sync=1', workspaceId)).then((calendar) => {
+                state.calendar = reconcileCalendarRefresh(calendar);
+            }));
+        }
+        if (targets.has('notes') || targets.has('noteFolders')) {
+            if (targets.has('noteFolders')) {
+                updates.push(api(workspaceScopedPath('/note-folders', workspaceId)).then((folders) => {
+                    state.noteFolders = normalizeNoteFolders(folders);
+                }));
+            }
+            updates.push(api(workspaceScopedPath('/notes', workspaceId)).then((notes) => {
+                state.notes = normalizeNotes(notes);
+                ensureSelectedNote();
+            }));
+        }
+        if (targets.has('memory')) {
+            updates.push(Promise.all([
+                api(workspaceScopedPath('/memory-items', workspaceId)),
+                api(workspaceScopedPath('/memory-summaries', workspaceId)),
+                api(workspaceScopedPath('/memory/request-history?limit=10', workspaceId)),
+            ]).then(([items, summaries, history]) => {
+                state.memoryItems = normalizeList(items);
+                state.memorySummaries = normalizeList(summaries);
+                state.memoryHistory = normalizeList(history);
+            }));
+        }
+        if (targets.has('summary')) {
+            updates.push(api(workspaceScopedPath('/today', workspaceId)).then((summary) => {
+                state.summary = summary;
+                state.approvals = normalizeList(summary?.approvals);
+                state.blockers = normalizeList(summary?.blockers);
+            }));
+        }
+        await Promise.all(updates);
+        saveDashboardCache(workspaceId);
+        renderDashboardDataUpdate({ deferIfEditing: false });
     }
 
     function beanWorkItemFromEvent(event) {
@@ -9214,6 +9313,9 @@ export function mountHeyBeanWebApp(mount) {
         let result = null;
         let assistantContent = '';
         let needsAssistantLookup = false;
+        const useQueuedRuntime = beanRequestShouldUseQueuedRuntime(content);
+        const initialWorkLabels = useQueuedRuntime ? beanInitialWorkLabelsForRequest(content) : [];
+        const localAck = useQueuedRuntime ? beanAcknowledgementForRequest(content) : '';
 
         if (options.autoOpenChat && state.selected !== 'bean') {
             state.selected = 'bean';
@@ -9226,8 +9328,16 @@ export function mountHeyBeanWebApp(mount) {
         state.busy = true;
         state.chatDraft = '';
         state.editingChatMessageId = '';
-        state.chatRunState = 'Working…';
-        resetBeanWorkItems([]);
+        state.chatRunState = useQueuedRuntime ? 'Working…' : 'Thinking…';
+        resetBeanWorkItems(initialWorkLabels);
+        if (localAck) {
+            state.messages.push({
+                id: `local-ack-${Date.now()}-${requestId}`,
+                role: 'assistant',
+                content: localAck,
+                metadata: { local_ack: true, client_request_id: clientRequestId },
+            });
+        }
         state.error = '';
         render();
         try {
@@ -9240,7 +9350,7 @@ export function mountHeyBeanWebApp(mount) {
             }
             startBeanWorkEventPolling(state.session.id);
             const metadata = {
-                source: 'web_queued_chat',
+                source: useQueuedRuntime ? 'web_queued_chat' : 'web_direct_chat',
                 client_request_id: clientRequestId,
                 ...(editingMessageId ? { edited_message_id: editingMessageId } : {}),
             };

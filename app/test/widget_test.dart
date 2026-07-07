@@ -2932,7 +2932,7 @@ void main() {
     expect(find.text('No problem — we can skip that.'), findsOneWidget);
   });
 
-  testWidgets('queued Bean chat does not show empty working dialog', (
+  testWidgets('queued Bean chat shows immediate work acknowledgement', (
     WidgetTester tester,
   ) async {
     final api = _DelayedQueueFakeHermesApiClient();
@@ -2952,7 +2952,9 @@ void main() {
 
     expect(api.queueMessageCalls, 1);
     expect(find.text('working...'), findsNothing);
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+    expect(find.text('I’ll check that now.'), findsOneWidget);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(find.textContaining('Checking weather'), findsOneWidget);
 
     api.completeQueue();
     await tester.pumpAndSettle();
@@ -2978,7 +2980,8 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(find.textContaining('Checking notes'), findsOneWidget);
 
     await tester.pump(const Duration(milliseconds: 800));
     await tester.pumpAndSettle();
@@ -2987,7 +2990,7 @@ void main() {
       find.text('Tomorrow dinner is the lemon chicken sheet-pan meal.'),
       findsOneWidget,
     );
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
   });
 
   testWidgets(
@@ -3052,7 +3055,7 @@ void main() {
     expect(find.text('2/2'), findsOneWidget);
   });
 
-  testWidgets('read-only task questions do not create Bean work dock items', (
+  testWidgets('read-only task questions show app lookup work only', (
     WidgetTester tester,
   ) async {
     final api = _ReadOnlyQuestionFakeHermesApiClient();
@@ -3068,10 +3071,14 @@ void main() {
       'What tasks do I have today?',
     );
     await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(find.textContaining('Checking tasks'), findsOneWidget);
+
     await tester.pumpAndSettle();
 
     expect(find.text('You have two tasks due today.'), findsOneWidget);
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
     expect(find.textContaining('Create task'), findsNothing);
     expect(find.textContaining('Creating task'), findsNothing);
   });
@@ -3124,7 +3131,7 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
 
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();
@@ -3150,7 +3157,7 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
 
     await tester.pump(const Duration(milliseconds: 600));
     await tester.pump(const Duration(milliseconds: 250));
@@ -3184,7 +3191,7 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
 
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();
@@ -3210,7 +3217,7 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
     expect(find.text('Creating item'), findsNothing);
 
     await tester.pump(const Duration(seconds: 15));
@@ -3237,7 +3244,7 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
 
     await tester.pump(const Duration(milliseconds: 600));
     await tester.pump(const Duration(milliseconds: 250));
@@ -3272,7 +3279,7 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
     expect(find.text('Take out trash'), findsNothing);
 
     await tester.pump(const Duration(seconds: 2));
@@ -3319,7 +3326,7 @@ void main() {
       await tester.tap(find.byKey(const Key('primary-chat-action')));
       await tester.pump();
 
-      expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+      expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
 
       await tester.pump(const Duration(seconds: 2));
       await tester.pump(const Duration(milliseconds: 250));

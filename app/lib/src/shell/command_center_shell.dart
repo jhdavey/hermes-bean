@@ -924,6 +924,25 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkAcceptsOrphanPlanEvents = true;
   }
 
+  void _seedBeanWorkItemsForRequest(String content) {
+    final labels = _beanInitialWorkLabelsForRequest(content);
+    _beanWorkItems = [
+      for (var index = 0; index < labels.length && index < 6; index++)
+        _BeanWorkItem(
+          id: 'request-$index',
+          label: labels[index],
+          status: 'running',
+        ),
+    ];
+  }
+
+  List<String> _beanInitialWorkLabelsForRequest(String content) {
+    final labels = _beanWorkLabelsForRequest(content);
+    if (labels.isNotEmpty) return labels;
+    final backgroundLabel = _beanBackgroundWorkLabelForRequest(content);
+    return backgroundLabel == null ? const [] : [backgroundLabel];
+  }
+
   bool _beanRequestIsCapabilityQuestion(String content) =>
       _beanCommandIsCapabilityQuestion(_normalizedBeanCommand(content));
 
@@ -966,6 +985,242 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       return true;
     }
     return false;
+  }
+
+  bool _beanRequestShouldUseQueuedRuntime(String content) {
+    final command = _normalizedBeanCommand(content);
+    if (command.isEmpty || _beanCommandIsCapabilityQuestion(command)) {
+      return false;
+    }
+    return _beanCommandRequiresBackgroundWork(command) ||
+        _beanCommandNeedsAgentWork(command);
+  }
+
+  bool _beanCommandRequiresBackgroundWork(String command) => RegExp(
+    r'\b(weather|forecast|traffic|news|headline|flight|hotel|price|prices|stock|market|sports|score|calendar|agenda|schedule|event|meeting|appointment|task|tasks|todo|to do|reminder|note|notes|approval|workspace|plan|organize|prioritize|available|availability)\b',
+  ).hasMatch(command);
+
+  bool _beanCommandNeedsAgentWork(String command) => RegExp(
+    r'\b(add|create|make|set|delete|remove|update|change|move|reschedule|complete|mark|save|remember|forget|schedule|book|reserve|find|check|look up)\b',
+  ).hasMatch(command);
+
+  String? _beanAcknowledgementForRequest(String content) {
+    final command = _normalizedBeanCommand(content);
+    if (command.isEmpty || _beanCommandIsCapabilityQuestion(command)) {
+      return null;
+    }
+    if (RegExp(
+      r'\b(weather|forecast|traffic|news|headline|flight|hotel|price|prices|stock|market|sports|score|available|availability|look up|check|find)\b',
+    ).hasMatch(command)) {
+      return 'I’ll check that now.';
+    }
+    if (RegExp(r'\b(plan|organize|prioritize)\b').hasMatch(command)) {
+      return 'I’ll work through that and show each step here.';
+    }
+    return 'I’m on it. I’ll show each step as I finish.';
+  }
+
+  String? _beanBackgroundWorkLabelForRequest(String content) {
+    final command = _normalizedBeanCommand(content);
+    if (command.isEmpty || _beanCommandIsCapabilityQuestion(command)) {
+      return null;
+    }
+    final subject = _beanBackgroundWorkSubject(command);
+    String withSubject(String base) =>
+        subject == null ? base : '$base: $subject';
+    if (RegExp(r'\b(weather|forecast)\b').hasMatch(command)) {
+      return withSubject('Checking weather');
+    }
+    if (RegExp(r'\b(traffic|drive|commute)\b').hasMatch(command)) {
+      return withSubject('Checking traffic');
+    }
+    if (RegExp(r'\b(news|headline|headlines)\b').hasMatch(command)) {
+      return withSubject('Checking news');
+    }
+    if (RegExp(
+      r'\b(flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|available|availability|cheapest|price|prices)\b',
+    ).hasMatch(command)) {
+      return withSubject('Checking travel');
+    }
+    if (RegExp(r'\b(stock|stocks|market|markets)\b').hasMatch(command)) {
+      return withSubject('Checking markets');
+    }
+    if (RegExp(r'\b(sports|score|scores|game|games)\b').hasMatch(command)) {
+      return withSubject('Checking scores');
+    }
+    if (RegExp(
+      r'\b(calendar|calendars|agenda|schedule|schedules|event|events|meeting|meetings|appointment|appointments)\b',
+    ).hasMatch(command)) {
+      return withSubject('Checking calendar');
+    }
+    if (RegExp(r'\b(task|tasks|todo|to do)\b').hasMatch(command)) {
+      return withSubject('Checking tasks');
+    }
+    if (RegExp(r'\b(reminder|reminders)\b').hasMatch(command)) {
+      return withSubject('Checking reminders');
+    }
+    if (RegExp(r'\b(note|notes)\b').hasMatch(command)) {
+      return withSubject('Checking notes');
+    }
+    if (RegExp(r'\b(approval|approvals)\b').hasMatch(command)) {
+      return withSubject('Checking approvals');
+    }
+    if (RegExp(r'\b(workspace|workspaces)\b').hasMatch(command)) {
+      return withSubject('Checking workspace');
+    }
+    if (RegExp(r'\b(plan|organize|prioritize)\b').hasMatch(command)) {
+      return withSubject('Planning request');
+    }
+    if (_beanCommandRequiresBackgroundWork(command) ||
+        _beanCommandNeedsAgentWork(command)) {
+      return withSubject('Checking request');
+    }
+    return null;
+  }
+
+  String? _beanBackgroundWorkSubject(String command) {
+    var text = command
+        .replaceAll(
+          RegExp(
+            r"\b(can you|could you|would you|please|tell me|show me|give me|get me|find me|check|look up|pull up|what is|what's|whats|what are|what's on|whats on|how is|how's|hows|do i have|anything on|any updates on)\b",
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(the|my|a|an|latest|current|currently|right now|now|today|tonight)\b',
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(weather|forecast|traffic|news|headlines?|stocks?|markets?|sports|scores?|flights?|airfares?|tickets?|hotels?|rental cars?|rentals?|reservations?|bookings?|calendar|calendars|agenda|schedule|schedules|events?|meetings?|appointments?|tasks?|todo|to do|reminders?|approvals?|workspaces?)\b',
+          ),
+          ' ',
+        )
+        .replaceAll(RegExp(r'\b(for|about|in|on|at|near|nearby)\b'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (text.isEmpty ||
+        text.length < 3 ||
+        RegExp(
+          r'^(me|it|that|this|there|anything|something)$',
+        ).hasMatch(text)) {
+      return null;
+    }
+    if (text.length > 42) text = '${text.substring(0, 42).trim()}...';
+    return text[0].toUpperCase() + text.substring(1);
+  }
+
+  List<String> _beanWorkLabelsForRequest(String content) {
+    final command = _normalizedBeanCommand(content);
+    if (command.isEmpty || _beanCommandIsCapabilityQuestion(command)) {
+      return const [];
+    }
+    final inheritedTarget = _beanWorkTargetForClause(command);
+    final labels = command
+        .split(RegExp(r'\b(?:and then|then|also|and)\b|[,;]'))
+        .map((clause) => _beanWorkLabelForClause(clause, inheritedTarget))
+        .whereType<String>()
+        .where((label) => !_isGenericBeanWorkLabel(label))
+        .toSet()
+        .toList();
+    if (labels.isNotEmpty) return labels.take(6).toList();
+    final fallback = _beanWorkLabelForClause(command, inheritedTarget);
+    return fallback == null || _isGenericBeanWorkLabel(fallback)
+        ? const []
+        : [fallback];
+  }
+
+  String _beanWorkTargetForClause(String clause) {
+    if (RegExp(r'\b(reminder|reminders|remind)\b').hasMatch(clause)) {
+      return 'reminder';
+    }
+    if (RegExp(r'\b(task|tasks|todo|to do)\b').hasMatch(clause)) {
+      return 'task';
+    }
+    if (RegExp(r'\b(note|notes|folder|folders)\b').hasMatch(clause)) {
+      return 'note';
+    }
+    if (RegExp(r'\b(memory|remember|forget)\b').hasMatch(clause)) {
+      return 'memory';
+    }
+    if (RegExp(
+      r'\b(calendar|event|events|meeting|appointment|schedule)\b',
+    ).hasMatch(clause)) {
+      return 'event';
+    }
+    return '';
+  }
+
+  String? _beanWorkLabelForClause(String rawClause, String inheritedTarget) {
+    final clause = rawClause.trim();
+    if (clause.isEmpty) return null;
+    final action = RegExp(r'\b(delete|remove|cancel|forget)\b').hasMatch(clause)
+        ? 'Delete'
+        : RegExp(
+            r'\b(update|change|move|reschedule|complete|mark)\b',
+          ).hasMatch(clause)
+        ? 'Update'
+        : RegExp(
+            r'\b(add|create|make|set|schedule|book|reserve|save|remember)\b',
+          ).hasMatch(clause)
+        ? 'Create'
+        : '';
+    if (action.isEmpty) return null;
+    final target = _beanWorkTargetForClause(clause).isNotEmpty
+        ? _beanWorkTargetForClause(clause)
+        : inheritedTarget;
+    if (target.isEmpty) return null;
+    final targetLabel = switch (target) {
+      'event' => 'calendar event',
+      'memory' => 'knowledge',
+      _ => target,
+    };
+    final subject = _beanWorkSubjectForClause(clause, target);
+    return subject == null
+        ? '$action $targetLabel'
+        : '$action $targetLabel: $subject';
+  }
+
+  String? _beanWorkSubjectForClause(String clause, String target) {
+    var subject = clause
+        .replaceAll(
+          RegExp(
+            r'\b(can you|could you|would you|please|also|then|and|to my|on my|my|the|a|an)\b',
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(add|create|make|set|schedule|book|reserve|save|remember|delete|remove|cancel|forget|update|change|move|reschedule|complete|mark)\b',
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(calendar|event|events|meeting|appointment|schedule|reminder|reminders|remind|task|tasks|todo|to do|note|notes|folder|folders|memory|knowledge)\b',
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(for|about|called|named|titled|with title|with the title)\b',
+          ),
+          ' ',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(today|tonight|tomorrow|next week|next month|at|from|until|by|before|after)\b.*$',
+          ),
+          ' ',
+        )
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (subject.isEmpty || subject.length < 3) return null;
+    if (subject.length > 48) subject = '${subject.substring(0, 48).trim()}...';
+    return subject[0].toUpperCase() + subject.substring(1);
   }
 
   void _applyBeanWorkEvents(List<HermesActivityEvent> events) {
@@ -2322,7 +2577,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         ),
       );
     }
+    final hasLocalPendingMessages = _messages.any(
+      (message) => message.id < 0 || message.metadata['local_ack'] == true,
+    );
     if (preserveVisibleMessages &&
+        !hasLocalPendingMessages &&
         _messages.length > replacementMessages.length) {
       return;
     }
@@ -2506,7 +2765,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (trimmed.isEmpty || session == null) return null;
     final runToken = ++_chatRunToken;
     final capabilityQuestion = _beanRequestIsCapabilityQuestion(trimmed);
+    final needsQueuedRuntime = _beanRequestShouldUseQueuedRuntime(trimmed);
+    final localAcknowledgement = needsQueuedRuntime
+        ? _beanAcknowledgementForRequest(trimmed)
+        : null;
     final localUserMessageId = _nextLocalMessageId();
+    final localAckMessageId = localAcknowledgement == null
+        ? null
+        : _nextLocalMessageId();
     final editingServerMessageId =
         editingMessageId != null && editingMessageId > 0
         ? editingMessageId
@@ -2519,11 +2785,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() {
       _busy = true;
       _editingChatMessageId = null;
-      _chatRunState = capabilityQuestion ? 'Thinking…' : 'Bean is working…';
+      _chatRunState = capabilityQuestion || !needsQueuedRuntime
+          ? 'Thinking…'
+          : 'Bean is working…';
       if (capabilityQuestion) {
         _prepareBeanWorkForFreshRequest();
       } else {
         _beginBeanWorkEventContext(freshRequest: true);
+        if (needsQueuedRuntime) _seedBeanWorkItemsForRequest(trimmed);
       }
       if (editingMessageId != null) {
         final editIndex = _messages.indexWhere(
@@ -2536,13 +2805,25 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _messages.add(
         HermesMessage(id: localUserMessageId, role: 'user', content: trimmed),
       );
+      if (localAcknowledgement != null && localAckMessageId != null) {
+        _messages.add(
+          HermesMessage(
+            id: localAckMessageId,
+            role: 'assistant',
+            content: localAcknowledgement,
+            metadata: {'local_ack': true},
+          ),
+        );
+      }
     });
     try {
       session = _session ?? session;
       final needsBeanIntroduction = _needsBeanIntroduction;
       final useDirectConversationReply =
           !needsBeanIntroduction &&
-          (capabilityQuestion || _shouldUseDirectConversationReply(trimmed));
+          (capabilityQuestion ||
+              _shouldUseDirectConversationReply(trimmed) ||
+              !needsQueuedRuntime);
       chatPhase = needsBeanIntroduction
           ? 'sending Bean introduction message'
           : editingServerMessageId != null
@@ -2554,6 +2835,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           'flutter-chat-${DateTime.now().microsecondsSinceEpoch}-$localUserMessageId';
       final messageMetadata = _flutterChatMetadata(
         additional: {
+          'source': useDirectConversationReply
+              ? 'flutter_direct_chat'
+              : 'flutter',
           'client_request_id': clientRequestId,
           if (editingServerMessageId != null)
             'edited_message_id': editingServerMessageId,
@@ -2676,7 +2960,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               : null;
         });
         _refreshDashboardAfterBeanMutationEvents(result.events);
-        unawaited(_refreshSignedInViews(showLoading: false));
+        if (!result.events.any(_beanActivityEventMutatesDashboard)) {
+          unawaited(_refreshSignedInViews(showLoading: false));
+        }
         return surfacedAssistantText;
       }
 
@@ -3383,7 +3669,9 @@ ${_truncateDiagnostic(stack, 2200)}
             }
           });
           _refreshDashboardAfterBeanMutationEvents(finalEvents);
-          unawaited(_refreshSignedInViews(showLoading: false));
+          if (!finalEvents.any(_beanActivityEventMutatesDashboard)) {
+            unawaited(_refreshSignedInViews(showLoading: false));
+          }
           return;
         }
         if (attempt > 0 &&
@@ -3451,7 +3739,6 @@ ${_truncateDiagnostic(stack, 2200)}
         _error = null;
         _completeActiveBeanWorkItems();
       });
-      unawaited(_refreshSignedInViews(showLoading: false));
 
       return true;
     } catch (_) {
@@ -3462,8 +3749,163 @@ ${_truncateDiagnostic(stack, 2200)}
   void _refreshDashboardAfterBeanMutationEvents(
     List<HermesActivityEvent> events,
   ) {
-    if (!_beanActivityEventsIncludeFreshDashboardMutation(events)) return;
-    unawaited(_refreshSignedInViews(showLoading: false));
+    final freshEvents = _freshBeanDashboardMutationEvents(events);
+    if (freshEvents.isEmpty) return;
+    unawaited(_refreshDashboardResourcesAfterBeanMutations(freshEvents));
+  }
+
+  List<HermesActivityEvent> _freshBeanDashboardMutationEvents(
+    List<HermesActivityEvent> events,
+  ) {
+    final fresh = <HermesActivityEvent>[];
+    for (final event in events) {
+      if (_beanDashboardRefreshEventIds.contains(event.id)) continue;
+      if (!_beanActivityEventMutatesDashboard(event)) continue;
+      _beanDashboardRefreshEventIds.add(event.id);
+      fresh.add(event);
+    }
+    return fresh;
+  }
+
+  Future<void> _refreshDashboardResourcesAfterBeanMutations(
+    List<HermesActivityEvent> events,
+  ) async {
+    final targets = _beanMutationTargets(events);
+    if (targets.isEmpty) return;
+    final tasksFuture = targets.contains('tasks')
+        ? widget.apiClient.listTasks().catchError((_) => _tasks)
+        : Future<List<HermesTask>?>.value();
+    final pastTasksFuture = targets.contains('tasks')
+        ? widget.apiClient.listPastTasks().catchError((_) => _pastTasks)
+        : Future<List<HermesTask>?>.value();
+    final remindersFuture = targets.contains('reminders')
+        ? widget.apiClient.listReminders().catchError((_) => _reminders)
+        : Future<List<HermesReminder>?>.value();
+    final calendarFuture = targets.contains('calendar')
+        ? widget.apiClient
+              .listCalendarEvents(skipExternalSync: true)
+              .catchError((_) => _calendar)
+        : Future<List<HermesCalendarEvent>?>.value();
+    final noteFoldersFuture = targets.contains('noteFolders')
+        ? widget.apiClient.listNoteFolders().catchError((_) => _noteFolders)
+        : Future<List<HermesNoteFolder>?>.value();
+    final notesFuture =
+        targets.contains('notes') || targets.contains('noteFolders')
+        ? widget.apiClient.listNotes().catchError((_) => _notes)
+        : Future<List<HermesNote>?>.value();
+    final memoryItemsFuture = targets.contains('memory')
+        ? widget.apiClient.listMemoryItems().catchError((_) => _memoryItems)
+        : Future<List<HermesMemoryItem>?>.value();
+    final memorySummariesFuture = targets.contains('memory')
+        ? widget.apiClient.listMemorySummaries().catchError(
+            (_) => _memorySummaries,
+          )
+        : Future<List<HermesMemorySummary>?>.value();
+    final memoryHistoryFuture = targets.contains('memory')
+        ? widget.apiClient.listRequestHistory().catchError(
+            (_) => _memoryHistory,
+          )
+        : Future<List<HermesRequestHistoryItem>?>.value();
+    final summaryFuture = targets.contains('summary')
+        ? widget.apiClient.todaySummary().catchError(
+            (_) => HermesTodaySummary(
+              tasks: _tasks,
+              reminders: _reminders,
+              calendarEvents: _calendar,
+              activityEvents: _events,
+              approvals: _approvals,
+              blockers: const [],
+            ),
+          )
+        : Future<HermesTodaySummary?>.value();
+
+    final results = await Future.wait<Object?>([
+      tasksFuture,
+      pastTasksFuture,
+      remindersFuture,
+      calendarFuture,
+      noteFoldersFuture,
+      notesFuture,
+      memoryItemsFuture,
+      memorySummariesFuture,
+      memoryHistoryFuture,
+      summaryFuture,
+    ]);
+    if (!mounted || _phase != _AuthPhase.signedIn) return;
+    setState(() {
+      final tasks = results[0] as List<HermesTask>?;
+      final pastTasks = results[1] as List<HermesTask>?;
+      final reminders = results[2] as List<HermesReminder>?;
+      final calendar = results[3] as List<HermesCalendarEvent>?;
+      final noteFolders = results[4] as List<HermesNoteFolder>?;
+      final notes = results[5] as List<HermesNote>?;
+      final memoryItems = results[6] as List<HermesMemoryItem>?;
+      final memorySummaries = results[7] as List<HermesMemorySummary>?;
+      final memoryHistory = results[8] as List<HermesRequestHistoryItem>?;
+      final summary = results[9] as HermesTodaySummary?;
+
+      if (tasks != null) {
+        _tasks = _dashboardListForMutationRefresh(
+          refreshed: _tasksWithPendingWrites(tasks),
+          current: _tasks,
+          showLoading: false,
+          deletedIds: _activePendingTaskDeleteIds(),
+          idFor: (task) => task.id,
+        );
+      }
+      if (pastTasks != null) {
+        _pastTasks = _tasksWithPendingWrites(pastTasks);
+      }
+      if (reminders != null) {
+        _reminders = _dashboardListForMutationRefresh(
+          refreshed: _remindersWithPendingWrites(reminders),
+          current: _reminders,
+          showLoading: false,
+          deletedIds: _activePendingReminderDeleteIds(),
+          idFor: (reminder) => reminder.id,
+        );
+      }
+      if (calendar != null) {
+        _calendar = _dashboardListForMutationRefresh(
+          refreshed: _calendarEventsForDashboardState(
+            listed: calendar,
+            summary: _calendar,
+          ),
+          current: _calendar,
+          showLoading: false,
+          deletedIds: _activePendingCalendarEventDeleteIds(),
+          idFor: (event) => event.id,
+        );
+      }
+      if (noteFolders != null) _noteFolders = _sortedNoteFolders(noteFolders);
+      if (notes != null) _notes = _sortedNotes(notes);
+      if (memoryItems != null) _memoryItems = _sortedMemoryItems(memoryItems);
+      if (memorySummaries != null) _memorySummaries = memorySummaries;
+      if (memoryHistory != null) _memoryHistory = memoryHistory;
+      if (summary != null) {
+        _approvals = summary.approvals;
+        _events = _mergeEvents(summary.activityEvents, _events);
+      }
+      _markDashboardDataMutated();
+      _cacheCurrentDashboardSnapshot();
+    });
+  }
+
+  Set<String> _beanMutationTargets(List<HermesActivityEvent> events) {
+    final targets = <String>{};
+    for (final event in events) {
+      final type = event.eventType;
+      if (type.contains('.task.')) targets.add('tasks');
+      if (type.contains('.reminder.')) targets.add('reminders');
+      if (type.contains('.calendar_event.')) targets.add('calendar');
+      if (type.contains('.note_folder.')) targets.add('noteFolders');
+      if (type.contains('.note.')) targets.add('notes');
+      if (type.contains('.memory.')) targets.add('memory');
+      if (type.contains('.approval.') || type.contains('.blocker.')) {
+        targets.add('summary');
+      }
+    }
+    return targets;
   }
 
   void _applyBeanDashboardMutationEvents(List<HermesActivityEvent> events) {
@@ -3531,19 +3973,6 @@ ${_truncateDiagnostic(stack, 2200)}
     if (value is num) return value.toInt();
     if (value is String) return int.tryParse(value);
     return null;
-  }
-
-  bool _beanActivityEventsIncludeFreshDashboardMutation(
-    List<HermesActivityEvent> events,
-  ) {
-    var shouldRefresh = false;
-    for (final event in events) {
-      if (_beanDashboardRefreshEventIds.contains(event.id)) continue;
-      if (!_beanActivityEventMutatesDashboard(event)) continue;
-      _beanDashboardRefreshEventIds.add(event.id);
-      shouldRefresh = true;
-    }
-    return shouldRefresh;
   }
 
   bool _beanActivityEventMutatesDashboard(HermesActivityEvent event) {
