@@ -4974,9 +4974,14 @@ export function mountHeyBeanWebApp(mount) {
     function mobileBeanButtonMarkup() {
         const active = state.selected === 'bean';
         const listening = state.voiceListening;
+        const working = !listening && (
+            state.busy
+            || beanWorkStatusActive()
+            || ['working', 'responding'].includes(String(state.kioskVoicePhase || '').toLowerCase())
+        );
         return `
             ${beanWorkStatusMarkup({ mobile: true })}
-            <button class="hb-bean-button hb-mobile-bean-button ${active ? 'hb-bean-button-active' : ''} ${listening ? 'hb-bean-button-listening' : ''}" type="button" data-mobile-bean-button aria-label="Bean chat. Hold to dictate, tap to type." title="Bean">
+            <button class="hb-bean-button hb-mobile-bean-button ${active ? 'hb-bean-button-active' : ''} ${listening ? 'hb-bean-button-listening' : ''} ${working ? 'hb-bean-button-working' : ''}" type="button" data-mobile-bean-button aria-label="Bean chat. Hold to dictate, tap to type." title="Bean">
                 <img src="${escapeAttr(logoUrl)}" alt="">
             </button>`;
     }

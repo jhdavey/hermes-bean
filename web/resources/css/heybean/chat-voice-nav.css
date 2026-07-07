@@ -678,6 +678,7 @@
     color: var(--hb-text);
     box-shadow: none;
     overflow: visible;
+    isolation: isolate;
     touch-action: none;
     user-select: none;
     -webkit-touch-callout: none;
@@ -696,6 +697,31 @@
     opacity: 0;
     transform: scale(.9);
     transition: opacity .18s ease, transform .18s ease;
+}
+
+.hb-chat-voice-button::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    z-index: 0;
+    border-radius: inherit;
+    padding: 2.5px;
+    pointer-events: none;
+    opacity: 0;
+    background: conic-gradient(
+        from 0deg,
+        transparent 0deg,
+        rgba(var(--hb-accent-rgb), .22) 124deg,
+        var(--hb-accent-strong) 218deg,
+        rgba(var(--hb-accent-rgb), .18) 292deg,
+        transparent 360deg
+    );
+    filter: drop-shadow(0 0 8px rgba(var(--hb-accent-rgb), .42));
+    transition: opacity .18s ease;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
 }
 
 .hb-chat-voice-button-disabled {
@@ -719,10 +745,10 @@
 .hb-chat-voice-button-speaking,
 .hb-chat-voice-button-responding,
 .hb-chat-voice-button-cancelable {
-    border-color: var(--hb-accent-strong);
+    border-color: transparent;
     background: color-mix(in srgb, var(--hb-surface) 88%, var(--hb-accent));
     color: var(--hb-accent-strong);
-    box-shadow: 0 0 0 2px rgba(var(--hb-accent-rgb), .16), 0 8px 18px rgba(var(--hb-accent-rgb), .14);
+    box-shadow: 0 8px 18px rgba(var(--hb-accent-rgb), .14);
 }
 
 .hb-chat-voice-button-on::before,
@@ -737,6 +763,14 @@
     transform: scale(1);
 }
 
+.hb-chat-voice-button-working::after,
+.hb-chat-voice-button-speaking::after,
+.hb-chat-voice-button-responding::after,
+.hb-chat-voice-button-cancelable::after {
+    opacity: 1;
+    animation: hb-bean-activity-orbit 1.15s linear infinite;
+}
+
 .hb-chat-voice-button-error {
     border-color: rgba(220, 38, 38, .24);
     background: rgba(220, 38, 38, .09);
@@ -744,6 +778,8 @@
 }
 
 .hb-chat-voice-button-logo {
+    position: relative;
+    z-index: 1;
     display: inline-grid;
     place-items: center;
     transform: none;
@@ -887,6 +923,31 @@
     transition: opacity .16s ease, transform .16s ease;
 }
 
+.hb-bean-button::after {
+    content: "";
+    position: absolute;
+    inset: -5px;
+    z-index: 0;
+    border-radius: inherit;
+    padding: 3px;
+    pointer-events: none;
+    opacity: 0;
+    background: conic-gradient(
+        from 0deg,
+        transparent 0deg,
+        rgba(var(--hb-accent-rgb), .24) 126deg,
+        var(--hb-accent-strong) 218deg,
+        rgba(var(--hb-accent-rgb), .20) 294deg,
+        transparent 360deg
+    );
+    filter: drop-shadow(0 0 10px rgba(var(--hb-accent-rgb), .46));
+    transition: opacity .16s ease;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+}
+
 .hb-bean-button:hover {
     transform: translateY(-2px);
     border-color: rgba(var(--hb-accent-rgb), .68);
@@ -910,7 +971,24 @@
     border-color: rgba(var(--hb-accent-rgb), .76);
 }
 
+.hb-bean-button-working {
+    border-color: transparent;
+    box-shadow: 0 16px 34px rgba(15, 23, 42, .13), inset 0 1px 0 rgba(255, 255, 255, .96);
+}
+
+.hb-bean-button-working::before {
+    opacity: .92;
+    transform: scale(1);
+}
+
+.hb-bean-button-working::after {
+    opacity: 1;
+    animation: hb-bean-activity-orbit 1.15s linear infinite;
+}
+
 .hb-bean-button img {
+    position: relative;
+    z-index: 1;
     width: 42px;
     height: 42px;
     border-radius: 999px;
@@ -969,6 +1047,10 @@
 
 .hb-mobile-bean-button.hb-bean-button-listening::before {
     animation: none;
+}
+
+.hb-mobile-bean-button.hb-bean-button-working::before {
+    display: block;
 }
 
 .hb-kiosk-voice-pill {
@@ -1167,10 +1249,20 @@
 @media (prefers-reduced-motion: reduce) {
     .hb-kiosk-voice-status-shell,
     .hb-kiosk-voice-work-list,
+    .hb-bean-button-working::after,
+    .hb-chat-voice-button-working::after,
+    .hb-chat-voice-button-speaking::after,
+    .hb-chat-voice-button-responding::after,
+    .hb-chat-voice-button-cancelable::after,
     .hb-kiosk-voice-work-list .hb-bean-work-checkbox {
         transition: none;
     }
 
+    .hb-bean-button-working::after,
+    .hb-chat-voice-button-working::after,
+    .hb-chat-voice-button-speaking::after,
+    .hb-chat-voice-button-responding::after,
+    .hb-chat-voice-button-cancelable::after,
     .hb-kiosk-voice-work-list .hb-bean-work-item:not(.hb-bean-work-item-done) .hb-bean-work-checkbox {
         animation: none;
     }
@@ -1221,6 +1313,12 @@
     100% {
         opacity: .72;
         transform: scale(.98);
+    }
+}
+
+@keyframes hb-bean-activity-orbit {
+    to {
+        transform: rotate(360deg);
     }
 }
 

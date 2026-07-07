@@ -80,6 +80,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
     required this.selected,
     required this.onSelected,
     required this.beanListening,
+    required this.beanWorking,
     required this.onMorePressed,
     required this.onBeanLongPressStart,
     required this.onBeanLongPressEnd,
@@ -88,6 +89,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
   final _HomeDestination selected;
   final ValueChanged<_HomeDestination> onSelected;
   final bool beanListening;
+  final bool beanWorking;
   final VoidCallback onMorePressed;
   final VoidCallback onBeanLongPressStart;
   final VoidCallback onBeanLongPressEnd;
@@ -178,6 +180,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             child: _BeanFab(
               selected: selected == _HomeDestination.bean,
               listening: beanListening,
+              working: beanWorking,
               onPressed: () => onSelected(_HomeDestination.bean),
               onLongPressStart: onBeanLongPressStart,
               onLongPressEnd: onBeanLongPressEnd,
@@ -517,6 +520,7 @@ class _BeanFab extends StatefulWidget {
   const _BeanFab({
     required this.selected,
     required this.listening,
+    this.working = false,
     required this.onPressed,
     required this.onLongPressStart,
     required this.onLongPressEnd,
@@ -528,6 +532,7 @@ class _BeanFab extends StatefulWidget {
   final Key widgetKey;
   final bool selected;
   final bool listening;
+  final bool working;
   final String semanticLabel;
   final bool longPressEnabled;
   final VoidCallback onPressed;
@@ -538,15 +543,16 @@ class _BeanFab extends StatefulWidget {
   State<_BeanFab> createState() => _BeanFabState();
 }
 
-class _BeanFabState extends State<_BeanFab>
-    with SingleTickerProviderStateMixin {
+class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
   static const _pressHoldDelay = Duration(milliseconds: 180);
 
   late final AnimationController _pulseController;
+  late final AnimationController _activityController;
   bool _pressRecording = false;
   Timer? _pressHoldTimer;
 
   bool get _visuallyListening => widget.listening || _pressRecording;
+  bool get _visuallyWorking => widget.working && !_visuallyListening;
 
   @override
   void initState() {
@@ -555,26 +561,37 @@ class _BeanFabState extends State<_BeanFab>
       vsync: this,
       duration: const Duration(milliseconds: 950),
     );
-    _syncPulseAnimation();
+    _activityController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1350),
+    );
+    _syncFabAnimations();
   }
 
   @override
   void didUpdateWidget(covariant _BeanFab oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.listening != widget.listening) {
+    if (oldWidget.listening != widget.listening ||
+        oldWidget.working != widget.working) {
       if (!widget.listening && _pressRecording) {
         _pressRecording = false;
       }
-      _syncPulseAnimation();
+      _syncFabAnimations();
     }
   }
 
-  void _syncPulseAnimation() {
+  void _syncFabAnimations() {
     if (_visuallyListening) {
       _pulseController.repeat(reverse: true);
     } else {
       _pulseController.stop();
       _pulseController.value = 0;
+    }
+    if (_visuallyWorking) {
+      _activityController.repeat();
+    } else {
+      _activityController.stop();
+      _activityController.value = 0;
     }
   }
 
@@ -582,6 +599,7 @@ class _BeanFabState extends State<_BeanFab>
   void dispose() {
     _pressHoldTimer?.cancel();
     _pulseController.dispose();
+    _activityController.dispose();
     super.dispose();
   }
 
@@ -614,14 +632,14 @@ class _BeanFabState extends State<_BeanFab>
     _pressHoldTimer = null;
     if (_pressRecording) return;
     setState(() => _pressRecording = true);
-    _syncPulseAnimation();
+    _syncFabAnimations();
     widget.onLongPressStart();
   }
 
   void _endPressRecording() {
     if (!_pressRecording) return;
     setState(() => _pressRecording = false);
-    _syncPulseAnimation();
+    _syncFabAnimations();
     widget.onLongPressEnd();
   }
 
@@ -629,6 +647,7 @@ class _BeanFabState extends State<_BeanFab>
   Widget build(BuildContext context) {
     final activeColor = HeyBeanTheme.accentStrong;
     final visuallyListening = _visuallyListening;
+    final visuallyWorking = _visuallyWorking;
     return GestureDetector(
       key: widget.widgetKey,
       behavior: HitTestBehavior.opaque,
@@ -681,18 +700,28 @@ class _BeanFabState extends State<_BeanFab>
                     shape: BoxShape.circle,
                     color: HeyBeanTheme.surface,
                     border: Border.all(
-                      color: visuallyListening || widget.selected
+                      color: visuallyWorking
+                          ? Colors.transparent
+                          : visuallyListening || widget.selected
                           ? activeColor
                           : _quietBorderColor(alpha: .54),
-                      width: visuallyListening ? 3 : 1.6,
+                      width: visuallyWorking
+                          ? 0
+                          : visuallyListening
+                          ? 3
+                          : 1.6,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: visuallyListening
+                        color: visuallyListening || visuallyWorking
                             ? activeColor.withValues(alpha: .14)
                             : Colors.black.withValues(alpha: .08),
-                        blurRadius: visuallyListening ? 24 : 14,
-                        spreadRadius: visuallyListening ? 2 : 0,
+                        blurRadius: visuallyListening || visuallyWorking
+                            ? 24
+                            : 14,
+                        spreadRadius: visuallyListening || visuallyWorking
+                            ? 2
+                            : 0,
                         offset: const Offset(0, 6),
                       ),
                     ],
@@ -712,9 +741,68 @@ class _BeanFabState extends State<_BeanFab>
                 ),
               ),
             ),
+            if (visuallyWorking)
+              IgnorePointer(
+                child: AnimatedBuilder(
+                  key: const Key('heybean-working-ring'),
+                  animation: _activityController,
+                  builder: (context, child) => CustomPaint(
+                    size: const Size.square(68),
+                    painter: _BeanActivityRingPainter(
+                      color: activeColor,
+                      progress: _activityController.value,
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
+}
+
+class _BeanActivityRingPainter extends CustomPainter {
+  const _BeanActivityRingPainter({required this.color, required this.progress});
+
+  final Color color;
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final strokeWidth = 4.0;
+    final rect = Offset.zero & size;
+    final arcRect = rect.deflate(strokeWidth / 2);
+    final startAngle = (math.pi * 2 * progress) - math.pi / 2;
+    const sweepAngle = math.pi * .82;
+
+    final glowPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 8
+      ..strokeCap = StrokeCap.round
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8)
+      ..color = color.withValues(alpha: .30);
+    canvas.drawArc(arcRect, startAngle, sweepAngle, false, glowPaint);
+
+    final arcPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..shader = SweepGradient(
+        startAngle: startAngle,
+        endAngle: startAngle + math.pi * 2,
+        colors: [
+          color.withValues(alpha: .08),
+          color.withValues(alpha: .42),
+          color,
+          color.withValues(alpha: .18),
+        ],
+        stops: const [0, .48, .72, 1],
+      ).createShader(arcRect);
+    canvas.drawArc(arcRect, startAngle, sweepAngle, false, arcPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _BeanActivityRingPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.progress != progress;
 }

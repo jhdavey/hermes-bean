@@ -7003,6 +7003,7 @@ ${_truncateDiagnostic(stack, 2200)}
                       menu: _HeyBeanBottomMenu(
                         selected: _selectedDestination,
                         beanListening: _beanVoiceListening,
+                        beanWorking: _beanStopAvailable && !_beanVoiceListening,
                         onSelected: _selectDestination,
                         onMorePressed: _openMoreMenu,
                         onBeanLongPressStart: () =>
