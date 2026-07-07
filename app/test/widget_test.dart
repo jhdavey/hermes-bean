@@ -6399,8 +6399,7 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.text('Planning request'), findsOneWidget);
-    expect(find.text('0/1'), findsOneWidget);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 800));
     await tester.pumpAndSettle();
@@ -6409,7 +6408,7 @@ void main() {
       find.text('Tomorrow dinner is the lemon chicken sheet-pan meal.'),
       findsOneWidget,
     );
-    expect(find.text('1/1'), findsOneWidget);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
   });
 
   testWidgets(
@@ -6474,6 +6473,30 @@ void main() {
     expect(find.text('2/2'), findsOneWidget);
   });
 
+  testWidgets('read-only task questions do not create Bean work dock items', (
+    WidgetTester tester,
+  ) async {
+    final api = _ReadOnlyQuestionFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'What tasks do I have today?',
+    );
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('You have two tasks due today.'), findsOneWidget);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+    expect(find.textContaining('Create task'), findsNothing);
+    expect(find.textContaining('Creating task'), findsNothing);
+  });
+
   testWidgets('dashboard refresh applies Bean work events during active runs', (
     WidgetTester tester,
   ) async {
@@ -6504,7 +6527,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 250));
   });
 
-  testWidgets('multi-action Bean requests show every local work item upfront', (
+  testWidgets('multi-action Bean requests wait for backend work events', (
     WidgetTester tester,
   ) async {
     final api = _DashboardRefreshBeanWorkFakeHermesApiClient();
@@ -6522,10 +6545,7 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
-    expect(find.text('Creating event: Workout'), findsOneWidget);
-    expect(find.text('Creating reminder: Workout'), findsOneWidget);
-    expect(find.text('0/2'), findsOneWidget);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
 
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();
@@ -6551,10 +6571,7 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
-    expect(find.text('Creating reminder: Parent teacher'), findsOneWidget);
-    expect(find.textContaining('Creating event'), findsNothing);
-    expect(find.text('0/1'), findsOneWidget);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 600));
     await tester.pump(const Duration(milliseconds: 250));
@@ -6588,18 +6605,7 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
-    expect(find.text('Creating event: Miata engine swap'), findsOneWidget);
-    expect(find.text('Creating reminder: Miata engine swap'), findsOneWidget);
-    expect(find.text('0/2'), findsOneWidget);
-
-    final eventTop = tester.getTopLeft(
-      find.text('Creating event: Miata engine swap'),
-    );
-    final reminderTop = tester.getTopLeft(
-      find.text('Creating reminder: Miata engine swap'),
-    );
-    expect(eventTop.dy, lessThan(reminderTop.dy));
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
 
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();
@@ -6625,19 +6631,8 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
-    expect(find.text('Creating event: Miata engine swap'), findsOneWidget);
-    expect(find.text('Creating reminder: Miata engine swap'), findsOneWidget);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
     expect(find.text('Creating item'), findsNothing);
-    expect(find.text('0/2'), findsOneWidget);
-
-    final eventTop = tester.getTopLeft(
-      find.text('Creating event: Miata engine swap'),
-    );
-    final reminderTop = tester.getTopLeft(
-      find.text('Creating reminder: Miata engine swap'),
-    );
-    expect(eventTop.dy, lessThan(reminderTop.dy));
 
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();
@@ -6663,9 +6658,7 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.text('Creating event: Miata engine swap'), findsOneWidget);
-    expect(find.text('Creating reminder: Miata engine swap'), findsOneWidget);
-    expect(find.text('0/2'), findsOneWidget);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 600));
     await tester.pump(const Duration(milliseconds: 250));
@@ -6674,8 +6667,7 @@ void main() {
       find.text('Create calendar event: Miata engine swap'),
       findsOneWidget,
     );
-    expect(find.text('Creating reminder: Miata engine swap'), findsOneWidget);
-    expect(find.text('0/2'), findsOneWidget);
+    expect(find.text('Creating reminder: Miata engine swap'), findsNothing);
 
     await tester.pump(const Duration(seconds: 2));
     await tester.pump(const Duration(milliseconds: 250));
@@ -6701,8 +6693,7 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pump();
 
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
-    expect(find.text('Creating task: Take out trash'), findsOneWidget);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
     expect(find.text('Take out trash'), findsNothing);
 
     await tester.pump(const Duration(seconds: 2));
@@ -6749,8 +6740,7 @@ void main() {
       await tester.tap(find.byKey(const Key('primary-chat-action')));
       await tester.pump();
 
-      expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
-      expect(find.text('0/1'), findsOneWidget);
+      expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
 
       await tester.pump(const Duration(seconds: 2));
       await tester.pump(const Duration(milliseconds: 250));
@@ -6987,7 +6977,13 @@ void main() {
 
     expect(find.byKey(const Key('title-time-time-dock')), findsOneWidget);
     expect(find.text('Choose date and time'), findsWidgets);
-    expect(find.byKey(const Key('title-time-date-month-dial')), findsOneWidget);
+    expect(find.byKey(const Key('title-time-date-calendar')), findsOneWidget);
+    expect(
+      find.byKey(const Key('title-time-date-month-title')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('title-time-date-prev-month')), findsOneWidget);
+    expect(find.byKey(const Key('title-time-date-next-month')), findsOneWidget);
     expect(find.byKey(const Key('title-time-time-hour-dial')), findsOneWidget);
     expect(
       find.byKey(const Key('title-time-time-minute-dial')),
@@ -11085,9 +11081,10 @@ void main() {
       await tester.tap(find.byKey(const Key('event-start-field')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('event-time-dock')), findsOneWidget);
-      expect(find.byKey(const Key('event-date-month-dial')), findsOneWidget);
-      expect(find.byKey(const Key('event-date-day-dial')), findsOneWidget);
-      expect(find.byKey(const Key('event-date-year-dial')), findsOneWidget);
+      expect(find.byKey(const Key('event-date-calendar')), findsOneWidget);
+      expect(find.byKey(const Key('event-date-month-title')), findsOneWidget);
+      expect(find.byKey(const Key('event-date-prev-month')), findsOneWidget);
+      expect(find.byKey(const Key('event-date-next-month')), findsOneWidget);
       expect(find.byKey(const Key('event-time-hour-dial')), findsOneWidget);
       expect(find.byKey(const Key('event-time-minute-dial')), findsOneWidget);
       expect(find.byKey(const Key('event-time-meridiem-dial')), findsOneWidget);
@@ -11127,12 +11124,19 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('07'), findsNothing);
-      tester
-          .widget<CupertinoPicker>(
-            find.byKey(const Key('event-date-year-dial')),
-          )
-          .onSelectedItemChanged
-          ?.call(2);
+      final nextYear = DateTime(DateTime.now().year + 1, DateTime.now().month);
+      for (var month = 0; month < 12; month++) {
+        await tester.tap(find.byKey(const Key('event-date-next-month')));
+        await tester.pumpAndSettle();
+      }
+      expect(
+        find.text('${_testMonthNames[nextYear.month - 1]} ${nextYear.year}'),
+        findsOneWidget,
+      );
+      final selectedDayKey = Key(
+        'event-date-day-${nextYear.year}-${nextYear.month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}',
+      );
+      await tester.tap(find.byKey(selectedDayKey));
       hourPicker.onSelectedItemChanged?.call(12);
       minutePicker.onSelectedItemChanged?.call(13);
       tester
@@ -13552,6 +13556,37 @@ class _StaleBeanWorkEventsFakeHermesApiClient
       sessionId: sessionId,
       content: content,
       metadata: metadata,
+    );
+  }
+}
+
+class _ReadOnlyQuestionFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    return HermesMessageResult(
+      status: 'completed',
+      session: const HermesSession(id: 42, status: 'active', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 8300,
+        role: 'user',
+        content: content,
+        metadata: metadata ?? const {},
+      ),
+      assistantMessage: const HermesMessage(
+        id: 8301,
+        role: 'assistant',
+        content: 'You have two tasks due today.',
+      ),
+      events: const [],
     );
   }
 }

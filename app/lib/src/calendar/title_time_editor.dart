@@ -15,27 +15,14 @@ Future<DateTime?> _showStandardDateTimeDock(
       DateTime.now();
   final initialYear = parsed.year;
   final yearStart = initialYear - 1;
-  final initialMonthIndex = parsed.month - 1;
-  final initialDayIndex = parsed.day - 1;
-  final initialYearIndex = initialYear - yearStart;
   final initialHourIndex = (parsed.hour % 12 == 0 ? 12 : parsed.hour % 12) - 1;
   final initialMinuteIndex = (parsed.minute / 5).round().clamp(0, 11);
   final initialMeridiemIndex = parsed.hour >= 12 ? 1 : 0;
-  var selectedMonthIndex = initialMonthIndex;
-  var selectedDayIndex = initialDayIndex;
-  var selectedYearIndex = initialYearIndex;
+  var selectedDate = DateTime(parsed.year, parsed.month, parsed.day);
+  var visibleMonth = DateTime(parsed.year, parsed.month);
   var selectedHourIndex = initialHourIndex;
   var selectedMinuteIndex = initialMinuteIndex;
   var selectedMeridiemIndex = initialMeridiemIndex;
-  final monthController = FixedExtentScrollController(
-    initialItem: initialMonthIndex,
-  );
-  final dayController = FixedExtentScrollController(
-    initialItem: initialDayIndex,
-  );
-  final yearController = FixedExtentScrollController(
-    initialItem: initialYearIndex,
-  );
   final hourController = FixedExtentScrollController(
     initialItem: initialHourIndex,
   );
@@ -51,211 +38,422 @@ Future<DateTime?> _showStandardDateTimeDock(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => SafeArea(
-        top: false,
-        child: Container(
-          key: Key('$keyPrefix-time-dock'),
-          margin: const EdgeInsets.all(12),
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-          decoration: BoxDecoration(
-            color: HeyBeanTheme.surface,
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: HeyBeanTheme.border),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x26000000),
-                blurRadius: 30,
-                offset: Offset(0, 16),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 44,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: HeyBeanTheme.border,
-                  borderRadius: BorderRadius.circular(999),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDockState) => SafeArea(
+          top: false,
+          child: Container(
+            key: Key('$keyPrefix-time-dock'),
+            margin: const EdgeInsets.all(12),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            decoration: BoxDecoration(
+              color: HeyBeanTheme.surface,
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: HeyBeanTheme.border),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x26000000),
+                  blurRadius: 30,
+                  offset: Offset(0, 16),
                 ),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                dateOnly ? 'Choose date' : 'Choose date and time',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: HeyBeanTheme.text,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                height: 128,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: CupertinoPicker(
-                        key: Key('$keyPrefix-date-month-dial'),
-                        scrollController: monthController,
-                        itemExtent: 36,
-                        magnification: 1.05,
-                        useMagnifier: true,
-                        onSelectedItemChanged: (index) =>
-                            selectedMonthIndex = index,
-                        children: [
-                          for (var month = 1; month <= 12; month++)
-                            Center(child: Text(_monthName(month))),
-                        ],
-                      ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 44,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: HeyBeanTheme.border,
+                      borderRadius: BorderRadius.circular(999),
                     ),
-                    Expanded(
-                      child: CupertinoPicker(
-                        key: Key('$keyPrefix-date-day-dial'),
-                        scrollController: dayController,
-                        itemExtent: 36,
-                        magnification: 1.05,
-                        useMagnifier: true,
-                        onSelectedItemChanged: (index) =>
-                            selectedDayIndex = index,
-                        children: [
-                          for (var day = 1; day <= 31; day++)
-                            Center(child: Text(day.toString())),
-                        ],
-                      ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    dateOnly ? 'Choose date' : 'Choose date and time',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: HeyBeanTheme.text,
+                      fontWeight: FontWeight.w900,
                     ),
-                    Expanded(
-                      child: CupertinoPicker(
-                        key: Key('$keyPrefix-date-year-dial'),
-                        scrollController: yearController,
-                        itemExtent: 36,
-                        magnification: 1.05,
-                        useMagnifier: true,
-                        onSelectedItemChanged: (index) =>
-                            selectedYearIndex = index,
+                  ),
+                  const SizedBox(height: 14),
+                  _StandardDateCalendar(
+                    keyPrefix: keyPrefix,
+                    visibleMonth: visibleMonth,
+                    selectedDate: selectedDate,
+                    firstDate: DateTime(yearStart),
+                    lastDate: DateTime(yearStart + 4, 12, 31),
+                    onVisibleMonthChanged: (month) {
+                      setDockState(() {
+                        visibleMonth = DateTime(month.year, month.month);
+                      });
+                    },
+                    onDateSelected: (date) {
+                      setDockState(() {
+                        selectedDate = DateTime(
+                          date.year,
+                          date.month,
+                          date.day,
+                        );
+                        visibleMonth = DateTime(date.year, date.month);
+                      });
+                    },
+                  ),
+                  if (!dateOnly) ...[
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      height: 128,
+                      child: Row(
                         children: [
-                          for (
-                            var year = yearStart;
-                            year <= yearStart + 4;
-                            year++
-                          )
-                            Center(child: Text(year.toString())),
+                          Expanded(
+                            child: CupertinoPicker(
+                              key: Key('$keyPrefix-time-hour-dial'),
+                              scrollController: hourController,
+                              itemExtent: 42,
+                              magnification: 1.08,
+                              useMagnifier: true,
+                              looping: true,
+                              onSelectedItemChanged: (index) =>
+                                  selectedHourIndex = index % 12,
+                              children: [
+                                for (var hour = 1; hour <= 12; hour++)
+                                  Center(child: Text(hour.toString())),
+                              ],
+                            ),
+                          ),
+                          Text(
+                            ':',
+                            style: Theme.of(context).textTheme.headlineSmall
+                                ?.copyWith(fontWeight: FontWeight.w900),
+                          ),
+                          Expanded(
+                            child: CupertinoPicker(
+                              key: Key('$keyPrefix-time-minute-dial'),
+                              scrollController: minuteController,
+                              itemExtent: 42,
+                              magnification: 1.08,
+                              useMagnifier: true,
+                              looping: true,
+                              onSelectedItemChanged: (index) =>
+                                  selectedMinuteIndex = index % 12,
+                              children: [
+                                for (var minute = 0; minute < 60; minute += 5)
+                                  Center(
+                                    child: Text(
+                                      minute.toString().padLeft(2, '0'),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          Expanded(
+                            child: CupertinoPicker(
+                              key: Key('$keyPrefix-time-meridiem-dial'),
+                              scrollController: meridiemController,
+                              itemExtent: 42,
+                              magnification: 1.08,
+                              useMagnifier: true,
+                              onSelectedItemChanged: (index) =>
+                                  selectedMeridiemIndex = index,
+                              children: const [
+                                Center(child: Text('AM')),
+                                Center(child: Text('PM')),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                     ),
                   ],
-                ),
-              ),
-              if (!dateOnly) ...[
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 190,
-                  child: Row(
+                  const SizedBox(height: 10),
+                  Row(
                     children: [
                       Expanded(
-                        child: CupertinoPicker(
-                          key: Key('$keyPrefix-time-hour-dial'),
-                          scrollController: hourController,
-                          itemExtent: 42,
-                          magnification: 1.08,
-                          useMagnifier: true,
-                          looping: true,
-                          onSelectedItemChanged: (index) =>
-                              selectedHourIndex = index % 12,
-                          children: [
-                            for (var hour = 1; hour <= 12; hour++)
-                              Center(child: Text(hour.toString())),
-                          ],
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: Text('Cancel'),
                         ),
                       ),
-                      Text(
-                        ':',
-                        style: Theme.of(context).textTheme.headlineSmall
-                            ?.copyWith(fontWeight: FontWeight.w900),
-                      ),
+                      const SizedBox(width: 10),
                       Expanded(
-                        child: CupertinoPicker(
-                          key: Key('$keyPrefix-time-minute-dial'),
-                          scrollController: minuteController,
-                          itemExtent: 42,
-                          magnification: 1.08,
-                          useMagnifier: true,
-                          looping: true,
-                          onSelectedItemChanged: (index) =>
-                              selectedMinuteIndex = index % 12,
-                          children: [
-                            for (var minute = 0; minute < 60; minute += 5)
-                              Center(
-                                child: Text(minute.toString().padLeft(2, '0')),
+                        child: FilledButton(
+                          key: Key('$keyPrefix-time-dock-done'),
+                          onPressed: () {
+                            if (dateOnly) {
+                              Navigator.of(context).pop(selectedDate);
+                              return;
+                            }
+                            final hour12 = selectedHourIndex + 1;
+                            final minute = selectedMinuteIndex * 5;
+                            var hour24 = hour12 % 12;
+                            if (selectedMeridiemIndex == 1) hour24 += 12;
+                            Navigator.of(context).pop(
+                              DateTime(
+                                selectedDate.year,
+                                selectedDate.month,
+                                selectedDate.day,
+                                hour24,
+                                minute,
                               ),
-                          ],
-                        ),
-                      ),
-                      Expanded(
-                        child: CupertinoPicker(
-                          key: Key('$keyPrefix-time-meridiem-dial'),
-                          scrollController: meridiemController,
-                          itemExtent: 42,
-                          magnification: 1.08,
-                          useMagnifier: true,
-                          onSelectedItemChanged: (index) =>
-                              selectedMeridiemIndex = index,
-                          children: const [
-                            Center(child: Text('AM')),
-                            Center(child: Text('PM')),
-                          ],
+                            );
+                          },
+                          child: Text('Done'),
                         ),
                       ),
                     ],
                   ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: Text('Cancel'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton(
-                      key: Key('$keyPrefix-time-dock-done'),
-                      onPressed: () {
-                        final year = yearStart + selectedYearIndex;
-                        final month = selectedMonthIndex + 1;
-                        final maxDay = DateTime(year, month + 1, 0).day;
-                        final day = (selectedDayIndex + 1).clamp(1, maxDay);
-                        if (dateOnly) {
-                          Navigator.of(context).pop(DateTime(year, month, day));
-                          return;
-                        }
-                        final hour12 = selectedHourIndex + 1;
-                        final minute = selectedMinuteIndex * 5;
-                        var hour24 = hour12 % 12;
-                        if (selectedMeridiemIndex == 1) hour24 += 12;
-                        Navigator.of(
-                          context,
-                        ).pop(DateTime(year, month, day, hour24, minute));
-                      },
-                      child: Text('Done'),
-                    ),
-                  ),
                 ],
               ),
-            ],
+            ),
           ),
         ),
       ),
     );
   } finally {
-    monthController.dispose();
-    dayController.dispose();
-    yearController.dispose();
     hourController.dispose();
     minuteController.dispose();
     meridiemController.dispose();
+  }
+}
+
+class _StandardDateCalendar extends StatelessWidget {
+  const _StandardDateCalendar({
+    required this.keyPrefix,
+    required this.visibleMonth,
+    required this.selectedDate,
+    required this.firstDate,
+    required this.lastDate,
+    required this.onVisibleMonthChanged,
+    required this.onDateSelected,
+  });
+
+  final String keyPrefix;
+  final DateTime visibleMonth;
+  final DateTime selectedDate;
+  final DateTime firstDate;
+  final DateTime lastDate;
+  final ValueChanged<DateTime> onVisibleMonthChanged;
+  final ValueChanged<DateTime> onDateSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final month = DateTime(visibleMonth.year, visibleMonth.month);
+    final previousMonth = DateTime(month.year, month.month - 1);
+    final nextMonth = DateTime(month.year, month.month + 1);
+    final canGoPrevious = !previousMonth.isBefore(
+      DateTime(firstDate.year, firstDate.month),
+    );
+    final canGoNext = !nextMonth.isAfter(
+      DateTime(lastDate.year, lastDate.month),
+    );
+    final firstOfMonth = DateTime(month.year, month.month);
+    final gridStart = firstOfMonth.subtract(
+      Duration(days: firstOfMonth.weekday % DateTime.daysPerWeek),
+    );
+    const weekdays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+    return Padding(
+      key: Key('$keyPrefix-date-calendar'),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              _DateCalendarNavButton(
+                key: Key('$keyPrefix-date-prev-month'),
+                icon: Icons.chevron_left_rounded,
+                enabled: canGoPrevious,
+                onPressed: () => onVisibleMonthChanged(previousMonth),
+              ),
+              Expanded(
+                child: Column(
+                  children: [
+                    Text(
+                      '${_monthName(month.month)} ${month.year}',
+                      key: Key('$keyPrefix-date-month-title'),
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: HeyBeanTheme.text,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _DateCalendarNavButton(
+                key: Key('$keyPrefix-date-next-month'),
+                icon: Icons.chevron_right_rounded,
+                enabled: canGoNext,
+                onPressed: () => onVisibleMonthChanged(nextMonth),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              for (final weekday in weekdays)
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      weekday,
+                      style: TextStyle(
+                        color: HeyBeanTheme.muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          for (var row = 0; row < 6; row++) ...[
+            Row(
+              children: [
+                for (var column = 0; column < 7; column++)
+                  Expanded(
+                    child: Builder(
+                      builder: (context) {
+                        final date = gridStart.add(
+                          Duration(days: row * 7 + column),
+                        );
+                        final inCurrentMonth = date.month == month.month;
+                        final enabled =
+                            !date.isBefore(firstDate) &&
+                            !date.isAfter(lastDate);
+
+                        return _DateCalendarDayButton(
+                          keyPrefix: keyPrefix,
+                          date: date,
+                          inCurrentMonth: inCurrentMonth,
+                          selected: _sameCalendarDay(date, selectedDate),
+                          today: _sameCalendarDay(date, DateTime.now()),
+                          enabled: enabled,
+                          onTap: () => onDateSelected(date),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+            if (row < 5) const SizedBox(height: 2),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _DateCalendarNavButton extends StatelessWidget {
+  const _DateCalendarNavButton({
+    super.key,
+    required this.icon,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    onPressed: enabled ? onPressed : null,
+    icon: Icon(icon),
+    color: HeyBeanTheme.text,
+    disabledColor: HeyBeanTheme.muted.withValues(alpha: .35),
+    style: IconButton.styleFrom(
+      backgroundColor: HeyBeanTheme.surface.withValues(
+        alpha: HeyBeanTheme.isDark ? .35 : .78,
+      ),
+      fixedSize: const Size.square(38),
+      minimumSize: const Size.square(38),
+      padding: EdgeInsets.zero,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    ),
+  );
+}
+
+class _DateCalendarDayButton extends StatelessWidget {
+  const _DateCalendarDayButton({
+    required this.keyPrefix,
+    required this.date,
+    required this.inCurrentMonth,
+    required this.selected,
+    required this.today,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String keyPrefix;
+  final DateTime date;
+  final bool inCurrentMonth;
+  final bool selected;
+  final bool today;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = selected
+        ? Colors.white
+        : enabled
+        ? inCurrentMonth
+              ? HeyBeanTheme.text
+              : HeyBeanTheme.muted.withValues(alpha: .58)
+        : HeyBeanTheme.muted.withValues(alpha: .30);
+    final borderColor = selected
+        ? HeyBeanTheme.accentStrong
+        : today
+        ? HeyBeanTheme.accentStrong.withValues(alpha: .55)
+        : Colors.transparent;
+    final background = selected
+        ? HeyBeanTheme.accentStrong
+        : today
+        ? HeyBeanTheme.accent.withValues(alpha: HeyBeanTheme.isDark ? .20 : .12)
+        : Colors.transparent;
+
+    return Padding(
+      padding: const EdgeInsets.all(2),
+      child: Semantics(
+        button: true,
+        selected: selected,
+        enabled: enabled,
+        label:
+            '${_monthName(date.month)} ${date.day}, ${date.year}${today ? ', today' : ''}',
+        child: Material(
+          color: background,
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            key: Key(
+              '$keyPrefix-date-day-${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}',
+            ),
+            onTap: enabled ? onTap : null,
+            borderRadius: BorderRadius.circular(14),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOutCubic,
+              height: 30,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: borderColor),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                date.day.toString(),
+                style: TextStyle(
+                  color: foreground,
+                  fontSize: 14,
+                  fontWeight: selected || today
+                      ? FontWeight.w900
+                      : FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
