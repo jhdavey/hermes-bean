@@ -5881,8 +5881,8 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 650));
 
-      expect(realtime.started, isTrue);
-      expect(realtime.startMicrophoneValues, [false]);
+      expect(realtime.started, isFalse);
+      expect(realtime.startMicrophoneValues, isEmpty);
       expect(find.byKey(const Key('chat-view')), findsOneWidget);
       expect(find.byKey(const Key('heybean-recording-pulse')), findsOneWidget);
       expect(find.text('Listening'), findsWidgets);
@@ -6002,9 +6002,9 @@ void main() {
       await gesture.up();
       await tester.pump(const Duration(milliseconds: 50));
 
-      realtime.failStart();
       await tester.pumpAndSettle();
 
+      expect(realtime.started, isFalse);
       expect(api.sentMessages, ['Hey Ben can you hear me right now']);
       expect(
         find.textContaining('Voice is not available right now'),
@@ -6016,7 +6016,7 @@ void main() {
     },
   );
 
-  testWidgets('failing Bean voice start shows text fallback instead of snag', (
+  testWidgets('failing realtime start does not interrupt dictated voice', (
     WidgetTester tester,
   ) async {
     final api = _SignedInFakeHermesApiClient();
@@ -6038,16 +6038,16 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
 
-    expect(realtime.started, isTrue);
+    expect(realtime.started, isFalse);
     expect(
       find.textContaining('Voice is not available right now'),
-      findsOneWidget,
+      findsNothing,
     );
     expect(find.textContaining('Bean hit a snag'), findsNothing);
     expect(find.textContaining('Realtime unavailable'), findsNothing);
   });
 
-  testWidgets('Bean voice errors do not appear on the settings screen', (
+  testWidgets('dictated voice does not surface stale realtime errors', (
     WidgetTester tester,
   ) async {
     final api = _SignedInFakeHermesApiClient();
@@ -6070,7 +6070,7 @@ void main() {
 
     expect(
       find.textContaining('Voice is not available right now'),
-      findsOneWidget,
+      findsNothing,
     );
 
     await openSettingsFromBottomNav(tester);
@@ -6083,7 +6083,7 @@ void main() {
   });
 
   testWidgets(
-    'realtime voice transport loss exits listening with text fallback',
+    'realtime transport loss does not interrupt local dictated voice',
     (WidgetTester tester) async {
       final api = _SignedInFakeHermesApiClient();
       final realtime = _FakeBeanRealtimeConversation(api);
@@ -6106,10 +6106,10 @@ void main() {
       realtime.emitSessionEnded('webrtc_connection_failure');
       await tester.pump();
 
-      expect(find.byKey(const Key('heybean-recording-pulse')), findsNothing);
+      expect(find.byKey(const Key('heybean-recording-pulse')), findsOneWidget);
       expect(
         find.textContaining('Bean voice lost the live connection'),
-        findsOneWidget,
+        findsNothing,
       );
 
       await gesture.up();
@@ -6139,8 +6139,8 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 650));
 
-    expect(realtime.started, isTrue);
-    expect(realtime.startMicrophoneValues, [false]);
+    expect(realtime.started, isFalse);
+    expect(realtime.startMicrophoneValues, isEmpty);
     expect(realtime.captureStarted, isFalse);
     expect(realtime.captureEnded, isFalse);
     expect(realtime.microphoneEnabled, isFalse);

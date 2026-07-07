@@ -86,8 +86,11 @@ Future<void> _defaultPlayBeanVoiceAudio(
 }) async {
   if (bytes.isEmpty) return;
   final player = AudioPlayer();
+  final cleanContentType = contentType.split(';').first.trim().toLowerCase();
+  final audioFile = File(
+    '${Directory.systemTemp.path}/bean-tts-${DateTime.now().microsecondsSinceEpoch}.${_audioExtensionForContentType(cleanContentType)}',
+  );
   try {
-    await player.setPlayerMode(PlayerMode.lowLatency);
     await player.setAudioContext(
       AudioContext(
         iOS: AudioContextIOS(
@@ -96,14 +99,30 @@ Future<void> _defaultPlayBeanVoiceAudio(
         ),
       ),
     );
-    await player.play(BytesSource(bytes, mimeType: contentType));
+    await audioFile.writeAsBytes(bytes, flush: true);
+    await player.play(
+      DeviceFileSource(audioFile.path, mimeType: cleanContentType),
+    );
     await player.onPlayerComplete.first.timeout(
       const Duration(seconds: 90),
       onTimeout: () {},
     );
   } finally {
     await player.dispose();
+    if (await audioFile.exists()) {
+      await audioFile.delete();
+    }
   }
+}
+
+String _audioExtensionForContentType(String contentType) {
+  if (contentType.contains('mpeg') || contentType.contains('mp3')) {
+    return 'mp3';
+  }
+  if (contentType.contains('aac')) return 'aac';
+  if (contentType.contains('ogg')) return 'ogg';
+  if (contentType.contains('webm')) return 'webm';
+  return 'wav';
 }
 
 class _HeyBeanThemeRuntime extends StatelessWidget {

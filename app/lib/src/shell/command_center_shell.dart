@@ -105,8 +105,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   String? _beanVoiceDraft;
   final stt.SpeechToText _beanSpeech = stt.SpeechToText();
   bool _beanSpeechReady = false;
-  Future<HermesSession>? _beanVoiceStartFuture;
-  bool _beanVoiceReleaseHandlingStart = false;
   int _localMessageSequence = -1;
   late final BeanRealtimeConversation _realtimeConversation;
   final Set<int> _dismissedReminderBannerIds = <int>{};
@@ -1819,6 +1817,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       },
       onSessionEnded: (_) {
         if (!mounted) return;
+        if (_beanVoiceListening) return;
         setState(() {
           _beanVoiceListening = false;
           _beanVoiceDraft = null;
@@ -3036,96 +3035,40 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() {
       _beanVoiceListening = true;
       _beanVoiceDraft = '';
-      _beanVoiceReleaseHandlingStart = false;
       _editingChatMessageId = null;
       _chatInputController.clear();
       _error = null;
-      _chatRunState = 'Connecting Bean voice';
+      _chatRunState = 'Listening';
     });
 
     try {
-      final startFuture = _realtimeConversation.start(
-        sessionId: _session?.id,
-        workspaceId: _user?.activeWorkspace?.numericId,
-        metadata: _flutterChatMetadata(),
-        microphoneEnabled: false,
-      );
-      _beanVoiceStartFuture = startFuture;
-      unawaited(
-        startFuture.then<void>(
-          (realtimeSession) {
-            if (!identical(_beanVoiceStartFuture, startFuture)) {
-              return;
-            }
-            if (!mounted) return;
-            setState(() {
-              _session = realtimeSession;
-              if (_beanVoiceListening) _chatRunState = 'Listening';
-            });
-          },
-          onError: (Object error) async {
-            if (!identical(_beanVoiceStartFuture, startFuture)) {
-              return;
-            }
-            if (_beanVoiceReleaseHandlingStart) {
-              return;
-            }
-            _beanVoiceStartFuture = null;
-            await _beanSpeech.cancel();
-            await _realtimeConversation.stop();
-            if (!mounted) return;
-            final limitMessage = _subscriptionLimitMessageFromError(error);
-            setState(() {
-              _beanVoiceListening = false;
-              _beanVoiceDraft = null;
-              _chatInputController.clear();
-              _chatRunState = 'Voice unavailable';
-              _beanWorkItems = const [];
-              _beanWorkAcceptsOrphanPlanEvents = false;
-              _error =
-                  limitMessage ??
-                  'Voice is not available right now. Type the request and Bean will handle it from chat.';
-            });
-          },
-        ),
-      );
-      try {
-        _beanSpeechReady =
-            _beanSpeechReady ||
-            await _beanSpeech.initialize(
-              onError: _handleBeanSpeechError,
-              onStatus: (status) {
-                if (!mounted || !_beanVoiceListening) return;
-                if (status == 'done' || status == 'notListening') {
-                  setState(() => _chatRunState = 'Listening');
-                }
-              },
-            );
-        if (_beanSpeechReady) {
-          await _listenForBeanSpeechDraft();
-        }
-      } catch (_) {
-        // Keep the realtime session available; release will fall back to chat
-        // if no local transcript was captured.
+      _beanSpeechReady =
+          _beanSpeechReady ||
+          await _beanSpeech.initialize(
+            onError: _handleBeanSpeechError,
+            onStatus: (status) {
+              if (!mounted || !_beanVoiceListening) return;
+              if (status == 'done' || status == 'notListening') {
+                setState(() => _chatRunState = 'Listening');
+              }
+            },
+          );
+      if (_beanSpeechReady) {
+        await _listenForBeanSpeechDraft();
       }
     } catch (error) {
       if (!mounted) return;
-      _beanVoiceStartFuture = null;
       await _beanSpeech.cancel();
-      await _realtimeConversation.stop();
       if (!mounted) return;
-      final limitMessage = _subscriptionLimitMessageFromError(error);
       setState(() {
         _beanVoiceListening = false;
         _beanVoiceDraft = null;
-        _beanVoiceReleaseHandlingStart = false;
         _chatInputController.clear();
         _chatRunState = 'Voice unavailable';
         _beanWorkItems = const [];
         _beanWorkAcceptsOrphanPlanEvents = false;
         _error =
-            limitMessage ??
-            'Voice is not available right now. Type the request and Bean will handle it from chat.';
+            'Voice input is not available. Type the request and Bean will handle it from chat.';
       });
     }
   }
@@ -3231,14 +3174,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   Future<void> _stopAgent() async {
     final session = _session;
     if (_beanVoiceListening) {
-      _beanVoiceStartFuture = null;
       await _beanSpeech.cancel();
-      await _realtimeConversation.stop();
       if (!mounted) return;
       setState(() {
         _beanVoiceListening = false;
         _beanVoiceDraft = null;
-        _beanVoiceReleaseHandlingStart = false;
         _editingChatMessageId = null;
         _chatInputController.clear();
         _chatRunState = 'Ready';
@@ -3297,7 +3237,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                 : _chatInputController.text)
             .trim();
     if (!_beanVoiceListening && pendingDraft.isEmpty) return;
-    final startFuture = _beanVoiceStartFuture;
     setState(() {
       _chatRunState = 'Thinking…';
       _beanWorkItems = const [];
@@ -3318,29 +3257,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() {
       _beanVoiceListening = false;
       _beanVoiceDraft = null;
-      _beanVoiceReleaseHandlingStart = dictated.isNotEmpty;
       _chatInputController.clear();
       _chatRunState = dictated.isEmpty ? 'Ready' : 'Bean is responding...';
       _beanWorkItems = const [];
       _beanWorkAcceptsOrphanPlanEvents = false;
     });
     if (dictated.isEmpty) {
-      await _realtimeConversation.stop();
-      _beanVoiceStartFuture = null;
-      _beanVoiceReleaseHandlingStart = false;
       return;
     }
 
-    _beanVoiceStartFuture = null;
-    _beanVoiceReleaseHandlingStart = false;
-    if (startFuture != null) {
-      unawaited(
-        startFuture
-            .then((_) => _realtimeConversation.stop())
-            .catchError((_) {}),
-      );
-    }
-    unawaited(_realtimeConversation.stop());
     setState(() {
       _chatRunState = 'Bean is working...';
       _error = null;
