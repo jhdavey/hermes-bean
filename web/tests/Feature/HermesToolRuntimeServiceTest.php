@@ -1291,6 +1291,62 @@ class HermesToolRuntimeServiceTest extends TestCase
         Carbon::setTestNow();
     }
 
+    public function test_external_lookup_cleans_kpi_weather_prompt_for_direct_open_meteo_lookup(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-07 19:20:00', 'America/New_York'));
+
+        Http::fake(function ($request) {
+            if (str_starts_with($request->url(), 'https://geocoding-api.open-meteo.com/v1/search')) {
+                $this->assertStringContainsString('name=Orlando', urldecode($request->url()));
+
+                return Http::response([
+                    'results' => [[
+                        'id' => 4167147,
+                        'name' => 'Orlando',
+                        'latitude' => 28.5383,
+                        'longitude' => -81.3792,
+                        'admin1' => 'Florida',
+                        'country_code' => 'US',
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://api.open-meteo.com/v1/forecast')) {
+                $payload = $request->data();
+                $this->assertSame('2026-07-08', data_get($payload, 'start_date'));
+                $this->assertSame('2026-07-08', data_get($payload, 'end_date'));
+
+                return Http::response([
+                    'timezone' => 'America/New_York',
+                    'daily' => [
+                        'time' => ['2026-07-08'],
+                        'temperature_2m_max' => [90.7],
+                        'temperature_2m_min' => [75.1],
+                        'precipitation_probability_max' => [35],
+                        'precipitation_sum' => [0.05],
+                        'weather_code' => [2],
+                        'wind_speed_10m_max' => [8.4],
+                    ],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('tool-weather-kpi-clean@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'KPI-021: Find the weather for tomorrow in Orlando and tell me if an evening walk makes sense.',
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $this->assertStringContainsString('Tomorrow in Orlando, Florida, US', (string) $response->json('data.assistant_message.content'));
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
+        Http::assertSentCount(2);
+        Carbon::setTestNow();
+    }
+
     public function test_external_lookup_routes_nearby_places_to_google_places(): void
     {
         config()->set('services.hermes_runtime.google_maps_api_key', 'google-test-key');
@@ -2991,6 +3047,51 @@ class HermesToolRuntimeServiceTest extends TestCase
         $this->assertDatabaseHas('notes', ['title' => 'Quick Dinner Ideas', 'is_pinned' => true]);
         $this->assertDatabaseHas('reminders', ['conversation_session_id' => $sessionId, 'title' => 'Pick one from Quick Dinner Ideas']);
         Http::assertSentCount(0);
+    }
+
+    public function test_app_crud_planner_handles_simple_kpi_actions_without_model_call(): void
+    {
+        config()->set('services.hermes_runtime.crud_planner_enabled', true);
+
+        Carbon::setTestNow(Carbon::parse('2026-07-07 10:00:00', 'America/New_York'));
+        Http::fake();
+
+        $token = $this->premiumApiToken('tool-simple-kpi-actions@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $clientContext = [
+            'current_local_time' => '2026-07-07T10:00:00-04:00',
+            'timezone' => 'America/New_York',
+            'timezone_offset' => '-04:00',
+            'timezone_offset_minutes' => -240,
+        ];
+
+        $eventResponse = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'KPI-011: Create a calendar event called KPI Focus Block tomorrow at 9am for 30 minutes.',
+            'metadata' => ['client_context' => $clientContext],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $reminderResponse = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'KPI-013: Set a reminder tomorrow at 8am to check the KPI dashboard.',
+            'metadata' => ['client_context' => $clientContext],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $noteResponse = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'KPI-014: Create a note called KPI Test Note with three short bullets.',
+            'metadata' => ['client_context' => $clientContext],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $this->assertCount(1, collect($eventResponse->json('data.events'))->where('event_type', 'assistant.calendar_event.created'));
+        $this->assertCount(1, collect($reminderResponse->json('data.events'))->where('event_type', 'assistant.reminder.created'));
+        $this->assertCount(1, collect($noteResponse->json('data.events'))->where('event_type', 'assistant.note.created'));
+        $this->assertDatabaseHas('calendar_events', ['conversation_session_id' => $sessionId, 'title' => 'KPI Focus Block']);
+        $this->assertDatabaseHas('reminders', ['conversation_session_id' => $sessionId, 'title' => 'check the KPI dashboard']);
+        $this->assertDatabaseHas('notes', ['title' => 'KPI Test Note']);
+        Http::assertSentCount(0);
+        Carbon::setTestNow();
     }
 
     public function test_app_crud_planner_does_not_treat_note_reminder_update_word_as_update_request(): void

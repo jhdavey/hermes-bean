@@ -40,7 +40,7 @@ trait CrudPlannerRuntime
         $response = $this->localPlannerResponse($plannerRoute, $actions);
         $modelCallDurationsMs = [];
 
-        if (! $this->plannerActionsMeetExpected($actions, $expectedWriteActionCount)) {
+        if (! $this->deterministicPlannerActionsAreUsable($actions) && ! $this->plannerActionsMeetExpected($actions, $expectedWriteActionCount)) {
             $plannerSource = 'model';
             $plannerMessages = [
                 ['role' => 'system', 'content' => $this->crudPlannerSystemInstructions()],
@@ -53,7 +53,11 @@ trait CrudPlannerRuntime
             $actions = $this->plannerActionsFromResponse($response);
         }
 
-        if (! $this->plannerActionsMeetExpected($actions, $expectedWriteActionCount)) {
+        if ($plannerSource === 'local') {
+            if (! $this->deterministicPlannerActionsAreUsable($actions)) {
+                return null;
+            }
+        } elseif (! $this->plannerActionsMeetExpected($actions, $expectedWriteActionCount)) {
             return null;
         }
 
@@ -319,7 +323,7 @@ PROMPT;
 
     private function deterministicCrudActions(ConversationSession $session, ConversationMessage $message, array $contextPayload, array $conversationMessages = []): array
     {
-        $content = str((string) $message->content)->squish()->toString();
+        $content = str($this->stripPlannerPromptPrefix((string) $message->content))->squish()->toString();
         if ($content === '') {
             return [];
         }
@@ -358,6 +362,11 @@ PROMPT;
             return $sameDaySequenceActions;
         }
 
+        $titleBeforeDateActions = $this->deterministicTitleBeforeDateCalendarListActions($content, $contextPayload, $timezone);
+        if ($titleBeforeDateActions !== []) {
+            return $titleBeforeDateActions;
+        }
+
         $calendarListActions = $this->deterministicDatedCalendarListActions($content, $contextPayload, $timezone);
         if ($calendarListActions !== []) {
             return $calendarListActions;
@@ -378,6 +387,16 @@ PROMPT;
             return $previousShoppingListActions;
         }
 
+        $projectFollowUpActions = $this->deterministicProjectFollowUpActions($content, $contextPayload, $timezone);
+        if ($projectFollowUpActions !== []) {
+            return $projectFollowUpActions;
+        }
+
+        $planningBundleActions = $this->deterministicPlanningBundleActions($content, $contextPayload, $timezone);
+        if ($planningBundleActions !== []) {
+            return $planningBundleActions;
+        }
+
         $taskReminderNoteActions = $this->deterministicTaskReminderNoteActions($content, $contextPayload, $timezone);
         if ($taskReminderNoteActions !== []) {
             return $taskReminderNoteActions;
@@ -388,9 +407,24 @@ PROMPT;
             return $noteReminderActions;
         }
 
-        $projectFollowUpActions = $this->deterministicProjectFollowUpActions($content, $contextPayload, $timezone);
-        if ($projectFollowUpActions !== []) {
-            return $projectFollowUpActions;
+        $simpleCalendarActions = $this->deterministicSimpleCalendarActions($content, $contextPayload, $timezone);
+        if ($simpleCalendarActions !== []) {
+            return $simpleCalendarActions;
+        }
+
+        $simpleReminderActions = $this->deterministicSimpleReminderActions($content, $contextPayload, $timezone);
+        if ($simpleReminderActions !== []) {
+            return $simpleReminderActions;
+        }
+
+        $simpleTaskActions = $this->deterministicSimpleTaskActions($content, $contextPayload, $timezone);
+        if ($simpleTaskActions !== []) {
+            return $simpleTaskActions;
+        }
+
+        $simpleNoteActions = $this->deterministicSimpleNoteActions($content);
+        if ($simpleNoteActions !== []) {
+            return $simpleNoteActions;
         }
 
         $this->collectDeterministicCreateMatches(
@@ -441,6 +475,11 @@ PROMPT;
         }
 
         return $actions;
+    }
+
+    private function stripPlannerPromptPrefix(string $content): string
+    {
+        return preg_replace('/^\s*(?:kpi|req)-\d{3}:\s*/iu', '', $content) ?: $content;
     }
 
     private function deterministicMoveEventAndDeleteReminderActions(ConversationSession $session, string $content, array $contextPayload): array
@@ -955,7 +994,7 @@ PROMPT;
     private function deterministicTaskReminderNoteActions(string $content, array $contextPayload, string $timezone): array
     {
         $normalized = str($content)->lower()->squish()->toString();
-        if (! preg_match('/\btask\b/u', $normalized) || ! preg_match('/\bremind\b/u', $normalized) || ! preg_match('/\bnote\b/u', $normalized)) {
+        if (! preg_match('/\btask\b/u', $normalized) || ! preg_match('/\b(?:remind|reminder)\b/u', $normalized) || ! preg_match('/\bnote\b/u', $normalized)) {
             return [];
         }
 
@@ -983,7 +1022,7 @@ PROMPT;
         }
 
         $noteTitle = str($title)->headline()->toString().' note';
-        if (preg_match('/\b(?:save|create)\s+(?:a\s+)?note\s+(?:called|titled)\s+(.+?)(?:,|\.|$)/iu', $content, $noteMatch)) {
+        if (preg_match('/\b(?:(?:save|create)\s+)?(?:a\s+)?note\s+(?:called|titled)\s+(.+?)(?:,|\.|$)/iu', $content, $noteMatch)) {
             $noteTitle = $this->cleanDeterministicTitle((string) ($noteMatch[1] ?? $noteTitle));
         }
 
@@ -1014,6 +1053,316 @@ PROMPT;
                     'title' => $noteTitle,
                     'plain_text' => "Documents to bring:\n- ID\n- Insurance card\n- Related paperwork\n- Any previous notes or reference numbers",
                 ],
+            ],
+        ];
+    }
+
+    private function deterministicSimpleCalendarActions(string $content, array $contextPayload, string $timezone): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (! preg_match('/\b(?:add|create|make|schedule|book)\b/u', $normalized)) {
+            return [];
+        }
+        if (! preg_match('/\b(?:calendar|event|appointment|meeting|block)\b/u', $normalized)) {
+            return [];
+        }
+        if (preg_match('/\b(?:task|reminder|remind|note)\b/u', $normalized)) {
+            return [];
+        }
+
+        $baseDate = $this->deterministicTargetDate($content, $contextPayload);
+        if (! $baseDate instanceof Carbon) {
+            return [];
+        }
+        $baseDate = $baseDate->copy()->setTimezone($timezone);
+
+        if (! preg_match('/\b(?:at|from)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/iu', $content, $timeMatch)) {
+            return [];
+        }
+
+        $startsAt = $this->deterministicDateWithMeridiemTime($baseDate, (string) ($timeMatch[1] ?? ''), $timezone);
+        if (! $startsAt instanceof Carbon) {
+            return [];
+        }
+
+        $title = $this->deterministicCalledTitle($content);
+        if ($title === '') {
+            if (! preg_match('/\b(?:calendar\s+)?(?:event|appointment|meeting|block)\s+(.+?)(?:\s+today|\s+tomorrow|\s+on\s+|\s+at\s+\d|,|\.|$)/iu', $content, $titleMatch)) {
+                return [];
+            }
+            $title = $this->cleanDeterministicTitle((string) ($titleMatch[1] ?? ''));
+        }
+
+        if ($title === '') {
+            return [];
+        }
+
+        $durationMinutes = $this->deterministicDurationMinutes($content, 60);
+
+        return [[
+            'type' => 'calendar_event.create',
+            'risk' => 'low',
+            'client_action_key' => 'event_0',
+            'parameters' => [
+                'title' => $title,
+                'starts_at' => $startsAt->toIso8601String(),
+                'ends_at' => $startsAt->copy()->addMinutes($durationMinutes)->toIso8601String(),
+            ],
+        ]];
+    }
+
+    private function deterministicSimpleReminderActions(string $content, array $contextPayload, string $timezone): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (! preg_match('/\b(?:add|create|make|set|remind)\b/u', $normalized)) {
+            return [];
+        }
+        if (! preg_match('/\b(?:reminder|remind)\b/u', $normalized)) {
+            return [];
+        }
+        if (preg_match('/\b(?:task|calendar|event|appointment|meeting|block|note)\b/u', $normalized)) {
+            return [];
+        }
+
+        $remindAt = ($this->deterministicTargetDate($content, $contextPayload) ?? $this->deterministicNow($contextPayload, $timezone)->copy()->addDay()->startOfDay())
+            ->setTimezone($timezone)
+            ->setTime(9, 0);
+
+        if (preg_match('/\b(?:at|by)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/iu', $content, $timeMatch)) {
+            $timed = $this->deterministicDateWithMeridiemTime($remindAt, (string) ($timeMatch[1] ?? ''), $timezone);
+            if ($timed instanceof Carbon) {
+                $remindAt = $timed;
+            }
+        }
+
+        $title = $this->deterministicCalledTitle($content);
+        if ($title === '' && preg_match('/\bto\s+(.+?)(?:,|\.|$)/iu', $content, $titleMatch)) {
+            $title = $this->cleanDeterministicTitle((string) ($titleMatch[1] ?? ''));
+        }
+        if ($title === '' && preg_match('/\b(?:reminder|remind me)\s+(.+?)(?:\s+today|\s+tomorrow|\s+on\s+|\s+at\s+\d|,|\.|$)/iu', $content, $titleMatch)) {
+            $title = $this->cleanDeterministicTitle((string) ($titleMatch[1] ?? ''));
+        }
+
+        if ($title === '') {
+            return [];
+        }
+
+        return [[
+            'type' => 'reminder.create',
+            'risk' => 'low',
+            'client_action_key' => 'reminder_0',
+            'parameters' => [
+                'title' => $title,
+                'remind_at' => $remindAt->toIso8601String(),
+            ],
+        ]];
+    }
+
+    private function deterministicSimpleTaskActions(string $content, array $contextPayload, string $timezone): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (! preg_match('/\b(?:add|create|make|set)\b/u', $normalized) || ! preg_match('/\btask\b/u', $normalized)) {
+            return [];
+        }
+
+        if (! preg_match('/\btask\s+to\s+(.+?)(?:\s+tomorrow|\s+today|\s+on\s+\d|,|\.|$)/iu', $content, $titleMatch)) {
+            return [];
+        }
+
+        $title = $this->cleanDeterministicTitle((string) ($titleMatch[1] ?? ''));
+        if ($title === '') {
+            return [];
+        }
+
+        $dueAt = ($this->deterministicTargetDate($content, $contextPayload) ?? $this->deterministicNow($contextPayload, $timezone)->copy()->addDay()->startOfDay())
+            ->setTimezone($timezone)
+            ->setTime(9, 0);
+
+        if (preg_match('/\b(?:at|by)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/iu', $content, $timeMatch)) {
+            $timed = $this->deterministicDateWithMeridiemTime($dueAt, (string) ($timeMatch[1] ?? ''), $timezone);
+            if ($timed instanceof Carbon) {
+                $dueAt = $timed;
+            }
+        }
+
+        return [[
+            'type' => 'task.create',
+            'risk' => 'low',
+            'client_action_key' => 'task_0',
+            'parameters' => [
+                'title' => $title,
+                'due_at' => $dueAt->toIso8601String(),
+            ],
+        ]];
+    }
+
+    private function deterministicSimpleNoteActions(string $content): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (! preg_match('/\b(?:add|create|make|save)\b/u', $normalized) || ! preg_match('/\bnote\b/u', $normalized)) {
+            return [];
+        }
+        if (preg_match('/\b(?:reminder|remind|task|calendar|event|appointment|meeting|block)\b/u', $normalized)) {
+            return [];
+        }
+
+        $title = $this->deterministicCalledTitle($content);
+        if ($title === '') {
+            return [];
+        }
+
+        $plainText = $title;
+        if (preg_match('/\bthree\s+(?:short\s+)?bullets?\b/iu', $content)) {
+            $plainText = "- {$title} item 1\n- {$title} item 2\n- {$title} item 3";
+        } elseif (preg_match('/\bwith\s+(.+?)(?:,|\.|$)/iu', $content, $withMatch)) {
+            $plainText = $this->cleanDeterministicTitle((string) ($withMatch[1] ?? $title));
+        }
+
+        return [[
+            'type' => 'note.create',
+            'risk' => 'low',
+            'client_action_key' => 'note_0',
+            'parameters' => [
+                'title' => $title,
+                'plain_text' => $plainText,
+            ],
+        ]];
+    }
+
+    private function deterministicPlanningBundleActions(string $content, array $contextPayload, string $timezone): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (! preg_match('/\b(?:plan|create|add|schedule)\b/u', $normalized)) {
+            return [];
+        }
+        if (! preg_match('/\b(?:calendar|event|block|focus block)\b/u', $normalized) || ! preg_match('/\btask\b/u', $normalized)) {
+            return [];
+        }
+        if (! preg_match('/\b(?:reminder|remind)\b/u', $normalized) && ! preg_match('/\bnote\b/u', $normalized)) {
+            return [];
+        }
+
+        $baseDate = $this->deterministicTargetDate($content, $contextPayload);
+        if (! $baseDate instanceof Carbon) {
+            return [];
+        }
+        $baseDate = $baseDate->copy()->setTimezone($timezone);
+
+        $eventTitle = 'Focus block';
+        if (preg_match('/\bcalled\s+(.+?)(?:,|\band\b|$)/iu', $content, $calledMatch)) {
+            $eventTitle = $this->cleanDeterministicTitle((string) ($calledMatch[1] ?? $eventTitle));
+        } elseif (preg_match('/\bcreate\s+(?:a\s+)?(.+?)\s+plan\s+for\b/iu', $content, $planMatch)) {
+            $eventTitle = $this->cleanDeterministicTitle((string) ($planMatch[1] ?? '')).' plan';
+        } elseif (str_contains($normalized, 'home reset')) {
+            $eventTitle = 'Home reset plan';
+        }
+        if ($eventTitle === '') {
+            $eventTitle = 'Focus block';
+        }
+
+        $startsAt = null;
+        if (preg_match('/\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/iu', $content, $timeMatch)) {
+            $startsAt = $this->deterministicDateWithMeridiemTime($baseDate, (string) ($timeMatch[1] ?? ''), $timezone);
+        }
+        $startsAt ??= $baseDate->copy()->setTime(9, 0);
+        $endsAt = $startsAt->copy()->addHour();
+
+        $actions = [[
+            'type' => 'calendar_event.create',
+            'risk' => 'low',
+            'client_action_key' => 'event_0',
+            'parameters' => [
+                'title' => $eventTitle,
+                'starts_at' => $startsAt->toIso8601String(),
+                'ends_at' => $endsAt->toIso8601String(),
+            ],
+        ]];
+
+        if (preg_match('/\btask\s+to\s+(.+?)(?:,|\band\s+(?:remind|reminder|a\s+note|note)|$)/iu', $content, $taskMatch)) {
+            $taskTitle = $this->cleanDeterministicTitle((string) ($taskMatch[1] ?? ''));
+            if ($taskTitle !== '') {
+                $actions[] = [
+                    'type' => 'task.create',
+                    'risk' => 'low',
+                    'client_action_key' => 'task_0',
+                    'parameters' => [
+                        'title' => $taskTitle,
+                        'due_at' => $startsAt->copy()->subHour()->toIso8601String(),
+                    ],
+                ];
+            }
+        }
+
+        $reminder = $this->deterministicPlanningReminder($content, $contextPayload, $timezone, $startsAt, $eventTitle);
+        if ($reminder !== null) {
+            $actions[] = $reminder;
+        }
+
+        if (preg_match('/\b(?:a\s+)?note\s+(?:called|titled)\s+(.+?)(?:,|\.|$)/iu', $content, $noteMatch)) {
+            $noteTitle = $this->cleanDeterministicTitle((string) ($noteMatch[1] ?? ''));
+            if ($noteTitle !== '') {
+                $actions[] = [
+                    'type' => 'note.create',
+                    'risk' => 'low',
+                    'client_action_key' => 'note_0',
+                    'parameters' => [
+                        'title' => $noteTitle,
+                        'plain_text' => $noteTitle,
+                    ],
+                ];
+            }
+        }
+
+        return count($actions) >= 2 ? $actions : [];
+    }
+
+    private function deterministicPlanningReminder(string $content, array $contextPayload, string $timezone, Carbon $eventStartsAt, string $eventTitle): ?array
+    {
+        if (preg_match('/\b(?:remind me|reminder)\s+(\d{1,3})\s+minutes?\s+before\b/iu', $content, $minutesMatch)) {
+            $minutes = max(1, min(1440, (int) ($minutesMatch[1] ?? 30)));
+
+            return [
+                'type' => 'reminder.create',
+                'risk' => 'low',
+                'client_action_key' => 'reminder_0',
+                'related_action_key' => 'event_0',
+                'parameters' => [
+                    'title' => 'Reminder: '.$eventTitle,
+                    'remind_at' => $eventStartsAt->copy()->subMinutes($minutes)->toIso8601String(),
+                ],
+            ];
+        }
+
+        if (! preg_match('/\breminder\s+(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)))?(?:\s+(morning|afternoon|evening))?/iu', $content, $reminderMatch)) {
+            return null;
+        }
+
+        $dateText = (string) ($reminderMatch[1] ?? '');
+        $remindAt = $this->deterministicTargetDate($dateText, $contextPayload);
+        if (! $remindAt instanceof Carbon) {
+            return null;
+        }
+        $remindAt = $remindAt->copy()->setTimezone($timezone)->setTime(9, 0);
+        $timeText = trim((string) ($reminderMatch[2] ?? ''));
+        $dayPart = mb_strtolower(trim((string) ($reminderMatch[3] ?? '')));
+        if ($timeText !== '') {
+            $timed = $this->deterministicDateWithMeridiemTime($remindAt, $timeText, $timezone);
+            if ($timed instanceof Carbon) {
+                $remindAt = $timed;
+            }
+        } elseif ($dayPart === 'afternoon') {
+            $remindAt->setTime(15, 0);
+        } elseif ($dayPart === 'evening') {
+            $remindAt->setTime(17, 0);
+        }
+
+        return [
+            'type' => 'reminder.create',
+            'risk' => 'low',
+            'client_action_key' => 'reminder_0',
+            'parameters' => [
+                'title' => $eventTitle,
+                'remind_at' => $remindAt->toIso8601String(),
             ],
         ];
     }
@@ -1181,6 +1530,56 @@ PROMPT;
         }
 
         return count($actions) === count($dateTokens) ? $actions : [];
+    }
+
+    private function deterministicTitleBeforeDateCalendarListActions(string $content, array $contextPayload, string $timezone): array
+    {
+        $normalized = str($content)->lower()->squish()->toString();
+        if (! preg_match('/\b(add|create|schedule|put)\b/u', $normalized) || ! preg_match('/\b(calendar|event|events|appointment|meeting)\b/u', $normalized)) {
+            return [];
+        }
+
+        if (! preg_match_all(
+            '/(?:^|:|,|\band\s+)\s*(?<title>[\pL\pN][\pL\pN\s&\'-]{1,80}?)\s+(?<date>\d{1,2}[\/.-]\d{1,2}(?:[\/.-]\d{2,4})?)\s+(?:at\s+)?(?<time>\d{1,2}(?::\d{2})?\s*(?:am|pm))/iu',
+            $content,
+            $matches,
+            PREG_SET_ORDER
+        )) {
+            return [];
+        }
+
+        if (count($matches) < 2) {
+            return [];
+        }
+
+        $actions = [];
+        foreach ($matches as $index => $match) {
+            $title = $this->cleanDeterministicTitle((string) ($match['title'] ?? ''));
+            $title = preg_replace('/^(?:add|create|schedule|put)\s+(?:three\s+)?(?:calendar\s+)?events?\s*/iu', '', $title) ?? $title;
+            $title = $this->cleanDeterministicTitle($title);
+            if ($title === '') {
+                continue;
+            }
+
+            $startsAt = $this->deterministicLocalIsoFromDateAndTime((string) ($match['date'] ?? ''), (string) ($match['time'] ?? ''), $contextPayload, $timezone);
+            if ($startsAt === null) {
+                continue;
+            }
+
+            $start = Carbon::parse($startsAt, $timezone)->setTimezone($timezone);
+            $actions[] = [
+                'type' => 'calendar_event.create',
+                'risk' => 'low',
+                'client_action_key' => 'event_'.$index,
+                'parameters' => [
+                    'title' => $title,
+                    'starts_at' => $start->toIso8601String(),
+                    'ends_at' => $start->copy()->addHour()->toIso8601String(),
+                ],
+            ];
+        }
+
+        return count($actions) === count($matches) ? $actions : [];
     }
 
     private function deterministicCalendarListSegment(string $dateText, string $segment, array $contextPayload, string $timezone): ?array
@@ -1872,6 +2271,28 @@ PROMPT;
             ->toString();
     }
 
+    private function deterministicCalledTitle(string $content): string
+    {
+        if (! preg_match('/\b(?:called|named|titled)\s+(.+?)(?=\s+(?:today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\s+|on\s+|at\s+\d|from\s+\d|for\s+\d{1,3}\s+(?:minutes?|hours?)|with\s+)|,|\.|$)/iu', $content, $match)) {
+            return '';
+        }
+
+        return $this->cleanDeterministicTitle((string) ($match[1] ?? ''));
+    }
+
+    private function deterministicDurationMinutes(string $content, int $default): int
+    {
+        if (preg_match('/\bfor\s+(\d{1,3})\s+minutes?\b/iu', $content, $match)) {
+            return max(1, min(1440, (int) ($match[1] ?? $default)));
+        }
+
+        if (preg_match('/\bfor\s+(\d{1,2})\s+hours?\b/iu', $content, $match)) {
+            return max(1, min(1440, (int) ($match[1] ?? 1) * 60));
+        }
+
+        return $default;
+    }
+
     private function deterministicLocalIso(string $value, string $timezone): ?string
     {
         $value = trim($value, " \t\n\r\0\x0B,.;");
@@ -2074,7 +2495,13 @@ PROMPT;
             return false;
         }
 
-        return ! collect($actions)->contains(fn (mixed $action): bool => ! is_array($action) || ! $this->plannerActionHasRequiredFields($action));
+        return $this->deterministicPlannerActionsAreUsable($actions);
+    }
+
+    private function deterministicPlannerActionsAreUsable(array $actions): bool
+    {
+        return $actions !== []
+            && ! collect($actions)->contains(fn (mixed $action): bool => ! is_array($action) || ! $this->plannerActionHasRequiredFields($action));
     }
 
     private function recordPlannedCrudWorkItems(ConversationSession $session, ConversationMessage $message, array $actions): array

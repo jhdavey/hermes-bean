@@ -852,7 +852,7 @@ PROMPT;
             return null;
         }
 
-        $content = str((string) $message->content)->squish()->toString();
+        $content = str(preg_replace('/^\s*(?:kpi|req)-\d{3}:\s*/iu', '', (string) $message->content) ?: (string) $message->content)->squish()->toString();
         if ($content === '') {
             return null;
         }
@@ -929,6 +929,7 @@ PROMPT;
             if (preg_match($pattern, $content, $match)) {
                 $candidate = trim((string) ($match[1] ?? ''));
                 $candidate = preg_replace('/\b(right now|currently|now|today|tonight|tomorrow|this morning|this afternoon|this evening)\b/iu', '', $candidate) ?? $candidate;
+                $candidate = preg_replace('/,?\s+\b(?:and|then|so)\b\s+(?:tell|suggest|recommend|advise|share|give|let|check|see|explain)\b.*$/iu', '', $candidate) ?? $candidate;
                 $candidate = preg_replace('/^\s*(?:in|for|near|at)\s+/iu', '', $candidate) ?? $candidate;
                 $candidate = trim($candidate, " \t\n\r\0\x0B,.?!'\"");
                 if ($candidate !== '' && ! preg_match('/\b(weather|forecast|temperature|temp)\b/iu', $candidate)) {

@@ -433,7 +433,11 @@ class RunBeanProductionSmokeSuite extends Command
             return false;
         }
 
-        return (bool) preg_match('/\b(add|create|make|schedule|book|set|move|update|remind me|save a note|pin it|remember that)\b/u', $promptText)
+        if (str_contains($promptText, 'difference between')) {
+            return false;
+        }
+
+        return (bool) preg_match('/\b(add|create|make|schedule|book|set|move|update|plan|block|reminder|remind me|save a note|pin it|remember that)\b/u', $promptText)
             && ! str_contains($promptText, 'find the weather')
             && ! str_contains($promptText, 'find the nearest')
             && ! str_contains($promptText, 'find the closest');

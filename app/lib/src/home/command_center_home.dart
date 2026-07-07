@@ -751,7 +751,7 @@ class _CommandCenterAgendaRow extends StatelessWidget {
       _CommandCenterAgendaKind.reminder => 'Reminder',
     };
     final hasEventNotes = item.event != null && _eventHasNotes(item.event!);
-    const timeWidth = 62.0;
+    const timeWidth = 50.0;
 
     return Material(
       color: Colors.transparent,
@@ -787,7 +787,7 @@ class _CommandCenterAgendaRow extends StatelessWidget {
                   shape: BoxShape.circle,
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
