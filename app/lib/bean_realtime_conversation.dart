@@ -196,6 +196,7 @@ class BeanRealtimeConversation {
   bool _bargeInRecoveryPending = false;
   bool _followUpReadyLoggedForTurn = false;
   bool _lastTurnNeededDashboardContext = false;
+  bool _endConversationAfterResponse = false;
 
   bool get active => _active;
   bool get conversationActive => _conversationActive;
@@ -319,7 +320,11 @@ class BeanRealtimeConversation {
     return realtimeSession.session;
   }
 
-  Future<void> sendText(String text, {bool audioResponse = false}) async {
+  Future<void> sendText(
+    String text, {
+    bool audioResponse = false,
+    bool endConversationAfterResponse = false,
+  }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
     final channel = _dataChannel;
@@ -329,6 +334,7 @@ class BeanRealtimeConversation {
     await _waitForDataChannelOpen(channel);
     _cancelFollowUpIdleTimeout();
     _conversationActive = true;
+    _endConversationAfterResponse = endConversationAfterResponse;
     _pendingUserContent = trimmed;
     _pendingUserItemId = 'typed-${DateTime.now().microsecondsSinceEpoch}';
     _startTurnMetrics();
@@ -371,7 +377,8 @@ class BeanRealtimeConversation {
     _voiceCaptureActive = false;
     _voiceReleasePending = true;
     _transcriptionOnlyReleasePending = false;
-    setMicrophoneEnabled(_conversationActive);
+    _endConversationAfterResponse = true;
+    setMicrophoneEnabled(false);
     final content = _pendingUserContent?.trim() ?? '';
     if (content.isNotEmpty) {
       _scheduleResponseCreate(
@@ -517,6 +524,7 @@ class BeanRealtimeConversation {
     _pendingResponseInterruptedBySpeech = false;
     _clearBargeInRecovery();
     _completeTranscriptionOnlyRelease();
+    _endConversationAfterResponse = false;
     _ignoreNextFunctionCalls = false;
     _assistantSpeaking = false;
     _assistantInterrupted = false;
@@ -596,6 +604,7 @@ class BeanRealtimeConversation {
     _pendingResponseInterruptedBySpeech = false;
     _clearBargeInRecovery();
     _completeTranscriptionOnlyRelease();
+    _endConversationAfterResponse = false;
     _suppressNextAssistantPersist = false;
     _voiceOnlyAssistant = false;
     _ignoreNextFunctionCalls = false;
@@ -659,6 +668,7 @@ class BeanRealtimeConversation {
     _pendingResponseInterruptedBySpeech = false;
     _clearBargeInRecovery();
     _completeTranscriptionOnlyRelease();
+    _endConversationAfterResponse = false;
     _assistantSpeaking = false;
     _currentResponseId = null;
     _assistantAudioStartedAt = null;
@@ -1368,12 +1378,13 @@ class BeanRealtimeConversation {
     _assistantSpeaking = false;
     _assistantAudioStartedAt = null;
     if (_conversationActive && !_transcriptionOnlyReleasePending) {
-      setMicrophoneEnabled(true);
+      setMicrophoneEnabled(!_endConversationAfterResponse);
     }
     final status = _realtimeStatusAfterAssistantAudioDone(
       conversationActive: _conversationActive,
       transcriptionOnlyReleasePending: _transcriptionOnlyReleasePending,
       backgroundWorkActive: _backgroundWorkActive,
+      endConversationAfterResponse: _endConversationAfterResponse,
     );
     if (status != null) onStatus?.call(status);
     unawaited(
@@ -2603,11 +2614,19 @@ class BeanRealtimeConversation {
     }
     _activeResponseUserContent = null;
     if (_conversationActive && !_transcriptionOnlyReleasePending) {
-      setMicrophoneEnabled(true);
+      setMicrophoneEnabled(!_endConversationAfterResponse);
     }
     if (_backgroundWorkActive) {
       _cancelFollowUpIdleTimeout();
       _showWorkingStatusWhenReady();
+      return;
+    }
+    if (_endConversationAfterResponse) {
+      _endConversationAfterResponse = false;
+      _conversationActive = false;
+      setMicrophoneEnabled(false);
+      _cancelFollowUpIdleTimeout();
+      onStatus?.call('Bean voice ready');
       return;
     }
     _scheduleFollowUpIdleTimeout();
@@ -3747,10 +3766,12 @@ class BeanRealtimeConversation {
     required bool conversationActive,
     bool transcriptionOnlyReleasePending = false,
     bool backgroundWorkActive = false,
+    bool endConversationAfterResponse = false,
   }) => _realtimeStatusAfterAssistantAudioDone(
     conversationActive: conversationActive,
     transcriptionOnlyReleasePending: transcriptionOnlyReleasePending,
     backgroundWorkActive: backgroundWorkActive,
+    endConversationAfterResponse: endConversationAfterResponse,
   );
 
   static Map<String, Object?> realtimeAudioDoneReadyDetailsForTesting({
@@ -4353,9 +4374,11 @@ String? _realtimeStatusAfterAssistantAudioDone({
   required bool conversationActive,
   required bool transcriptionOnlyReleasePending,
   required bool backgroundWorkActive,
+  bool endConversationAfterResponse = false,
 }) {
   if (!conversationActive || transcriptionOnlyReleasePending) return null;
   if (backgroundWorkActive) return 'working...';
+  if (endConversationAfterResponse) return 'Bean voice ready';
   return 'listening';
 }
 

@@ -99,6 +99,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int? _editingChatMessageId;
   bool _beanVoiceListening = false;
   String? _beanVoiceDraft;
+  final stt.SpeechToText _beanSpeech = stt.SpeechToText();
+  bool _beanSpeechReady = false;
+  Future<HermesSession>? _beanVoiceStartFuture;
   int _localMessageSequence = -1;
   late final BeanRealtimeConversation _realtimeConversation;
   final Set<int> _dismissedReminderBannerIds = <int>{};
@@ -1781,6 +1784,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _stopDashboardChangePolling();
     _chatInputController.dispose();
     _chatInputFocusNode.dispose();
+    unawaited(_beanSpeech.cancel());
     unawaited(_pushNotifications.dispose());
     unawaited(_realtimeConversation.stop());
     super.dispose();
@@ -2690,10 +2694,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   void _showOnboardingTour({bool pendingPlanSelection = false}) {
-    _activateOnboardingTourStep(
-      0,
-      pendingPlanSelection: pendingPlanSelection,
-    );
+    _activateOnboardingTourStep(0, pendingPlanSelection: pendingPlanSelection);
     if (_phase == _AuthPhase.signedIn) {
       unawaited(
         _loadSecondarySignedInData(
@@ -2704,10 +2705,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
-  void _activateOnboardingTourStep(
-    int index, {
-    bool? pendingPlanSelection,
-  }) {
+  void _activateOnboardingTourStep(int index, {bool? pendingPlanSelection}) {
     final boundedIndex = index.clamp(0, _appOnboardingTourSteps.length - 1);
     final step = _appOnboardingTourSteps[boundedIndex];
     setState(() {
@@ -2898,24 +2896,97 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     });
 
     try {
-      final realtimeSession = await _realtimeConversation.start(
+      final startFuture = _realtimeConversation.start(
         sessionId: _session?.id,
         workspaceId: _user?.activeWorkspace?.numericId,
         metadata: _flutterChatMetadata(),
-        microphoneEnabled: true,
+        microphoneEnabled: false,
       );
-      if (!mounted || !_beanVoiceListening) return;
-      _realtimeConversation.beginVoiceCapture();
-      setState(() {
-        _session = realtimeSession;
-        _chatRunState = 'listening';
-      });
+      _beanVoiceStartFuture = startFuture;
+      unawaited(
+        startFuture.then<void>(
+          (realtimeSession) {
+            if (!mounted) return;
+            setState(() {
+              _session = realtimeSession;
+              if (_beanVoiceListening) _chatRunState = 'Listening';
+            });
+          },
+          onError: (Object error) async {
+            _beanVoiceStartFuture = null;
+            await _beanSpeech.cancel();
+            await _realtimeConversation.stop();
+            if (!mounted) return;
+            final limitMessage = _subscriptionLimitMessageFromError(error);
+            setState(() {
+              _beanVoiceListening = false;
+              _beanVoiceDraft = null;
+              _chatInputController.clear();
+              _chatRunState = 'Voice unavailable';
+              _beanWorkItems = const [];
+              _beanWorkAcceptsOrphanPlanEvents = false;
+              _error =
+                  limitMessage ??
+                  'Voice is not available right now. Type the request and Bean will handle it from chat.';
+            });
+          },
+        ),
+      );
+      try {
+        _beanSpeechReady =
+            _beanSpeechReady ||
+            await _beanSpeech.initialize(
+              onError: (_) {
+                if (!mounted) return;
+                setState(() {
+                  _beanVoiceListening = false;
+                  _beanVoiceDraft = null;
+                  _chatInputController.clear();
+                  _chatRunState = 'Voice unavailable';
+                  _error =
+                      'Voice input is not available. Type the request and Bean will handle it from chat.';
+                });
+              },
+              onStatus: (status) {
+                if (!mounted || !_beanVoiceListening) return;
+                if (status == 'done' || status == 'notListening') {
+                  setState(() => _chatRunState = 'Listening');
+                }
+              },
+            );
+        if (_beanSpeechReady) {
+          await _beanSpeech.listen(
+            listenOptions: stt.SpeechListenOptions(
+              partialResults: true,
+              listenMode: stt.ListenMode.dictation,
+              pauseFor: const Duration(seconds: 30),
+              listenFor: const Duration(seconds: 60),
+            ),
+            onResult: (result) {
+              if (!mounted || !_beanVoiceListening) return;
+              final transcript = result.recognizedWords.trim();
+              setState(() {
+                _beanVoiceDraft = transcript;
+                _chatRunState = 'Listening';
+              });
+            },
+          );
+        }
+      } catch (_) {
+        // Keep the realtime session available; release will fall back to chat
+        // if no local transcript was captured.
+      }
     } catch (error) {
+      if (!mounted) return;
+      _beanVoiceStartFuture = null;
+      await _beanSpeech.cancel();
+      await _realtimeConversation.stop();
       if (!mounted) return;
       final limitMessage = _subscriptionLimitMessageFromError(error);
       setState(() {
         _beanVoiceListening = false;
         _beanVoiceDraft = null;
+        _chatInputController.clear();
         _chatRunState = 'Voice unavailable';
         _beanWorkItems = const [];
         _beanWorkAcceptsOrphanPlanEvents = false;
@@ -2973,6 +3044,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   Future<void> _stopAgent() async {
     final session = _session;
     if (_beanVoiceListening) {
+      _beanVoiceStartFuture = null;
+      await _beanSpeech.cancel();
       await _realtimeConversation.stop();
       if (!mounted) return;
       setState(() {
@@ -3031,6 +3104,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _finishBeanVoiceDraft() async {
     if (!_beanVoiceListening) return;
+    final startFuture = _beanVoiceStartFuture;
     setState(() {
       _chatRunState = 'Thinking…';
       _beanWorkItems = const [];
@@ -3041,19 +3115,49 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     });
     _cancelBeanWorkStatusClear();
     _cancelBeanWorkStageTimers();
-    await _realtimeConversation.endVoiceCaptureForTranscriptionOnly();
+    await _beanSpeech.stop();
     final dictated = _beanVoiceDraft?.trim() ?? '';
-    await _realtimeConversation.stop();
     if (!mounted) return;
     setState(() {
       _beanVoiceListening = false;
       _beanVoiceDraft = null;
       _chatInputController.clear();
-      _chatRunState = dictated.isEmpty ? 'Ready' : 'Bean is working...';
+      _chatRunState = dictated.isEmpty ? 'Ready' : 'Bean is responding...';
       _beanWorkItems = const [];
       _beanWorkAcceptsOrphanPlanEvents = false;
     });
-    if (dictated.isNotEmpty) {
+    if (dictated.isEmpty) {
+      await _realtimeConversation.stop();
+      _beanVoiceStartFuture = null;
+      return;
+    }
+
+    try {
+      final realtimeSession = startFuture == null
+          ? await _realtimeConversation.start(
+              sessionId: _session?.id,
+              workspaceId: _user?.activeWorkspace?.numericId,
+              metadata: _flutterChatMetadata(),
+              microphoneEnabled: false,
+            )
+          : await startFuture;
+      _beanVoiceStartFuture = null;
+      if (!mounted) return;
+      setState(() => _session = realtimeSession);
+      await _realtimeConversation.sendText(
+        dictated,
+        audioResponse: true,
+        endConversationAfterResponse: true,
+      );
+    } catch (error) {
+      _beanVoiceStartFuture = null;
+      await _realtimeConversation.stop();
+      if (!mounted) return;
+      final limitMessage = _subscriptionLimitMessageFromError(error);
+      setState(() {
+        _chatRunState = 'Bean is working...';
+        if (limitMessage != null) _error = limitMessage;
+      });
       unawaited(_sendChat(dictated));
     }
   }
@@ -6782,9 +6886,9 @@ ${_truncateDiagnostic(stack, 2200)}
                 titleSpacing: 12,
                 title: _phase == _AuthPhase.signedIn
                     ? KeyedSubtree(
-                        key: _onboardingTourTargetKeys[
-                            _OnboardingTourTarget.calendarControls
-                        ],
+                        key:
+                            _onboardingTourTargetKeys[_OnboardingTourTarget
+                                .calendarControls],
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -6804,7 +6908,9 @@ ${_truncateDiagnostic(stack, 2200)}
                             Flexible(
                               child: _CalendarHeaderButton(
                                 key: const Key('calendar-month-chevron'),
-                                label: _calendarHeaderMonthLabel(DateTime.now()),
+                                label: _calendarHeaderMonthLabel(
+                                  DateTime.now(),
+                                ),
                                 icon: Icons.calendar_month_rounded,
                                 horizontalPadding: 10,
                                 verticalPadding: 7,
@@ -6828,9 +6934,9 @@ ${_truncateDiagnostic(stack, 2200)}
                     ),
                     const SizedBox(width: 8),
                     KeyedSubtree(
-                      key: _onboardingTourTargetKeys[
-                          _OnboardingTourTarget.createMenu
-                      ],
+                      key:
+                          _onboardingTourTargetKeys[_OnboardingTourTarget
+                              .createMenu],
                       child: _CreateItemMenu(
                         onCreateEvent: _showNewCalendarEventEditor,
                         onCreateTask: _showNewTaskEditor,

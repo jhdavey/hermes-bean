@@ -324,91 +324,128 @@ class _MessageBubble extends StatelessWidget {
   final VoidCallback? onEdit;
 
   @override
-  Widget build(BuildContext context) {
-    final hasActions = onCopy != null || onEdit != null;
-    final bubble = Container(
-      key: alignRight ? const Key('user-message-bubble') : null,
-      constraints: const BoxConstraints(maxWidth: 560),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: alignRight
-            ? HeyBeanTheme.accent.withValues(alpha: .08)
-            : _quietMutedSurfaceColor(alpha: .54),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _quietBorderColor(alpha: .38)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final hasActions = onCopy != null || onEdit != null;
+      final availableWidth = constraints.hasBoundedWidth
+          ? constraints.maxWidth
+          : MediaQuery.sizeOf(context).width;
+      final bubbleWidth = math.min(math.max(availableWidth, 0.0), 560.0);
+      final bubble = SizedBox(
+        width: bubbleWidth,
+        child: Container(
+          key: alignRight ? const Key('user-message-bubble') : null,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: alignRight
+                ? HeyBeanTheme.accent.withValues(alpha: .08)
+                : _quietMutedSurfaceColor(alpha: .54),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _quietBorderColor(alpha: .38)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  sender,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: HeyBeanTheme.muted,
-                    fontWeight: FontWeight.w600,
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      sender,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: HeyBeanTheme.muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
-                ),
+                  if (hasActions)
+                    Builder(
+                      builder: (buttonContext) => IconButton(
+                        key: const Key('sent-message-actions-trigger'),
+                        tooltip: 'Message actions',
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 40,
+                          height: 32,
+                        ),
+                        icon: Icon(
+                          Icons.more_horiz_rounded,
+                          size: 18,
+                          color: HeyBeanTheme.muted,
+                        ),
+                        onPressed: () async {
+                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                          final overlay =
+                              Overlay.of(
+                                    buttonContext,
+                                  ).context.findRenderObject()
+                                  as RenderBox;
+                          final button =
+                              buttonContext.findRenderObject() as RenderBox;
+                          final topLeft = button.localToGlobal(
+                            Offset.zero,
+                            ancestor: overlay,
+                          );
+                          final bottomRight = button.localToGlobal(
+                            button.size.bottomRight(Offset.zero),
+                            ancestor: overlay,
+                          );
+                          final action = await showMenu<_SentMessageAction>(
+                            context: buttonContext,
+                            position: RelativeRect.fromRect(
+                              Rect.fromPoints(topLeft, bottomRight),
+                              Offset.zero & overlay.size,
+                            ),
+                            items: [
+                              if (onCopy != null)
+                                const PopupMenuItem<_SentMessageAction>(
+                                  key: Key('chat-copy-sent-message-action'),
+                                  value: _SentMessageAction.copy,
+                                  child: ListTile(
+                                    dense: true,
+                                    leading: Icon(Icons.copy_rounded),
+                                    title: Text('Copy'),
+                                  ),
+                                ),
+                              if (onEdit != null)
+                                const PopupMenuItem<_SentMessageAction>(
+                                  key: Key('chat-edit-sent-message-action'),
+                                  value: _SentMessageAction.edit,
+                                  child: ListTile(
+                                    dense: true,
+                                    leading: Icon(Icons.edit_rounded),
+                                    title: Text('Edit'),
+                                  ),
+                                ),
+                            ],
+                          );
+                          switch (action) {
+                            case _SentMessageAction.copy:
+                              onCopy?.call();
+                            case _SentMessageAction.edit:
+                              onEdit?.call();
+                            case null:
+                              break;
+                          }
+                        },
+                      ),
+                    ),
+                ],
               ),
-              if (hasActions)
-                PopupMenuButton<_SentMessageAction>(
-                  key: const Key('sent-message-actions-trigger'),
-                  tooltip: 'Message actions',
-                  position: PopupMenuPosition.under,
-                  padding: EdgeInsets.zero,
-                  icon: Icon(
-                    Icons.more_horiz_rounded,
-                    size: 18,
-                    color: HeyBeanTheme.muted,
-                  ),
-                  onOpened: () =>
-                      ScaffoldMessenger.of(context).hideCurrentSnackBar(),
-                  onSelected: (action) {
-                    switch (action) {
-                      case _SentMessageAction.copy:
-                        onCopy?.call();
-                      case _SentMessageAction.edit:
-                        onEdit?.call();
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    if (onCopy != null)
-                      const PopupMenuItem<_SentMessageAction>(
-                        key: Key('chat-copy-sent-message-action'),
-                        value: _SentMessageAction.copy,
-                        child: ListTile(
-                          dense: true,
-                          leading: Icon(Icons.copy_rounded),
-                          title: Text('Copy'),
-                        ),
-                      ),
-                    if (onEdit != null)
-                      const PopupMenuItem<_SentMessageAction>(
-                        key: Key('chat-edit-sent-message-action'),
-                        value: _SentMessageAction.edit,
-                        child: ListTile(
-                          dense: true,
-                          leading: Icon(Icons.edit_rounded),
-                          title: Text('Edit'),
-                        ),
-                      ),
-                  ],
-                ),
+              const SizedBox(height: 4),
+              Text(message),
             ],
           ),
-          const SizedBox(height: 4),
-          Text(message),
-        ],
-      ),
-    );
+        ),
+      );
 
-    return Align(
-      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
-      child: bubble,
-    );
-  }
+      return Align(
+        alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+        child: bubble,
+      );
+    },
+  );
 }
 
 // ignore: unused_element

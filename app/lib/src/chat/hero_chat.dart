@@ -111,32 +111,40 @@ class _HeroChatCardState extends State<_HeroChatCard> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
-                child: Builder(
-                  builder: (context) {
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
                     return SingleChildScrollView(
                       key: const Key('chat-message-list'),
                       controller: _scrollController,
-                      padding: const EdgeInsets.only(bottom: 8, top: 6),
-                      child: Column(
-                        children: [
-                          for (final message in widget.messages)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 6),
-                              child: _MessageBubble(
-                                sender: message.role == 'user' ? 'You' : 'Bean',
-                                message: message.content ?? '',
-                                alignRight: message.role == 'user',
-                                onCopy: message.role == 'user'
-                                    ? () => unawaited(
-                                        widget.onMessageCopied(message),
-                                      )
-                                    : null,
-                                onEdit: message.role == 'user' && !widget.busy
-                                    ? () => widget.onMessageEdited(message)
-                                    : null,
+                      padding: const EdgeInsets.only(bottom: 112, top: 6),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minWidth: constraints.maxWidth,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (final message in widget.messages)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 6),
+                                child: _MessageBubble(
+                                  sender: message.role == 'user'
+                                      ? 'You'
+                                      : 'Bean',
+                                  message: message.content ?? '',
+                                  alignRight: message.role == 'user',
+                                  onCopy: message.role == 'user'
+                                      ? () => unawaited(
+                                          widget.onMessageCopied(message),
+                                        )
+                                      : null,
+                                  onEdit: message.role == 'user' && !widget.busy
+                                      ? () => widget.onMessageEdited(message)
+                                      : null,
+                                ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     );
                   },

@@ -117,7 +117,8 @@ class RealtimeAssistantFlowTest extends TestCase
             && data_get($request->data(), 'session.audio.input.turn_detection.create_response') === false
             && data_get($request->data(), 'session.audio.input.turn_detection.interrupt_response') === true
             && preg_match('/^[A-Za-z0-9_-]+$/', (string) data_get($request->data(), 'session.tracing.group_id')) === 1
-            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Only respond when the user is clearly talking to Bean')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'Mobile hold-to-talk requests are already addressed to Bean')
+            && str_contains((string) data_get($request->data(), 'session.instructions'), 'For ambient realtime sessions outside hold-to-talk')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Voice brevity contract')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'at most two short sentences')
             && str_contains((string) data_get($request->data(), 'session.instructions'), 'Do not read long lists')
@@ -992,7 +993,7 @@ class RealtimeAssistantFlowTest extends TestCase
             ->assertJsonPath('data.snapshot.timezone', '-04:00')
             ->assertJson(fn ($json) => $json
                 ->where('data.prompt_text', fn (string $value): bool => str_contains($value, 'cross-workspace snapshot') && str_contains($value, 'the turn is complete'))
-                ->where('data.instructions', fn (string $value): bool => str_contains($value, 'Move laundry') && str_contains($value, 'Only respond when the user is clearly talking to Bean'))
+                ->where('data.instructions', fn (string $value): bool => str_contains($value, 'Move laundry') && str_contains($value, 'Mobile hold-to-talk requests are already addressed to Bean'))
                 ->etc()
             );
     }

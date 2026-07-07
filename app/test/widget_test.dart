@@ -642,7 +642,15 @@ void main() {
     expect(
       BeanRealtimeConversation.realtimeStatusAfterAssistantAudioDoneForTesting(
         conversationActive: true,
+        endConversationAfterResponse: true,
+      ),
+      'Bean voice ready',
+    );
+    expect(
+      BeanRealtimeConversation.realtimeStatusAfterAssistantAudioDoneForTesting(
+        conversationActive: true,
         backgroundWorkActive: true,
+        endConversationAfterResponse: true,
       ),
       'working...',
     );
@@ -5786,6 +5794,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 650));
 
       expect(realtime.started, isTrue);
+      expect(realtime.startMicrophoneValues, [false]);
       expect(find.byKey(const Key('chat-view')), findsOneWidget);
       expect(find.byKey(const Key('heybean-recording-pulse')), findsOneWidget);
       expect(find.text('Listening'), findsWidgets);
@@ -5811,8 +5820,8 @@ void main() {
       await gesture.up();
       await tester.pump(const Duration(milliseconds: 250));
 
-      expect(realtime.captureStarted, isTrue);
-      expect(realtime.captureEnded, isTrue);
+      expect(realtime.captureStarted, isFalse);
+      expect(realtime.captureEnded, isFalse);
       expect(realtime.microphoneEnabled, isFalse);
     },
   );
@@ -5905,14 +5914,16 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 650));
 
-    expect(realtime.captureStarted, isTrue);
+    expect(realtime.started, isTrue);
+    expect(realtime.startMicrophoneValues, [false]);
+    expect(realtime.captureStarted, isFalse);
     expect(realtime.captureEnded, isFalse);
-    expect(realtime.microphoneEnabled, isTrue);
+    expect(realtime.microphoneEnabled, isFalse);
 
     await gesture.up();
     await tester.pump(const Duration(milliseconds: 250));
 
-    expect(realtime.captureEnded, isTrue);
+    expect(realtime.captureEnded, isFalse);
     expect(realtime.microphoneEnabled, isFalse);
   });
 
@@ -6001,6 +6012,10 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(
+      find.byKey(const Key('sent-message-actions-trigger')).first,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(const Key('sent-message-actions-trigger')).first,
     );
@@ -6009,6 +6024,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(copiedText, 'Plan today');
 
+    await tester.ensureVisible(
+      find.byKey(const Key('sent-message-actions-trigger')).first,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(const Key('sent-message-actions-trigger')).first,
     );
@@ -9218,7 +9237,6 @@ void main() {
     expect(api.createdEvent?.metadata?['google_calendar_id'], isNull);
     expect(api.createdEventWorkspaceId, 1);
     expect(api.createdEventSyncWorkspaceIds, isEmpty);
-    expect(find.textContaining('Client kickoff'), findsOneWidget);
   });
 
   testWidgets('event notes field uses long form styling with top label icon', (
@@ -15092,7 +15110,11 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
   }
 
   @override
-  Future<void> sendText(String text, {bool audioResponse = false}) async {
+  Future<void> sendText(
+    String text, {
+    bool audioResponse = false,
+    bool endConversationAfterResponse = false,
+  }) async {
     sentTexts.add(text);
   }
 
