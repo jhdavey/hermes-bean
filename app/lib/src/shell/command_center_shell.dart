@@ -1104,10 +1104,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         ? inheritedTarget
         : clauseTarget;
     final targetsEvent =
-        RegExp(
-          r'\b(calendar|event|events|appointment|appointments|meeting|meetings)\b',
-        ).hasMatch(command) ||
-        effectiveTarget == 'event';
+        effectiveTarget != 'reminder' &&
+        (RegExp(
+              r'\b(calendar|event|events|appointment|appointments|meeting|meetings)\b',
+            ).hasMatch(command) ||
+            effectiveTarget == 'event');
     final targetsTask =
         RegExp(r'\b(task|tasks|todo|to-do)\b').hasMatch(command) ||
         effectiveTarget == 'task';
@@ -1210,22 +1211,24 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       RegExp(r'\b(add|create|put|schedule|save|write|set)\b').hasMatch(command);
 
   String _beanWorkTargetForClause(String command) {
-    if (RegExp(
-      r'\b(calendar|event|events|appointment|appointments|meeting|meetings)\b',
-    ).hasMatch(command)) {
-      return 'event';
+    final reminderMatch = RegExp(
+      r'\b(reminder|reminders|remind)\b',
+    ).firstMatch(command);
+    final eventAnchorMatch = RegExp(
+      r'\b(calendar|event|events|appointment|appointments|meeting|meetings)\b|\bblock\s+on\s+(?:my\s+|the\s+)?schedule\b|\bput\s+.+\s+on\s+(?:my\s+|the\s+)?schedule\b',
+    ).firstMatch(command);
+    if (reminderMatch != null &&
+        (eventAnchorMatch == null ||
+            reminderMatch.start < eventAnchorMatch.start)) {
+      return 'reminder';
     }
-    if (RegExp(
-      r'\bblock\s+on\s+(?:my\s+|the\s+)?schedule\b|\bput\s+.+\s+on\s+(?:my\s+|the\s+)?schedule\b',
-    ).hasMatch(command)) {
+    if (eventAnchorMatch != null) {
       return 'event';
     }
     if (_beanWorkClauseLooksLikeScheduleBlock(command)) {
       return 'event';
     }
-    if (RegExp(r'\b(reminder|reminders|remind)\b').hasMatch(command)) {
-      return 'reminder';
-    }
+    if (reminderMatch != null) return 'reminder';
     if (RegExp(r'\b(task|tasks|todo|to-do)\b').hasMatch(command)) {
       return 'task';
     }
@@ -1252,6 +1255,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   String? _beanWorkSubjectForClause(String clause) {
     final semanticSubject = _beanWorkSemanticSubjectForClause(clause);
     if (semanticSubject != null) return semanticSubject;
+    final reminderAnchor = _beanWorkReminderAnchorSubjectForClause(clause);
+    if (reminderAnchor != null) return reminderAnchor;
     var text = _beanWorkExplicitSubjectForClause(clause) ?? clause;
     text = text
         .replaceAll(
@@ -1313,6 +1318,34 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
     if (text.length > 42) text = '${text.substring(0, 42).trim()}...';
     return text;
+  }
+
+  String? _beanWorkReminderAnchorSubjectForClause(String clause) {
+    final text = clause.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (!RegExp(r'\b(reminder|reminders|remind)\b').hasMatch(text)) {
+      return null;
+    }
+    final match = RegExp(
+      r'\b(?:before|after)\s+(?:the\s+|a\s+|an\s+)?(.+)$',
+    ).firstMatch(text);
+    if (match == null) return null;
+    var subject = (match.group(1) ?? '').trim();
+    if (subject.isEmpty) return null;
+    subject = subject
+        .replaceAll(
+          RegExp(
+            r'\b(?:today|tomorrow|tonight|on\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b.*$',
+          ),
+          ' ',
+        )
+        .replaceAll(RegExp(r'\b(?:meeting|appointment|event)\b'), ' ')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (subject.length < 3 || _beanWorkSubjectLooksLikeTiming(subject)) {
+      return null;
+    }
+    return _beanWorkFormatSubject(subject);
   }
 
   bool _beanWorkLooksLikeSchedulableActivity(String clause) {

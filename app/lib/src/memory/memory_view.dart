@@ -318,16 +318,22 @@ class _MemoryComposer extends StatelessWidget {
                 },
               ),
               const Spacer(),
-              FilledButton.icon(
+              FilledButton(
                 onPressed: saving ? null : onSubmit,
-                icon: saving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                child: saving
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(width: 8),
+                          Text('Saving'),
+                        ],
                       )
-                    : Icon(Icons.add_rounded),
-                label: Text(saving ? 'Saving' : 'Remember'),
+                    : Text('Remember'),
               ),
             ],
           ),

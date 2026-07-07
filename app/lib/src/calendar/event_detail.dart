@@ -1600,13 +1600,12 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                 ),
                               ),
                               const SizedBox(width: 10),
-                              IconButton.outlined(
+                              _CreateButton(
                                 key: const Key('event-category-add-action'),
                                 onPressed: _savingCategory
                                     ? null
                                     : _openCategoryCreationModal,
                                 tooltip: 'Create category',
-                                icon: Icon(Icons.add_rounded),
                               ),
                             ],
                           ),
@@ -2393,7 +2392,7 @@ class _EventCategoryCreateDialogState
             child: Text('Save'),
           )
         else
-          _ThemedPlusButton(
+          _CreateButton(
             key: const Key('event-category-modal-save-action'),
             tooltip: 'Create category',
             onPressed: _submit,

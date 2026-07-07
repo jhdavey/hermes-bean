@@ -3156,17 +3156,50 @@ void main() {
 
     expect(find.byKey(const Key('notes-view')), findsOneWidget);
     expect(find.byKey(const Key('notes-list-menu')), findsOneWidget);
+    expect(find.byKey(const Key('notes-search-toggle')), findsOneWidget);
+    expect(find.byKey(const Key('notes-search-field')), findsNothing);
     expect(find.byKey(const Key('notes-folder-title')), findsOneWidget);
     expect(find.text('All Notes'), findsOneWidget);
     expect(find.text('Meeting notes'), findsWidgets);
     expect(find.text('Pinned'), findsOneWidget);
     expect(find.byKey(const Key('note-detail-back')), findsNothing);
 
+    final titleLeft = tester.getTopLeft(
+      find.byKey(const Key('notes-folder-title')),
+    );
+    final searchLeft = tester.getTopLeft(
+      find.byKey(const Key('notes-search-toggle')),
+    );
+    final menuLeft = tester.getTopLeft(
+      find.byKey(const Key('notes-list-menu')),
+    );
+    expect(titleLeft.dx, lessThan(searchLeft.dx));
+    expect(searchLeft.dx, lessThan(menuLeft.dx));
+
+    await tester.tap(find.byKey(const Key('notes-search-toggle')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('notes-search-field')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('notes-search-toggle')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('notes-search-field')), findsNothing);
+
     await tester.tap(find.byKey(const Key('note-list-item-1')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('note-detail-back')), findsOneWidget);
     expect(find.byKey(const Key('note-detail-menu')), findsOneWidget);
+    expect(find.byKey(const Key('note-detail-title')), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('note-detail-title')))
+          .controller
+          ?.text,
+      'Meeting notes',
+    );
+    expect(find.text('Meeting notes'), findsOneWidget);
     expect(find.text('Bring the launch plan.'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('note-detail-back')));
@@ -3582,6 +3615,7 @@ void main() {
 
     expect(api.createdNotes, hasLength(1));
     expect(find.byKey(const Key('note-detail-back')), findsOneWidget);
+    expect(find.byKey(const Key('note-detail-title')), findsOneWidget);
     expect(find.text('New Note'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
@@ -3636,7 +3670,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.deletedFolderIds, [1]);
-    expect(find.text('Notes options'), findsOneWidget);
+    expect(find.text('Folders'), findsOneWidget);
+    expect(find.byKey(const Key('notes-new-folder')), findsOneWidget);
     expect(find.byKey(const Key('notes-filter-folder-1')), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -6267,6 +6302,43 @@ void main() {
 
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 8));
+    await tester.pump(const Duration(milliseconds: 250));
+  });
+
+  testWidgets('reminder before existing meeting is not labeled as an event', (
+    WidgetTester tester,
+  ) async {
+    final api = _ReminderBeforeMeetingFakeHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'Please create a reminder an hour before the parent teacher meeting on Wednesday',
+    );
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(find.text('Creating reminder: Parent teacher'), findsOneWidget);
+    expect(find.textContaining('Creating event'), findsNothing);
+    expect(find.text('0/1'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(
+      find.text('Create reminder: Parent-teacher check-in - 1 hour before'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Creating event'), findsNothing);
+    expect(find.text('1/1'), findsOneWidget);
+
     await tester.pump(const Duration(seconds: 8));
     await tester.pump(const Duration(milliseconds: 250));
   });
@@ -13133,6 +13205,112 @@ class _DashboardRefreshBeanWorkFakeHermesApiClient
   }) async => _dashboardRefreshRequested
       ? _BeanWorkPlanFakeHermesApiClient._workEvents
       : const [];
+}
+
+class _ReminderBeforeMeetingFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  bool _messageSent = false;
+  bool _workEventsReturned = false;
+
+  static const _workEvents = [
+    HermesActivityEvent(
+      id: 40,
+      eventType: 'assistant.reminder.created',
+      status: 'succeeded',
+      toolName: 'reminders.create',
+      payload: {
+        'reminder_id': 77,
+        'title': 'Parent-teacher check-in - 1 hour before',
+        'action_type': 'reminder.create',
+      },
+    ),
+  ];
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    _messageSent = true;
+    return HermesMessageResult(
+      status: 'queued',
+      session: const HermesSession(id: 42, status: 'queued', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 7400 + queueMessageCalls,
+        role: 'user',
+        content: content,
+        metadata: metadata ?? const {},
+      ),
+      run: const HermesAssistantRun(
+        id: 96,
+        status: 'running',
+        source: 'flutter',
+      ),
+      events: const [
+        HermesActivityEvent(
+          id: 39,
+          eventType: 'runtime.run_queued',
+          status: 'queued',
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<List<HermesActivityEvent>> pollActivityEvents(
+    int sessionId, {
+    int? after,
+    int waitSeconds = 0,
+    int limit = 100,
+  }) async {
+    if (!_messageSent) return const [];
+    _workEventsReturned = true;
+    return _workEvents;
+  }
+
+  @override
+  Future<HermesAssistantRun> getAssistantRun(int runId) async =>
+      _workEventsReturned
+      ? const HermesAssistantRun(
+          id: 96,
+          status: 'completed',
+          source: 'flutter',
+          assistantMessage: HermesMessage(
+            id: 8901,
+            role: 'assistant',
+            content: 'Done - I set the reminder.',
+          ),
+        )
+      : const HermesAssistantRun(id: 96, status: 'running', source: 'flutter');
+
+  @override
+  Future<List<HermesReminder>> listReminders() async => _workEventsReturned
+      ? const [
+          HermesReminder(
+            id: 77,
+            title: 'Parent-teacher check-in - 1 hour before',
+            dueAt: '2026-07-08T14:00:00Z',
+          ),
+        ]
+      : const [];
+
+  @override
+  Future<HermesTodaySummary> todaySummary({int? workspaceId}) async {
+    todaySummaryCalls++;
+    return HermesTodaySummary(
+      tasks: const [],
+      reminders: await listReminders(),
+      calendarEvents: const [],
+      activityEvents: await pollActivityEvents(42),
+      approvals: const [],
+      blockers: const [],
+    );
+  }
 }
 
 class _BeanMutationRefreshFakeHermesApiClient

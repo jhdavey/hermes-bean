@@ -202,11 +202,10 @@ class _TaskItemTileState extends State<_TaskItemTile> {
                             ),
                           ),
                           if (widget.onAddSubtask != null)
-                            TextButton.icon(
+                            _CreateButton(
                               key: Key('task-add-subtask-${task.id}'),
+                              tooltip: 'Add subtask',
                               onPressed: widget.onAddSubtask,
-                              icon: Icon(Icons.add_rounded, size: 16),
-                              label: Text('Add'),
                             ),
                         ],
                       ),

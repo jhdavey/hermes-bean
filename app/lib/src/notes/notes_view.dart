@@ -50,6 +50,7 @@ class _NotesViewState extends State<_NotesView> {
   int? _selectedId;
   int? _editingFolderId;
   bool _saving = false;
+  bool _searchExpanded = false;
   Timer? _autosaveTimer;
   String _lastBodyText = '';
 
@@ -379,6 +380,17 @@ class _NotesViewState extends State<_NotesView> {
         onDeleteFolder: _deleteFolder,
       ),
     );
+  }
+
+  void _toggleNotesSearch() {
+    setState(() {
+      if (_searchExpanded || _searchController.text.isNotEmpty) {
+        _searchController.clear();
+        _searchExpanded = false;
+      } else {
+        _searchExpanded = true;
+      }
+    });
   }
 
   Future<void> _showMoveFolderSheet() async {
@@ -909,23 +921,44 @@ class _NotesViewState extends State<_NotesView> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(6, 0, 6, 8),
-                  child: Text(
-                    _currentFolderTitle,
-                    key: const Key('notes-folder-title'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: HeyBeanTheme.text,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0,
-                    ),
-                  ),
-                ),
                 Row(
                   children: [
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: Text(
+                          _currentFolderTitle,
+                          key: const Key('notes-folder-title'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: HeyBeanTheme.text,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0,
+                          ),
+                        ),
+                      ),
+                    ),
+                    IconButton.outlined(
+                      key: const Key('notes-search-toggle'),
+                      onPressed: _toggleNotesSearch,
+                      icon: Icon(
+                        _searchExpanded || _searchController.text.isNotEmpty
+                            ? Icons.close_rounded
+                            : Icons.search_rounded,
+                      ),
+                      tooltip: _searchExpanded
+                          ? 'Close search'
+                          : 'Search notes',
+                      style: IconButton.styleFrom(
+                        foregroundColor: HeyBeanTheme.muted,
+                        side: BorderSide(color: _quietBorderColor(alpha: .36)),
+                        backgroundColor: _quietSurfaceColor(alpha: .72),
+                        fixedSize: const Size(36, 36),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     IconButton.outlined(
                       key: const Key('notes-list-menu'),
                       onPressed: _showNotesListOptionsSheet,
@@ -938,9 +971,27 @@ class _NotesViewState extends State<_NotesView> {
                         fixedSize: const Size(36, 36),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(child: _searchField()),
                   ],
+                ),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 160),
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeIn,
+                  transitionBuilder: (child, animation) => SizeTransition(
+                    sizeFactor: animation,
+                    axisAlignment: -1,
+                    child: FadeTransition(opacity: animation, child: child),
+                  ),
+                  child: _searchExpanded || _searchController.text.isNotEmpty
+                      ? Padding(
+                          key: const Key('notes-search-expanded'),
+                          padding: const EdgeInsets.fromLTRB(6, 10, 0, 0),
+                          child: _searchField(),
+                        )
+                      : const SizedBox(
+                          key: Key('notes-search-collapsed'),
+                          height: 0,
+                        ),
                 ),
               ],
             ),
@@ -997,17 +1048,65 @@ class _NotesViewState extends State<_NotesView> {
                       tooltip: 'Notes',
                     ),
                     Expanded(
-                      child: Text(
-                        _saving
-                            ? 'Saving...'
-                            : locked
-                            ? 'Locked'
-                            : 'Notes',
+                      child: TextField(
+                        key: const Key('note-detail-title'),
+                        controller: _titleController,
+                        focusNode: _titleFocusNode,
+                        readOnly: locked,
                         textAlign: TextAlign.center,
+                        maxLines: 1,
+                        textInputAction: TextInputAction.done,
+                        onChanged: (_) => _queueAutosave(),
+                        onTapOutside: _dismissEditorFocus,
                         style: TextStyle(
-                          color: HeyBeanTheme.muted,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                          color: HeyBeanTheme.text,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0,
+                        ),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 8,
+                          ),
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: UnderlineInputBorder(
+                            borderSide: BorderSide(
+                              color: HeyBeanTheme.accent.withValues(alpha: .45),
+                              width: 1.4,
+                            ),
+                          ),
+                          disabledBorder: InputBorder.none,
+                          errorBorder: InputBorder.none,
+                          focusedErrorBorder: InputBorder.none,
+                          hintText: 'New Note',
+                          suffixIcon: _saving
+                              ? const SizedBox(
+                                  width: 26,
+                                  height: 26,
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 1.6,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : locked
+                              ? Icon(
+                                  Icons.lock_rounded,
+                                  size: 16,
+                                  color: HeyBeanTheme.muted,
+                                )
+                              : null,
+                          suffixIconConstraints: const BoxConstraints(
+                            minWidth: 26,
+                            minHeight: 26,
+                          ),
                         ),
                       ),
                     ),
@@ -1090,37 +1189,11 @@ class _NotesViewState extends State<_NotesView> {
                 child: ListView(
                   padding: EdgeInsets.fromLTRB(
                     18,
-                    0,
+                    4,
                     18,
                     toolbarVisible ? 88 : 28,
                   ),
                   children: [
-                    TextField(
-                      controller: _titleController,
-                      focusNode: _titleFocusNode,
-                      readOnly: locked,
-                      textInputAction: TextInputAction.next,
-                      onChanged: (_) => _queueAutosave(),
-                      onTapOutside: _dismissEditorFocus,
-                      style: TextStyle(
-                        fontSize: 30,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      decoration: const InputDecoration(
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        disabledBorder: InputBorder.none,
-                        errorBorder: InputBorder.none,
-                        focusedErrorBorder: InputBorder.none,
-                        hintText: 'New Note',
-                      ),
-                    ),
-                    Divider(
-                      height: 1,
-                      thickness: 1,
-                      color: HeyBeanTheme.border,
-                    ),
                     Listener(
                       behavior: HitTestBehavior.translucent,
                       onPointerUp: _handleBodyPointerUp,
@@ -1180,7 +1253,7 @@ class _NotesViewState extends State<_NotesView> {
         const SizedBox(height: 10),
         Text('No notes', style: TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 12),
-        _ThemedPlusButton(onPressed: _newNote, tooltip: 'New note'),
+        _CreateButton(onPressed: _newNote, tooltip: 'New note'),
       ],
     ),
   );
@@ -1292,6 +1365,7 @@ class _NotesViewState extends State<_NotesView> {
   Widget _searchField() => TextField(
     key: const Key('notes-search-field'),
     controller: _searchController,
+    autofocus: true,
     textAlignVertical: TextAlignVertical.center,
     decoration: InputDecoration(
       prefixIcon: Icon(Icons.search),
@@ -1381,26 +1455,6 @@ class _NotesListOptionsSheetState extends State<_NotesListOptionsSheet> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Notes options',
-                      style: TextStyle(
-                        color: HeyBeanTheme.text,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  _ThemedPlusButton(
-                    key: const Key('notes-new-folder'),
-                    onPressed: widget.onNewFolder,
-                    tooltip: 'New folder',
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
               _NotesOptionsSection(
                 title: 'View',
                 children: [
@@ -1438,6 +1492,11 @@ class _NotesListOptionsSheetState extends State<_NotesListOptionsSheet> {
               const SizedBox(height: 14),
               _NotesOptionsSection(
                 title: 'Folders',
+                trailing: _CreateButton(
+                  key: const Key('notes-new-folder'),
+                  onPressed: widget.onNewFolder,
+                  tooltip: 'New folder',
+                ),
                 emptyText: visibleFolders.isEmpty ? 'No folders yet' : null,
                 children: [
                   for (final folder in visibleFolders)
@@ -1494,11 +1553,13 @@ class _NotesOptionsSection extends StatelessWidget {
     required this.title,
     required this.children,
     this.emptyText,
+    this.trailing,
   });
 
   final String title;
   final List<Widget> children;
   final String? emptyText;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -1506,14 +1567,21 @@ class _NotesOptionsSection extends StatelessWidget {
     children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(2, 0, 2, 8),
-        child: Text(
-          title,
-          style: TextStyle(
-            color: HeyBeanTheme.muted,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0,
-          ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: HeyBeanTheme.muted,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0,
+                ),
+              ),
+            ),
+            if (trailing != null) trailing!,
+          ],
         ),
       ),
       DecoratedBox(
@@ -2196,7 +2264,7 @@ class _NewNoteFolderDialogState extends State<_NewNoteFolderDialog> {
         onPressed: () => Navigator.pop(context),
         child: Text('Cancel'),
       ),
-      _ThemedPlusButton(
+      _CreateButton(
         key: const Key('new-note-folder-create'),
         tooltip: 'Create folder',
         onPressed: _submit,

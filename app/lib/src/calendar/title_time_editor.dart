@@ -790,7 +790,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                       ),
                                     ),
                                     if (onEventCategorySaved != null)
-                                      IconButton.outlined(
+                                      _CreateButton(
                                         key: const Key(
                                           'title-time-editor-category-add-action',
                                         ),
@@ -853,7 +853,6 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                                   });
                                                 }
                                               },
-                                        icon: Icon(Icons.add_rounded),
                                       ),
                                   ],
                                 ),

@@ -1861,21 +1861,10 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
                     'Workspace calendar choices control which connected calendars appear in that workspace.',
                   ],
                 ),
-                IconButton(
+                _CreateButton(
                   key: const Key('workspace-create-household-action'),
                   tooltip: 'Create workspace',
                   onPressed: _busy ? null : _createHousehold,
-                  icon: Icon(Icons.add_rounded),
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.transparent,
-                    disabledBackgroundColor: Colors.transparent,
-                    foregroundColor: HeyBeanTheme.accentStrong,
-                    disabledForegroundColor: HeyBeanTheme.muted,
-                    side: BorderSide.none,
-                    fixedSize: const Size.square(40),
-                    minimumSize: const Size.square(40),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
                 ),
               ],
             ),

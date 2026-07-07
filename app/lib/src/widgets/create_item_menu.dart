@@ -77,60 +77,69 @@ class _CreateItemMenu extends StatelessWidget {
           ),
         ),
       ],
-      child: _ThemedPlusButtonChrome(
+      child: _CreateButton(
         key: const Key('create-item-menu-button'),
-        color: accentStrong,
+        tooltip: 'Create',
+        passive: true,
       ),
     );
   }
 }
 
-class _ThemedPlusButton extends StatelessWidget {
-  const _ThemedPlusButton({
+class _CreateButton extends StatelessWidget {
+  const _CreateButton({
     super.key,
     required this.tooltip,
-    required this.onPressed,
+    this.onPressed,
+    this.size = 40,
+    this.iconSize = 32,
+    this.passive = false,
   });
 
   final String tooltip;
   final VoidCallback? onPressed;
+  final double size;
+  final double iconSize;
+  final bool passive;
+
+  Color _iconColor(BuildContext context) => onPressed == null && !passive
+      ? HeyBeanTheme.muted
+      : HeyBeanTheme.accentStrong;
 
   @override
-  Widget build(BuildContext context) => IconButton(
-    tooltip: tooltip,
-    onPressed: onPressed,
-    icon: Icon(Icons.add_rounded),
-    style: IconButton.styleFrom(
-      backgroundColor: onPressed == null
-          ? HeyBeanTheme.border.withValues(alpha: .32)
-          : HeyBeanTheme.accent.withValues(alpha: .12),
-      foregroundColor: onPressed == null
-          ? HeyBeanTheme.muted
-          : HeyBeanTheme.accentStrong,
-      side: BorderSide(
-        color: onPressed == null
-            ? HeyBeanTheme.border
-            : HeyBeanTheme.accent.withValues(alpha: .24),
+  Widget build(BuildContext context) {
+    final icon = Icon(
+      Icons.add_rounded,
+      color: _iconColor(context),
+      size: iconSize,
+    );
+    if (passive) {
+      return Tooltip(
+        message: tooltip,
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Center(child: icon),
+        ),
+      );
+    }
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      icon: icon,
+      style: IconButton.styleFrom(
+        backgroundColor: Colors.transparent,
+        disabledBackgroundColor: Colors.transparent,
+        foregroundColor: HeyBeanTheme.accentStrong,
+        disabledForegroundColor: HeyBeanTheme.muted,
+        side: BorderSide.none,
+        fixedSize: Size.square(size),
+        minimumSize: Size.square(size),
+        padding: EdgeInsets.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
-      fixedSize: const Size.square(40),
-      minimumSize: const Size.square(40),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    ),
-  );
-}
-
-class _ThemedPlusButtonChrome extends StatelessWidget {
-  const _ThemedPlusButtonChrome({super.key, required this.color});
-
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 40,
-    height: 40,
-    alignment: Alignment.center,
-    child: Icon(Icons.add_rounded, color: color, size: 30),
-  );
+    );
+  }
 }
 
 class _CreateItemMenuRow extends StatelessWidget {
