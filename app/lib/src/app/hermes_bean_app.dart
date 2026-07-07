@@ -1,5 +1,8 @@
 part of '../../main.dart';
 
+typedef BeanVoiceAudioPlayer =
+    Future<void> Function(Uint8List bytes, {String contentType});
+
 class HermesBeanApp extends StatefulWidget {
   HermesBeanApp({
     super.key,
@@ -9,12 +12,14 @@ class HermesBeanApp extends StatefulWidget {
     AppIconBadgeUpdater? updateAppIconBadge,
     StripePaymentHandler? stripePaymentHandler,
     this.realtimeConversation,
+    BeanVoiceAudioPlayer? playBeanVoiceAudio,
   }) : apiClient = apiClient ?? HermesApiClient(),
        tokenStore = tokenStore ?? const SharedPreferencesAuthTokenStore(),
        launchExternalUrl = launchExternalUrl ?? _defaultLaunchExternalUrl,
        updateAppIconBadge = updateAppIconBadge ?? _defaultUpdateAppIconBadge,
        stripePaymentHandler =
-           stripePaymentHandler ?? DefaultStripePaymentHandler();
+           stripePaymentHandler ?? DefaultStripePaymentHandler(),
+       playBeanVoiceAudio = playBeanVoiceAudio ?? _defaultPlayBeanVoiceAudio;
 
   final HermesApiClient apiClient;
   final AuthTokenStore tokenStore;
@@ -22,6 +27,7 @@ class HermesBeanApp extends StatefulWidget {
   final AppIconBadgeUpdater updateAppIconBadge;
   final StripePaymentHandler stripePaymentHandler;
   final BeanRealtimeConversation? realtimeConversation;
+  final BeanVoiceAudioPlayer playBeanVoiceAudio;
 
   @override
   State<HermesBeanApp> createState() => _HermesBeanAppState();
@@ -66,10 +72,28 @@ class _HermesBeanAppState extends State<HermesBeanApp> {
         updateAppIconBadge: widget.updateAppIconBadge,
         stripePaymentHandler: widget.stripePaymentHandler,
         realtimeConversation: widget.realtimeConversation,
+        playBeanVoiceAudio: widget.playBeanVoiceAudio,
         onThemeChanged: _setThemeKey,
         onThemeModeChanged: _setThemeModeKey,
       ),
     );
+  }
+}
+
+Future<void> _defaultPlayBeanVoiceAudio(
+  Uint8List bytes, {
+  String contentType = 'audio/wav',
+}) async {
+  if (bytes.isEmpty) return;
+  final player = AudioPlayer();
+  try {
+    await player.play(BytesSource(bytes, mimeType: contentType));
+    await player.onPlayerComplete.first.timeout(
+      const Duration(seconds: 90),
+      onTimeout: () {},
+    );
+  } finally {
+    await player.dispose();
   }
 }
 

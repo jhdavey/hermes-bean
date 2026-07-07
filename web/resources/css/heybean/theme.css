@@ -208,7 +208,12 @@
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-surface-soft,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-metric,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-kpi,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-health-card,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-health-metrics span,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-mini-list span,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-switch,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-coupon-entry,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-provider-stats span,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-billing-summary-grid > div,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-day-board-column,
@@ -500,14 +505,10 @@
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-message-icon-action {
-    border-color: rgba(var(--hb-accent-rgb), .32);
-    background: rgba(20, 27, 35, .94);
-    color: var(--hb-text);
+    color: var(--hb-muted);
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-message-icon-action:hover {
-    border-color: rgba(var(--hb-accent-rgb), .52);
-    background: rgba(var(--hb-accent-rgb), .16);
     color: var(--hb-text);
 }
 
@@ -529,6 +530,7 @@
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-plan-panel,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-billing-interval-toggle,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-subscribe-plan,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-coupon-table,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-subscribe-summary-grid div {
     border-color: rgba(var(--hb-accent-rgb), .18);
     background: linear-gradient(180deg, rgba(24, 31, 39, .96), rgba(15, 20, 26, .96));
@@ -580,6 +582,7 @@
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-subscribe-plan p,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-subscribe-price span,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-subscribe-summary-grid span,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-coupon-entry span,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-subscribe-footer {
     color: #aeb8c6;
 }

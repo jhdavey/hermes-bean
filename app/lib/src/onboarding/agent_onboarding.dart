@@ -194,97 +194,124 @@ class _AgentOnboardingOverlayState extends State<_AgentOnboardingOverlay> {
 
   @override
   Widget build(BuildContext context) {
+    final screenSize = MediaQuery.sizeOf(context);
     return Positioned.fill(
       child: ColoredBox(
-        color: Colors.black.withValues(alpha: .45),
+        color: Colors.black.withValues(alpha: .56),
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 440),
-                child: _ShellCard(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
-                    child: Column(
-                      key: ValueKey('agent-onboarding-step-$_step'),
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _SectionTitle(
-                          icon: widget.editMode
-                              ? Icons.tune_rounded
-                              : _step == 3
-                              ? Icons.check_circle_rounded
-                              : Icons.auto_awesome_rounded,
-                          title: widget.editMode
-                              ? 'Edit Bean preferences'
-                              : _step == 3
-                              ? 'You’re all set'
-                              : 'Let’s personalize Bean',
-                          subtitle: widget.editMode
-                              ? 'Review the current settings and save only what you want to change.'
-                              : _step == 3
-                              ? 'You can update these settings any time in the Bean section of Settings.'
-                              : 'A few quick choices help Bean understand your style and priorities.',
+                constraints: BoxConstraints(
+                  maxWidth: widget.editMode ? 520 : 440,
+                  maxHeight: math.max(360, screenSize.height - 48),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    key: const Key('agent-preferences-panel'),
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: HeyBeanTheme.surface,
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(color: HeyBeanTheme.borderStrong),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: .18),
+                          blurRadius: 28,
+                          offset: const Offset(0, 16),
                         ),
-                        const SizedBox(height: 18),
-                        if (widget.editMode) ...[
-                          _personalityStep(),
-                          const SizedBox(height: 18),
-                          _prioritiesStep(),
-                          const SizedBox(height: 18),
-                          _contextStep(),
-                        ] else ...[
-                          if (_step == 0) _personalityStep(),
-                          if (_step == 1) _prioritiesStep(),
-                          if (_step == 2) _contextStep(),
-                          if (_step == 3)
-                            Text(
-                              'Bean will use your personality, priorities, and context to shape tone, planning, reminders, and follow-up. Look for Bean in Settings whenever you want to change them.',
-                              style: TextStyle(color: HeyBeanTheme.muted),
-                            ),
-                        ],
-                        const SizedBox(height: 18),
-                        if (widget.editMode)
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton(
-                                  key: const Key('agent-preferences-cancel'),
-                                  onPressed: widget.busy
-                                      ? null
-                                      : widget.onCancel,
-                                  child: Text('Cancel'),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: FilledButton(
-                                  key: const Key('agent-preferences-save'),
-                                  onPressed: widget.busy ? null : _save,
-                                  child: Text(widget.busy ? 'Saving…' : 'Save'),
-                                ),
-                              ),
-                            ],
-                          )
-                        else
-                          FilledButton(
-                            key: Key(
-                              _step == 3
-                                  ? 'agent-onboarding-finish'
-                                  : 'agent-onboarding-next',
-                            ),
-                            onPressed: widget.busy ? null : _next,
-                            child: Text(
-                              widget.busy
-                                  ? 'Saving…'
-                                  : _step == 3
-                                  ? 'Finish'
-                                  : 'Next',
-                            ),
-                          ),
                       ],
+                    ),
+                    child: SingleChildScrollView(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        child: Column(
+                          key: ValueKey('agent-onboarding-step-$_step'),
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _SectionTitle(
+                              icon: widget.editMode
+                                  ? Icons.tune_rounded
+                                  : _step == 3
+                                  ? Icons.check_circle_rounded
+                                  : Icons.auto_awesome_rounded,
+                              title: widget.editMode
+                                  ? 'Edit Bean preferences'
+                                  : _step == 3
+                                  ? 'You’re all set'
+                                  : 'Let’s personalize Bean',
+                              subtitle: widget.editMode
+                                  ? 'Review the current settings and save only what you want to change.'
+                                  : _step == 3
+                                  ? 'You can update these settings any time in the Bean section of Settings.'
+                                  : 'A few quick choices help Bean understand your style and priorities.',
+                            ),
+                            const SizedBox(height: 18),
+                            if (widget.editMode) ...[
+                              _personalityStep(),
+                              const SizedBox(height: 18),
+                              _prioritiesStep(),
+                              const SizedBox(height: 18),
+                              _contextStep(),
+                            ] else ...[
+                              if (_step == 0) _personalityStep(),
+                              if (_step == 1) _prioritiesStep(),
+                              if (_step == 2) _contextStep(),
+                              if (_step == 3)
+                                Text(
+                                  'Bean will use your personality, priorities, and context to shape tone, planning, reminders, and follow-up. Look for Bean in Settings whenever you want to change them.',
+                                  style: TextStyle(color: HeyBeanTheme.muted),
+                                ),
+                            ],
+                            const SizedBox(height: 18),
+                            if (widget.editMode)
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton(
+                                      key: const Key(
+                                        'agent-preferences-cancel',
+                                      ),
+                                      onPressed: widget.busy
+                                          ? null
+                                          : widget.onCancel,
+                                      child: Text('Cancel'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: FilledButton(
+                                      key: const Key('agent-preferences-save'),
+                                      onPressed: widget.busy ? null : _save,
+                                      child: Text(
+                                        widget.busy ? 'Saving…' : 'Save',
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            else
+                              FilledButton(
+                                key: Key(
+                                  _step == 3
+                                      ? 'agent-onboarding-finish'
+                                      : 'agent-onboarding-next',
+                                ),
+                                onPressed: widget.busy ? null : _next,
+                                child: Text(
+                                  widget.busy
+                                      ? 'Saving…'
+                                      : _step == 3
+                                      ? 'Finish'
+                                      : 'Next',
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),

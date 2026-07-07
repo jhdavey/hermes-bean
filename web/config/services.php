@@ -100,7 +100,7 @@ return [
         'publishable_key' => env('STRIPE_PUBLISHABLE_KEY'),
         'api_version' => env('STRIPE_API_VERSION', '2026-05-27.dahlia'),
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
-        'trial_days' => (int) env('STRIPE_TRIAL_DAYS', 14),
+        'trial_days' => (int) env('STRIPE_TRIAL_DAYS', 7),
         'prices' => [
             'base' => [
                 'monthly' => env('STRIPE_PRICE_BASE_MONTHLY', env('STRIPE_PRICE_BASE')),
@@ -113,6 +113,20 @@ return [
             'pro' => [
                 'monthly' => env('STRIPE_PRICE_PRO_MONTHLY', env('STRIPE_PRICE_PRO')),
                 'yearly' => env('STRIPE_PRICE_PRO_YEARLY'),
+            ],
+        ],
+        'plan_amounts' => [
+            'base' => [
+                'monthly' => (float) env('STRIPE_AMOUNT_BASE_MONTHLY', 4.99),
+                'yearly' => (float) env('STRIPE_AMOUNT_BASE_YEARLY', 49.99),
+            ],
+            'premium' => [
+                'monthly' => (float) env('STRIPE_AMOUNT_PREMIUM_MONTHLY', 19.99),
+                'yearly' => (float) env('STRIPE_AMOUNT_PREMIUM_YEARLY', 199.99),
+            ],
+            'pro' => [
+                'monthly' => (float) env('STRIPE_AMOUNT_PRO_MONTHLY', 49.99),
+                'yearly' => (float) env('STRIPE_AMOUNT_PRO_YEARLY', 499.99),
             ],
         ],
     ],

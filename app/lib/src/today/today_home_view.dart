@@ -416,8 +416,8 @@ class _CriticalTaskBadge extends StatelessWidget {
         '$count',
         style: TextStyle(
           color: HeyBeanTheme.accentStrong,
-          fontSize: 24,
-          fontWeight: FontWeight.w900,
+          fontSize: 21,
+          fontWeight: FontWeight.w600,
         ),
       ),
     ),

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 const String hermesApiBaseUrl = String.fromEnvironment(
   'HERMES_API_BASE_URL',
@@ -198,6 +199,17 @@ class HermesApiClient {
   Future<HermesSubscriptionSummary> getSubscriptionSummary() async {
     final data = await _sendJson('GET', '/billing/subscription');
     return HermesSubscriptionSummary.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesCouponRedemptionResult> redeemCouponCode({
+    required String code,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/billing/coupon-codes/redeem',
+      body: {'code': code},
+    );
+    return HermesCouponRedemptionResult.fromJson(_expectMap(data['data']));
   }
 
   Future<void> logout({bool clearBearerToken = true}) async {
@@ -975,6 +987,53 @@ class HermesApiClient {
     return GoogleCalendarSyncStatus.fromJson(_expectMap(data['data']));
   }
 
+  Future<List<ExternalCalendarProviderPreset>>
+  listExternalCalendarProviders() async {
+    try {
+      final data = await _sendJson('GET', '/external-calendars/providers');
+      return _expectList(data['data'])
+          .map(
+            (json) => ExternalCalendarProviderPreset.fromJson(_expectMap(json)),
+          )
+          .toList();
+    } on HermesApiException catch (error) {
+      if (error.statusCode == 401 || error.statusCode == 403) {
+        rethrow;
+      }
+      return ExternalCalendarProviderPreset.defaults;
+    } on FormatException {
+      return ExternalCalendarProviderPreset.defaults;
+    }
+  }
+
+  Future<ExternalCalendarImportResult> importExternalCalendar({
+    required String providerKey,
+    required String url,
+    int? workspaceId,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/external-calendars/import',
+      body: {
+        'provider_key': providerKey,
+        'url': url,
+        if (workspaceId != null) 'workspace_id': workspaceId,
+      },
+    );
+    return ExternalCalendarImportResult.fromJson(_expectMap(data['data']));
+  }
+
+  Future<ExternalCalendarImportResult> importAppleCalendar({
+    required String url,
+    int? workspaceId,
+  }) async {
+    return importExternalCalendar(
+      providerKey: 'apple',
+      url: url,
+      workspaceId: workspaceId,
+    );
+  }
+
   Future<List<HermesEventCategory>> listEventCategories() async {
     final data = await _sendJson('GET', '/event-categories');
     return _expectList(
@@ -1168,6 +1227,41 @@ class HermesApiClient {
       responseTimeout: _assistantApiResponseTimeout,
     );
     return HermesMessageResult.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesTextToSpeechAudio> synthesizeSpeech({
+    required String text,
+    String? voice,
+    int? workspaceId,
+  }) async {
+    final body = <String, Object?>{
+      'text': text,
+      if (voice != null && voice.trim().isNotEmpty) 'voice': voice.trim(),
+      if (workspaceId != null) 'workspace_id': workspaceId,
+    };
+    final headers = <String, String>{
+      'Accept': 'audio/wav',
+      'Content-Type': 'application/json',
+    };
+    if (bearerToken != null) {
+      headers['Authorization'] = 'Bearer $bearerToken';
+    }
+
+    final response = await _sendBinary(
+      HermesApiRequest(
+        method: 'POST',
+        uri: _resolveApiPath('/assistant/tts'),
+        path: '/assistant/tts',
+        headers: headers,
+        body: body,
+        responseTimeout: const Duration(seconds: 30),
+      ),
+    );
+
+    return HermesTextToSpeechAudio(
+      bytes: response.bytes,
+      contentType: response.headers['content-type'] ?? 'audio/wav',
+    );
   }
 
   Future<HermesMessageResult> branchMessage({
@@ -1484,6 +1578,47 @@ class HermesApiClient {
     return decoded;
   }
 
+  Future<HermesBinaryResponse> _sendBinary(HermesApiRequest request) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15);
+    try {
+      final ioRequest = await client
+          .openUrl(request.method, request.uri)
+          .timeout(const Duration(seconds: 15));
+      request.headers.forEach(ioRequest.headers.set);
+      if (request.body != null) {
+        ioRequest.add(utf8.encode(jsonEncode(request.body)));
+      }
+
+      final ioResponse = await ioRequest.close().timeout(
+        request.responseTimeout,
+      );
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in ioResponse.timeout(request.responseTimeout)) {
+        builder.add(chunk);
+      }
+      final bytes = builder.takeBytes();
+      if (ioResponse.statusCode < 200 || ioResponse.statusCode >= 300) {
+        throw HermesApiException(
+          ioResponse.statusCode,
+          utf8.decode(bytes, allowMalformed: true),
+        );
+      }
+      final headers = <String, String>{};
+      ioResponse.headers.forEach((name, values) {
+        headers[name.toLowerCase()] = values.join(', ');
+      });
+      return HermesBinaryResponse(ioResponse.statusCode, bytes, headers);
+    } on TimeoutException catch (error) {
+      throw HermesApiException(
+        408,
+        "Request timed out: ${error.message ?? 'network timeout'}",
+      );
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   String _pathWithQuery(String path, Map<String, String> queryParameters) {
     if (queryParameters.isEmpty) return path;
     final uri = Uri(path: path, queryParameters: queryParameters);
@@ -1557,6 +1692,24 @@ class HermesApiResponse {
 
   final int statusCode;
   final String body;
+}
+
+class HermesBinaryResponse {
+  const HermesBinaryResponse(this.statusCode, this.bytes, this.headers);
+
+  final int statusCode;
+  final Uint8List bytes;
+  final Map<String, String> headers;
+}
+
+class HermesTextToSpeechAudio {
+  const HermesTextToSpeechAudio({
+    required this.bytes,
+    required this.contentType,
+  });
+
+  final Uint8List bytes;
+  final String contentType;
 }
 
 class HermesApiException implements Exception {
@@ -1667,6 +1820,7 @@ class HermesSubscriptionSummary {
     this.billingInterval = 'monthly',
     this.status,
     this.currentPeriodEnd,
+    this.baseCompExpiresAt,
     this.trialEndsAt,
     this.accessEndsAt,
     this.cancelAtPeriodEnd = false,
@@ -1679,6 +1833,7 @@ class HermesSubscriptionSummary {
   final String billingInterval;
   final String? status;
   final String? currentPeriodEnd;
+  final String? baseCompExpiresAt;
   final String? trialEndsAt;
   final String? accessEndsAt;
   final bool cancelAtPeriodEnd;
@@ -1686,22 +1841,65 @@ class HermesSubscriptionSummary {
   final bool canCancel;
   final bool canResume;
 
-  factory HermesSubscriptionSummary.fromJson(Map<String, Object?> json) =>
-      HermesSubscriptionSummary(
-        tier: _readStringOrDefault(json['tier'], 'base'),
-        billingInterval: _readStringOrDefault(
-          json['billing_interval'] ?? json['billingInterval'],
-          'monthly',
+  factory HermesSubscriptionSummary.fromJson(
+    Map<String, Object?> json,
+  ) => HermesSubscriptionSummary(
+    tier: _readStringOrDefault(json['tier'], 'base'),
+    billingInterval: _readStringOrDefault(
+      json['billing_interval'] ?? json['billingInterval'],
+      'monthly',
+    ),
+    status: json['status']?.toString(),
+    currentPeriodEnd: json['current_period_end']?.toString(),
+    baseCompExpiresAt:
+        (json['base_comp_expires_at'] ?? json['baseCompExpiresAt'])?.toString(),
+    trialEndsAt: json['trial_ends_at']?.toString(),
+    accessEndsAt: (json['access_ends_at'] ?? json['accessEndsAt'])?.toString(),
+    cancelAtPeriodEnd: _readBool(json['cancel_at_period_end'] ?? false),
+    canUpgrade: _readBool(json['can_upgrade'] ?? false),
+    canCancel: _readBool(json['can_cancel'] ?? json['canCancel'] ?? false),
+    canResume: _readBool(json['can_resume'] ?? json['canResume'] ?? false),
+  );
+}
+
+class HermesCouponRedemptionResult {
+  const HermesCouponRedemptionResult({required this.subscription, this.coupon});
+
+  final HermesSubscriptionSummary subscription;
+  final HermesCouponCode? coupon;
+
+  factory HermesCouponRedemptionResult.fromJson(Map<String, Object?> json) =>
+      HermesCouponRedemptionResult(
+        subscription: HermesSubscriptionSummary.fromJson(
+          _expectMap(json['subscription']),
         ),
-        status: json['status']?.toString(),
-        currentPeriodEnd: json['current_period_end']?.toString(),
-        trialEndsAt: json['trial_ends_at']?.toString(),
-        accessEndsAt: (json['access_ends_at'] ?? json['accessEndsAt'])
-            ?.toString(),
-        cancelAtPeriodEnd: _readBool(json['cancel_at_period_end'] ?? false),
-        canUpgrade: _readBool(json['can_upgrade'] ?? false),
-        canCancel: _readBool(json['can_cancel'] ?? json['canCancel'] ?? false),
-        canResume: _readBool(json['can_resume'] ?? json['canResume'] ?? false),
+        coupon: json['coupon'] is Map<String, Object?>
+            ? HermesCouponCode.fromJson(_expectMap(json['coupon']))
+            : null,
+      );
+}
+
+class HermesCouponCode {
+  const HermesCouponCode({
+    required this.code,
+    required this.monthsFreeBase,
+    this.used = false,
+    this.baseAccessExpiresAt,
+  });
+
+  final String code;
+  final int monthsFreeBase;
+  final bool used;
+  final String? baseAccessExpiresAt;
+
+  factory HermesCouponCode.fromJson(Map<String, Object?> json) =>
+      HermesCouponCode(
+        code: _expectString(json['code']),
+        monthsFreeBase: _expectInt(json['months_free_base']),
+        used: _readBool(json['used'] ?? false),
+        baseAccessExpiresAt:
+            (json['base_access_expires_at'] ?? json['baseAccessExpiresAt'])
+                ?.toString(),
       );
 }
 
@@ -1943,6 +2141,7 @@ class HermesUser {
     this.subscriptionTier = 'base',
     this.subscriptionStatus,
     this.subscriptionTrialEndsAt,
+    this.baseCompExpiresAt,
     this.theme = 'green',
     this.themeMode = 'auto',
     this.commandCenterLabel = 'Command Center',
@@ -1969,6 +2168,7 @@ class HermesUser {
   final String subscriptionTier;
   final String? subscriptionStatus;
   final String? subscriptionTrialEndsAt;
+  final String? baseCompExpiresAt;
   final String theme;
   final String themeMode;
   final String commandCenterLabel;
@@ -1997,6 +2197,7 @@ class HermesUser {
     String? subscriptionTier,
     String? subscriptionStatus,
     String? subscriptionTrialEndsAt,
+    String? baseCompExpiresAt,
     String? theme,
     String? themeMode,
     String? commandCenterLabel,
@@ -2023,6 +2224,7 @@ class HermesUser {
     subscriptionStatus: subscriptionStatus ?? this.subscriptionStatus,
     subscriptionTrialEndsAt:
         subscriptionTrialEndsAt ?? this.subscriptionTrialEndsAt,
+    baseCompExpiresAt: baseCompExpiresAt ?? this.baseCompExpiresAt,
     theme: theme ?? this.theme,
     themeMode: themeMode ?? this.themeMode,
     commandCenterLabel: commandCenterLabel ?? this.commandCenterLabel,
@@ -2058,6 +2260,8 @@ class HermesUser {
     subscriptionTrialEndsAt:
         (json['subscription_trial_ends_at'] ?? json['subscriptionTrialEndsAt'])
             ?.toString(),
+    baseCompExpiresAt:
+        (json['base_comp_expires_at'] ?? json['baseCompExpiresAt'])?.toString(),
     theme: _readStringOrDefault(json['theme'], 'green'),
     themeMode: _readStringOrDefault(
       json['theme_mode'] ?? json['themeMode'],
@@ -2536,6 +2740,181 @@ class GoogleCalendarSyncResult {
         status: GoogleCalendarSyncStatus.fromJson(_expectMap(json['status'])),
       );
 }
+
+class ExternalCalendarProviderPreset {
+  const ExternalCalendarProviderPreset({
+    required this.key,
+    required this.label,
+    required this.description,
+    required this.linkLabel,
+    required this.linkHint,
+    this.instructions = const [],
+  });
+
+  final String key;
+  final String label;
+  final String description;
+  final String linkLabel;
+  final String linkHint;
+  final List<String> instructions;
+
+  static const defaults = [
+    ExternalCalendarProviderPreset(
+      key: 'apple',
+      label: 'Apple Calendar',
+      description: 'Paste an iCloud public calendar link from Apple Calendar.',
+      linkLabel: 'iCloud public calendar link',
+      linkHint: 'webcal://pXX-caldav.icloud.com/published/2/...',
+      instructions: [
+        'In Apple Calendar or iCloud.com, turn on Public Calendar for the calendar you want.',
+        'Copy the generated webcal link.',
+        'Paste the link here to import events into this workspace.',
+      ],
+    ),
+    ExternalCalendarProviderPreset(
+      key: 'google',
+      label: 'Google Calendar',
+      description: 'Paste a Google secret iCal address for a one-time import.',
+      linkLabel: 'Google secret iCal address',
+      linkHint: 'https://calendar.google.com/calendar/ical/...',
+      instructions: [
+        'Open Google Calendar settings for the calendar.',
+        'Copy the Secret address in iCal format.',
+        'Paste it here for a one-time import. Use Google sync for ongoing connected sync.',
+      ],
+    ),
+    ExternalCalendarProviderPreset(
+      key: 'outlook',
+      label: 'Outlook Calendar',
+      description: 'Paste an Outlook published ICS link for a one-time import.',
+      linkLabel: 'Outlook published ICS link',
+      linkHint: 'https://outlook.live.com/owa/calendar/.../calendar.ics',
+      instructions: [
+        'Publish the Outlook calendar as an ICS link.',
+        'Copy the ICS link.',
+        'Paste it here for a one-time import. Use Outlook sync for ongoing connected sync.',
+      ],
+    ),
+    ExternalCalendarProviderPreset(
+      key: 'proton',
+      label: 'Proton Calendar',
+      description:
+          'Paste a Proton share link for calendars shared with anyone.',
+      linkLabel: 'Proton calendar share link',
+      linkHint: 'https://calendar.proton.me/api/calendar/v1/url/...',
+      instructions: [
+        'In Proton Calendar, share the calendar with anyone.',
+        'Copy the generated calendar link.',
+        'Paste it here to import the visible events.',
+      ],
+    ),
+    ExternalCalendarProviderPreset(
+      key: 'yahoo',
+      label: 'Yahoo Calendar',
+      description: 'Paste a Yahoo iCal link or exported calendar URL.',
+      linkLabel: 'Yahoo iCal link',
+      linkHint: 'https://calendar.yahoo.com/.../calendar.ics',
+      instructions: [
+        'Open Yahoo Calendar settings for the calendar.',
+        'Copy the iCal link or export link.',
+        'Paste it here to import the events.',
+      ],
+    ),
+    ExternalCalendarProviderPreset(
+      key: 'fastmail',
+      label: 'Fastmail',
+      description: 'Paste a Fastmail calendar sharing link.',
+      linkLabel: 'Fastmail calendar link',
+      linkHint: 'https://calendar.fastmail.com/.../calendar.ics',
+      instructions: [
+        'Share or publish the Fastmail calendar to get an iCalendar link.',
+        'Copy the generated link.',
+        'Paste it here for a one-time import.',
+      ],
+    ),
+    ExternalCalendarProviderPreset(
+      key: 'nextcloud',
+      label: 'Nextcloud',
+      description:
+          'Paste a public Nextcloud/ownCloud calendar subscription link.',
+      linkLabel: 'Nextcloud public calendar link',
+      linkHint: 'https://cloud.example.com/remote.php/dav/public-calendars/...',
+      instructions: [
+        'In Nextcloud Calendar, copy the public subscription link.',
+        'Use the webcal or download link for the calendar.',
+        'Paste it here to import events into HeyBean.',
+      ],
+    ),
+    ExternalCalendarProviderPreset(
+      key: 'ics',
+      label: 'Other iCal link',
+      description: 'Use any public .ics or webcal calendar URL.',
+      linkLabel: 'Public iCal or webcal link',
+      linkHint: 'webcal://example.com/calendar.ics',
+      instructions: [
+        'Copy a public .ics, iCal, or webcal calendar URL.',
+        'Paste it here to import events.',
+        'Only use links you trust and intend to import into this workspace.',
+      ],
+    ),
+  ];
+
+  factory ExternalCalendarProviderPreset.fromJson(Map<String, Object?> json) =>
+      ExternalCalendarProviderPreset(
+        key: _expectString(json['key']),
+        label: _expectString(json['label']),
+        description: _readStringOrDefault(json['description'], ''),
+        linkLabel: _readStringOrDefault(
+          json['link_label'] ?? json['linkLabel'],
+          'Calendar link',
+        ),
+        linkHint: _readStringOrDefault(
+          json['link_hint'] ?? json['linkHint'],
+          'webcal://example.com/calendar.ics',
+        ),
+        instructions: _expectList(
+          json['instructions'] ?? const [],
+        ).map((item) => item.toString()).toList(),
+      );
+}
+
+class ExternalCalendarImportResult {
+  const ExternalCalendarImportResult({
+    required this.imported,
+    required this.updated,
+    required this.deleted,
+    required this.skipped,
+    required this.total,
+    this.workspaceId,
+    this.providerKey,
+    this.providerLabel,
+  });
+
+  final int imported;
+  final int updated;
+  final int deleted;
+  final int skipped;
+  final int total;
+  final int? workspaceId;
+  final String? providerKey;
+  final String? providerLabel;
+
+  int get changed => imported + updated + deleted;
+
+  factory ExternalCalendarImportResult.fromJson(Map<String, Object?> json) =>
+      ExternalCalendarImportResult(
+        imported: _expectInt(json['imported']),
+        updated: _expectInt(json['updated']),
+        deleted: _expectInt(json['deleted']),
+        skipped: _expectInt(json['skipped']),
+        total: _expectInt(json['total']),
+        workspaceId: _readIntOrNull(json['workspace_id']),
+        providerKey: json['provider_key']?.toString(),
+        providerLabel: json['provider_label']?.toString(),
+      );
+}
+
+typedef AppleCalendarImportResult = ExternalCalendarImportResult;
 
 class HermesTodaySummary {
   const HermesTodaySummary({

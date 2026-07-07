@@ -5,6 +5,7 @@ use App\Http\Middleware\ApiSecurityHeaders;
 use App\Http\Middleware\AuthenticateBearerToken;
 use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\HandleApiCors;
+use App\Http\Middleware\RecordPageView;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -20,6 +21,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->prepend([
             HandleApiCors::class,
             ApiSecurityHeaders::class,
+        ]);
+        $middleware->web(append: [
+            RecordPageView::class,
         ]);
 
         $middleware->alias([

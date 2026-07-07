@@ -6,6 +6,8 @@ use App\Models\AiUsageLog;
 use App\Models\AdminSetting;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
+use App\Models\PageViewEvent;
+use App\Models\PersonalAccessToken;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\AiUsageService;
@@ -22,10 +24,35 @@ class AiUsageGuardrailTest extends TestCase
         $userToken = $this->apiToken('usage-user@example.com');
         $adminToken = $this->apiToken('usage-admin@example.com');
 
+        config()->set('services.stripe.plan_amounts.premium.monthly', 19.99);
+
         $user = User::where('email', 'usage-user@example.com')->firstOrFail();
         $admin = User::where('email', 'usage-admin@example.com')->firstOrFail();
         $admin->forceFill(['is_admin' => true, 'subscription_tier' => 'pro'])->save();
+        $user->forceFill([
+            'subscription_tier' => 'premium',
+            'subscription_status' => 'active',
+            'stripe_subscription_id' => 'sub_usage_test',
+        ])->save();
         User::factory()->create(['created_at' => now()->subMonths(2)->startOfMonth()->addDay()]);
+        PageViewEvent::create([
+            'visitor_key' => 'visitor-1',
+            'path' => '/pricing',
+            'utm_source' => 'influencer',
+            'status_code' => 200,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        PageViewEvent::create([
+            'user_id' => $admin->id,
+            'visitor_key' => 'admin-visitor',
+            'path' => '/admin',
+            'utm_source' => 'internal',
+            'status_code' => 200,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        PersonalAccessToken::where('user_id', $admin->id)->update(['last_used_at' => now()]);
         $workspace = Workspace::where('personal_owner_user_id', $user->id)->firstOrFail();
         $session = ConversationSession::create([
             'user_id' => $user->id,
@@ -55,6 +82,7 @@ class AiUsageGuardrailTest extends TestCase
             'total_tokens' => 160,
             'estimated_cost_usd' => 0.00027,
             'action_types' => ['task.create'],
+            'metadata' => ['duration_ms' => 400, 'model_call_ms' => 100, 'tool_execution_ms' => 80],
         ]);
 
         $this->withToken($userToken)->getJson('/api/admin/usage/summary')
@@ -64,11 +92,22 @@ class AiUsageGuardrailTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.totals.ai_actions_month', 1)
             ->assertJsonPath('data.totals.tokens_month', 160)
+            ->assertJsonPath('data.business.mrr', 19.99)
+            ->assertJsonPath('data.business.arr', 239.88)
+            ->assertJsonPath('data.traffic.page_views_month', 1)
+            ->assertJsonPath('data.traffic.signups_month', 1)
+            ->assertJsonPath('data.traffic.top_pages.0.path', '/pricing')
+            ->assertJsonPath('data.traffic.top_sources.0.source', 'influencer')
+            ->assertJsonPath('data.activation.active_users_today', 1)
+            ->assertJsonPath('data.activation.premium_users', 1)
+            ->assertJsonPath('data.app_usage.chat_messages_month', 1)
+            ->assertJsonPath('data.app_usage.avg_request_latency_ms', 400)
+            ->assertJsonPath('data.server.queue.connection', config('queue.default'))
             ->assertJsonPath('data.by_model.0.key', 'gpt-5.4-mini')
             ->assertJsonPath('data.top_users.0.email', 'usage-user@example.com')
             ->assertJsonPath('data.user_growth_range', 'last_30_days')
             ->assertJsonCount(30, 'data.user_growth')
-            ->assertJsonPath('data.user_growth.29.total_users', User::count())
+            ->assertJsonPath('data.user_growth.29.total_users', User::where('is_admin', false)->count())
             ->assertJsonPath('data.recent_logs.0.status', 'completed')
             ->assertJsonPath('data.recent_logs.0.use_case', 'Task management')
             ->assertJsonPath('data.recent_logs.0.request_preview', 'Please add take out the trash as a task for tonight.')
@@ -80,19 +119,19 @@ class AiUsageGuardrailTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.user_growth_range', 'today')
             ->assertJsonCount(1, 'data.user_growth')
-            ->assertJsonPath('data.user_growth.0.total_users', User::count());
+            ->assertJsonPath('data.user_growth.0.total_users', User::where('is_admin', false)->count());
 
         $this->withToken($adminToken)->getJson('/api/admin/usage/summary?user_growth_range=last_7_days')
             ->assertOk()
             ->assertJsonPath('data.user_growth_range', 'last_7_days')
             ->assertJsonCount(7, 'data.user_growth')
-            ->assertJsonPath('data.user_growth.6.total_users', User::count());
+            ->assertJsonPath('data.user_growth.6.total_users', User::where('is_admin', false)->count());
 
         $this->withToken($adminToken)->getJson('/api/admin/usage/summary?user_growth_range=all_time')
             ->assertOk()
             ->assertJsonPath('data.user_growth_range', 'all_time')
             ->assertJsonCount(3, 'data.user_growth')
-            ->assertJsonPath('data.user_growth.2.total_users', User::count());
+            ->assertJsonPath('data.user_growth.2.total_users', User::where('is_admin', false)->count());
 
         $this->withToken($adminToken)->getJson('/api/admin/usage/summary?user_growth_range=bad')
             ->assertOk()

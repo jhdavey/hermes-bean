@@ -3876,78 +3876,17 @@ void main() {
     expect(api.updatedAgentPersonality, 'balanced');
     expect(api.updatedContext, contains('guided Bean signup onboarding'));
 
-    await tester.ensureVisible(find.byKey(const Key('guided-tour-start')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('guided-tour-start')));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('onboarding-tour-overlay')), findsOneWidget);
-    expect(find.byKey(const Key('guided-tour-next')), findsNothing);
-    expect(find.byKey(const Key('guided-bean-thinking')), findsNothing);
-    expect(find.text('Command center'), findsOneWidget);
-    expect(find.byKey(const Key('command-center-home')), findsOneWidget);
-    expect(
-      find.text(
-        "This is your command center. I'm always here to help, just tell me what you need.",
-      ),
-      findsOneWidget,
-    );
-    final tourNext = tester.widget<FilledButton>(
-      find.byKey(const Key('onboarding-tour-next')),
-    );
-    expect(tourNext.onPressed, isNotNull);
-    expect(find.byKey(const Key('signup-plan-base')), findsNothing);
-
-    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
-    expect(find.byKey(const Key('guided-bean-thinking')), findsNothing);
-    await tester.pumpAndSettle();
-    expect(find.text('Today at a glance'), findsOneWidget);
-    expect(find.byKey(const Key('command-center-home')), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
-    await tester.pumpAndSettle();
-    expect(find.text('Create items'), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
-    await tester.pumpAndSettle();
-    expect(find.text('Calendar views'), findsOneWidget);
-    expect(find.byKey(const Key('calendar-view')), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
-    await tester.pumpAndSettle();
-    expect(
-      find.textContaining('Tasks are for things you need to complete.'),
-      findsOneWidget,
-    );
-    expect(find.byKey(const Key('tasks-view')), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
-    await tester.pumpAndSettle();
-    expect(
-      find.textContaining('Reminders are lightweight nudges.'),
-      findsOneWidget,
-    );
-    expect(find.byKey(const Key('reminders-view')), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
-    await tester.pumpAndSettle();
-    expect(
-      find.textContaining('Notes hold plans, lists, and longer writing.'),
-      findsOneWidget,
-    );
-    expect(find.byKey(const Key('notes-view')), findsOneWidget);
-    expect(find.byKey(const Key('onboarding-tour-finish')), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('onboarding-tour-finish')));
-    await tester.pumpAndSettle();
-
     expect(find.byKey(const Key('signup-plan-base')), findsOneWidget);
     expect(
-      find.text('14-day free trial, then billed monthly'),
+      find.text('7-day free trial, then billed monthly'),
       findsNWidgets(3),
     );
-    expect(find.text('Start with a 7-day free trial.'), findsNothing);
+    expect(
+      find.textContaining('Start with a 7-day free trial.'),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('calendar-view')), findsNothing);
+    expect(find.byKey(const Key('onboarding-tour-overlay')), findsNothing);
     expect(tokenStore.token, 'fake-token');
     expect(tokenStore.rememberMe, isTrue);
     expect(find.textContaining('Bean could not create'), findsNothing);
@@ -4001,6 +3940,98 @@ void main() {
     expect(stripeHandler.preparedSetupIntentIds, ['seti_test_base']);
     expect(stripeHandler.presentedSheets, 1);
     expect(find.byKey(const Key('command-center-home')), findsOneWidget);
+    expect(find.byKey(const Key('onboarding-tour-overlay')), findsOneWidget);
+    expect(find.byKey(const Key('guided-tour-next')), findsNothing);
+    expect(find.byKey(const Key('guided-bean-thinking')), findsNothing);
+    expect(find.text('Command center'), findsOneWidget);
+    expect(
+      find.text(
+        "This is your command center. I'm always here to help, just tell me what you need.",
+      ),
+      findsOneWidget,
+    );
+    final tourNext = tester.widget<FilledButton>(
+      find.byKey(const Key('onboarding-tour-next')),
+    );
+    expect(tourNext.onPressed, isNotNull);
+    expect(find.byKey(const Key('signup-plan-base')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+    expect(find.byKey(const Key('guided-bean-thinking')), findsNothing);
+    await tester.pumpAndSettle();
+    expect(find.text('Today at a glance'), findsOneWidget);
+    expect(find.byKey(const Key('command-center-home')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+    await tester.pumpAndSettle();
+    expect(find.text('Create items'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+    await tester.pumpAndSettle();
+    expect(find.text('Calendar views'), findsOneWidget);
+    expect(find.byKey(const Key('calendar-view')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Tasks are for things you need to complete.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('tasks-view')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Reminders are lightweight nudges.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('reminders-view')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Notes hold plans, lists, and longer writing.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('notes-view')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('onboarding-tour-next')));
+    await tester.pumpAndSettle();
+    expect(find.text('Import your calendar'), findsOneWidget);
+    expect(
+      find.textContaining('Bring in the calendar you already use.'),
+      findsOneWidget,
+    );
+    final tourFinish = tester.widget<FilledButton>(
+      find.byKey(const Key('onboarding-tour-finish')),
+    );
+    expect(tourFinish.onPressed, isNotNull);
+    expect(find.text('Import calendar'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('onboarding-tour-finish')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Last step: import your calendar'), findsOneWidget);
+    expect(
+      find.byKey(const Key('external-calendar-provider-apple')),
+      findsAtLeastNWidgets(1),
+    );
+    expect(
+      find.byKey(const Key('external-calendar-provider-proton')),
+      findsAtLeastNWidgets(1),
+    );
+    expect(
+      find.byKey(const Key('external-calendar-url-field')),
+      findsAtLeastNWidgets(1),
+    );
+    expect(
+      find.byKey(const Key('external-calendar-import-action')),
+      findsAtLeastNWidgets(1),
+    );
+    expect(
+      find.byKey(const Key('external-calendar-skip-action')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('guided Bean signup keeps light mode copy for light selection', (
@@ -5031,6 +5062,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Edit Bean preferences'), findsOneWidget);
+    final preferencesPanel = tester.widget<Container>(
+      find.byKey(const Key('agent-preferences-panel')),
+    );
+    final preferencesDecoration = preferencesPanel.decoration! as BoxDecoration;
+    expect(preferencesDecoration.color, HeyBeanTheme.surface);
+    expect(preferencesDecoration.borderRadius, BorderRadius.circular(22));
+    expect(preferencesDecoration.boxShadow, isNotEmpty);
     expect(find.text('Choose Bean’s personality'), findsOneWidget);
     expect(find.text('What should Bean prioritize?'), findsOneWidget);
     expect(find.text('Anything Bean should know?'), findsOneWidget);
@@ -5867,12 +5905,94 @@ void main() {
         HeyBeanTheme.accentStrong,
       );
 
+      await tester.pump(const Duration(seconds: 4));
+      expect(find.byKey(const Key('heybean-recording-pulse')), findsOneWidget);
+      expect(find.text('Listening'), findsWidgets);
+
       await gesture.up();
       await tester.pump(const Duration(milliseconds: 250));
 
       expect(realtime.captureStarted, isFalse);
       expect(realtime.captureEnded, isFalse);
       expect(realtime.microphoneEnabled, isFalse);
+    },
+  );
+
+  testWidgets('dictated Bean voice requests are spoken with TTS', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    final realtime = _FakeBeanRealtimeConversation(api);
+    final playedAudio = <String>[];
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        realtimeConversation: realtime,
+        playBeanVoiceAudio: (bytes, {contentType = 'audio/wav'}) async {
+          playedAudio.add('$contentType:${String.fromCharCodes(bytes)}');
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('nav-bean'))),
+    );
+    await tester.pump(const Duration(milliseconds: 650));
+    await tester.enterText(find.byKey(const Key('chat-input')), 'Plan today');
+    await tester.pump();
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(realtime.sentTexts, isEmpty);
+    expect(api.sentMessages, ['Plan today']);
+    expect(api.synthesizedSpeechTexts, ['Done — I updated your day.']);
+    expect(playedAudio, ['audio/wav:fake-wav']);
+  });
+
+  testWidgets(
+    'dictated fallback does not leave stale voice unavailable error',
+    (WidgetTester tester) async {
+      final api = _SignedInFakeHermesApiClient();
+      final realtime = _DelayedFailingBeanRealtimeConversation(api);
+      final playedAudio = <String>[];
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: api,
+          tokenStore: _MemoryAuthTokenStore(),
+          realtimeConversation: realtime,
+          playBeanVoiceAudio: (bytes, {contentType = 'audio/wav'}) async {
+            playedAudio.add('$contentType:${String.fromCharCodes(bytes)}');
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const Key('nav-bean'))),
+      );
+      await tester.pump(const Duration(milliseconds: 650));
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'Hey Ben can you hear me right now',
+      );
+      await tester.pump();
+      await gesture.up();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      realtime.failStart();
+      await tester.pumpAndSettle();
+
+      expect(api.sentMessages, ['Hey Ben can you hear me right now']);
+      expect(
+        find.textContaining('Voice is not available right now'),
+        findsNothing,
+      );
+      expect(find.text('Done — I updated your day.'), findsOneWidget);
+      expect(api.synthesizedSpeechTexts, ['Done — I updated your day.']);
+      expect(playedAudio, ['audio/wav:fake-wav']);
     },
   );
 
@@ -5905,6 +6025,41 @@ void main() {
     );
     expect(find.textContaining('Bean hit a snag'), findsNothing);
     expect(find.textContaining('Realtime unavailable'), findsNothing);
+  });
+
+  testWidgets('Bean voice errors do not appear on the settings screen', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    final realtime = _FailingBeanRealtimeConversation(api);
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        realtimeConversation: realtime,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('nav-bean'))),
+    );
+    await tester.pump(const Duration(milliseconds: 650));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('Voice is not available right now'),
+      findsOneWidget,
+    );
+
+    await openSettingsFromBottomNav(tester);
+
+    expect(find.byKey(const Key('settings-view')), findsOneWidget);
+    expect(
+      find.textContaining('Voice is not available right now'),
+      findsNothing,
+    );
   });
 
   testWidgets(
@@ -6001,8 +6156,14 @@ void main() {
       expect(realtime.startMicrophoneValues, isEmpty);
       expect(realtime.sentTexts, isEmpty);
       expect(api.sentMessages, ['Plan today']);
-      expect(find.text('Done — I updated your day.'), findsOneWidget);
+      final assistantReply = find.text('Done — I updated your day.');
+      expect(assistantReply, findsOneWidget);
       expect(find.text('Plan today'), findsOneWidget);
+      final messageListBottom = tester
+          .getRect(find.byKey(const Key('chat-message-list')))
+          .bottom;
+      final replyBottom = tester.getRect(assistantReply).bottom;
+      expect(messageListBottom - replyBottom, lessThan(56));
     },
   );
 
@@ -6550,6 +6711,43 @@ void main() {
     await tester.pump(const Duration(milliseconds: 250));
   });
 
+  testWidgets(
+    'completed note work events clear dock even while run poll stays running',
+    (WidgetTester tester) async {
+      final api = _NoteMutationStillRunningFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'create a shopping list note based on that',
+      );
+      await tester.tap(find.byKey(const Key('primary-chat-action')));
+      await tester.pump();
+
+      expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+      expect(find.text('0/1'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(milliseconds: 250));
+
+      expect(find.text('Create note: Shopping list'), findsOneWidget);
+      expect(find.text('Done'), findsOneWidget);
+      expect(find.text('1/1'), findsOneWidget);
+      expect(api.noteListIncludedCreatedNote, isTrue);
+
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pump(const Duration(milliseconds: 250));
+
+      expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+      expect(find.text('Working...'), findsNothing);
+    },
+  );
+
   testWidgets('chat stop cancels an in-flight Bean request', (
     WidgetTester tester,
   ) async {
@@ -7030,6 +7228,10 @@ void main() {
       dropdownKey: const Key('title-time-editor-category-select'),
       text: 'Work',
     );
+    expect(
+      find.byKey(const Key('title-time-editor-no-category-colors')),
+      findsNothing,
+    );
     await tester.ensureVisible(
       find.byKey(const Key('title-time-editor-open-picker')),
     );
@@ -7109,7 +7311,7 @@ void main() {
     expect(find.textContaining('Work'), findsWidgets);
   });
 
-  testWidgets('uncategorized task and reminder saves use theme color', (
+  testWidgets('uncategorized task and reminder saves use selected color', (
     WidgetTester tester,
   ) async {
     final api = _TaskReminderCategoryFakeHermesApiClient();
@@ -7126,13 +7328,21 @@ void main() {
       find.byKey(const Key('title-time-editor-category-select')),
       findsOneWidget,
     );
+    expect(
+      find.byKey(const Key('title-time-editor-no-category-colors')),
+      findsOneWidget,
+    );
+    await tester.ensureVisible(find.bySemanticsLabel('Orange color'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.bySemanticsLabel('Orange color'));
+    await tester.pumpAndSettle();
     await tester.dragFrom(const Offset(400, 500), const Offset(0, -320));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('title-time-editor-save-bottom')));
     await tester.pumpAndSettle();
 
     expect(api.updatedTask?.category, isNull);
-    expect(api.updatedTask?.color, '#7BC98C');
+    expect(api.updatedTask?.color, '#FF9500');
 
     await tester.tap(find.byKey(const Key('nav-reminders')));
     await tester.pumpAndSettle();
@@ -7143,13 +7353,21 @@ void main() {
       dropdownKey: const Key('title-time-editor-category-select'),
       text: 'No category',
     );
+    expect(
+      find.byKey(const Key('title-time-editor-no-category-colors')),
+      findsOneWidget,
+    );
+    await tester.ensureVisible(find.bySemanticsLabel('Purple color'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.bySemanticsLabel('Purple color'));
+    await tester.pumpAndSettle();
     await tester.dragFrom(const Offset(400, 500), const Offset(0, -320));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('title-time-editor-save-bottom')));
     await tester.pumpAndSettle();
 
     expect(api.updatedReminder?.category, isNull);
-    expect(api.updatedReminder?.color, '#7BC98C');
+    expect(api.updatedReminder?.color, '#AF52DE');
   });
 
   testWidgets('new task date saves on the task without creating a reminder', (
@@ -9019,7 +9237,8 @@ void main() {
       );
       await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
       await tester.tap(find.byKey(const Key('primary-chat-action')));
-      await tester.pumpAndSettle(const Duration(seconds: 2));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
 
       expect(find.textContaining('I’m still checking'), findsNothing);
       expect(
@@ -9813,12 +10032,67 @@ void main() {
 
     expect(find.byKey(const Key('event-category-dropdown')), findsOneWidget);
     expect(find.text('Studio'), findsWidgets);
+    expect(find.byKey(const Key('event-no-category-colors')), findsNothing);
 
     await tester.tap(find.byKey(const Key('event-save-action')));
     await tester.pumpAndSettle();
 
     expect(api.updatedEvent?.category, 'Studio');
     expect(api.updatedEvent?.color, '#123ABC');
+  });
+
+  testWidgets('event editor shows color choices only without a category', (
+    WidgetTester tester,
+  ) async {
+    final today = DateTime.now();
+    final api = _EditableCalendarFakeHermesApiClient(
+      initialEvent: HermesCalendarEvent(
+        id: 3,
+        title: 'Uncategorized event',
+        startsAt: DateTime(
+          today.year,
+          today.month,
+          today.day,
+          14,
+        ).toIso8601String(),
+        endsAt: DateTime(
+          today.year,
+          today.month,
+          today.day,
+          15,
+        ).toIso8601String(),
+        color: '#FF9500',
+        recurrence: 'none',
+      ),
+    );
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+    await _openTodayView(tester);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('calendar-event-block-uncategorized-event')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const Key('calendar-event-block-uncategorized-event')),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const Key('event-category-dropdown')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('event-no-category-colors')), findsOneWidget);
+    await tester.tap(find.bySemanticsLabel('Purple color'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('event-save-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedEvent?.category, isNull);
+    expect(api.updatedEvent?.color, '#AF52DE');
   });
 
   testWidgets(
@@ -12264,6 +12538,7 @@ class _FakeHermesApiClient extends HermesApiClient {
   int branchMessageCalls = 0;
   int? branchedFromMessageId;
   int queueMessageCalls = 0;
+  final synthesizedSpeechTexts = <String>[];
   final mobileSubscriptionSetupRequests = <Map<String, String>>[];
   final mobileSubscriptionConfirmRequests = <Map<String, String>>[];
   int paymentMethodSetupRequests = 0;
@@ -12798,6 +13073,43 @@ class _FakeHermesApiClient extends HermesApiClient {
       );
 
   @override
+  Future<List<ExternalCalendarProviderPreset>>
+  listExternalCalendarProviders() async => const [
+    ExternalCalendarProviderPreset(
+      key: 'apple',
+      label: 'Apple Calendar',
+      description: 'Import a public iCloud calendar subscription.',
+      linkLabel: 'iCloud public calendar link',
+      linkHint: 'webcal://p123-caldav.icloud.com/published/example',
+      instructions: ['Copy the public iCloud calendar link.'],
+    ),
+    ExternalCalendarProviderPreset(
+      key: 'proton',
+      label: 'Proton Calendar',
+      description: 'Import a Proton public calendar subscription.',
+      linkLabel: 'Proton calendar link',
+      linkHint: 'https://calendar.proton.me/api/calendar/v1/url/example.ics',
+      instructions: ['Copy the shared Proton calendar link.'],
+    ),
+  ];
+
+  @override
+  Future<ExternalCalendarImportResult> importExternalCalendar({
+    required String providerKey,
+    required String url,
+    int? workspaceId,
+  }) async => ExternalCalendarImportResult(
+    imported: 1,
+    updated: 0,
+    deleted: 0,
+    skipped: 0,
+    total: 1,
+    workspaceId: workspaceId,
+    providerKey: providerKey,
+    providerLabel: providerKey == 'apple' ? 'Apple Calendar' : 'Calendar',
+  );
+
+  @override
   Future<GoogleCalendarSyncStatus> updateGoogleCalendarSelection({
     required List<String> selectedCalendarIds,
     String? defaultCalendarId,
@@ -12945,6 +13257,19 @@ class _FakeHermesApiClient extends HermesApiClient {
           eventType: 'assistant.calendar_event.created',
         ),
       ],
+    );
+  }
+
+  @override
+  Future<HermesTextToSpeechAudio> synthesizeSpeech({
+    required String text,
+    String? voice,
+    int? workspaceId,
+  }) async {
+    synthesizedSpeechTexts.add(text);
+    return HermesTextToSpeechAudio(
+      bytes: Uint8List.fromList('fake-wav'.codeUnits),
+      contentType: 'audio/wav',
     );
   }
 
@@ -13546,6 +13871,125 @@ class _BeanMutationRefreshFakeHermesApiClient
           ),
         )
       : const HermesAssistantRun(id: 92, status: 'running', source: 'flutter');
+}
+
+class _NoteMutationStillRunningFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  bool _messageSent = false;
+  bool _workEventsReturned = false;
+  int _runPolls = 0;
+  bool noteListIncludedCreatedNote = false;
+
+  static const _workEvents = [
+    HermesActivityEvent(
+      id: 24,
+      eventType: 'assistant.work_item.planned',
+      status: 'planned',
+      toolName: 'assistant.work',
+      payload: {
+        'work_item_id': 'note-create-shopping',
+        'work_order': 0,
+        'action_type': 'note.create',
+        'label': 'Create note: Shopping list',
+      },
+    ),
+    HermesActivityEvent(
+      id: 25,
+      eventType: 'assistant.note.created',
+      status: 'succeeded',
+      toolName: 'notes.create',
+      payload: {
+        'note_id': 512,
+        'title': 'Shopping list',
+        'work_item_id': 'note-create-shopping',
+        'work_order': 0,
+        'work_label': 'Create note: Shopping list',
+        'action_type': 'note.create',
+      },
+    ),
+  ];
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    _messageSent = true;
+    return HermesMessageResult(
+      status: 'queued',
+      session: const HermesSession(id: 42, status: 'queued', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 7350 + queueMessageCalls,
+        role: 'user',
+        content: content,
+        metadata: metadata ?? const {},
+      ),
+      run: const HermesAssistantRun(
+        id: 93,
+        status: 'running',
+        source: 'flutter',
+      ),
+      events: const [
+        HermesActivityEvent(
+          id: 23,
+          eventType: 'runtime.run_queued',
+          status: 'queued',
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<List<HermesActivityEvent>> pollActivityEvents(
+    int sessionId, {
+    int? after,
+    int waitSeconds = 0,
+    int limit = 100,
+  }) async {
+    if (!_messageSent) return const [];
+    _workEventsReturned = true;
+    return _workEvents;
+  }
+
+  @override
+  Future<List<HermesNote>> listNotes() async {
+    if (!_workEventsReturned) return const [];
+    noteListIncludedCreatedNote = true;
+    return const [
+      HermesNote(
+        id: 512,
+        title: 'Shopping list',
+        plainText: 'Milk\nEggs\nBread',
+        updatedAt: '2026-07-06T22:10:00Z',
+      ),
+    ];
+  }
+
+  @override
+  Future<HermesAssistantRun> getAssistantRun(int runId) async {
+    _runPolls++;
+    return _runPolls >= 25
+        ? const HermesAssistantRun(
+            id: 93,
+            status: 'completed',
+            source: 'flutter',
+            assistantMessage: HermesMessage(
+              id: 8950,
+              role: 'assistant',
+              content: 'Done - I created the shopping list note.',
+            ),
+          )
+        : const HermesAssistantRun(
+            id: 93,
+            status: 'running',
+            source: 'flutter',
+          );
+  }
 }
 
 class _PartialBeanWorkEventsFakeHermesApiClient
@@ -15383,6 +15827,8 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
   bool captureEnded = false;
   final startMicrophoneValues = <bool>[];
   final sentTexts = <String>[];
+  final sentTextAudioResponses = <bool>[];
+  final sentTextEndConversationValues = <bool>[];
 
   @override
   Future<HermesSession> start({
@@ -15404,6 +15850,8 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
     bool endConversationAfterResponse = false,
   }) async {
     sentTexts.add(text);
+    sentTextAudioResponses.add(audioResponse);
+    sentTextEndConversationValues.add(endConversationAfterResponse);
   }
 
   @override
@@ -15457,6 +15905,31 @@ class _FailingBeanRealtimeConversation extends _FakeBeanRealtimeConversation {
     started = true;
     startMicrophoneValues.add(microphoneEnabled);
     throw StateError('Realtime unavailable');
+  }
+}
+
+class _DelayedFailingBeanRealtimeConversation
+    extends _FakeBeanRealtimeConversation {
+  _DelayedFailingBeanRealtimeConversation(super.apiClient);
+
+  final Completer<HermesSession> _startCompleter = Completer<HermesSession>();
+
+  @override
+  Future<HermesSession> start({
+    int? sessionId,
+    int? workspaceId,
+    Map<String, Object?> metadata = const {},
+    bool microphoneEnabled = true,
+  }) {
+    started = true;
+    startMicrophoneValues.add(microphoneEnabled);
+    this.microphoneEnabled = microphoneEnabled;
+    return _startCompleter.future;
+  }
+
+  void failStart() {
+    if (_startCompleter.isCompleted) return;
+    _startCompleter.completeError(StateError('Realtime unavailable'));
   }
 }
 

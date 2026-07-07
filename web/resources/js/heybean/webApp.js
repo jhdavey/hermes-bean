@@ -14,6 +14,7 @@ import {
     appThemesByKey,
     icons,
     subscriptionPlans,
+    subscriptionTrialDays,
     systemDarkScheme,
     themeModes,
     themeModesByKey,
@@ -59,6 +60,7 @@ export function mountHeyBeanWebApp(mount) {
         billingPlanInterval: initialBillingInterval,
         billingMessage: '',
         billingError: '',
+        billingCouponCode: '',
         token: readToken(),
         remember: localStorage.getItem(rememberKey) === 'true',
         phase: 'loading',
@@ -98,6 +100,7 @@ export function mountHeyBeanWebApp(mount) {
         adminUsage: null,
         adminLiveLookup: null,
         adminPlanLimits: null,
+        adminCoupons: null,
         adminUsageLoading: false,
         adminModelRegistry: null,
         adminHermesStatus: null,
@@ -186,6 +189,64 @@ export function mountHeyBeanWebApp(mount) {
             description: 'A patient, low-pressure style that keeps busy days feeling manageable.',
         },
     ];
+    const externalCalendarImportPresets = [
+        {
+            key: 'apple',
+            label: 'Apple Calendar',
+            description: 'Paste an iCloud public calendar link from Apple Calendar.',
+            linkLabel: 'iCloud public calendar link',
+            linkHint: 'webcal://pXX-caldav.icloud.com/published/2/...',
+        },
+        {
+            key: 'google',
+            label: 'Google Calendar',
+            description: 'Paste a Google secret iCal address for a one-time import.',
+            linkLabel: 'Google secret iCal address',
+            linkHint: 'https://calendar.google.com/calendar/ical/...',
+        },
+        {
+            key: 'outlook',
+            label: 'Outlook Calendar',
+            description: 'Paste an Outlook published ICS link for a one-time import.',
+            linkLabel: 'Outlook published ICS link',
+            linkHint: 'https://outlook.live.com/owa/calendar/.../calendar.ics',
+        },
+        {
+            key: 'proton',
+            label: 'Proton Calendar',
+            description: 'Paste a Proton share link for calendars shared with anyone.',
+            linkLabel: 'Proton calendar share link',
+            linkHint: 'https://calendar.proton.me/api/calendar/v1/url/...',
+        },
+        {
+            key: 'yahoo',
+            label: 'Yahoo Calendar',
+            description: 'Paste a Yahoo iCal link or exported calendar URL.',
+            linkLabel: 'Yahoo iCal link',
+            linkHint: 'https://calendar.yahoo.com/.../calendar.ics',
+        },
+        {
+            key: 'fastmail',
+            label: 'Fastmail',
+            description: 'Paste a Fastmail calendar sharing link.',
+            linkLabel: 'Fastmail calendar link',
+            linkHint: 'https://calendar.fastmail.com/.../calendar.ics',
+        },
+        {
+            key: 'nextcloud',
+            label: 'Nextcloud',
+            description: 'Paste a public Nextcloud or ownCloud calendar subscription link.',
+            linkLabel: 'Nextcloud public calendar link',
+            linkHint: 'https://cloud.example.com/remote.php/dav/public-calendars/...',
+        },
+        {
+            key: 'ics',
+            label: 'Other iCal link',
+            description: 'Use any public .ics or webcal calendar URL.',
+            linkLabel: 'Public iCal or webcal link',
+            linkHint: 'webcal://example.com/calendar.ics',
+        },
+    ];
 
     applyAppTheme();
     systemDarkScheme?.addEventListener?.('change', () => {
@@ -210,6 +271,7 @@ export function mountHeyBeanWebApp(mount) {
     let dashboardChangeLoopActive = false;
     let dashboardRefreshTimer = 0;
     let adminCommandRunPollTimer = 0;
+    let adminRealtimeRefreshTimer = 0;
     let deferredDashboardRenderPending = false;
     let deferredDashboardRenderTimer = 0;
     let dashboardRefreshGeneration = 0;
@@ -263,6 +325,7 @@ export function mountHeyBeanWebApp(mount) {
     let kioskRealtimeResponseCreateInFlight = false;
     let kioskRealtimePendingResponseInterruptedBySpeech = false;
     let kioskRealtimePendingResponseRecoveryTimer = 0;
+    let kioskRealtimeSuppressedAssistantEchoStartedAt = 0;
     let kioskRealtimeToolFallbackTimer = 0;
     let kioskRealtimeToolFallbackContent = '';
     let kioskRealtimeReconnectTimer = 0;
@@ -1540,6 +1603,13 @@ export function mountHeyBeanWebApp(mount) {
                 modal.error || '',
             ].map((part) => String(part)).join(':');
         }
+        if (modal.type === 'external-calendar-import') {
+            return [
+                modal.type,
+                modal.providerKey || 'apple',
+                modal.error || '',
+            ].map((part) => String(part)).join(':');
+        }
 
         return [
             modal.type || '',
@@ -1823,9 +1893,8 @@ export function mountHeyBeanWebApp(mount) {
             guidedSignupUser(`Shared city: ${city}`);
             await saveGuidedSignupPreferences();
             state.busy = false;
-            await respondGuidedSignupBean(`Thanks. I will remember ${city} for weather and local planning. Want a quick dashboard tour, or should we go straight to plan setup?`);
-            state.guidedSignupStep = 'tourChoice';
-            render();
+            await respondGuidedSignupBean(`Thanks. I will remember ${city} for weather and local planning. Next, choose your plan so your ${subscriptionTrialDays}-day free trial is ready. After that I will show you the dashboard and help import your calendar.`);
+            openGuidedPlanSelection();
         } catch (error) {
             state.busy = false;
             state.guidedSignupError = error instanceof Error ? error.message : 'I could not read your city. You can skip this and add it later in Settings.';
@@ -1873,14 +1942,22 @@ export function mountHeyBeanWebApp(mount) {
         try {
             await saveGuidedSignupPreferences();
             state.busy = false;
-            await respondGuidedSignupBean('No worries. We can skip that for now. Would you like a quick tour before plan setup?');
-            state.guidedSignupStep = 'tourChoice';
-            render();
+            await respondGuidedSignupBean(`No worries. We can skip that for now. Next, choose your plan so your ${subscriptionTrialDays}-day free trial is ready. After that I will show you the dashboard and help import your calendar.`);
+            openGuidedPlanSelection();
         } catch (error) {
             state.busy = false;
             state.guidedSignupError = friendlyError(error, 'save your Bean preferences');
             render();
         }
+    }
+
+    function openGuidedPlanSelection() {
+        state.phase = 'subscription';
+        state.busy = false;
+        state.guidedSignupStep = 'plan';
+        state.error = '';
+        history.pushState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan || 'premium')}&billing_interval=${encodeURIComponent(normalizedBillingInterval(state.selectedBillingInterval))}`);
+        render();
     }
 
     async function saveGuidedSignupPreferences() {
@@ -1957,7 +2034,7 @@ export function mountHeyBeanWebApp(mount) {
         await respondGuidedSignupBean(
             skipTour
                 ? 'Sounds good. We will skip the tour and finish setup with your plan. Pick whichever option fits your needs.'
-                : 'That is the quick tour. Last step: choose your plan so your free trial is ready.',
+                : `That is the quick tour. Last step: choose your plan so your ${subscriptionTrialDays}-day free trial is ready.`,
         );
         state.phase = 'subscription';
         state.busy = false;
@@ -2161,15 +2238,33 @@ export function mountHeyBeanWebApp(mount) {
         const billingInterval = normalizedBillingInterval(state.selectedBillingInterval);
         return `
             <div class="hb-guided-plan-header">
-                <strong>14-day free trial</strong>
+                <strong>${escapeHtml(`${subscriptionTrialDays}-day free trial`)}</strong>
                 <span>Billing begins after the trial and renews ${billingInterval === 'yearly' ? 'yearly' : 'monthly'} until canceled.</span>
             </div>
             ${billingIntervalToggleMarkup(billingInterval, 'subscribe-billing-interval')}
             <div class="hb-subscribe-grid">
                 ${Object.entries(subscriptionPlans).map(([key, plan]) => subscriptionPlanCardMarkup(key, plan, key === selectedPlan)).join('')}
             </div>
+            ${couponCodeEntryMarkup('subscribe')}
             <div class="hb-subscribe-footer">
                 <p>Payment is handled securely through Stripe.</p>
+            </div>`;
+    }
+
+    function couponCodeEntryMarkup(context) {
+        const code = context === 'billing' ? state.billingCouponCode : '';
+        const inputAttr = context === 'billing' ? 'data-billing-coupon-code' : 'data-subscribe-coupon-code';
+        const buttonAttr = context === 'billing' ? 'data-billing-apply-coupon' : 'data-subscribe-apply-coupon';
+        return `
+            <div class="hb-coupon-entry">
+                <div>
+                    <strong>Have a coupon code?</strong>
+                    <span>Apply a 6-digit influencer code for free Base access.</span>
+                </div>
+                <label class="hb-label">Coupon code
+                    <input class="hb-input" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" value="${escapeAttr(code)}" ${inputAttr} ${state.busy || state.billingBusy ? 'disabled' : ''}>
+                </label>
+                <button class="hb-button-secondary" type="button" ${buttonAttr} ${state.busy || state.billingBusy ? 'disabled' : ''}>${state.busy || state.billingBusy ? 'Applying...' : 'Apply code'}</button>
             </div>`;
     }
 
@@ -2186,7 +2281,7 @@ export function mountHeyBeanWebApp(mount) {
                     </div>
                     <div class="hb-subscribe-price"><strong>${escapeHtml(planDisplayPrice(plan, billingInterval))}</strong><span>${escapeHtml(planDisplaySuffix(billingInterval))}</span></div>
                 </div>
-                <div class="hb-subscribe-trial">14-day free trial, then billed ${billingInterval === 'yearly' ? 'yearly' : 'monthly'}</div>
+                <div class="hb-subscribe-trial">${escapeHtml(`${subscriptionTrialDays}-day free trial`)}, then billed ${billingInterval === 'yearly' ? 'yearly' : 'monthly'}</div>
                 <ul>
                     ${normalizeList(plan.features).map((feature) => `<li>${icons.checkCircle}<span>${escapeHtml(feature)}</span></li>`).join('')}
                 </ul>
@@ -2239,7 +2334,7 @@ export function mountHeyBeanWebApp(mount) {
                 <div class="hb-subscribe-summary-grid">
                     <div><span>Plan</span><strong>${escapeHtml(plan.label)}</strong></div>
                     <div><span>${billingInterval === 'yearly' ? 'Yearly' : 'Monthly'} price</span><strong>${escapeHtml(planDisplayPrice(plan, billingInterval))}${escapeHtml(planDisplaySuffix(billingInterval))}</strong></div>
-                    <div><span>Trial</span><strong>14 days</strong></div>
+                    <div><span>Trial</span><strong>${escapeHtml(`${subscriptionTrialDays} days`)}</strong></div>
                     <div><span>Billing cycle</span><strong>${billingInterval === 'yearly' ? 'Yearly' : 'Monthly'}</strong></div>
                 </div>
                 <div class="hb-subscribe-actions">
@@ -2253,7 +2348,7 @@ export function mountHeyBeanWebApp(mount) {
         const billingInterval = normalizedBillingInterval(state.selectedBillingInterval);
         if (trialEndsAt) return `${plan.label} starts with a free trial through ${formatDateTime(trialEndsAt)}. After that, billing continues ${billingInterval} until canceled.`;
         if (currentPeriodEnd) return `${plan.label} is billed ${billingInterval}. Your current billing cycle renews around ${formatDateTime(currentPeriodEnd)}.`;
-        return `${plan.label} starts with a 14-day free trial. Billing begins on day 15 and continues ${billingInterval} until canceled.`;
+        return `${plan.label} starts with a ${subscriptionTrialDays}-day free trial. Billing begins on day ${subscriptionTrialDays + 1} and continues ${billingInterval} until canceled.`;
     }
 
     function signedInMarkup() {
@@ -2697,14 +2792,18 @@ export function mountHeyBeanWebApp(mount) {
         const settings = usage.settings || {};
         const killSwitches = settings.kill_switches || settings.killSwitches || {};
         const userGrowth = normalizeList(usage.user_growth || usage.userGrowth);
+        const dailyActivity = normalizeList(usage.daily_activity || usage.dailyActivity);
         return `
             <section class="hb-card hb-card-pad hb-admin-panel">
                 <div class="hb-section-action-row">
-                    ${sectionTitle(icons.activity, 'Admin monitor', 'AI cost, usage limits, and user activity')}
+                    ${sectionTitle(icons.activity, 'Project admin', 'Business, traffic, app usage, server health, and AI operations')}
                     <button class="hb-button-secondary" type="button" data-refresh-admin ${state.adminUsageLoading ? 'disabled' : ''}>${state.adminUsageLoading ? 'Refreshing...' : 'Refresh'}</button>
                 </div>
                 ${errorMarkup(state.error)}
                 ${state.adminUsageLoading && !state.adminUsage ? '<div class="hb-empty hb-surface-soft">Loading AI usage metrics...</div>' : ''}
+                ${adminExecutiveKpisMarkup(usage)}
+                ${adminHealthGridMarkup(usage)}
+                ${adminDailyActivityChartMarkup(dailyActivity)}
                 ${adminUserGrowthChartMarkup(userGrowth)}
                 <div class="hb-admin-metrics">
                     ${adminMetricMarkup('Users', totals.users, 'Total accounts')}
@@ -2721,6 +2820,7 @@ export function mountHeyBeanWebApp(mount) {
                 ${adminSettingsMarkup(settings)}
                 ${adminLiveLookupProvidersMarkup(state.adminLiveLookup)}
                 ${adminPlanLimitsMarkup(state.adminPlanLimits)}
+                ${adminCouponCodesMarkup(state.adminCoupons)}
                 <div class="hb-admin-grid">
                     ${adminIssueReportsBlockMarkup(issueReports, archivedIssueReports)}
                     ${adminListBlockMarkup('Budget and spike alerts', alerts, adminAlertRowMarkup, 'No alerts yet.')}
@@ -2740,6 +2840,197 @@ export function mountHeyBeanWebApp(mount) {
                     </div>
                 </div>
             </section>`;
+    }
+
+    function adminExecutiveKpisMarkup(usage) {
+        const business = usage.business || {};
+        const traffic = usage.traffic || {};
+        const activation = usage.activation || {};
+        const server = usage.server || {};
+        return `
+            <div class="hb-admin-kpi-grid">
+                ${adminKpiMarkup('Daily run-rate', formatCurrency(business.daily_revenue_rate || 0), 'From active local subscriptions', 'money')}
+                ${adminKpiMarkup('Weekly run-rate', formatCurrency(business.weekly_revenue_rate || 0), 'From active local subscriptions', 'money')}
+                ${adminKpiMarkup('MRR', formatCurrency(business.mrr || 0), `${escapeHtml(business.active_paid_subscriptions || 0)} paid subscriptions`, 'money')}
+                ${adminKpiMarkup('ARR', formatCurrency(business.arr || 0), `${formatPercent(business.month_over_month_growth_rate)} MoM signup growth`, 'money')}
+                ${adminKpiMarkup('Active today', activation.active_users_today || 0, `${activation.active_users_7_days || 0} active in 7 days`, 'activity')}
+                ${adminKpiMarkup('Visitors today', traffic.unique_visitors_today || 0, `${traffic.page_views_today || 0} page views`, 'traffic')}
+                ${adminKpiMarkup('Server', adminServerStatusLabel(server.status), adminServerStatusMeta(server), server.status === 'critical' ? 'danger' : server.status === 'watch' ? 'warning' : 'healthy')}
+            </div>`;
+    }
+
+    function adminKpiMarkup(label, value, meta, tone = 'neutral') {
+        return `
+            <article class="hb-admin-kpi hb-admin-kpi-${escapeAttr(tone)}">
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value)}</strong>
+                <small>${escapeHtml(meta)}</small>
+            </article>`;
+    }
+
+    function adminHealthGridMarkup(usage) {
+        return `
+            <div class="hb-admin-health-grid">
+                ${adminBusinessHealthMarkup(usage.business || {})}
+                ${adminTrafficHealthMarkup(usage.traffic || {})}
+                ${adminActivationHealthMarkup(usage.activation || {})}
+                ${adminAppUsageHealthMarkup(usage.app_usage || usage.appUsage || {})}
+                ${adminServerHealthMarkup(usage.server || {})}
+            </div>`;
+    }
+
+    function adminBusinessHealthMarkup(business) {
+        const mix = business.subscription_mix || business.subscriptionMix || {};
+        return `
+            <section class="hb-admin-health-card">
+                <div class="hb-admin-health-head">
+                    <strong>Business</strong>
+                    <mark class="hb-admin-status hb-admin-status-ok">${escapeHtml(formatPercent(business.month_over_month_growth_rate))} MoM</mark>
+                </div>
+                <div class="hb-admin-health-metrics">
+                    ${adminHealthMetricMarkup('Paid', business.active_paid_subscriptions || business.activePaidSubscriptions || 0)}
+                    ${adminHealthMetricMarkup('Trials', business.trialing_subscriptions || business.trialingSubscriptions || 0)}
+                    ${adminHealthMetricMarkup('Paid signups week', business.new_paid_week || business.newPaidWeek || 0)}
+                    ${adminHealthMetricMarkup('Base/Prem/Pro', `${mix.base || 0}/${mix.premium || 0}/${mix.pro || 0}`)}
+                </div>
+            </section>`;
+    }
+
+    function adminTrafficHealthMarkup(traffic) {
+        const pages = normalizeList(traffic.top_pages || traffic.topPages);
+        const sources = normalizeList(traffic.top_sources || traffic.topSources);
+        return `
+            <section class="hb-admin-health-card">
+                <div class="hb-admin-health-head">
+                    <strong>Traffic</strong>
+                    <small>${escapeHtml(traffic.page_views_month || traffic.pageViewsMonth || 0)} views this month</small>
+                </div>
+                <div class="hb-admin-health-metrics">
+                    ${adminHealthMetricMarkup('Visitors week', traffic.unique_visitors_week || traffic.uniqueVisitorsWeek || 0)}
+                    ${adminHealthMetricMarkup('Signups week', traffic.signups_week || traffic.signupsWeek || 0)}
+                    ${adminHealthMetricMarkup('Early access', traffic.early_access_requests_month || traffic.earlyAccessRequestsMonth || 0)}
+                </div>
+                <div class="hb-admin-mini-list">
+                    ${(pages.length ? pages : [{ path: 'No page data yet', views: 0 }]).slice(0, 4).map((page) => `<span><strong>${escapeHtml(page.path || 'Unknown')}</strong><small>${escapeHtml(page.views || 0)} views</small></span>`).join('')}
+                </div>
+                <div class="hb-admin-mini-list hb-admin-source-list">
+                    ${(sources.length ? sources : [{ source: 'direct', views: 0 }]).slice(0, 3).map((source) => `<span><strong>${escapeHtml(source.source || 'direct')}</strong><small>${escapeHtml(source.visitors || 0)} visitors</small></span>`).join('')}
+                </div>
+            </section>`;
+    }
+
+    function adminActivationHealthMarkup(activation) {
+        return `
+            <section class="hb-admin-health-card">
+                <div class="hb-admin-health-head">
+                    <strong>Activation and retention</strong>
+                    <small>${escapeHtml(activation.total_app_users || activation.totalAppUsers || 0)} non-admin users</small>
+                </div>
+                <div class="hb-admin-health-metrics">
+                    ${adminHealthMetricMarkup('Active 30d', activation.active_users_30_days || activation.activeUsers30Days || 0)}
+                    ${adminHealthMetricMarkup('Inactive 3d', activation.inactive_users_3_days || activation.inactiveUsers3Days || 0)}
+                    ${adminHealthMetricMarkup('Inactive 10d', activation.inactive_users_10_days || activation.inactiveUsers10Days || 0)}
+                    ${adminHealthMetricMarkup('Inactive 30d', activation.inactive_users_30_days || activation.inactiveUsers30Days || 0)}
+                    ${adminHealthMetricMarkup('Verified', activation.verified_users || activation.verifiedUsers || 0)}
+                    ${adminHealthMetricMarkup('Onboarded', activation.onboarded_users || activation.onboardedUsers || 0)}
+                </div>
+            </section>`;
+    }
+
+    function adminAppUsageHealthMarkup(appUsage) {
+        const today = appUsage.created_today || appUsage.createdToday || {};
+        const month = appUsage.created_month || appUsage.createdMonth || {};
+        return `
+            <section class="hb-admin-health-card">
+                <div class="hb-admin-health-head">
+                    <strong>App usage</strong>
+                    <mark class="hb-admin-status ${appUsage.success_rate_today === null || appUsage.successRateToday === null ? 'hb-admin-status-warning' : 'hb-admin-status-ok'}">${escapeHtml(formatPercent(appUsage.success_rate_today ?? appUsage.successRateToday))} success today</mark>
+                </div>
+                <div class="hb-admin-health-metrics">
+                    ${adminHealthMetricMarkup('Tasks today', today.tasks || 0)}
+                    ${adminHealthMetricMarkup('Reminders today', today.reminders || 0)}
+                    ${adminHealthMetricMarkup('Events today', today.calendar_events || today.calendarEvents || 0)}
+                    ${adminHealthMetricMarkup('Notes today', today.notes || 0)}
+                    ${adminHealthMetricMarkup('Chats month', appUsage.chat_messages_month || appUsage.chatMessagesMonth || 0)}
+                    ${adminHealthMetricMarkup('Actions month', appUsage.activity_events_month || appUsage.activityEventsMonth || 0)}
+                </div>
+                <p class="hb-admin-health-note">${escapeHtml(month.tasks || 0)} tasks, ${escapeHtml(month.reminders || 0)} reminders, ${escapeHtml(month.calendar_events || month.calendarEvents || 0)} events, and ${escapeHtml(month.notes || 0)} notes created this month.</p>
+            </section>`;
+    }
+
+    function adminServerHealthMarkup(server) {
+        const disk = server.disk || {};
+        const php = server.php || {};
+        const queue = server.queue || {};
+        const signals = normalizeList(server.signals);
+        return `
+            <section class="hb-admin-health-card hb-admin-server-card">
+                <div class="hb-admin-health-head">
+                    <strong>Server health</strong>
+                    <mark class="hb-admin-status ${server.status === 'critical' ? 'hb-admin-status-danger' : server.status === 'watch' ? 'hb-admin-status-warning' : 'hb-admin-status-ok'}">${escapeHtml(adminServerStatusLabel(server.status))}</mark>
+                </div>
+                <div class="hb-admin-health-metrics">
+                    ${adminHealthMetricMarkup('Disk used', disk.used_percent == null ? 'n/a' : `${disk.used_percent}%`)}
+                    ${adminHealthMetricMarkup('Free disk', formatBytes(disk.free_bytes || 0))}
+                    ${adminHealthMetricMarkup('Storage', formatBytes(disk.storage_bytes || 0))}
+                    ${adminHealthMetricMarkup('Database', disk.database_bytes == null ? 'n/a' : formatBytes(disk.database_bytes))}
+                    ${adminHealthMetricMarkup('PHP peak', php.memory_peak_percent == null ? 'n/a' : `${php.memory_peak_percent}%`)}
+                    ${adminHealthMetricMarkup('Queue', queue.pending_jobs == null ? 'n/a' : queue.pending_jobs)}
+                </div>
+                <div class="hb-admin-signal-list">
+                    ${signals.length ? signals.map((signal) => `<span class="hb-admin-signal hb-admin-signal-${escapeAttr(signal.severity || 'warning')}">${escapeHtml(signal.message || '')}</span>`).join('') : '<span class="hb-admin-signal hb-admin-signal-ok">No upgrade signals right now.</span>'}
+                </div>
+            </section>`;
+    }
+
+    function adminHealthMetricMarkup(label, value) {
+        return `<span><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></span>`;
+    }
+
+    function adminDailyActivityChartMarkup(points) {
+        if (!points.length) return '';
+        const values = points.map((point) => ({
+            day: point.day || '',
+            pageViews: Number(point.page_views ?? point.pageViews ?? 0),
+            aiActions: Number(point.ai_actions ?? point.aiActions ?? 0),
+            signups: Number(point.signups ?? 0),
+        }));
+        const width = 760;
+        const height = 210;
+        const padLeft = 44;
+        const padRight = 22;
+        const padTop = 24;
+        const padBottom = 34;
+        const max = niceChartMax(Math.max(1, ...values.flatMap((point) => [point.pageViews, point.aiActions, point.signups])));
+        const xFor = (index) => values.length <= 1 ? padLeft : padLeft + (index / (values.length - 1)) * (width - padLeft - padRight);
+        const yFor = (value) => height - padBottom - (value / max) * (height - padTop - padBottom);
+        const pathFor = (key) => values.map((point, index) => `${index === 0 ? 'M' : 'L'} ${xFor(index).toFixed(1)} ${yFor(point[key]).toFixed(1)}`).join(' ');
+        const ticks = chartYTicks(max, max <= 5 ? max : 4);
+        return `
+            <div class="hb-admin-growth-card hb-admin-activity-chart-card">
+                <div class="hb-admin-growth-header">
+                    <div>
+                        <strong>Daily app pulse</strong>
+                        <small>Traffic, Bean actions, and signups over the selected range</small>
+                    </div>
+                    <div class="hb-admin-chart-legend">
+                        <span><i class="hb-legend-traffic"></i>Page views</span>
+                        <span><i class="hb-legend-actions"></i>AI actions</span>
+                        <span><i class="hb-legend-signups"></i>Signups</span>
+                    </div>
+                </div>
+                <svg class="hb-admin-growth-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Daily app pulse chart">
+                    ${ticks.map((tick) => `
+                        <line x1="${padLeft}" y1="${yFor(tick).toFixed(1)}" x2="${width - padRight}" y2="${yFor(tick).toFixed(1)}" class="${tick === 0 ? 'hb-admin-growth-axis' : 'hb-admin-growth-grid'}"></line>
+                        <text x="${padLeft - 10}" y="${(yFor(tick) + 4).toFixed(1)}" text-anchor="end" class="hb-admin-growth-label">${escapeHtml(formatCompactNumber(tick))}</text>
+                    `).join('')}
+                    <path d="${escapeAttr(pathFor('pageViews'))}" class="hb-admin-activity-line hb-admin-activity-traffic"></path>
+                    <path d="${escapeAttr(pathFor('aiActions'))}" class="hb-admin-activity-line hb-admin-activity-actions"></path>
+                    <path d="${escapeAttr(pathFor('signups'))}" class="hb-admin-activity-line hb-admin-activity-signups"></path>
+                    <text x="${padLeft}" y="${height - 8}" class="hb-admin-growth-label">${escapeHtml(monthDayLabel(values[0]?.day))}</text>
+                    <text x="${width - padRight}" y="${height - 8}" text-anchor="end" class="hb-admin-growth-label">${escapeHtml(monthDayLabel(values[values.length - 1]?.day))}</text>
+                </svg>
+            </div>`;
     }
 
     function adminUserGrowthChartMarkup(points) {
@@ -2947,6 +3238,44 @@ export function mountHeyBeanWebApp(mount) {
                     ${adminEnterpriseLimitFormMarkup({})}
                 </div>
             </section>`;
+    }
+
+    function adminCouponCodesMarkup(couponsPayload) {
+        const coupons = normalizeList(couponsPayload);
+        return `
+            <section class="hb-admin-settings hb-admin-coupons" data-admin-coupons-panel>
+                <div class="hb-section-action-row">
+                    <div>
+                        <strong>Influencer coupon codes</strong>
+                        <small>Create one-time 6-digit codes for free Base access</small>
+                    </div>
+                    <span class="hb-item-meta">${coupons.length} active code${coupons.length === 1 ? '' : 's'}</span>
+                </div>
+                <form class="hb-admin-coupon-form" data-admin-coupon-form>
+                    <label><span>Code</span><input class="hb-input" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="Random"></label>
+                    <label><span>Months free Base</span><input class="hb-input" type="number" min="1" max="60" name="months_free_base" value="1" required></label>
+                    <button class="hb-button-secondary" type="submit" ${state.adminUsageLoading ? 'disabled' : ''}>Create code</button>
+                </form>
+                <div class="hb-admin-coupon-table">
+                    <div class="hb-admin-coupon-head"><span>Code</span><span>Credit</span><span>Status</span><span>Redeemed by</span><span>Created</span><span></span></div>
+                    ${coupons.map(adminCouponCodeRowMarkup).join('') || '<div class="hb-empty">No coupon codes yet. Create a random code and send it to an influencer.</div>'}
+                </div>
+            </section>`;
+    }
+
+    function adminCouponCodeRowMarkup(coupon) {
+        const used = coupon.used === true || Boolean(coupon.redeemed_at || coupon.redeemedAt);
+        const redeemer = coupon.redeemer || {};
+        const redeemedLabel = redeemer.email || redeemer.name || (used ? 'Used' : 'Unused');
+        return `
+            <div class="hb-admin-coupon-row">
+                <strong>${escapeHtml(coupon.code || '')}</strong>
+                <span>${escapeHtml(coupon.months_free_base || coupon.monthsFreeBase || 1)} month${Number(coupon.months_free_base || coupon.monthsFreeBase || 1) === 1 ? '' : 's'}</span>
+                <mark class="hb-admin-status ${used ? 'hb-admin-status-ok' : 'hb-admin-status-warning'}">${used ? 'Used' : 'Unused'}</mark>
+                <span>${escapeHtml(redeemedLabel)}</span>
+                <span>${escapeHtml(formatDateTime(coupon.created_at || coupon.createdAt) || 'Unknown')}</span>
+                <button class="hb-admin-mini-action" type="button" data-admin-coupon-delete="${escapeAttr(coupon.id)}" ${state.adminUsageLoading ? 'disabled' : ''}>Delete</button>
+            </div>`;
     }
 
     function adminPlanLimitCardMarkup(plan, payload) {
@@ -4096,6 +4425,12 @@ export function mountHeyBeanWebApp(mount) {
             view: 'notes',
             selectors: ['[data-tour-target="notes-view"]'],
         },
+        {
+            title: 'Import your calendar',
+            caption: 'Bring in the calendar you already use. Choose Apple, Google, Outlook, Proton, Yahoo, Fastmail, Nextcloud, or any iCal link.',
+            view: 'settings',
+            selectors: ['[data-tour-target="external-calendar-import"]'],
+        },
     ];
 
     function onboardingTourStep(index = state.onboardingTourStep) {
@@ -4127,7 +4462,8 @@ export function mountHeyBeanWebApp(mount) {
         activateOnboardingTourStep(0);
     }
 
-    function closeOnboardingTour() {
+    function closeOnboardingTour(options = {}) {
+        const openCalendarImport = options.openCalendarImport === true && !state.onboardingTourPendingSubscription;
         markOnboardingTourSeen();
         state.onboardingTourActive = false;
         state.onboardingTourStep = 0;
@@ -4136,6 +4472,9 @@ export function mountHeyBeanWebApp(mount) {
             state.phase = 'subscription';
             state.selected = 'today';
             history.pushState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan || 'premium')}&billing_interval=${encodeURIComponent(normalizedBillingInterval(state.selectedBillingInterval))}`);
+        } else if (openCalendarImport) {
+            state.selected = 'settings';
+            state.modal = { type: 'external-calendar-import', providerKey: 'apple' };
         }
         window.cancelAnimationFrame(onboardingTourLayoutFrame);
         onboardingTourLayoutFrame = 0;
@@ -4178,7 +4517,7 @@ export function mountHeyBeanWebApp(mount) {
                     <p>${escapeHtml(step.caption)}</p>
                     <div class="hb-onboarding-tour-actions">
                         <button class="hb-button-ghost" type="button" data-onboarding-tour-skip>Skip</button>
-                        <button class="hb-button" type="button" ${isLast ? 'data-onboarding-tour-finish' : 'data-onboarding-tour-next'}>${isLast ? 'Finish' : 'Next'}</button>
+                        <button class="hb-button" type="button" ${isLast ? 'data-onboarding-tour-finish' : 'data-onboarding-tour-next'}>${isLast ? (state.onboardingTourPendingSubscription ? 'Plan setup' : 'Import calendar') : 'Next'}</button>
                     </div>
                 </article>
             </section>`;
@@ -4318,6 +4657,7 @@ export function mountHeyBeanWebApp(mount) {
                 <div class="hb-surface-soft hb-card-pad hb-settings-section hb-settings-calendar-card">
                     ${googleCalendarMarkup()}
                 </div>
+                ${externalCalendarImportSettingsMarkup()}
                 <div class="hb-surface-soft hb-card-pad hb-settings-section hb-settings-calendar-preferences-card">
                     ${settingsSectionHeader(icons.calendar, 'Calendar preferences', 'Day view visible hours.')}
                     <div class="hb-field-row hb-settings-hour-row" style="margin-top:10px">
@@ -4391,6 +4731,18 @@ export function mountHeyBeanWebApp(mount) {
             </label>`;
     }
 
+    function externalCalendarImportSettingsMarkup() {
+        const workspaceName = workspaceDisplayName(findWorkspace(currentWorkspaceId())) || 'current workspace';
+        return `
+            <div class="hb-surface-soft hb-card-pad hb-settings-section hb-settings-calendar-import-card" data-tour-target="external-calendar-import">
+                ${settingsSectionHeader(icons.calendar, 'Import External Calendar', `Paste a public calendar link and import events into ${workspaceName}.`)}
+                <p class="hb-item-meta">Use this for Apple, Proton, Yahoo, Fastmail, Nextcloud, or any iCal feed. Google and Outlook can also use connected sync above for ongoing updates.</p>
+                <div class="hb-account-actions">
+                    <button class="hb-button-secondary" type="button" data-external-calendar-import-open>Import Calendar</button>
+                </div>
+            </div>`;
+    }
+
     function billingSettingsMarkup() {
         const subscription = state.subscriptionSummary || {};
         const user = state.user || {};
@@ -4436,6 +4788,7 @@ export function mountHeyBeanWebApp(mount) {
                     </label>
                     <button class="hb-button" type="button" data-billing-change-plan ${state.billingBusy ? 'disabled' : ''}>${state.billingBusy ? 'Working...' : 'Change plan'}</button>
                 </div>
+                ${couponCodeEntryMarkup('billing')}
                 ${cancelAtPeriodEnd ? `<p class="hb-item-meta"><strong>Renewal is canceled.</strong> ${accessEndsAt ? `Your access stays active through ${escapeHtml(formatDateOnly(accessEndsAt))}. You can restart renewal before then to keep this account and data active.` : 'Your access stays active through the end of the current paid period or trial.'}</p>` : ''}
                 <div class="hb-account-actions">
                     <button class="hb-button-secondary" type="button" data-billing-update-payment ${state.billingBusy ? 'disabled' : ''}>Update payment</button>
@@ -5557,6 +5910,7 @@ export function mountHeyBeanWebApp(mount) {
         if (modal.type === 'admin-usage-log') return adminUsageLogModalMarkup(modal.log);
         if (modal.type === 'admin-command-run') return adminCommandRunModalMarkup(modal);
         if (modal.type === 'external-calendar-connect') return externalCalendarConnectModalMarkup();
+        if (modal.type === 'external-calendar-import') return externalCalendarImportModalMarkup(modal);
         if (modal.type === 'profile') return profileModalMarkup();
         if (modal.type === 'agent') return agentModalMarkup();
         if (modal.type === 'workspace') return workspaceModalMarkup(modal.mode, modal.workspace);
@@ -5575,6 +5929,37 @@ export function mountHeyBeanWebApp(mount) {
                     <button class="hb-button-secondary" type="button" data-external-calendar-provider="outlook">Microsoft Outlook</button>
                     <div class="hb-modal-actions"><button class="hb-button-ghost" type="button" data-close-modal>Cancel</button></div>
                 </section>
+            </div>`;
+    }
+
+    function externalCalendarImportPreset(key = 'apple') {
+        return externalCalendarImportPresets.find((provider) => provider.key === key)
+            || externalCalendarImportPresets[0];
+    }
+
+    function externalCalendarImportModalMarkup(modal = {}) {
+        const provider = externalCalendarImportPreset(modal.providerKey);
+        const workspaceName = workspaceDisplayName(findWorkspace(currentWorkspaceId())) || 'current workspace';
+        return `
+            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-label="Import external calendar">
+                <form class="hb-card hb-modal hb-form" data-modal-form="external-calendar-import">
+                    <h3>Import External Calendar</h3>
+                    <p class="hb-item-meta">${escapeHtml(provider.description)} Events import into ${escapeHtml(workspaceName)}.</p>
+                    ${modal.error ? `<div class="hb-error"><strong>Calendar import failed</strong><span>${escapeHtml(modal.error)}</span></div>` : ''}
+                    <label class="hb-label">Calendar app
+                        <select class="hb-select" name="providerKey" data-external-calendar-import-provider>
+                            ${externalCalendarImportPresets.map((item) => `<option value="${escapeAttr(item.key)}" ${item.key === provider.key ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}
+                        </select>
+                    </label>
+                    <label class="hb-label">${escapeHtml(provider.linkLabel)}
+                        <input class="hb-input" type="url" name="url" placeholder="${escapeAttr(provider.linkHint)}" autocomplete="off" required>
+                    </label>
+                    <p class="hb-item-meta">Use a public iCal, ICS, or webcal link. HeyBean does not need account access for this import.</p>
+                    <div class="hb-modal-actions">
+                        <button class="hb-button-secondary" type="button" data-close-modal>Skip for now</button>
+                        <button class="hb-button" type="submit">Import ${escapeHtml(provider.label)}</button>
+                    </div>
+                </form>
             </div>`;
     }
 
@@ -5741,7 +6126,7 @@ export function mountHeyBeanWebApp(mount) {
                     ${formSectionMarkup(isEvent ? '' : 'Organize', isEvent ? '' : 'Category, color, and workspace', `
                         <div class="hb-field-row hb-compact-field-row">
                             ${categorySelectMarkup(item)}
-                            ${labelInput('Color', 'color', 'color', itemColor(item))}
+                            ${itemColorInputMarkup(item)}
                         </div>
                         ${categoryManagerToggleMarkup()}
                         ${!isReminder && !isTask ? criticalToggleMarkup(item) : ''}
@@ -5887,6 +6272,12 @@ export function mountHeyBeanWebApp(mount) {
                 <option value="" data-category-color="${escapeAttr(themeAccentColor())}">None</option>
                 ${categories.map((category) => `<option value="${escapeAttr(category.name)}" data-category-color="${escapeAttr(safeColor(category.color))}" ${category.name === current ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('')}
             </select></label>`;
+    }
+
+    function itemColorInputMarkup(item = null) {
+        const currentCategory = String(item?.category || '').trim();
+        return `
+            <label class="hb-label" data-no-category-color-field ${currentCategory ? 'hidden' : ''}>Color<input class="hb-input hb-color-input" type="color" name="color" value="${escapeAttr(itemColor(item))}" data-no-category-color-input></label>`;
     }
 
     function categoryManagerToggleMarkup() {
@@ -6231,10 +6622,19 @@ export function mountHeyBeanWebApp(mount) {
             state.selectedBillingInterval = normalizedBillingInterval(button.dataset.subscribeBillingInterval);
             render();
         }));
-        mount.querySelectorAll('[data-subscribe-dashboard]').forEach((button) => button.addEventListener('click', () => {
+        mount.querySelector('[data-subscribe-coupon-code]')?.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                redeemCouponCodeFromInput('subscribe');
+            }
+        });
+        mount.querySelector('[data-subscribe-apply-coupon]')?.addEventListener('click', () => redeemCouponCodeFromInput('subscribe'));
+        mount.querySelectorAll('[data-subscribe-dashboard]').forEach((button) => button.addEventListener('click', async () => {
             history.pushState({}, '', '/app');
             state.selected = 'today';
-            loadSignedIn();
+            await loadSignedIn();
+            startOnboardingTourIfNeeded();
+            render();
         }));
         mount.querySelectorAll('[data-subscribe-refresh]').forEach((button) => button.addEventListener('click', refreshSubscriptionStatus));
         mount.querySelectorAll('[data-subscribe-logout]').forEach((button) => button.addEventListener('click', logout));
@@ -6398,7 +6798,7 @@ export function mountHeyBeanWebApp(mount) {
             render();
         });
         mount.querySelector('[data-onboarding-tour-finish]')?.addEventListener('click', () => {
-            closeOnboardingTour();
+            closeOnboardingTour({ openCalendarImport: true });
             render();
         });
         mount.querySelector('[data-admin-login]')?.addEventListener('click', () => {
@@ -6461,6 +6861,8 @@ export function mountHeyBeanWebApp(mount) {
         mount.querySelector('[data-refresh-admin]')?.addEventListener('click', () => loadAdminUsage(true));
         mount.querySelector('[data-admin-settings-form]')?.addEventListener('submit', saveAdminSettings);
         mount.querySelector('[data-admin-plan-limits-form]')?.addEventListener('submit', saveAdminPlanLimits);
+        mount.querySelector('[data-admin-coupon-form]')?.addEventListener('submit', createAdminCouponCode);
+        mount.querySelectorAll('[data-admin-coupon-delete]').forEach((button) => button.addEventListener('click', () => deleteAdminCouponCode(button.dataset.adminCouponDelete)));
         mount.querySelectorAll('[data-enterprise-limit-form]').forEach((form) => form.addEventListener('submit', saveEnterpriseLimits));
         mount.querySelectorAll('[data-enterprise-limit-delete]').forEach((button) => button.addEventListener('click', () => deleteEnterpriseLimits(button.dataset.enterpriseLimitDelete)));
         mount.querySelector('[data-update-hermes]')?.addEventListener('click', updateHermesRuntime);
@@ -6574,12 +6976,23 @@ export function mountHeyBeanWebApp(mount) {
             render();
         });
         mount.querySelector('[data-billing-change-plan]')?.addEventListener('click', changeBillingPlan);
+        mount.querySelector('[data-billing-coupon-code]')?.addEventListener('input', (event) => {
+            state.billingCouponCode = event.currentTarget.value.replace(/\D/g, '').slice(0, 6);
+        });
+        mount.querySelector('[data-billing-coupon-code]')?.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                redeemCouponCodeFromInput('billing');
+            }
+        });
+        mount.querySelector('[data-billing-apply-coupon]')?.addEventListener('click', () => redeemCouponCodeFromInput('billing'));
         mount.querySelector('[data-billing-update-payment]')?.addEventListener('click', startBillingPaymentUpdate);
         mount.querySelector('[data-billing-refresh]')?.addEventListener('click', () => refreshBillingSettings({ user: true }));
         mount.querySelector('[data-billing-cancel-renewal]')?.addEventListener('click', cancelBillingRenewal);
         mount.querySelector('[data-billing-resume-subscription]')?.addEventListener('click', resumeBillingSubscription);
         mount.querySelectorAll('[data-google-action]').forEach((button) => button.addEventListener('click', () => googleAction(button.dataset.googleAction)));
         mount.querySelector('[data-external-calendar-connect]')?.addEventListener('click', () => { state.modal = { type: 'external-calendar-connect' }; render(); });
+        mount.querySelector('[data-external-calendar-import-open]')?.addEventListener('click', () => { state.modal = { type: 'external-calendar-import', providerKey: 'apple' }; render(); });
         mount.querySelectorAll('[data-external-calendar-provider]').forEach((button) => button.addEventListener('click', () => connectExternalCalendar(button.dataset.externalCalendarProvider)));
         mount.querySelectorAll('[data-external-calendar-action]').forEach((button) => button.addEventListener('click', () => externalCalendarAction(button.dataset.externalCalendarAction)));
         mount.querySelectorAll('[data-google-calendar]').forEach((input) => input.addEventListener('change', updateGoogleCalendarSelection));
@@ -7138,6 +7551,14 @@ export function mountHeyBeanWebApp(mount) {
         mount.querySelectorAll('[data-modal-delete]').forEach((button) => button.addEventListener('click', deleteModalItem));
         mount.querySelectorAll('[data-recurring-delete-mode]').forEach((button) => button.addEventListener('click', confirmRecurringDelete));
         mount.querySelector('[data-modal-form]')?.addEventListener('submit', submitModal);
+        mount.querySelector('[data-external-calendar-import-provider]')?.addEventListener('change', (event) => {
+            state.modal = {
+                ...(state.modal || {}),
+                providerKey: event.currentTarget.value,
+                error: '',
+            };
+            render();
+        });
         mount.querySelector('[data-open-categories]')?.addEventListener('click', toggleInlineCategoryManager);
         mount.querySelector('[data-open-settings-categories]')?.addEventListener('click', () => { state.modal = { type: 'categories' }; render(); });
         mount.querySelector('[data-settings-category-select]')?.addEventListener('change', (event) => {
@@ -7545,6 +7966,7 @@ export function mountHeyBeanWebApp(mount) {
         const form = panel.closest('form');
         const select = form?.querySelector('select[name="category"]');
         const colorInput = form?.querySelector('input[name="color"]');
+        const colorField = form?.querySelector('[data-no-category-color-field]');
         const current = selectedName === null ? select?.value || '' : selectedName;
         if (select) {
             select.innerHTML = categoryOptions(current)
@@ -7556,7 +7978,10 @@ export function mountHeyBeanWebApp(mount) {
         if (colorInput) {
             colorInput.value = current
                 ? safeColor(selectedColor || categoryColor(current))
-                : themeAccentColor();
+                : safeColor(colorInput.dataset.noCategoryColor || themeAccentColor());
+        }
+        if (colorField) {
+            colorField.hidden = Boolean(current);
         }
         const list = panel.querySelector('[data-inline-category-list]');
         if (list) list.innerHTML = inlineCategoryRowsMarkup();
@@ -7657,6 +8082,25 @@ export function mountHeyBeanWebApp(mount) {
                 const token = workspaceToken(data.token);
                 await api(`/workspace-invitations/${encodeURIComponent(token)}/accept`, { method: 'POST' });
                 await loadSignedIn();
+            } else if (kind === 'external-calendar-import') {
+                if (form.dataset.saving === 'true') return;
+                form.dataset.saving = 'true';
+                const provider = externalCalendarImportPreset(data.providerKey);
+                const result = await api('/external-calendars/import', {
+                    method: 'POST',
+                    body: {
+                        provider_key: provider.key,
+                        url: String(data.url || '').trim(),
+                        workspace_id: currentWorkspaceId() || null,
+                    },
+                    timeoutMs: 30000,
+                });
+                state.modal = null;
+                state.notice = externalCalendarImportResultMessage(result, provider);
+                state.error = '';
+                render();
+                refreshOnlyInBackground({ skipCalendarSync: true });
+                return;
             } else if (kind === 'category-create') {
                 await api('/event-categories', { method: 'POST', body: { name: data.name, color: data.color || themeAccentColor() } });
                 await refreshOnly(false);
@@ -7691,11 +8135,31 @@ export function mountHeyBeanWebApp(mount) {
             state.error = friendlyError(error, 'save that change');
             if (['task', 'reminder', 'event'].includes(kind)) {
                 form.dataset.saving = 'false';
+            } else if (kind === 'external-calendar-import') {
+                form.dataset.saving = 'false';
+                state.modal = {
+                    ...(state.modal || { type: 'external-calendar-import' }),
+                    error: friendlyError(error, 'import external calendar'),
+                };
             } else {
                 state.modal = null;
             }
             render();
         }
+    }
+
+    function externalCalendarImportResultMessage(result = {}, provider = externalCalendarImportPresets[0]) {
+        const imported = Number(result.imported || 0);
+        const updated = Number(result.updated || 0);
+        const deleted = Number(result.deleted || 0);
+        const skipped = Number(result.skipped || 0);
+        const parts = [
+            imported > 0 ? `${imported} new` : '',
+            updated > 0 ? `${updated} updated` : '',
+            deleted > 0 ? `${deleted} removed` : '',
+            skipped > 0 ? `${skipped} skipped` : '',
+        ].filter(Boolean);
+        return `${parts.length ? parts.join(', ') : 'No changes'} from ${result.provider_label || result.providerLabel || provider.label}.`;
     }
 
     async function submitIssueReport(form) {
@@ -7842,6 +8306,56 @@ export function mountHeyBeanWebApp(mount) {
             state.notice = 'Plan limits saved.';
         } catch (error) {
             state.error = friendlyError(error, 'save plan limits');
+        } finally {
+            state.adminUsageLoading = false;
+            render();
+        }
+    }
+
+    async function createAdminCouponCode(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const formData = new FormData(form);
+        const code = String(formData.get('code') || '').replace(/\D/g, '').slice(0, 6);
+        const months = Number(formData.get('months_free_base') || 1);
+        if (code && code.length !== 6) {
+            state.error = 'Manual coupon codes must be exactly 6 digits.';
+            render();
+            return;
+        }
+        state.adminUsageLoading = true;
+        state.error = '';
+        render();
+        try {
+            await api('/admin/coupon-codes', {
+                method: 'POST',
+                body: {
+                    ...(code ? { code } : {}),
+                    months_free_base: Number.isFinite(months) ? Math.max(1, Math.min(60, Math.round(months))) : 1,
+                },
+            });
+            state.adminCoupons = await api('/admin/coupon-codes');
+            state.notice = 'Coupon code created.';
+        } catch (error) {
+            state.error = friendlyError(error, 'create the coupon code');
+        } finally {
+            state.adminUsageLoading = false;
+            render();
+        }
+    }
+
+    async function deleteAdminCouponCode(id) {
+        if (!id || state.adminUsageLoading) return;
+        if (!confirm('Delete this coupon code? The code can no longer be redeemed.')) return;
+        state.adminUsageLoading = true;
+        state.error = '';
+        render();
+        try {
+            await api(`/admin/coupon-codes/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            state.adminCoupons = await api('/admin/coupon-codes');
+            state.notice = 'Coupon code deleted.';
+        } catch (error) {
+            state.error = friendlyError(error, 'delete the coupon code');
         } finally {
             state.adminUsageLoading = false;
             render();
@@ -8400,10 +8914,21 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function syncSelectedCategoryColor(event) {
+        const select = event.currentTarget;
         const option = event.currentTarget.selectedOptions?.[0];
         const color = option?.dataset?.categoryColor || themeAccentColor();
-        const input = event.currentTarget.closest('form')?.querySelector('input[name="color"]');
-        if (input) input.value = safeColor(color);
+        const form = select.closest('form');
+        const input = form?.querySelector('input[name="color"]');
+        const colorField = form?.querySelector('[data-no-category-color-field]');
+        if (!input) return;
+        if (select.value) {
+            input.dataset.noCategoryColor = input.dataset.noCategoryColor || safeColor(input.value || themeAccentColor());
+            input.value = safeColor(color);
+            if (colorField) colorField.hidden = true;
+            return;
+        }
+        input.value = safeColor(input.dataset.noCategoryColor || themeAccentColor());
+        if (colorField) colorField.hidden = false;
     }
 
     async function deleteModalItem(event) {
@@ -10050,6 +10575,19 @@ export function mountHeyBeanWebApp(mount) {
         }
         if (type === 'input_audio_buffer.speech_started') {
             kioskRealtimeLastSpeechStartedAt = Date.now();
+            if (realtimeSpeechStartLikelyAssistantOutputEcho()) {
+                kioskRealtimeSuppressedAssistantEchoStartedAt = kioskRealtimeLastSpeechStartedAt;
+                markRealtimeAssistantOutputActive(1800);
+                logKioskRealtimeVoiceTrace('flutter_realtime_speech_started_suppressed_during_assistant_output', {
+                    summary: 'Ignored speech_started while Bean output was active to prevent speaker echo from interrupting the response.',
+                    phase: state.kioskVoicePhase || '',
+                    assistant_text: String(kioskRealtimeAssistantDraft?.content || kioskRealtimeLastAssistantText || '').trim(),
+                    voice_only: kioskRealtimeVoiceOnlyAssistant,
+                    response_create_in_flight: kioskRealtimeResponseCreateInFlight,
+                    awaiting_first_audio: kioskRealtimeAwaitingFirstAudio,
+                });
+                return;
+            }
             if (kioskConversationActive) {
                 window.clearTimeout(kioskConversationTimer);
                 kioskConversationTimer = 0;
@@ -10200,6 +10738,13 @@ export function mountHeyBeanWebApp(mount) {
         kioskRealtimeSuppressInputUntil = Math.max(kioskRealtimeSuppressInputUntil, Date.now() + durationMs);
     }
 
+    function realtimeSpeechStartLikelyAssistantOutputEcho() {
+        if (!kioskRealtimeConnected()) return false;
+        if (!kioskConversationActive && !realtimeBackgroundWorkPending()) return false;
+        if (kioskRealtimeAssistantOutputStartedAt && Date.now() - kioskRealtimeAssistantOutputStartedAt < 1200) return true;
+        return realtimeAssistantOutputActive() || ['responding', 'speaking'].includes(state.kioskVoicePhase);
+    }
+
     function realtimeAssistantOutputActive() {
         return Date.now() < kioskRealtimeSuppressInputUntil;
     }
@@ -10237,6 +10782,7 @@ export function mountHeyBeanWebApp(mount) {
         kioskRealtimeSuppressInputUntil = 0;
         kioskRealtimeAssistantOutputStartedAt = 0;
         kioskRealtimeLastAssistantOutputEndedAt = 0;
+        kioskRealtimeSuppressedAssistantEchoStartedAt = 0;
         window.clearTimeout(kioskRealtimeAssistantOutputTimer);
         kioskRealtimeAssistantOutputTimer = 0;
         window.clearTimeout(kioskRealtimeDeferredWorkingStatusTimer);
@@ -13652,12 +14198,13 @@ export function mountHeyBeanWebApp(mount) {
 
     async function loadAdminUsage(force = false) {
         if (!userIsAdmin() || (state.adminUsage && !force)) return;
+        window.clearTimeout(adminRealtimeRefreshTimer);
         state.adminUsageLoading = true;
         state.error = '';
         render();
         try {
             const growthRange = encodeURIComponent(state.adminUserGrowthRange || 'last_30_days');
-            const [usage, modelRegistry, hermesStatus, liveLookup, planLimits] = await Promise.all([
+            const [usage, modelRegistry, hermesStatus, liveLookup, planLimits, coupons] = await Promise.all([
                 api(`/admin/usage/summary?user_growth_range=${growthRange}`),
                 api('/admin/settings/models'),
                 api('/admin/hermes/status').catch((error) => ({
@@ -13667,18 +14214,32 @@ export function mountHeyBeanWebApp(mount) {
                 })),
                 api('/admin/live-lookup/providers'),
                 api('/admin/plan-limits'),
+                api('/admin/coupon-codes'),
             ]);
             state.adminUsage = usage;
             state.adminModelRegistry = modelRegistry;
             state.adminHermesStatus = hermesStatus;
             state.adminLiveLookup = liveLookup;
             state.adminPlanLimits = planLimits;
+            state.adminCoupons = coupons;
         } catch (error) {
             state.error = friendlyError(error, 'load admin metrics');
         } finally {
             state.adminUsageLoading = false;
             render();
+            scheduleAdminRealtimeRefresh();
         }
+    }
+
+    function scheduleAdminRealtimeRefresh() {
+        window.clearTimeout(adminRealtimeRefreshTimer);
+        adminRealtimeRefreshTimer = 0;
+        if (!userIsAdmin() || state.phase !== 'signedIn' || state.selected !== 'admin') return;
+        adminRealtimeRefreshTimer = window.setTimeout(() => {
+            if (state.selected === 'admin' && !state.adminUsageLoading) {
+                loadAdminUsage(true);
+            }
+        }, 30000);
     }
 
     async function refreshCalendar() {
@@ -13923,6 +14484,68 @@ export function mountHeyBeanWebApp(mount) {
             state.billingBusy = false;
             render();
         }
+    }
+
+    async function redeemCouponCodeFromInput(context = 'billing') {
+        if (state.busy || state.billingBusy) return;
+        const input = mount.querySelector(context === 'subscribe' ? '[data-subscribe-coupon-code]' : '[data-billing-coupon-code]');
+        const code = String(input?.value || '').replace(/\D/g, '').slice(0, 6);
+        if (code.length !== 6) {
+            if (context === 'subscribe') {
+                state.error = 'Enter a 6-digit coupon code.';
+            } else {
+                state.billingError = 'Enter a 6-digit coupon code.';
+                state.billingMessage = '';
+            }
+            render();
+            return;
+        }
+        if (context === 'subscribe') {
+            state.busy = true;
+            state.error = '';
+        } else {
+            state.billingBusy = true;
+            state.billingError = '';
+            state.billingMessage = 'Applying coupon...';
+            state.billingCouponCode = code;
+        }
+        render();
+        try {
+            const result = await api('/billing/coupon-codes/redeem', {
+                method: 'POST',
+                body: { code },
+            });
+            state.subscriptionSummary = result?.subscription || state.subscriptionSummary;
+            const freshUser = await api('/auth/me').catch(() => null);
+            if (freshUser) state.user = freshUser;
+            if (context === 'subscribe') {
+                state.busy = false;
+                state.notice = couponAppliedMessage(result?.subscription);
+                history.pushState({}, '', '/app');
+                await loadSignedIn();
+                return;
+            }
+            state.billingCouponCode = '';
+            state.billingMessage = couponAppliedMessage(result?.subscription);
+        } catch (error) {
+            if (context === 'subscribe') {
+                state.error = friendlyError(error, 'apply your coupon code');
+            } else {
+                state.billingError = friendlyError(error, 'apply your coupon code');
+                state.billingMessage = '';
+            }
+        } finally {
+            state.busy = false;
+            state.billingBusy = false;
+            render();
+        }
+    }
+
+    function couponAppliedMessage(subscription = null) {
+        const expiresAt = subscription?.base_comp_expires_at || subscription?.baseCompExpiresAt;
+        return expiresAt
+            ? `Coupon applied. Free Base access runs through ${formatDateOnly(expiresAt)}.`
+            : 'Coupon applied. Free Base access is active.';
     }
 
     async function startBillingPaymentUpdate() {
@@ -15084,6 +15707,37 @@ export function mountHeyBeanWebApp(mount) {
     function formatCurrency(value) {
         const amount = Number(value || 0);
         return amount.toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: amount >= 1 ? 2 : 4, maximumFractionDigits: amount >= 1 ? 2 : 4 });
+    }
+
+    function formatPercent(value) {
+        if (value === null || value === undefined || value === '') return 'n/a';
+        const number = Number(value);
+        if (!Number.isFinite(number)) return 'n/a';
+        return `${number > 0 ? '+' : ''}${number.toFixed(Math.abs(number) >= 10 ? 0 : 1)}%`;
+    }
+
+    function formatBytes(value) {
+        const bytes = Number(value || 0);
+        if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+        const amount = bytes / (1024 ** index);
+        return `${amount.toFixed(amount >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
+    }
+
+    function adminServerStatusLabel(status) {
+        return {
+            healthy: 'Healthy',
+            watch: 'Watch',
+            critical: 'Upgrade soon',
+        }[String(status || '').toLowerCase()] || 'Unknown';
+    }
+
+    function adminServerStatusMeta(server = {}) {
+        const signals = normalizeList(server.signals);
+        if (signals.length) return `${signals.length} signal${signals.length === 1 ? '' : 's'} to review`;
+        const checkedAt = server.checked_at || server.checkedAt;
+        return checkedAt ? `Checked ${formatTime(checkedAt)}` : 'No upgrade signals';
     }
 
     function formatTokens(value) {

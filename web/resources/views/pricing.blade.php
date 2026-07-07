@@ -1,3 +1,4 @@
+@php($trialDays = max(0, (int) config('services.stripe.trial_days', 7)))
 <!DOCTYPE html>
 <html lang="en">
 @php($fromFlutter = request()->query('source') === 'flutter')
@@ -111,7 +112,7 @@
             <div class="section-head">
                 <span class="section-kicker">Pricing</span>
                 <h2>Organized Your Days With Less Effort</h2>
-                <p>14-day Free Trial - cancel anytime</p>
+                <p>{{ $trialDays }}-day Free Trial - cancel anytime</p>
             </div>
 
             <div class="billing-switch" aria-label="Billing options">
@@ -143,8 +144,8 @@
                         <li>Recent history so Bean can follow the thread of your day</li>
                     </ul>
                     <div class="plan-actions">
-                        <a class="button monthly-link" data-plan-link="base" href="/register?plan=base&billing_interval=monthly">Start 14 day free trial <span aria-hidden="true">-></span></a>
-                        <a class="button yearly-link" href="/register?plan=base&billing_interval=yearly">Start 14 day free trial <span aria-hidden="true">-></span></a>
+                        <a class="button monthly-link" data-plan-link="base" href="/register?plan=base&billing_interval=monthly">Start {{ $trialDays }} day free trial <span aria-hidden="true">-></span></a>
+                        <a class="button yearly-link" href="/register?plan=base&billing_interval=yearly">Start {{ $trialDays }} day free trial <span aria-hidden="true">-></span></a>
                     </div>
                     <p class="fine">$0.00 due today, cancel anytime</p>
                 </article>
@@ -164,8 +165,8 @@
                         <li>The best fit for most busy households</li>
                     </ul>
                     <div class="plan-actions">
-                        <a class="button monthly-link" data-plan-link="premium" href="/register?plan=premium&billing_interval=monthly">Start 14 day free trial <span aria-hidden="true">-></span></a>
-                        <a class="button yearly-link" href="/register?plan=premium&billing_interval=yearly">Start 14 day free trial <span aria-hidden="true">-></span></a>
+                        <a class="button monthly-link" data-plan-link="premium" href="/register?plan=premium&billing_interval=monthly">Start {{ $trialDays }} day free trial <span aria-hidden="true">-></span></a>
+                        <a class="button yearly-link" href="/register?plan=premium&billing_interval=yearly">Start {{ $trialDays }} day free trial <span aria-hidden="true">-></span></a>
                     </div>
                     <p class="fine">$0.00 due today, cancel anytime</p>
                 </article>
@@ -185,8 +186,8 @@
                         <li>Priority support</li>
                     </ul>
                     <div class="plan-actions">
-                        <a class="button monthly-link" data-plan-link="pro" href="/register?plan=pro&billing_interval=monthly">Start 14 day free trial <span aria-hidden="true">-></span></a>
-                        <a class="button yearly-link" href="/register?plan=pro&billing_interval=yearly">Start 14 day free trial <span aria-hidden="true">-></span></a>
+                        <a class="button monthly-link" data-plan-link="pro" href="/register?plan=pro&billing_interval=monthly">Start {{ $trialDays }} day free trial <span aria-hidden="true">-></span></a>
+                        <a class="button yearly-link" href="/register?plan=pro&billing_interval=yearly">Start {{ $trialDays }} day free trial <span aria-hidden="true">-></span></a>
                     </div>
                     <p class="fine">$0.00 due today, cancel anytime</p>
                 </article>

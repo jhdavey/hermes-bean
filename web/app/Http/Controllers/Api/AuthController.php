@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\ResetPasswordLink;
 use App\Services\AgentProfileService;
+use App\Services\CouponCodeService;
 use App\Services\PlanLimitService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
@@ -345,6 +346,7 @@ class AuthController extends Controller
 
         $agentProfiles->ensureForUser($user);
         $workspaceService->ensurePersonalWorkspaceForUser($user);
+        $user = app(CouponCodeService::class)->syncBaseCompAccess($user);
 
         $user = $user->fresh();
         $user->unsetRelation('agentProfile');

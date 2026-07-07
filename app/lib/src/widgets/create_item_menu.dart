@@ -2,6 +2,9 @@ part of '../../main.dart';
 
 enum _CreateItemAction { event, task, reminder, note }
 
+const int _subscriptionTrialDays = 7;
+const String _subscriptionTrialLabel = '$_subscriptionTrialDays-day free trial';
+
 class _CreateItemMenu extends StatelessWidget {
   const _CreateItemMenu({
     required this.onCreateEvent,
@@ -91,15 +94,11 @@ class _CreateButton extends StatelessWidget {
     super.key,
     required this.tooltip,
     this.onPressed,
-    this.size = 40,
-    this.iconSize = 32,
     this.passive = false,
   });
 
   final String tooltip;
   final VoidCallback? onPressed;
-  final double size;
-  final double iconSize;
   final bool passive;
 
   Color _iconColor(BuildContext context) => onPressed == null && !passive
@@ -108,6 +107,8 @@ class _CreateButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const size = 40.0;
+    const iconSize = 32.0;
     final icon = Icon(
       Icons.add_rounded,
       color: _iconColor(context),
@@ -176,7 +177,7 @@ const List<_SignupPlanOption> _signupPlanOptions = [
     yearlyPrice: r'$49.99',
     priceSuffix: '/mo',
     description: 'For getting your personal day into one organized place.',
-    trialText: '14-day free trial, then billed monthly',
+    trialText: '$_subscriptionTrialLabel, then billed monthly',
     actionLabel: 'Start Base trial',
     finePrint: 'A simple place to begin with Bean.',
     features: [
@@ -197,9 +198,10 @@ const List<_SignupPlanOption> _signupPlanOptions = [
     priceSuffix: '/mo',
     description:
         'For families and power users who want Bean woven into the daily routine.',
-    trialText: '14-day free trial, then billed monthly',
+    trialText: '$_subscriptionTrialLabel, then billed monthly',
     actionLabel: 'Start Premium trial',
-    finePrint: 'Cancel before day 15 to avoid being billed.',
+    finePrint:
+        'Cancel before day ${_subscriptionTrialDays + 1} to avoid being billed.',
     features: [
       '5 workspaces for home, work, school, and projects',
       'Expanded Bean capacity for everyday planning',
@@ -220,7 +222,7 @@ const List<_SignupPlanOption> _signupPlanOptions = [
     priceSuffix: '/mo',
     description:
         'For people who want Bean to run across every workspace, account, and recurring workflow.',
-    trialText: '14-day free trial, then billed monthly',
+    trialText: '$_subscriptionTrialLabel, then billed monthly',
     actionLabel: 'Start Pro trial',
     finePrint:
         'Built for users who want Bean available across the whole operating system of their day.',
@@ -287,7 +289,7 @@ String? _planDisplayPriceSuffix(
 }
 
 String _planTrialText(String billingInterval) =>
-    '14-day free trial, then billed ${_normalizedBillingInterval(billingInterval) == 'yearly' ? 'yearly' : 'monthly'}';
+    '$_subscriptionTrialLabel, then billed ${_normalizedBillingInterval(billingInterval) == 'yearly' ? 'yearly' : 'monthly'}';
 
 String _billingIntervalLabel(String billingInterval) =>
     _normalizedBillingInterval(billingInterval) == 'yearly'

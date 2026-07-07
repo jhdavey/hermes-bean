@@ -550,6 +550,7 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
   late final AnimationController _activityController;
   bool _pressRecording = false;
   Timer? _pressHoldTimer;
+  int? _activePointer;
 
   bool get _visuallyListening => widget.listening || _pressRecording;
   bool get _visuallyWorking => widget.working && !_visuallyListening;
@@ -573,7 +574,10 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.listening != widget.listening ||
         oldWidget.working != widget.working) {
-      if (!widget.listening && _pressRecording) {
+      final stoppedListening = oldWidget.listening && !widget.listening;
+      if (!widget.listening &&
+          (stoppedListening || _activePointer == null) &&
+          _pressRecording) {
         _pressRecording = false;
       }
       _syncFabAnimations();
@@ -603,13 +607,17 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  void _handleTapDown() {
+  void _handlePointerDown(PointerDownEvent event) {
     if (!widget.longPressEnabled) return;
+    if (_activePointer != null) return;
+    _activePointer = event.pointer;
     _pressHoldTimer?.cancel();
     _pressHoldTimer = Timer(_pressHoldDelay, _beginPressRecording);
   }
 
-  void _handleTapUp() {
+  void _handlePointerUp(PointerUpEvent event) {
+    if (_activePointer != event.pointer) return;
+    _activePointer = null;
     final wasRecording = _pressRecording;
     _pressHoldTimer?.cancel();
     _pressHoldTimer = null;
@@ -620,7 +628,9 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
     }
   }
 
-  void _handleTapCancel() {
+  void _handlePointerCancel(PointerCancelEvent event) {
+    if (_activePointer != event.pointer) return;
+    _activePointer = null;
     _pressHoldTimer?.cancel();
     _pressHoldTimer = null;
     _endPressRecording();
@@ -648,12 +658,12 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
     final activeColor = HeyBeanTheme.accentStrong;
     final visuallyListening = _visuallyListening;
     final visuallyWorking = _visuallyWorking;
-    return GestureDetector(
+    return Listener(
       key: widget.widgetKey,
       behavior: HitTestBehavior.opaque,
-      onTapDown: (_) => _handleTapDown(),
-      onTapUp: (_) => _handleTapUp(),
-      onTapCancel: _handleTapCancel,
+      onPointerDown: _handlePointerDown,
+      onPointerUp: _handlePointerUp,
+      onPointerCancel: _handlePointerCancel,
       child: SizedBox(
         width: 88,
         height: 88,

@@ -7,13 +7,16 @@ use App\Http\Controllers\Api\AdminLiveLookupController;
 use App\Http\Controllers\Api\AdminPlanLimitController;
 use App\Http\Controllers\Api\AdminSettingsController;
 use App\Http\Controllers\Api\AdminUsageController;
+use App\Http\Controllers\Api\AppleCalendarController;
 use App\Http\Controllers\Api\AssistantRunController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BillingController;
 use App\Http\Controllers\Api\ConversationMessageController;
 use App\Http\Controllers\Api\ConversationSessionController;
+use App\Http\Controllers\Api\CouponCodeController;
 use App\Http\Controllers\Api\DashboardChangeController;
 use App\Http\Controllers\Api\DomainResourceController;
+use App\Http\Controllers\Api\ExternalCalendarController;
 use App\Http\Controllers\Api\GoogleCalendarController;
 use App\Http\Controllers\Api\IssueReportController;
 use App\Http\Controllers\Api\OutlookCalendarController;
@@ -52,6 +55,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/billing/subscription/change-plan', [BillingController::class, 'changePlan']);
         Route::post('/billing/subscription/cancel', [BillingController::class, 'cancel']);
         Route::post('/billing/subscription/resume', [BillingController::class, 'resume']);
+        Route::post('/billing/coupon-codes/redeem', [CouponCodeController::class, 'redeem']);
 
         Route::get('/workspaces', [WorkspaceController::class, 'index']);
         Route::post('/workspaces', [WorkspaceController::class, 'store']);
@@ -106,6 +110,9 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/outlook-calendar/sync', [OutlookCalendarController::class, 'sync']);
         Route::patch('/outlook-calendar/calendars', [OutlookCalendarController::class, 'calendars']);
         Route::delete('/outlook-calendar', [OutlookCalendarController::class, 'disconnect']);
+        Route::get('/external-calendars/providers', [ExternalCalendarController::class, 'providers']);
+        Route::post('/external-calendars/import', [ExternalCalendarController::class, 'import']);
+        Route::post('/apple-calendar/import', [AppleCalendarController::class, 'import']);
 
         Route::get('/memory-items', [DomainResourceController::class, 'listMemoryItems']);
         Route::post('/memory-items', [DomainResourceController::class, 'storeMemoryItem']);
@@ -159,6 +166,9 @@ Route::middleware('api.rate_limit')->group(function (): void {
             Route::post('/plan-limits/enterprise-customers', [AdminPlanLimitController::class, 'storeEnterpriseCustomer']);
             Route::patch('/plan-limits/enterprise-customers/{enterpriseCustomerLimit}', [AdminPlanLimitController::class, 'updateEnterpriseCustomer']);
             Route::delete('/plan-limits/enterprise-customers/{enterpriseCustomerLimit}', [AdminPlanLimitController::class, 'destroyEnterpriseCustomer']);
+            Route::get('/coupon-codes', [CouponCodeController::class, 'index']);
+            Route::post('/coupon-codes', [CouponCodeController::class, 'store']);
+            Route::delete('/coupon-codes/{couponCode}', [CouponCodeController::class, 'destroy']);
             Route::get('/hermes/status', [AdminHermesController::class, 'show']);
             Route::post('/hermes/update', [AdminHermesController::class, 'update']);
             Route::get('/live-lookup/providers', [AdminLiveLookupController::class, 'index']);

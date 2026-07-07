@@ -397,9 +397,6 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   final timeController = TextEditingController(text: initialTime);
   final notesController = TextEditingController(text: initialNotes);
   var selectedCategory = initialCategory?.trim() ?? '';
-  var selectedColor = selectedCategory.isEmpty
-      ? _themeCategoryColorHex()
-      : initialColor?.trim() ?? _themeCategoryColorHex();
   var modalCategories = [...categories];
   var savingCategory = false;
   var saving = false;
@@ -437,6 +434,25 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
           ? 'Title and required reminder time'
           : 'Title and optional due date');
   final actionLabel = deleteLabel == null ? 'Create' : 'Save';
+  final matchingInitialCategoryColor = categories
+      .where(
+        (category) =>
+            category.name.toLowerCase() == selectedCategory.toLowerCase(),
+      )
+      .map((category) => category.color)
+      .firstOrNull;
+  var selectedColor =
+      _isHexColor(
+        selectedCategory.isEmpty ? initialColor : matchingInitialCategoryColor,
+      )
+      ? (selectedCategory.isEmpty
+                ? initialColor
+                : matchingInitialCategoryColor)!
+            .trim()
+            .toUpperCase()
+      : _isHexColor(initialColor)
+      ? initialColor!.trim().toUpperCase()
+      : _themeCategoryColorHex();
 
   Map<String, Object?>? buildPayload(
     StateSetter setModalState, {
@@ -484,9 +500,9 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
           : notesController.text.trim(),
       if (complete) 'complete': true,
       'category': selectedCategory.isEmpty ? null : selectedCategory,
-      'color': selectedCategory.isEmpty
-          ? _themeCategoryColorHex()
-          : (selectedColor.isEmpty ? _themeCategoryColorHex() : selectedColor),
+      'color': _isHexColor(selectedColor)
+          ? selectedColor.toUpperCase()
+          : _themeCategoryColorHex(),
       'isCritical': isCritical,
       if (showRecurrence)
         'recurrenceMetadata': _metadataWithRecurrence(
@@ -934,28 +950,33 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                           }),
                                   ),
                                 ),
-                                _EventFieldLabel(
-                                  icon: Icons.palette_outlined,
-                                  label: 'Color',
-                                ),
-                                Wrap(
-                                  spacing: 10,
-                                  runSpacing: 10,
-                                  children: [
-                                    for (final color
-                                        in _titleTimeEditorCategoryColors)
-                                      _ColorSwatchButton(
-                                        label: color.label,
-                                        color: _colorFromHex(color.value),
-                                        selected:
-                                            selectedColor.toUpperCase() ==
-                                            color.value.toUpperCase(),
-                                        onTap: () => setModalState(() {
-                                          selectedColor = color.value;
-                                        }),
-                                      ),
-                                  ],
-                                ),
+                                if (selectedCategory.isEmpty) ...[
+                                  _EventFieldLabel(
+                                    icon: Icons.palette_outlined,
+                                    label: 'Color',
+                                  ),
+                                  Wrap(
+                                    key: const Key(
+                                      'title-time-editor-no-category-colors',
+                                    ),
+                                    spacing: 10,
+                                    runSpacing: 10,
+                                    children: [
+                                      for (final color
+                                          in _titleTimeEditorCategoryColors)
+                                        _ColorSwatchButton(
+                                          label: color.label,
+                                          color: _colorFromHex(color.value),
+                                          selected:
+                                              selectedColor.toUpperCase() ==
+                                              color.value.toUpperCase(),
+                                          onTap: () => setModalState(() {
+                                            selectedColor = color.value;
+                                          }),
+                                        ),
+                                    ],
+                                  ),
+                                ],
                               ],
                             ),
                           ],

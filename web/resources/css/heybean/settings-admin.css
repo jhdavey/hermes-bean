@@ -231,6 +231,10 @@
     gap: 8px;
 }
 
+.hb-billing-settings .hb-coupon-entry {
+    margin-top: 10px;
+}
+
 .hb-theme-select-row {
     display: grid;
     grid-template-columns: 28px minmax(0, 1fr);
@@ -516,6 +520,233 @@
     overflow-wrap: anywhere;
 }
 
+.hb-admin-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.hb-admin-kpi {
+    min-width: 0;
+    display: grid;
+    gap: 6px;
+    padding: 14px;
+    border: 1px solid var(--hb-border);
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, .92), rgba(248, 250, 252, .82));
+}
+
+.hb-admin-kpi span,
+.hb-admin-kpi small {
+    color: var(--hb-muted);
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+
+.hb-admin-kpi strong {
+    color: var(--hb-text);
+    font-size: clamp(20px, 2vw, 30px);
+    line-height: 1;
+    font-weight: 850;
+}
+
+.hb-admin-kpi-money strong {
+    color: var(--hb-accent-strong);
+}
+
+.hb-admin-kpi-danger {
+    border-color: rgba(239, 68, 68, .34);
+    background: rgba(254, 242, 242, .9);
+}
+
+.hb-admin-kpi-warning {
+    border-color: rgba(245, 158, 11, .34);
+    background: rgba(255, 251, 235, .9);
+}
+
+.hb-admin-kpi-healthy {
+    border-color: rgba(34, 197, 94, .28);
+    background: rgba(240, 253, 244, .9);
+}
+
+.hb-admin-health-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.hb-admin-health-card {
+    min-width: 0;
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--hb-border);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, .72);
+}
+
+.hb-admin-health-card:nth-child(1),
+.hb-admin-health-card:nth-child(2) {
+    grid-column: span 3;
+}
+
+.hb-admin-health-card:nth-child(3),
+.hb-admin-health-card:nth-child(4),
+.hb-admin-health-card:nth-child(5) {
+    grid-column: span 2;
+}
+
+.hb-admin-health-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.hb-admin-health-head strong {
+    color: var(--hb-text);
+    font-size: 15px;
+    font-weight: 900;
+}
+
+.hb-admin-health-head small,
+.hb-admin-health-note {
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 750;
+}
+
+.hb-admin-health-note {
+    margin: 0;
+    line-height: 1.35;
+}
+
+.hb-admin-health-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.hb-admin-health-metrics span,
+.hb-admin-mini-list span {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+    padding: 9px 10px;
+    border: 1px solid var(--hb-border);
+    border-radius: 12px;
+    background: var(--hb-surface2);
+}
+
+.hb-admin-health-metrics small,
+.hb-admin-mini-list small {
+    color: var(--hb-muted);
+    font-size: 11px;
+    font-weight: 850;
+}
+
+.hb-admin-health-metrics strong,
+.hb-admin-mini-list strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--hb-text);
+    font-size: 13px;
+    font-weight: 900;
+}
+
+.hb-admin-mini-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.hb-admin-source-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.hb-admin-signal-list {
+    display: grid;
+    gap: 8px;
+}
+
+.hb-admin-signal {
+    padding: 9px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    line-height: 1.35;
+    font-weight: 800;
+}
+
+.hb-admin-signal-ok {
+    border: 1px solid rgba(34, 197, 94, .22);
+    background: rgba(240, 253, 244, .9);
+    color: #166534;
+}
+
+.hb-admin-signal-warning {
+    border: 1px solid rgba(245, 158, 11, .28);
+    background: rgba(255, 251, 235, .9);
+    color: #92400e;
+}
+
+.hb-admin-signal-critical {
+    border: 1px solid rgba(239, 68, 68, .28);
+    background: rgba(254, 242, 242, .9);
+    color: #991b1b;
+}
+
+.hb-admin-chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 850;
+}
+
+.hb-admin-chart-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.hb-admin-chart-legend i {
+    width: 22px;
+    height: 3px;
+    border-radius: 999px;
+}
+
+.hb-legend-traffic,
+.hb-admin-activity-traffic {
+    color: var(--hb-accent);
+    background: var(--hb-accent);
+    stroke: var(--hb-accent);
+}
+
+.hb-legend-actions,
+.hb-admin-activity-actions {
+    color: #2563eb;
+    background: #2563eb;
+    stroke: #2563eb;
+}
+
+.hb-legend-signups,
+.hb-admin-activity-signups {
+    color: #d97706;
+    background: #d97706;
+    stroke: #d97706;
+}
+
+.hb-admin-activity-line {
+    fill: none;
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
 .hb-admin-settings {
     display: grid;
     gap: 12px;
@@ -606,6 +837,60 @@
     color: #92400e;
     font-size: 12px;
     font-weight: 850;
+}
+
+.hb-admin-coupon-form {
+    display: grid;
+    grid-template-columns: minmax(120px, 180px) minmax(120px, 180px) auto;
+    gap: 10px;
+    align-items: end;
+}
+
+.hb-admin-coupon-form label {
+    display: grid;
+    gap: 5px;
+}
+
+.hb-admin-coupon-form label span {
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 900;
+}
+
+.hb-admin-coupon-table {
+    overflow-x: auto;
+    border: 1px solid var(--hb-border);
+    border-radius: 14px;
+}
+
+.hb-admin-coupon-head,
+.hb-admin-coupon-row {
+    min-width: 820px;
+    display: grid;
+    grid-template-columns: 112px 100px 90px minmax(180px, 1fr) 150px 80px;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 12px;
+}
+
+.hb-admin-coupon-head {
+    background: var(--hb-surface2);
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.hb-admin-coupon-row {
+    border-top: 1px solid var(--hb-border);
+    color: var(--hb-text);
+    font-size: 13px;
+    font-weight: 750;
+}
+
+.hb-admin-coupon-row strong {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    letter-spacing: .08em;
 }
 
 .hb-admin-live-lookup {

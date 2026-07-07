@@ -370,6 +370,13 @@ const List<_OnboardingTourStepConfig> _appOnboardingTourSteps = [
     destination: _HomeDestination.notes,
     targets: [_OnboardingTourTarget.notesView],
   ),
+  _OnboardingTourStepConfig(
+    title: 'Import your calendar',
+    caption:
+        'Bring in the calendar you already use. Choose Apple, Google, Outlook, Proton, Yahoo, Fastmail, Nextcloud, or any iCal link.',
+    destination: _HomeDestination.settings,
+    targets: [],
+  ),
 ];
 
 class _OnboardingTourOverlay extends StatelessWidget {

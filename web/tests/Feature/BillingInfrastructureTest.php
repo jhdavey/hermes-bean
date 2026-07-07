@@ -2,10 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Models\PaidSubscriptionNotificationRecipient;
+use App\Models\PushNotificationDeviceToken;
 use App\Models\User;
 use App\Notifications\SubscriptionReceiptNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
@@ -30,7 +33,7 @@ class BillingInfrastructureTest extends TestCase
                 $this->assertSame('cus_test_123', $data['customer']);
                 $this->assertSame('price_premium_test', $data['line_items'][0]['price']);
                 $this->assertSame(1, $data['line_items'][0]['quantity']);
-                $this->assertSame(14, $data['subscription_data']['trial_period_days']);
+                $this->assertSame(7, $data['subscription_data']['trial_period_days']);
                 $this->assertSame('premium', $data['subscription_data']['metadata']['plan']);
                 $this->assertSame('flutter', $data['subscription_data']['metadata']['source']);
                 $this->assertStringContainsString('source=flutter', $data['success_url']);
@@ -218,15 +221,15 @@ class BillingInfrastructureTest extends TestCase
                 $this->assertSame('pm_card_visa', $data['default_payment_method']);
                 $this->assertSame('price_premium_test', $data['items'][0]['price']);
                 $this->assertSame(1, $data['items'][0]['quantity']);
-                $this->assertSame(14, $data['trial_period_days']);
+                $this->assertSame(7, $data['trial_period_days']);
                 $this->assertSame('on_subscription', $data['payment_settings']['save_default_payment_method']);
 
                 return Http::response([
                     'id' => 'sub_mobile_123',
                     'customer' => 'cus_mobile_confirm_123',
                     'status' => 'trialing',
-                    'current_period_end' => now()->addDays(14)->timestamp,
-                    'trial_end' => now()->addDays(14)->timestamp,
+                    'current_period_end' => now()->addDays(7)->timestamp,
+                    'trial_end' => now()->addDays(7)->timestamp,
                     'cancel_at_period_end' => false,
                     'metadata' => [
                         'heybean_user_id' => (string) $user->id,
@@ -788,6 +791,129 @@ class BillingInfrastructureTest extends TestCase
             ->assertJsonPath('received', true);
     }
 
+    public function test_paid_invoice_webhook_sends_new_paid_subscriber_push_to_manual_recipients_once(): void
+    {
+        $this->configureStripe();
+        Cache::forget('firebase.fcm.access_token');
+        config()->set('services.firebase.project_id', 'heybean-test');
+        config()->set('services.firebase.credentials_json', json_encode($this->firebaseCredentials()));
+
+        $recipient = User::factory()->create([
+            'id' => 17,
+            'email' => 'founder@example.com',
+        ]);
+        PushNotificationDeviceToken::create([
+            'user_id' => $recipient->id,
+            'token' => 'founder-fcm-token',
+            'token_hash' => hash('sha256', 'founder-fcm-token'),
+            'platform' => 'ios',
+            'enabled' => true,
+            'last_seen_at' => now(),
+        ]);
+        $nonRecipient = User::factory()->create(['email' => 'not-recipient@example.com']);
+        PushNotificationDeviceToken::create([
+            'user_id' => $nonRecipient->id,
+            'token' => 'other-fcm-token',
+            'token_hash' => hash('sha256', 'other-fcm-token'),
+            'platform' => 'ios',
+            'enabled' => true,
+            'last_seen_at' => now(),
+        ]);
+        PaidSubscriptionNotificationRecipient::updateOrCreate(
+            ['user_id' => $recipient->id],
+            ['enabled' => true],
+        );
+        $subscriber = User::factory()->create([
+            'email' => 'paid-subscriber@example.com',
+            'subscription_tier' => 'base',
+            'stripe_customer_id' => 'cus_paid_invoice_123',
+        ]);
+        $fcmSendCount = 0;
+
+        Http::fake(function (HttpRequest $request) use ($subscriber, &$fcmSendCount) {
+            if ($request->url() === 'https://api.stripe.com/v1/subscriptions/sub_paid_invoice_123') {
+                return Http::response([
+                    'id' => 'sub_paid_invoice_123',
+                    'customer' => 'cus_paid_invoice_123',
+                    'status' => 'active',
+                    'current_period_end' => now()->addMonth()->timestamp,
+                    'trial_end' => now()->subMinute()->timestamp,
+                    'cancel_at_period_end' => false,
+                    'metadata' => [
+                        'heybean_user_id' => (string) $subscriber->id,
+                        'plan' => 'premium',
+                    ],
+                    'items' => ['data' => [[
+                        'id' => 'si_paid_invoice_123',
+                        'price' => ['id' => 'price_premium_test'],
+                    ]]],
+                ], 200);
+            }
+
+            if ($request->url() === 'https://oauth2.googleapis.com/token') {
+                return Http::response([
+                    'access_token' => 'firebase-access-token',
+                    'expires_in' => 3600,
+                    'token_type' => 'Bearer',
+                ], 200);
+            }
+
+            if ($request->url() === 'https://fcm.googleapis.com/v1/projects/heybean-test/messages:send') {
+                $fcmSendCount++;
+                $this->assertSame('founder-fcm-token', $request['message']['token']);
+                $this->assertSame('New paid subscriber!', $request['message']['notification']['title']);
+                $this->assertSame('Premium monthly - $19.99', $request['message']['notification']['body']);
+                $this->assertSame('new_paid_subscriber', $request['message']['data']['type']);
+                $this->assertSame((string) $subscriber->id, $request['message']['data']['subscriber_user_id']);
+                $this->assertSame('premium', $request['message']['data']['subscription_tier']);
+                $this->assertSame('1999', $request['message']['data']['amount_paid_cents']);
+
+                return Http::response([
+                    'name' => 'projects/heybean-test/messages/new-paid-subscriber',
+                ], 200);
+            }
+
+            return Http::response([], 404);
+        });
+
+        $payload = [
+            'id' => 'evt_paid_invoice_123',
+            'type' => 'invoice.paid',
+            'data' => ['object' => [
+                'id' => 'in_paid_invoice_123',
+                'customer' => 'cus_paid_invoice_123',
+                'subscription' => 'sub_paid_invoice_123',
+                'amount_paid' => 1999,
+                'currency' => 'usd',
+                'paid' => true,
+                'status' => 'paid',
+            ]],
+        ];
+
+        $this->postJson('/api/billing/stripe/webhook', $payload)
+            ->assertOk()
+            ->assertJsonPath('received', true);
+        $this->postJson('/api/billing/stripe/webhook', $payload)
+            ->assertOk()
+            ->assertJsonPath('received', true);
+
+        $this->assertSame(1, $fcmSendCount);
+        $this->assertDatabaseHas('paid_subscription_purchase_notifications', [
+            'purchaser_user_id' => $subscriber->id,
+            'stripe_subscription_id' => 'sub_paid_invoice_123',
+            'stripe_invoice_id' => 'in_paid_invoice_123',
+            'plan' => 'premium',
+            'billing_interval' => 'monthly',
+            'amount_paid_cents' => 1999,
+            'currency' => 'usd',
+            'sent_count' => 1,
+        ]);
+
+        $subscriber->refresh();
+        $this->assertSame('premium', $subscriber->subscription_tier);
+        $this->assertSame('active', $subscriber->subscription_status);
+    }
+
     public function test_subscription_summary_recovers_cancelled_access_end_from_stripe(): void
     {
         $this->configureStripe();
@@ -860,7 +986,7 @@ class BillingInfrastructureTest extends TestCase
         config()->set('services.stripe.publishable_key', 'pk_test_123');
         config()->set('services.stripe.api_version', '2026-05-27.dahlia');
         config()->set('services.stripe.webhook_secret', null);
-        config()->set('services.stripe.trial_days', 14);
+        config()->set('services.stripe.trial_days', 7);
         config()->set('services.stripe.prices.base', [
             'monthly' => 'price_base_test',
             'yearly' => 'price_base_yearly_test',
@@ -873,5 +999,21 @@ class BillingInfrastructureTest extends TestCase
             'monthly' => 'price_pro_test',
             'yearly' => 'price_pro_yearly_test',
         ]);
+    }
+
+    private function firebaseCredentials(): array
+    {
+        $key = openssl_pkey_new([
+            'private_key_bits' => 2048,
+            'private_key_type' => OPENSSL_KEYTYPE_RSA,
+        ]);
+        openssl_pkey_export($key, $privateKey);
+
+        return [
+            'type' => 'service_account',
+            'project_id' => 'heybean-test',
+            'client_email' => 'firebase-adminsdk@example.iam.gserviceaccount.com',
+            'private_key' => $privateKey,
+        ];
     }
 }

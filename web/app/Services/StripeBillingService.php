@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\PaidSubscriptionNotificationRecipient;
+use App\Models\PaidSubscriptionPurchaseNotification;
 use App\Models\User;
 use App\Notifications\SubscriptionReceiptNotification;
 use Illuminate\Http\Client\Response;
@@ -25,6 +27,7 @@ class StripeBillingService
     public function subscriptionSummary(User $user): array
     {
         $user = $this->refreshCancelledSubscriptionForSummary($user);
+        $user = app(CouponCodeService::class)->syncBaseCompAccess($user);
         $accessEndsAt = $user->subscription_current_period_end;
         $canResume = (bool) $user->stripe_subscription_id
             && (bool) $user->subscription_cancel_at_period_end
@@ -36,6 +39,7 @@ class StripeBillingService
             'billing_interval' => $this->billingIntervalForPriceId($user->stripe_price_id),
             'status' => $user->subscription_status,
             'current_period_end' => $user->subscription_current_period_end?->toIso8601String(),
+            'base_comp_expires_at' => $user->base_comp_expires_at?->toIso8601String(),
             'trial_ends_at' => $user->subscription_trial_ends_at?->toIso8601String(),
             'access_ends_at' => $user->subscription_cancel_at_period_end ? $accessEndsAt?->toIso8601String() : null,
             'cancel_at_period_end' => (bool) $user->subscription_cancel_at_period_end,
@@ -96,7 +100,7 @@ class StripeBillingService
                 'source' => $source ?: 'web',
             ],
             'subscription_data' => [
-                'trial_period_days' => max(0, (int) config('services.stripe.trial_days', 14)),
+                'trial_period_days' => max(0, (int) config('services.stripe.trial_days', 7)),
                 'metadata' => [
                     'heybean_user_id' => (string) $user->id,
                     'plan' => $plan,
@@ -194,7 +198,7 @@ class StripeBillingService
                     'price' => $this->priceId($plan, $billingInterval),
                     'quantity' => 1,
                 ]],
-                'trial_period_days' => max(0, (int) config('services.stripe.trial_days', 14)),
+                'trial_period_days' => max(0, (int) config('services.stripe.trial_days', 7)),
                 'payment_behavior' => 'allow_incomplete',
                 'payment_settings' => [
                     'save_default_payment_method' => 'on_subscription',
@@ -388,6 +392,7 @@ class StripeBillingService
             'checkout.session.completed' => $this->handleCheckoutCompleted($object),
             'customer.subscription.created', 'customer.subscription.updated' => $this->syncSubscription($object),
             'customer.subscription.deleted' => $this->markSubscriptionDeleted($object),
+            'invoice.paid' => $this->handleInvoicePaid($object),
             default => null,
         };
     }
@@ -407,6 +412,157 @@ class StripeBillingService
 
         $subscription = $this->stripeGet('/subscriptions/'.$subscriptionId)->json();
         $this->syncSubscription($subscription);
+    }
+
+    private function handleInvoicePaid(array $invoice): void
+    {
+        $amountPaid = (int) ($invoice['amount_paid'] ?? 0);
+        if ($amountPaid <= 0) {
+            return;
+        }
+
+        if (array_key_exists('paid', $invoice) && ! (bool) $invoice['paid']) {
+            return;
+        }
+
+        if (isset($invoice['status']) && $invoice['status'] !== 'paid') {
+            return;
+        }
+
+        $subscriptionId = $this->subscriptionIdFromInvoice($invoice);
+        if (! $subscriptionId) {
+            return;
+        }
+
+        $subscription = $this->stripeGet('/subscriptions/'.$subscriptionId)->json();
+        $fallbackUser = $this->userForSubscription([
+            'customer' => $invoice['customer'] ?? null,
+            'metadata' => $invoice['metadata'] ?? [],
+        ]);
+
+        $this->syncSubscription($subscription, $fallbackUser, sendReceipt: false);
+        $user = $this->userForSubscription($subscription, $fallbackUser)?->fresh();
+        if (! $user) {
+            return;
+        }
+
+        $event = PaidSubscriptionPurchaseNotification::firstOrCreate(
+            ['stripe_subscription_id' => $subscriptionId],
+            [
+                'purchaser_user_id' => $user->id,
+                'stripe_customer_id' => $subscription['customer'] ?? $invoice['customer'] ?? null,
+                'stripe_invoice_id' => $this->stripeId($invoice),
+                'plan' => $user->subscriptionTier(),
+                'billing_interval' => $this->billingIntervalForPriceId($user->stripe_price_id),
+                'amount_paid_cents' => $amountPaid,
+                'currency' => strtolower((string) ($invoice['currency'] ?? 'usd')),
+            ],
+        );
+
+        if (! $event->wasRecentlyCreated) {
+            return;
+        }
+
+        $sentCount = $this->sendPaidSubscriberNotification(
+            user: $user,
+            plan: $event->plan,
+            billingInterval: $event->billing_interval,
+            amountPaidCents: $event->amount_paid_cents,
+            currency: $event->currency,
+        );
+
+        $event->forceFill([
+            'sent_count' => $sentCount,
+            'notification_attempted_at' => now(),
+        ])->save();
+    }
+
+    private function sendPaidSubscriberNotification(
+        User $user,
+        string $plan,
+        string $billingInterval,
+        int $amountPaidCents,
+        string $currency,
+    ): int {
+        $firebase = app(FirebaseCloudMessagingService::class);
+        if (! $firebase->configured()) {
+            return 0;
+        }
+
+        $title = 'New paid subscriber!';
+        $body = sprintf(
+            '%s %s - %s',
+            Str::headline($plan),
+            $billingInterval,
+            $this->formatInvoiceAmount($amountPaidCents, $currency),
+        );
+        $sentCount = 0;
+
+        $recipients = PaidSubscriptionNotificationRecipient::query()
+            ->where('enabled', true)
+            ->with(['user.pushNotificationDeviceTokens' => function ($query): void {
+                $query->where('enabled', true);
+            }])
+            ->get();
+
+        foreach ($recipients as $recipient) {
+            foreach ($recipient->user?->pushNotificationDeviceTokens ?? [] as $deviceToken) {
+                try {
+                    if ($firebase->sendToToken(
+                        token: $deviceToken->token,
+                        title: $title,
+                        body: $body,
+                        data: [
+                            'type' => 'new_paid_subscriber',
+                            'subscriber_user_id' => (string) $user->id,
+                            'subscription_tier' => $plan,
+                            'billing_interval' => $billingInterval,
+                            'amount_paid_cents' => (string) $amountPaidCents,
+                            'currency' => $currency,
+                        ],
+                    )) {
+                        $sentCount++;
+                    }
+                } catch (Throwable $exception) {
+                    Log::warning('Paid subscriber push notification failed.', [
+                        'recipient_user_id' => $recipient->user_id,
+                        'subscriber_user_id' => $user->id,
+                        'message' => $exception->getMessage(),
+                    ]);
+                }
+            }
+        }
+
+        return $sentCount;
+    }
+
+    private function subscriptionIdFromInvoice(array $invoice): ?string
+    {
+        foreach ([
+            $invoice['subscription'] ?? null,
+            $invoice['subscription_details']['subscription'] ?? null,
+            $invoice['parent']['subscription_details']['subscription'] ?? null,
+        ] as $candidate) {
+            if (is_string($candidate) && $candidate !== '') {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private function stripeId(array $object): ?string
+    {
+        $id = $object['id'] ?? null;
+
+        return is_string($id) && $id !== '' ? $id : null;
+    }
+
+    private function formatInvoiceAmount(int $amountPaidCents, string $currency): string
+    {
+        $amount = number_format($amountPaidCents / 100, 2);
+
+        return strtolower($currency) === 'usd' ? '$'.$amount : strtoupper($currency).' '.$amount;
     }
 
     private function handlePaymentMethodCheckoutCompleted(array $session): void

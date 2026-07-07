@@ -647,6 +647,46 @@ void main() {
     ]);
   });
 
+  test('redeems coupon codes for free base access', () async {
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'coupon-token',
+      transport: (request) async {
+        expect(request.method, 'POST');
+        expect(request.path, '/billing/coupon-codes/redeem');
+        expect(request.headers['Authorization'], 'Bearer coupon-token');
+        expect(request.body, {'code': '123456'});
+        return HermesApiResponse(
+          200,
+          jsonEncode({
+            'data': {
+              'coupon': {
+                'code': '123456',
+                'months_free_base': 3,
+                'used': true,
+                'base_access_expires_at': '2026-10-07T00:00:00+00:00',
+              },
+              'subscription': {
+                'tier': 'base',
+                'status': 'active',
+                'base_comp_expires_at': '2026-10-07T00:00:00+00:00',
+                'current_period_end': '2026-10-07T00:00:00+00:00',
+              },
+            },
+          }),
+        );
+      },
+    );
+
+    final result = await client.redeemCouponCode(code: '123456');
+
+    expect(result.coupon?.code, '123456');
+    expect(result.coupon?.monthsFreeBase, 3);
+    expect(result.subscription.tier, 'base');
+    expect(result.subscription.status, 'active');
+    expect(result.subscription.baseCompExpiresAt, '2026-10-07T00:00:00+00:00');
+  });
+
   test('parses bank account billing payment methods', () async {
     final requests = <HermesApiRequest>[];
     final client = HermesApiClient(
@@ -1430,6 +1470,124 @@ void main() {
     expect(event.googleCalendarId, 'work@example.com');
     expect(event.metadata?['google_calendar_id'], 'work@example.com');
   });
+
+  test(
+    'loads external calendar providers and imports selected provider',
+    () async {
+      final requests = <HermesApiRequest>[];
+      final client = HermesApiClient(
+        baseUrl: Uri.parse('http://local.test/api'),
+        bearerToken: 'token-123',
+        transport: (request) async {
+          requests.add(request);
+          expect(request.headers['Authorization'], 'Bearer token-123');
+          if (request.path == '/external-calendars/providers') {
+            expect(request.method, 'GET');
+            return HermesApiResponse(
+              200,
+              jsonEncode({
+                'data': [
+                  {
+                    'key': 'apple',
+                    'label': 'Apple Calendar',
+                    'description': 'Paste an iCloud public calendar link.',
+                    'link_label': 'iCloud public calendar link',
+                    'link_hint':
+                        'webcal://pXX-caldav.icloud.com/published/2/...',
+                    'instructions': ['Turn on Public Calendar.', 'Copy link.'],
+                  },
+                  {
+                    'key': 'proton',
+                    'label': 'Proton Calendar',
+                    'description': 'Paste a Proton share link.',
+                    'link_label': 'Proton calendar share link',
+                    'link_hint':
+                        'https://calendar.proton.me/api/calendar/v1/url/...',
+                    'instructions': ['Create a share link.'],
+                  },
+                ],
+              }),
+            );
+          }
+          expect(request.method, 'POST');
+          expect(request.path, '/external-calendars/import');
+          expect(request.body, {
+            'provider_key': 'proton',
+            'url': 'https://calendar.proton.me/api/calendar/v1/url/example',
+            'workspace_id': 7,
+          });
+          return HermesApiResponse(
+            200,
+            jsonEncode({
+              'data': {
+                'imported': 4,
+                'updated': 2,
+                'deleted': 1,
+                'skipped': 3,
+                'total': 10,
+                'workspace_id': 7,
+                'provider_key': 'proton',
+                'provider_label': 'Proton Calendar',
+              },
+            }),
+          );
+        },
+      );
+
+      final providers = await client.listExternalCalendarProviders();
+      expect(providers.map((provider) => provider.key), ['apple', 'proton']);
+      expect(providers.first.instructions, [
+        'Turn on Public Calendar.',
+        'Copy link.',
+      ]);
+
+      final result = await client.importExternalCalendar(
+        providerKey: 'proton',
+        url: 'https://calendar.proton.me/api/calendar/v1/url/example',
+        workspaceId: 7,
+      );
+
+      expect(requests, hasLength(2));
+      expect(result.imported, 4);
+      expect(result.updated, 2);
+      expect(result.deleted, 1);
+      expect(result.skipped, 3);
+      expect(result.total, 10);
+      expect(result.workspaceId, 7);
+      expect(result.providerKey, 'proton');
+      expect(result.providerLabel, 'Proton Calendar');
+      expect(result.changed, 7);
+    },
+  );
+
+  test(
+    'falls back to built-in external calendar providers on stale API',
+    () async {
+      final client = HermesApiClient(
+        baseUrl: Uri.parse('http://local.test/api'),
+        bearerToken: 'token-123',
+        transport: (request) async {
+          expect(request.method, 'GET');
+          expect(request.path, '/external-calendars/providers');
+          return const HermesApiResponse(404, '{"message":"Not Found"}');
+        },
+      );
+
+      final providers = await client.listExternalCalendarProviders();
+
+      expect(providers.map((provider) => provider.key), [
+        'apple',
+        'google',
+        'outlook',
+        'proton',
+        'yahoo',
+        'fastmail',
+        'nextcloud',
+        'ics',
+      ]);
+      expect(providers.first.label, 'Apple Calendar');
+    },
+  );
 
   test('loads today summary with live surfaces and blockers', () async {
     final client = HermesApiClient(

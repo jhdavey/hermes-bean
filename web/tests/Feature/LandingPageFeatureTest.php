@@ -55,9 +55,9 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Keep every calendar moving.', false)
             ->assertSee('Turn loose ends into managed tasks.', false)
             ->assertSee('See the day Bean is helping you run.', false)
-            ->assertSee('class="mock-card schedule-board product-window"', false)
-            ->assertSee('class="mock-card task-board product-window"', false)
-            ->assertSee('class="mock-card daily-board product-window"', false)
+            ->assertSee('images/heybean-landing-scheduling.png', false)
+            ->assertSee('images/heybean-landing-task-management.png', false)
+            ->assertSee('images/heybean-landing-daily-control.png', false)
             ->assertSee('HeyBean is loved by busy people who need fewer loose ends.', false)
             ->assertSee('Alex Rivera', false)
             ->assertSee('Maya Chen', false)
@@ -123,6 +123,10 @@ class LandingPageFeatureTest extends TestCase
         $this->assertStringContainsString('Command center', $appJs);
         $this->assertStringContainsString('Calendar views', $appJs);
         $this->assertStringContainsString('Notes hold plans, lists, and longer writing.', $appJs);
+        $this->assertStringContainsString('Import your calendar', $appJs);
+        $this->assertStringContainsString('Bring in the calendar you already use.', $appJs);
+        $this->assertStringContainsString('Import External Calendar', $appJs);
+        $this->assertStringContainsString('/external-calendars/import', $appJs);
         $this->assertStringContainsString('/subscribe?plan=', $appJs);
     }
 
@@ -134,7 +138,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Monthly', false)
             ->assertSee('Yearly', false)
             ->assertSee('Save over 16%', false)
-            ->assertSee('14-day Free Trial - cancel anytime', false)
+            ->assertSee('7-day Free Trial - cancel anytime', false)
             ->assertSee('Base', false)
             ->assertSee('Premium', false)
             ->assertSee('Pro', false)
@@ -152,7 +156,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Up to 10 Notes for plans, lists, and longer writing', false)
             ->assertSee('Unlimited Notes with folders for plans, lists, and longer writing', false)
             ->assertSee('Unlimited Notes across every workspace', false)
-            ->assertSee('Start 14 day free trial', false)
+            ->assertSee('Start 7 day free trial', false)
             ->assertSee('href="/register?plan=base&billing_interval=monthly"', false)
             ->assertSee('href="/register?plan=premium&billing_interval=monthly"', false)
             ->assertSee('href="/register?plan=pro&billing_interval=monthly"', false)

@@ -36,6 +36,7 @@ class _SignupPaywallScreen extends StatefulWidget {
     required this.busyPlan,
     required this.error,
     required this.onSelectPlan,
+    required this.onRedeemCoupon,
     required this.onContactEnterprise,
     required this.onContinue,
     required this.onSignOut,
@@ -45,6 +46,7 @@ class _SignupPaywallScreen extends StatefulWidget {
   final String? busyPlan;
   final String? error;
   final Future<void> Function(String plan, String billingInterval) onSelectPlan;
+  final Future<void> Function(String code) onRedeemCoupon;
   final VoidCallback onContactEnterprise;
   final Future<void> Function() onContinue;
   final Future<void> Function() onSignOut;
@@ -113,7 +115,7 @@ class _SignupPaywallScreenState extends State<_SignupPaywallScreen> {
                   ),
                   const SizedBox(height: 14),
                   Text(
-                    '14-day free trial - cancel anytime. Pick the plan that best fits your needs.',
+                    'Start with a $_subscriptionTrialLabel. Pick the plan that best fits your needs.',
                     style: TextStyle(
                       color: HeyBeanTheme.muted,
                       height: 1.45,
@@ -149,6 +151,13 @@ class _SignupPaywallScreenState extends State<_SignupPaywallScreen> {
               ),
               const SizedBox(height: 12),
             ],
+            _CouponCodeCard(
+              key: const Key('signup-coupon-card'),
+              busy: widget.busyPlan == 'coupon',
+              disabled: _busy && widget.busyPlan != 'coupon',
+              onRedeem: widget.onRedeemCoupon,
+            ),
+            const SizedBox(height: 12),
             _ShellCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -392,6 +401,144 @@ class _SignupPlanCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _CouponCodeCard extends StatefulWidget {
+  const _CouponCodeCard({
+    super.key,
+    required this.busy,
+    required this.disabled,
+    required this.onRedeem,
+  });
+
+  final bool busy;
+  final bool disabled;
+  final Future<void> Function(String code) onRedeem;
+
+  @override
+  State<_CouponCodeCard> createState() => _CouponCodeCardState();
+}
+
+class _CouponCodeCardState extends State<_CouponCodeCard> {
+  final _controller = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final code = _controller.text.replaceAll(RegExp(r'\D'), '');
+    if (code.length != 6) {
+      setState(() => _error = 'Enter a 6-digit coupon code.');
+      return;
+    }
+    setState(() => _error = null);
+    try {
+      await widget.onRedeem(code);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'apply your coupon code',
+        );
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => _ShellCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: HeyBeanTheme.accent.withValues(alpha: .12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.confirmation_number_rounded,
+                color: HeyBeanTheme.accentStrong,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Have a coupon code?',
+                    style: TextStyle(
+                      color: HeyBeanTheme.text,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Apply a 6-digit influencer code for free Base access.',
+                    style: TextStyle(
+                      color: HeyBeanTheme.muted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                key: const Key('coupon-code-input'),
+                controller: _controller,
+                enabled: !widget.busy && !widget.disabled,
+                keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.done,
+                maxLength: 6,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: InputDecoration(
+                  labelText: 'Coupon code',
+                  counterText: '',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                onSubmitted: (_) {
+                  if (!widget.busy && !widget.disabled) unawaited(_submit());
+                },
+              ),
+            ),
+            const SizedBox(width: 10),
+            FilledButton(
+              key: const Key('coupon-code-apply-action'),
+              onPressed: widget.busy || widget.disabled ? null : _submit,
+              child: widget.busy
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Apply'),
+            ),
+          ],
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 10),
+          _InlinePlanLimitError(message: _error!),
+        ],
+      ],
+    ),
+  );
 }
 
 class _BillingIntervalToggle extends StatelessWidget {

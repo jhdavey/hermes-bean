@@ -8,6 +8,7 @@ class CommandCenterShell extends StatefulWidget {
     required this.launchExternalUrl,
     required this.updateAppIconBadge,
     required this.stripePaymentHandler,
+    required this.playBeanVoiceAudio,
     required this.onThemeChanged,
     required this.onThemeModeChanged,
     this.realtimeConversation,
@@ -18,6 +19,7 @@ class CommandCenterShell extends StatefulWidget {
   final ExternalUrlLauncher launchExternalUrl;
   final AppIconBadgeUpdater updateAppIconBadge;
   final StripePaymentHandler stripePaymentHandler;
+  final BeanVoiceAudioPlayer playBeanVoiceAudio;
   final ValueChanged<String> onThemeChanged;
   final ValueChanged<String> onThemeModeChanged;
   final BeanRealtimeConversation? realtimeConversation;
@@ -64,6 +66,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int _beanWorkEventFloorId = 0;
   bool _beanWorkFinalized = false;
   bool _beanWorkAcceptsOrphanPlanEvents = false;
+  bool _beanSpeechRestarting = false;
   final Set<int> _beanWorkAppliedEventIds = <int>{};
   final Set<int> _beanDashboardRefreshEventIds = <int>{};
   final Set<String> _beanWorkStagedCompletionIds = <String>{};
@@ -90,6 +93,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _onboardingTourVisible = false;
   int _onboardingTourStep = 0;
   bool _onboardingTourPendingPlanSelection = false;
+  bool _onboardingTourFinishWithImport = false;
   final Map<_OnboardingTourTarget, GlobalKey> _onboardingTourTargetKeys = {
     for (final target in _OnboardingTourTarget.values) target: GlobalKey(),
   };
@@ -102,6 +106,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   final stt.SpeechToText _beanSpeech = stt.SpeechToText();
   bool _beanSpeechReady = false;
   Future<HermesSession>? _beanVoiceStartFuture;
+  bool _beanVoiceReleaseHandlingStart = false;
   int _localMessageSequence = -1;
   late final BeanRealtimeConversation _realtimeConversation;
   final Set<int> _dismissedReminderBannerIds = <int>{};
@@ -199,6 +204,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _onboardingTourVisible = false;
     _onboardingTourStep = 0;
     _onboardingTourPendingPlanSelection = false;
+    _onboardingTourFinishWithImport = false;
   }
 
   void _rememberPendingTaskWrite(HermesTask task, int mutationVersion) {
@@ -756,6 +762,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _beanWorkItems = const [];
         _beanWorkFinalized = false;
         _beanWorkAcceptsOrphanPlanEvents = false;
+        _activeAssistantRunId = null;
         _activeBeanWorkMessageId = null;
         _beanWorkStagedCompletionIds.clear();
       });
@@ -1504,6 +1511,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (!_hasActiveBeanWorkContext) return;
     final ordered = [...events]
       ..sort((left, right) => left.id.compareTo(right.id));
+    final appliedEvents = <HermesActivityEvent>[];
     for (final event in ordered) {
       if (event.id <= _beanWorkEventFloorId ||
           _beanWorkAppliedEventIds.contains(event.id)) {
@@ -1514,6 +1522,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (!_beanWorkEventBelongsToActiveRequest(event, item)) continue;
       _beanWorkAppliedEventIds.add(event.id);
       _beanWorkEventFloorId = math.max(_beanWorkEventFloorId, event.id);
+      appliedEvents.add(event);
       final shouldStageCompletion =
           item.done &&
           !_beanWorkItems.any((existing) => existing.id == item.id) &&
@@ -1535,6 +1544,21 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         resolvedByEvent: true,
       );
     }
+    _finalizeBeanWorkFromCompletedMutationEvents(appliedEvents);
+  }
+
+  void _finalizeBeanWorkFromCompletedMutationEvents(
+    List<HermesActivityEvent> events,
+  ) {
+    if (_beanWorkFinalized || events.isEmpty) return;
+    if (_beanWorkItems.isEmpty || _beanWorkItems.any((item) => !item.done)) {
+      return;
+    }
+    if (!events.any(_beanActivityEventMutatesDashboard)) return;
+    _beanWorkFinalized = true;
+    _activeAssistantRunId = null;
+    _chatRunState = 'Updated';
+    _scheduleBeanWorkStatusClearIfDone();
   }
 
   bool get _hasActiveBeanWorkContext =>
@@ -2488,6 +2512,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     String billingInterval,
   ) async {
     if (_checkoutBusyPlan != null) return;
+    final shouldLaunchTourAfterCheckout = _phase == _AuthPhase.guidedOnboarding;
     setState(() {
       _checkoutBusyPlan = plan;
       _checkoutError = null;
@@ -2514,6 +2539,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _checkoutError = null;
       });
       await _loadSignedIn(loadingStatusText: 'Preparing your dashboard...');
+      if (shouldLaunchTourAfterCheckout &&
+          mounted &&
+          _phase == _AuthPhase.signedIn) {
+        _showOnboardingTour(finishWithImport: true);
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -2525,6 +2555,39 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                 action: 'start your subscription',
               );
       });
+    }
+  }
+
+  Future<void> _redeemCouponCodeForSignup(String code) async {
+    if (_checkoutBusyPlan != null) return;
+    final shouldLaunchTourAfterCoupon = _phase == _AuthPhase.guidedOnboarding;
+    setState(() {
+      _checkoutBusyPlan = 'coupon';
+      _checkoutError = null;
+    });
+    try {
+      await widget.apiClient.redeemCouponCode(code: code);
+      if (!mounted) return;
+      setState(() {
+        _checkoutBusyPlan = null;
+        _checkoutError = null;
+      });
+      await _loadSignedIn(loadingStatusText: 'Applying your coupon...');
+      if (shouldLaunchTourAfterCoupon &&
+          mounted &&
+          _phase == _AuthPhase.signedIn) {
+        _showOnboardingTour(finishWithImport: true);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _checkoutBusyPlan = null;
+        _checkoutError = beanFriendlyErrorMessage(
+          error,
+          action: 'apply your coupon code',
+        );
+      });
+      rethrow;
     }
   }
 
@@ -2726,8 +2789,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _showOnboardingTour();
   }
 
-  void _showOnboardingTour({bool pendingPlanSelection = false}) {
-    _activateOnboardingTourStep(0, pendingPlanSelection: pendingPlanSelection);
+  void _showOnboardingTour({
+    bool pendingPlanSelection = false,
+    bool finishWithImport = false,
+  }) {
+    _activateOnboardingTourStep(
+      0,
+      pendingPlanSelection: pendingPlanSelection,
+      finishWithImport: finishWithImport,
+    );
     if (_phase == _AuthPhase.signedIn) {
       unawaited(
         _loadSecondarySignedInData(
@@ -2738,7 +2808,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
-  void _activateOnboardingTourStep(int index, {bool? pendingPlanSelection}) {
+  void _activateOnboardingTourStep(
+    int index, {
+    bool? pendingPlanSelection,
+    bool? finishWithImport,
+  }) {
     final boundedIndex = index.clamp(0, _appOnboardingTourSteps.length - 1);
     final step = _appOnboardingTourSteps[boundedIndex];
     setState(() {
@@ -2746,6 +2820,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _onboardingTourStep = boundedIndex;
       if (pendingPlanSelection != null) {
         _onboardingTourPendingPlanSelection = pendingPlanSelection;
+      }
+      if (finishWithImport != null) {
+        _onboardingTourFinishWithImport = finishWithImport;
       }
       _selectedDestination = step.destination;
       _clearPlanLimitError();
@@ -2775,11 +2852,13 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   Future<void> _markOnboardingTourSeenAndClose() async {
     final user = _user;
     final showPlanSelection = _onboardingTourPendingPlanSelection;
+    final showImport = _onboardingTourFinishWithImport && !showPlanSelection;
     if (mounted) {
       setState(() {
         _onboardingTourVisible = false;
         _onboardingTourStep = 0;
         _onboardingTourPendingPlanSelection = false;
+        _onboardingTourFinishWithImport = false;
         if (showPlanSelection) {
           _phase = _AuthPhase.planSelection;
           _selectedDestination = _HomeDestination.bean;
@@ -2791,6 +2870,41 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_onboardingTourSeenPreferenceKey(user), true);
     }
+    if (showImport && mounted) {
+      await _openExternalCalendarImportSheet();
+    }
+  }
+
+  Future<void> _openExternalCalendarImportSheet() async {
+    final user = _user;
+    if (user == null) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            0,
+            20,
+            MediaQuery.viewInsetsOf(context).bottom + 24,
+          ),
+          child: _ShellCard(
+            child: _ExternalCalendarImportCard(
+              apiClient: widget.apiClient,
+              user: user,
+              title: 'Last step: import your calendar',
+              compact: true,
+              onImported: () async {
+                await _refreshSignedInViews();
+              },
+              onSkipped: () => Navigator.of(context).maybePop(),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<HermesSessionDetails?> _loadDailySessionForUser(
@@ -2922,6 +3036,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() {
       _beanVoiceListening = true;
       _beanVoiceDraft = '';
+      _beanVoiceReleaseHandlingStart = false;
       _editingChatMessageId = null;
       _chatInputController.clear();
       _error = null;
@@ -2939,6 +3054,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       unawaited(
         startFuture.then<void>(
           (realtimeSession) {
+            if (!identical(_beanVoiceStartFuture, startFuture)) {
+              return;
+            }
             if (!mounted) return;
             setState(() {
               _session = realtimeSession;
@@ -2946,6 +3064,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             });
           },
           onError: (Object error) async {
+            if (!identical(_beanVoiceStartFuture, startFuture)) {
+              return;
+            }
+            if (_beanVoiceReleaseHandlingStart) {
+              return;
+            }
             _beanVoiceStartFuture = null;
             await _beanSpeech.cancel();
             await _realtimeConversation.stop();
@@ -2969,17 +3093,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _beanSpeechReady =
             _beanSpeechReady ||
             await _beanSpeech.initialize(
-              onError: (_) {
-                if (!mounted) return;
-                setState(() {
-                  _beanVoiceListening = false;
-                  _beanVoiceDraft = null;
-                  _chatInputController.clear();
-                  _chatRunState = 'Voice unavailable';
-                  _error =
-                      'Voice input is not available. Type the request and Bean will handle it from chat.';
-                });
-              },
+              onError: _handleBeanSpeechError,
               onStatus: (status) {
                 if (!mounted || !_beanVoiceListening) return;
                 if (status == 'done' || status == 'notListening') {
@@ -2988,22 +3102,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               },
             );
         if (_beanSpeechReady) {
-          await _beanSpeech.listen(
-            listenOptions: stt.SpeechListenOptions(
-              partialResults: true,
-              listenMode: stt.ListenMode.dictation,
-              pauseFor: const Duration(seconds: 30),
-              listenFor: const Duration(seconds: 60),
-            ),
-            onResult: (result) {
-              if (!mounted || !_beanVoiceListening) return;
-              final transcript = result.recognizedWords.trim();
-              setState(() {
-                _beanVoiceDraft = transcript;
-                _chatRunState = 'Listening';
-              });
-            },
-          );
+          await _listenForBeanSpeechDraft();
         }
       } catch (_) {
         // Keep the realtime session available; release will fall back to chat
@@ -3019,6 +3118,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       setState(() {
         _beanVoiceListening = false;
         _beanVoiceDraft = null;
+        _beanVoiceReleaseHandlingStart = false;
         _chatInputController.clear();
         _chatRunState = 'Voice unavailable';
         _beanWorkItems = const [];
@@ -3028,6 +3128,60 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             'Voice is not available right now. Type the request and Bean will handle it from chat.';
       });
     }
+  }
+
+  void _handleBeanSpeechError(Object error) {
+    if (!mounted || !_beanVoiceListening) return;
+    final transient =
+        error is speech_error.SpeechRecognitionError &&
+        error.permanent == false;
+    if (transient) {
+      setState(() => _chatRunState = 'Listening');
+      unawaited(_restartBeanSpeechDraftCapture());
+      return;
+    }
+    setState(() {
+      _beanVoiceListening = false;
+      _beanVoiceDraft = null;
+      _chatInputController.clear();
+      _chatRunState = 'Voice unavailable';
+      _error =
+          'Voice input is not available. Type the request and Bean will handle it from chat.';
+    });
+  }
+
+  Future<void> _restartBeanSpeechDraftCapture() async {
+    if (_beanSpeechRestarting || !_beanSpeechReady || !_beanVoiceListening) {
+      return;
+    }
+    _beanSpeechRestarting = true;
+    try {
+      await _listenForBeanSpeechDraft();
+    } catch (_) {
+      // Realtime voice remains available; release will fall back if needed.
+    } finally {
+      _beanSpeechRestarting = false;
+    }
+  }
+
+  Future<void> _listenForBeanSpeechDraft() async {
+    if (!_beanSpeechReady || !_beanVoiceListening) return;
+    await _beanSpeech.listen(
+      listenOptions: stt.SpeechListenOptions(
+        partialResults: true,
+        listenMode: stt.ListenMode.dictation,
+        pauseFor: const Duration(seconds: 30),
+        listenFor: const Duration(seconds: 60),
+      ),
+      onResult: (result) {
+        if (!mounted || !_beanVoiceListening) return;
+        final transcript = result.recognizedWords.trim();
+        setState(() {
+          _beanVoiceDraft = transcript;
+          _chatRunState = 'Listening';
+        });
+      },
+    );
   }
 
   void _updateBeanVoiceDraft(String draft) {
@@ -3084,6 +3238,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       setState(() {
         _beanVoiceListening = false;
         _beanVoiceDraft = null;
+        _beanVoiceReleaseHandlingStart = false;
         _editingChatMessageId = null;
         _chatInputController.clear();
         _chatRunState = 'Ready';
@@ -3154,6 +3309,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() {
       _beanVoiceListening = false;
       _beanVoiceDraft = null;
+      _beanVoiceReleaseHandlingStart = dictated.isNotEmpty;
       _chatInputController.clear();
       _chatRunState = dictated.isEmpty ? 'Ready' : 'Bean is responding...';
       _beanWorkItems = const [];
@@ -3162,36 +3318,61 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (dictated.isEmpty) {
       await _realtimeConversation.stop();
       _beanVoiceStartFuture = null;
+      _beanVoiceReleaseHandlingStart = false;
       return;
     }
 
+    _beanVoiceStartFuture = null;
+    _beanVoiceReleaseHandlingStart = false;
+    if (startFuture != null) {
+      unawaited(
+        startFuture
+            .then((_) => _realtimeConversation.stop())
+            .catchError((_) {}),
+      );
+    }
+    unawaited(_realtimeConversation.stop());
+    setState(() {
+      _chatRunState = 'Bean is working...';
+      _error = null;
+    });
+    unawaited(_sendVoiceFallbackChat(dictated));
+  }
+
+  Future<void> _sendVoiceFallbackChat(String dictated) async {
+    final existingAssistantIds = _messages
+        .where((message) => message.role == 'assistant')
+        .map((message) => message.id)
+        .toSet();
+    await _sendChat(dictated);
+    if (!mounted) return;
+
+    HermesMessage? assistantMessage;
+    for (final message in _messages.reversed) {
+      if (message.role != 'assistant') continue;
+      if (existingAssistantIds.contains(message.id)) break;
+      assistantMessage = message;
+      break;
+    }
+    final text = beanSafeAssistantDisplayContent(
+      assistantMessage?.content ?? '',
+    ).trim();
+    if (text.isEmpty) return;
+    await _speakBeanFallbackText(text);
+  }
+
+  Future<void> _speakBeanFallbackText(String text) async {
     try {
-      final realtimeSession = startFuture == null
-          ? await _realtimeConversation.start(
-              sessionId: _session?.id,
-              workspaceId: _user?.activeWorkspace?.numericId,
-              metadata: _flutterChatMetadata(),
-              microphoneEnabled: false,
-            )
-          : await startFuture;
-      _beanVoiceStartFuture = null;
-      if (!mounted) return;
-      setState(() => _session = realtimeSession);
-      await _realtimeConversation.sendText(
-        dictated,
-        audioResponse: true,
-        endConversationAfterResponse: true,
+      final audio = await widget.apiClient.synthesizeSpeech(
+        text: text,
+        workspaceId: _user?.activeWorkspace?.numericId,
+      );
+      await widget.playBeanVoiceAudio(
+        audio.bytes,
+        contentType: audio.contentType,
       );
     } catch (error) {
-      _beanVoiceStartFuture = null;
-      await _realtimeConversation.stop();
-      if (!mounted) return;
-      final limitMessage = _subscriptionLimitMessageFromError(error);
-      setState(() {
-        _chatRunState = 'Bean is working...';
-        if (limitMessage != null) _error = limitMessage;
-      });
-      unawaited(_sendChat(dictated));
+      debugPrint('Bean voice TTS fallback failed: $error');
     }
   }
 
@@ -5128,7 +5309,9 @@ ${_truncateDiagnostic(stack, 2200)}
     List<Object> syncToWorkspaceIds = const [],
   }) {
     final normalizedDueAt = _taskReminderInputToWireValue(dueAt);
-    final normalizedColor = category == null ? _themeCategoryColorHex() : color;
+    final normalizedColor = _isHexColor(color)
+        ? color!.trim().toUpperCase()
+        : _themeCategoryColorHex();
     final metadata = <String, Object?>{
       ...?task?.metadata,
       ...?recurrenceMetadata,
@@ -5470,7 +5653,9 @@ ${_truncateDiagnostic(stack, 2200)}
       if (mounted) setState(() => _error = 'Reminder time is required.');
       return Future<void>.value();
     }
-    final normalizedColor = category == null ? _themeCategoryColorHex() : color;
+    final normalizedColor = _isHexColor(color)
+        ? color!.trim().toUpperCase()
+        : _themeCategoryColorHex();
     final metadata = <String, Object?>{
       ...?reminder?.metadata,
       ...?recurrenceMetadata,
@@ -6019,7 +6204,9 @@ ${_truncateDiagnostic(stack, 2200)}
   }) {
     final wireStartsAt = _calendarEventWireValueToUtcIso(startsAt) ?? startsAt;
     final wireEndsAt = _calendarEventWireValueToUtcIso(endsAt);
-    final normalizedColor = category == null ? _themeCategoryColorHex() : color;
+    final normalizedColor = _isHexColor(color)
+        ? color!.trim().toUpperCase()
+        : _themeCategoryColorHex();
     final previousCalendar = _calendar;
     final optimisticEvent = HermesCalendarEvent(
       id: _nextLocalResourceId(),
@@ -6227,7 +6414,9 @@ ${_truncateDiagnostic(stack, 2200)}
   }) {
     final wireStartsAt = _calendarEventWireValueToUtcIso(startsAt) ?? startsAt;
     final wireEndsAt = _calendarEventWireValueToUtcIso(endsAt);
-    final normalizedColor = category == null ? _themeCategoryColorHex() : color;
+    final normalizedColor = _isHexColor(color)
+        ? color!.trim().toUpperCase()
+        : _themeCategoryColorHex();
     final previousCalendar = _calendar;
     final optimisticEvent = event.copyWith(
       title: title,
@@ -7001,7 +7190,7 @@ ${_truncateDiagnostic(stack, 2200)}
                               verticalPadding: 7,
                               labelStyle: TextStyle(
                                 fontSize: 13,
-                                fontWeight: FontWeight.w800,
+                                fontWeight: FontWeight.normal,
                               ),
                               onTap: _returnToToday,
                             ),
@@ -7017,7 +7206,7 @@ ${_truncateDiagnostic(stack, 2200)}
                                 verticalPadding: 7,
                                 labelStyle: TextStyle(
                                   fontSize: 13,
-                                  fontWeight: FontWeight.w800,
+                                  fontWeight: FontWeight.normal,
                                 ),
                                 onTap: _openCurrentCalendarMonth,
                               ),
@@ -7115,7 +7304,9 @@ ${_truncateDiagnostic(stack, 2200)}
                 targetKeys: _onboardingTourTargetKeys,
                 primaryLabel:
                     _onboardingTourStep >= _appOnboardingTourSteps.length - 1
-                    ? (_onboardingTourPendingPlanSelection
+                    ? (_onboardingTourFinishWithImport
+                          ? 'Import calendar'
+                          : _onboardingTourPendingPlanSelection
                           ? 'Plan setup'
                           : 'Finish')
                     : 'Next',
@@ -7174,6 +7365,7 @@ ${_truncateDiagnostic(stack, 2200)}
         onSavePreferences: _saveGuidedOnboardingPreferences,
         onLaunchLiveTour: _launchGuidedLiveTour,
         onSelectPlan: _startTrialCheckoutForInterval,
+        onRedeemCoupon: _redeemCouponCodeForSignup,
         onContactEnterprise: () {
           widget.launchExternalUrl(_enterpriseContactUrl);
         },
@@ -7194,6 +7386,7 @@ ${_truncateDiagnostic(stack, 2200)}
         busyPlan: _checkoutBusyPlan,
         error: _checkoutError,
         onSelectPlan: _startTrialCheckoutForInterval,
+        onRedeemCoupon: _redeemCouponCodeForSignup,
         onContactEnterprise: () {
           widget.launchExternalUrl(_enterpriseContactUrl);
         },

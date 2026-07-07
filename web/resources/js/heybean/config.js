@@ -18,13 +18,14 @@ export const themeModes = [
     ];
 export const themeModesByKey = new Map(themeModes.map((mode) => [mode.key, mode]));
 export const systemDarkScheme = window.matchMedia?.('(prefers-color-scheme: dark)');
+export const subscriptionTrialDays = 7;
 export const subscriptionPlans = {
         base: {
             label: 'Base',
             price: '$4.99',
             yearlyPrice: '$49.99',
             summary: '2 workspaces, up to 10 Notes, Bean chat and voice, connected calendar planning, push reminders, and recent context.',
-            trial: 'Base 14-day free trial selected',
+            trial: `Base ${subscriptionTrialDays}-day free trial selected`,
             bestFor: 'For getting your personal day into one organized place.',
             features: [
                 'Tasks, reminders, calendar, chat, and voice',
@@ -38,7 +39,7 @@ export const subscriptionPlans = {
             price: '$19.99',
             yearlyPrice: '$199.99',
             summary: '5 workspaces, expanded Bean capacity, unlimited Notes, email reminders, recurring routines, multiple calendars, and 1 year of history.',
-            trial: 'Premium 14-day free trial selected',
+            trial: `Premium ${subscriptionTrialDays}-day free trial selected`,
             bestFor: 'Best for busy households and daily routines.',
             popular: true,
             features: [
@@ -53,7 +54,7 @@ export const subscriptionPlans = {
             price: '$49.99',
             yearlyPrice: '$499.99',
             summary: 'Unlimited workspaces, maximum Bean capacity, unlimited Notes, unlimited connected accounts, full history, and priority background work.',
-            trial: 'Pro 14-day free trial selected',
+            trial: `Pro ${subscriptionTrialDays}-day free trial selected`,
             bestFor: 'For running Bean across every part of life.',
             features: [
                 'Unlimited workspaces and connected accounts',

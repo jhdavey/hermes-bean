@@ -128,6 +128,11 @@ class _SettingsView extends StatelessWidget {
               apiClient: apiClient,
               launchExternalUrl: launchExternalUrl,
             ),
+            _ExternalCalendarImportCard(
+              apiClient: apiClient,
+              user: user,
+              onImported: onWorkspacesChanged,
+            ),
             _CalendarPreferencesCard(
               startHour: calendarStartHour,
               endHour: calendarEndHour,
@@ -211,6 +216,7 @@ class _BillingSettingsCard extends StatefulWidget {
 }
 
 class _BillingSettingsCardState extends State<_BillingSettingsCard> {
+  final _couponController = TextEditingController();
   HermesBillingPaymentMethod? _paymentMethod;
   HermesSubscriptionSummary? _subscription;
   bool _loadingPaymentMethod = true;
@@ -222,6 +228,12 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
   String get _planLabel => _subscriptionPlanLabel(
     _subscription?.tier ?? widget.user.subscriptionTier,
   );
+
+  @override
+  void dispose() {
+    _couponController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -459,6 +471,44 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
     }
   }
 
+  Future<void> _redeemCouponCode() async {
+    if (_busy) return;
+    final code = _couponController.text.replaceAll(RegExp(r'\D'), '');
+    if (code.length != 6) {
+      setState(() {
+        _error = 'Enter a 6-digit coupon code.';
+        _message = null;
+      });
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+      _message = 'Applying coupon...';
+    });
+    try {
+      final result = await widget.apiClient.redeemCouponCode(code: code);
+      if (!mounted) return;
+      _couponController.clear();
+      setState(() {
+        _subscription = result.subscription;
+        _message = _couponAppliedMessage(result.subscription);
+      });
+      await widget.onBillingChanged();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'apply your coupon code',
+        );
+        _message = null;
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final subscription = _currentSubscription;
@@ -587,6 +637,60 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
             _SuccessNotice(message: _message!),
           ],
           const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _quietMutedSurfaceColor(alpha: .32),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _quietBorderColor(alpha: .32)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Coupon code',
+                  style: TextStyle(
+                    color: HeyBeanTheme.text,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        key: const Key('settings-coupon-code-input'),
+                        controller: _couponController,
+                        enabled: !_busy,
+                        keyboardType: TextInputType.number,
+                        textInputAction: TextInputAction.done,
+                        maxLength: 6,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        decoration: InputDecoration(
+                          labelText: '6-digit code',
+                          counterText: '',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        onSubmitted: (_) => unawaited(_redeemCouponCode()),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      key: const Key('settings-apply-coupon-action'),
+                      onPressed: _busy ? null : _redeemCouponCode,
+                      icon: Icon(Icons.confirmation_number_rounded),
+                      label: Text('Apply'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -664,6 +768,13 @@ String? _subscriptionRenewalLine(HermesSubscriptionSummary subscription) {
 String? _formatBillingDate(String? value) {
   final parsed = _parseCalendarEventDateTime(value);
   return parsed == null ? null : _formatCalendarDateLabel(parsed);
+}
+
+String _couponAppliedMessage(HermesSubscriptionSummary subscription) {
+  final label = _formatBillingDate(subscription.baseCompExpiresAt);
+  return label == null
+      ? 'Coupon applied. Base access is active.'
+      : 'Coupon applied. Free Base access runs through $label.';
 }
 
 class _PlanBillingChoice {
@@ -2703,6 +2814,335 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
                     connected ? 'Connect another calendar' : 'Connect Calendar',
                   ),
                 ),
+              ],
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+class _ExternalCalendarImportCard extends StatefulWidget {
+  const _ExternalCalendarImportCard({
+    required this.apiClient,
+    required this.user,
+    required this.onImported,
+    this.title = 'Import External Calendar',
+    this.onSkipped,
+    this.compact = false,
+  });
+
+  final HermesApiClient apiClient;
+  final HermesUser user;
+  final Future<void> Function() onImported;
+  final String title;
+  final VoidCallback? onSkipped;
+  final bool compact;
+
+  @override
+  State<_ExternalCalendarImportCard> createState() =>
+      _ExternalCalendarImportCardState();
+}
+
+class _ExternalCalendarImportCardState
+    extends State<_ExternalCalendarImportCard> {
+  final TextEditingController _urlController = TextEditingController();
+  late Future<List<ExternalCalendarProviderPreset>> _providersFuture;
+  ExternalCalendarProviderPreset? _selectedProvider;
+  bool _busy = false;
+  String? _error;
+  String? _message;
+
+  int? get _workspaceId =>
+      widget.user.activeWorkspace?.numericId ?? widget.user.defaultWorkspaceId;
+
+  String get _workspaceName =>
+      widget.user.activeWorkspace?.name ??
+      _workspaceNameForId(widget.user.workspaces, _workspaceId) ??
+      'current workspace';
+
+  @override
+  void initState() {
+    super.initState();
+    _providersFuture = widget.apiClient.listExternalCalendarProviders();
+  }
+
+  @override
+  void dispose() {
+    _urlController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim();
+    if (text == null || text.isEmpty) return;
+    setState(() {
+      _urlController.text = text;
+      _error = null;
+    });
+  }
+
+  Future<void> _import() async {
+    final url = _urlController.text.trim();
+    if (url.isEmpty || _busy) {
+      setState(() => _error = 'Paste a calendar link first.');
+      return;
+    }
+    final provider = _selectedProvider;
+    if (provider == null) {
+      setState(() => _error = 'Choose a calendar provider first.');
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
+      _message = null;
+    });
+
+    try {
+      final result = await widget.apiClient.importExternalCalendar(
+        providerKey: provider.key,
+        url: url,
+        workspaceId: _workspaceId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _message = _externalImportMessage(result, provider);
+        _urlController.clear();
+      });
+      await widget.onImported();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'import external calendar',
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  String _externalImportMessage(
+    ExternalCalendarImportResult result,
+    ExternalCalendarProviderPreset provider,
+  ) {
+    final created = result.imported;
+    final updated = result.updated;
+    final deleted = result.deleted;
+    final skipped = result.skipped;
+    final parts = <String>[
+      if (created > 0) '$created new',
+      if (updated > 0) '$updated updated',
+      if (deleted > 0) '$deleted removed',
+      if (skipped > 0) '$skipped skipped',
+    ];
+    final summary = parts.isEmpty ? 'No changes' : parts.join(', ');
+    return '$summary from ${result.providerLabel ?? provider.label} into $_workspaceName.';
+  }
+
+  String? _workspaceNameForId(List<HermesWorkspace> workspaces, int? id) {
+    if (id == null) return null;
+    for (final workspace in workspaces) {
+      if (workspace.numericId == id) return workspace.name;
+    }
+
+    return null;
+  }
+
+  ExternalCalendarProviderPreset _defaultProvider(
+    List<ExternalCalendarProviderPreset> providers,
+  ) {
+    final selected = _selectedProvider;
+    if (selected != null && providers.any((item) => item.key == selected.key)) {
+      return selected;
+    }
+    return providers.firstWhere(
+      (provider) => provider.key == 'apple',
+      orElse: () => providers.first,
+    );
+  }
+
+  IconData _providerIcon(String key) => switch (key) {
+    'apple' => Icons.phone_iphone_rounded,
+    'google' => Icons.calendar_month_rounded,
+    'outlook' => Icons.mail_outline_rounded,
+    'proton' => Icons.lock_outline_rounded,
+    'yahoo' => Icons.alternate_email_rounded,
+    'fastmail' => Icons.mark_email_read_rounded,
+    'nextcloud' => Icons.cloud_queue_rounded,
+    _ => Icons.event_note_rounded,
+  };
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) => FutureBuilder<List<ExternalCalendarProviderPreset>>(
+    future: _providersFuture,
+    builder: (context, snapshot) {
+      final providers = snapshot.data ?? const [];
+      final loading = snapshot.connectionState != ConnectionState.done;
+      final selected = providers.isEmpty ? null : _defaultProvider(providers);
+      if (_selectedProvider == null && selected != null) {
+        _selectedProvider = selected;
+      }
+
+      return Container(
+        key: const Key('external-calendar-import-settings'),
+        margin: EdgeInsets.only(bottom: widget.compact ? 0 : 10),
+        padding: widget.compact
+            ? const EdgeInsets.all(0)
+            : const EdgeInsets.symmetric(vertical: 14),
+        decoration: widget.compact ? null : _sectionDividerDecoration(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: HeyBeanTheme.accent.withValues(alpha: .10),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: HeyBeanTheme.accent.withValues(alpha: .24),
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.calendar_month_rounded,
+                    color: HeyBeanTheme.accentStrong,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.title,
+                        style: TextStyle(
+                          color: HeyBeanTheme.text,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        selected == null
+                            ? 'Choose a provider, paste a public calendar link, and import events into $_workspaceName.'
+                            : '${selected.description} Imports go into $_workspaceName.',
+                        style: TextStyle(
+                          color: HeyBeanTheme.muted,
+                          fontWeight: FontWeight.w500,
+                          height: 1.25,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _InfoIconButton(
+                  key: const Key('external-calendar-import-info'),
+                  title: widget.title,
+                  bullets: selected?.instructions.isNotEmpty == true
+                      ? selected!.instructions
+                      : const [
+                          'Choose the calendar app you use.',
+                          'Paste a public iCal, ICS, or webcal link.',
+                          'The link is used for import only. HeyBean does not get account access.',
+                        ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (loading)
+              const LinearProgressIndicator(minHeight: 3)
+            else if (providers.isEmpty)
+              _InlinePlanLimitError(
+                message:
+                    'Calendar import options could not load. Try again in a moment.',
+              )
+            else ...[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final provider in providers)
+                    ChoiceChip(
+                      key: Key('external-calendar-provider-${provider.key}'),
+                      selected: selected?.key == provider.key,
+                      avatar: Icon(_providerIcon(provider.key), size: 18),
+                      label: Text(provider.label),
+                      onSelected: _busy
+                          ? null
+                          : (_) => setState(() {
+                              _selectedProvider = provider;
+                              _error = null;
+                            }),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                key: const Key('external-calendar-url-field'),
+                controller: _urlController,
+                enabled: !_busy,
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _import(),
+                decoration: InputDecoration(
+                  labelText: selected?.linkLabel ?? 'Calendar link',
+                  hintText:
+                      selected?.linkHint ?? 'webcal://example.com/calendar.ics',
+                  prefixIcon: Icon(Icons.link_rounded),
+                  suffixIcon: IconButton(
+                    key: const Key('external-calendar-paste-action'),
+                    tooltip: 'Paste link',
+                    onPressed: _busy ? null : _pasteFromClipboard,
+                    icon: Icon(Icons.content_paste_rounded),
+                  ),
+                ),
+              ),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              _InlinePlanLimitError(message: _error!),
+            ],
+            if (_message != null) ...[
+              const SizedBox(height: 10),
+              _SuccessNotice(message: _message!),
+            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  key: const Key('external-calendar-import-action'),
+                  onPressed: _busy || providers.isEmpty ? null : _import,
+                  icon: _busy
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(Icons.file_download_done_rounded),
+                  label: Text(
+                    _busy
+                        ? 'Importing...'
+                        : 'Import ${selected?.label ?? 'Calendar'}',
+                  ),
+                ),
+                if (widget.onSkipped != null)
+                  TextButton(
+                    key: const Key('external-calendar-skip-action'),
+                    onPressed: _busy ? null : widget.onSkipped,
+                    child: Text('Skip for now'),
+                  ),
               ],
             ),
           ],

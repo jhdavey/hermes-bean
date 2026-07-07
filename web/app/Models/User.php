@@ -8,12 +8,13 @@ use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'email', 'password', 'onboard_complete', 'is_admin', 'subscription_tier', 'default_workspace_id', 'notification_preferences', 'theme', 'theme_mode', 'command_center_label', 'preferred_map_app', 'stripe_customer_id', 'stripe_subscription_id', 'stripe_subscription_item_id', 'stripe_price_id', 'subscription_status', 'subscription_current_period_end', 'subscription_trial_ends_at', 'subscription_cancel_at_period_end'])]
+#[Fillable(['name', 'email', 'password', 'onboard_complete', 'is_admin', 'subscription_tier', 'default_workspace_id', 'notification_preferences', 'theme', 'theme_mode', 'command_center_label', 'preferred_map_app', 'stripe_customer_id', 'stripe_subscription_id', 'stripe_subscription_item_id', 'stripe_price_id', 'subscription_status', 'subscription_current_period_end', 'base_comp_expires_at', 'base_comp_source_coupon_code_id', 'subscription_trial_ends_at', 'subscription_cancel_at_period_end'])]
 #[Hidden(['password', 'remember_token', 'stripe_customer_id', 'stripe_subscription_id', 'stripe_subscription_item_id', 'stripe_price_id'])]
 class User extends Authenticatable implements MustVerifyEmail
 {
@@ -29,6 +30,7 @@ class User extends Authenticatable implements MustVerifyEmail
             'is_admin' => 'boolean',
             'notification_preferences' => 'array',
             'subscription_current_period_end' => 'datetime',
+            'base_comp_expires_at' => 'datetime',
             'subscription_trial_ends_at' => 'datetime',
             'subscription_cancel_at_period_end' => 'boolean',
         ];
@@ -59,6 +61,11 @@ class User extends Authenticatable implements MustVerifyEmail
     public function issueReports(): HasMany
     {
         return $this->hasMany(IssueReport::class);
+    }
+
+    public function baseCompSourceCouponCode(): BelongsTo
+    {
+        return $this->belongsTo(CouponCode::class, 'base_comp_source_coupon_code_id');
     }
 
     public function getNotificationPreferencesAttribute($value): array

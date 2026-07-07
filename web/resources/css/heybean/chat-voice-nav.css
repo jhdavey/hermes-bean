@@ -494,17 +494,17 @@
     height: 28px;
     display: inline-grid;
     place-items: center;
-    border: 1px solid rgba(var(--hb-accent-rgb), .18);
+    border: 0;
     border-radius: 999px;
-    background: color-mix(in srgb, var(--hb-surface) 72%, transparent);
-    color: var(--hb-accent-strong);
+    background: transparent;
+    color: var(--hb-muted);
     cursor: pointer;
+    transition: color .16s ease, transform .16s ease;
 }
 
 .hb-message-icon-action:hover {
-    border-color: rgba(var(--hb-accent-rgb), .34);
-    background: rgba(var(--hb-accent-rgb), .14);
     color: var(--hb-text);
+    transform: translateY(-1px);
 }
 
 .hb-message-icon-action svg {

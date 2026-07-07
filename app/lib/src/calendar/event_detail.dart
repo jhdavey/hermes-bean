@@ -281,8 +281,8 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         .map((category) => category.color)
         .firstOrNull;
     final initialColor = (event.category ?? '').trim().isEmpty
-        ? _themeCategoryColorHex()
-        : event.color ?? matchingCategoryColor;
+        ? event.color ?? _themeCategoryColorHex()
+        : matchingCategoryColor ?? event.color;
     _color = _isHexColor(initialColor)
         ? initialColor!.toUpperCase()
         : _themeCategoryColorHex();
@@ -1661,6 +1661,30 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                                   ),
                               ],
                             ),
+                          if (_category.text.trim().isEmpty) ...[
+                            const _EventFieldLabel(
+                              icon: Icons.palette_outlined,
+                              label: 'Color',
+                            ),
+                            Wrap(
+                              key: const Key('event-no-category-colors'),
+                              spacing: 10,
+                              runSpacing: 10,
+                              children: [
+                                for (final color in _colors)
+                                  _ColorSwatchButton(
+                                    label: color.label,
+                                    color: _colorFromHex(color.value),
+                                    selected:
+                                        _color.toUpperCase() ==
+                                        color.value.toUpperCase(),
+                                    onTap: () => setState(() {
+                                      _color = color.value.toUpperCase();
+                                    }),
+                                  ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                       const SizedBox(height: 14),

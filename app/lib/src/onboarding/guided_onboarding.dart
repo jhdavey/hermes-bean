@@ -61,6 +61,7 @@ class _GuidedBeanOnboardingScreen extends StatefulWidget {
     required this.onSavePreferences,
     required this.onLaunchLiveTour,
     required this.onSelectPlan,
+    required this.onRedeemCoupon,
     required this.onContactEnterprise,
     required this.onBackToLogin,
     required this.onPreviewThemeMode,
@@ -74,6 +75,7 @@ class _GuidedBeanOnboardingScreen extends StatefulWidget {
   final _GuidedSavePreferences onSavePreferences;
   final Future<void> Function() onLaunchLiveTour;
   final Future<void> Function(String plan, String billingInterval) onSelectPlan;
+  final Future<void> Function(String code) onRedeemCoupon;
   final VoidCallback onContactEnterprise;
   final VoidCallback onBackToLogin;
   final ValueChanged<String> onPreviewThemeMode;
@@ -460,17 +462,20 @@ class _GuidedBeanOnboardingScreenState
       await _respondBean(
         city == null
             ? _nextResponseVariation([
-                'No problem. I will continue without location. Would you like me to show you how to use your dashboard, or send you straight in?',
-                'That is okay. We can skip location for now. Want a quick dashboard tour, or should I take you straight to setup your plan?',
-                'No worries. You can add location later. Would you like a short dashboard tour before plan setup?',
+                'No problem. I will continue without location. Next, choose your plan so your $_subscriptionTrialLabel is ready. After that I will show you the dashboard and help import your calendar.',
+                'That is okay. We can skip location for now. Let us set up your $_subscriptionTrialLabel first, then I will give you the quick tour and calendar import step.',
+                'No worries. You can add location later. Next is plan setup, then I will show you around and help bring in your calendar.',
               ])
             : _nextResponseVariation([
-                'Great, I will keep $city in mind for weather related topics. Next, would you like me to show you how to use your dashboard, or just send you straight in?',
-                'Thanks. I will remember $city for weather and local planning. Want a quick dashboard tour, or should we go straight to plan setup?',
-                'Got it — I will use $city for local context. Would you like me to show you the dashboard next?',
+                'Great, I will keep $city in mind for weather related topics. Next, choose your plan so your $_subscriptionTrialLabel is ready. After that I will show you the dashboard and help import your calendar.',
+                'Thanks. I will remember $city for weather and local planning. Let us set up your $_subscriptionTrialLabel first, then I will give you the quick tour and calendar import step.',
+                'Got it — I will use $city for local context. Next is plan setup, then I will show you around and help bring in your calendar.',
               ]),
+        scrollBehavior: _GuidedScrollBehavior.none,
+        widgetKey: _planIntroKey,
       );
-      setState(() => _step = _GuidedOnboardingStep.tourChoice);
+      setState(() => _step = _GuidedOnboardingStep.plan);
+      _scrollPlanIntroIntoView();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -495,12 +500,15 @@ class _GuidedBeanOnboardingScreenState
       setState(() => _busy = false);
       await _respondBean(
         _nextResponseVariation([
-          'No problem. Would you like me to show you how to use your dashboard, or just send you straight in?',
-          'All good. You can add a city later. Want a quick dashboard tour, or should I send you straight in?',
-          'No worries. We can skip that for now. Would you like a quick tour before plan setup?',
+          'No problem. Next, choose your plan so your $_subscriptionTrialLabel is ready. After that I will show you the dashboard and help import your calendar.',
+          'All good. You can add a city later. Let us set up your $_subscriptionTrialLabel first, then I will give you the quick tour and calendar import step.',
+          'No worries. We can skip that for now. Next is plan setup, then I will show you around and help bring in your calendar.',
         ]),
+        scrollBehavior: _GuidedScrollBehavior.none,
+        widgetKey: _planIntroKey,
       );
-      setState(() => _step = _GuidedOnboardingStep.tourChoice);
+      setState(() => _step = _GuidedOnboardingStep.plan);
+      _scrollPlanIntroIntoView();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -574,14 +582,14 @@ class _GuidedBeanOnboardingScreenState
     await _respondBean(
       skipTour
           ? _nextResponseVariation([
-              'Ok, no problem, lets just finish setting up your plan, and you will be all set to start your free trial! Select the option that fits your needs.',
-              'No problem. Let us finish your plan setup so your free trial is ready. Choose the option that fits best.',
-              'Sounds good. We will skip the tour and finish setup with your plan. Pick whichever option fits your needs.',
+              'Ok, no problem, let us set up your plan first. After checkout I will bring you into HeyBean.',
+              'No problem. Let us finish your plan setup so your $_subscriptionTrialLabel is ready.',
+              'Sounds good. Pick whichever plan fits your needs.',
             ])
           : _nextResponseVariation([
-              'Now, we just need to finish setting up your plan, and you will be all set to start your free trial! Select the option that fits your needs.',
-              'That is the quick tour. Last step: choose your plan so your free trial is ready.',
-              'You are almost set. Pick the plan that fits you best, then we will start your trial.',
+              'Now, choose your plan so your $_subscriptionTrialLabel is ready. After checkout I will show you the dashboard and help import your calendar.',
+              'You are almost set. Pick the plan that fits you best, then I will show you around.',
+              'Select the option that fits your needs. Then we will finish onboarding with the tour and calendar import.',
             ]),
       scrollBehavior: _GuidedScrollBehavior.none,
       widgetKey: _planIntroKey,
@@ -883,6 +891,7 @@ class _GuidedBeanOnboardingScreenState
                           ),
                           onSelect: (plan) =>
                               widget.onSelectPlan(plan, _billingInterval),
+                          onRedeemCoupon: widget.onRedeemCoupon,
                           onContactEnterprise: widget.onContactEnterprise,
                         ),
                     ],
@@ -1506,6 +1515,7 @@ class _GuidedPlanPicker extends StatelessWidget {
     required this.error,
     required this.onBillingChanged,
     required this.onSelect,
+    required this.onRedeemCoupon,
     required this.onContactEnterprise,
   });
 
@@ -1514,12 +1524,36 @@ class _GuidedPlanPicker extends StatelessWidget {
   final String? error;
   final ValueChanged<String> onBillingChanged;
   final ValueChanged<String> onSelect;
+  final Future<void> Function(String code) onRedeemCoupon;
   final VoidCallback onContactEnterprise;
 
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
+      _ShellCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Start with a $_subscriptionTrialLabel.',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Choose the plan that fits how much of your calendar, tasks, reminders, and daily context you want Bean to handle.',
+              style: TextStyle(
+                color: HeyBeanTheme.muted,
+                height: 1.4,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 12),
       _BillingIntervalToggle(
         selected: billingInterval,
         onChanged: onBillingChanged,
@@ -1541,6 +1575,12 @@ class _GuidedPlanPicker extends StatelessWidget {
         ),
         const SizedBox(height: 12),
       ],
+      _CouponCodeCard(
+        key: const Key('guided-coupon-card'),
+        busy: busyPlan == 'coupon',
+        disabled: busyPlan != null && busyPlan != 'coupon',
+        onRedeem: onRedeemCoupon,
+      ),
     ],
   );
 }

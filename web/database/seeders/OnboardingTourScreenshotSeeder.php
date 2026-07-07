@@ -53,7 +53,7 @@ class OnboardingTourScreenshotSeeder extends Seeder
                     'onboard_complete' => true,
                     'subscription_tier' => 'pro',
                     'subscription_status' => 'trialing',
-                    'subscription_trial_ends_at' => now()->addDays(14),
+                    'subscription_trial_ends_at' => now()->addDays(7),
                     'theme' => 'green',
                     'theme_mode' => 'light',
                     'command_center_label' => 'Command Center',

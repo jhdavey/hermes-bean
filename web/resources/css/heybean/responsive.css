@@ -630,10 +630,16 @@
     }
 
     .hb-subscribe-plan-head,
+    .hb-coupon-entry,
     .hb-subscribe-footer,
     .hb-subscribe-actions {
         align-items: stretch;
         flex-direction: column;
+    }
+
+    .hb-coupon-entry,
+    .hb-admin-coupon-form {
+        grid-template-columns: 1fr;
     }
 
     .hb-subscribe-price {
@@ -664,9 +670,25 @@
     }
 
     .hb-admin-metrics,
+    .hb-admin-kpi-grid,
     .hb-admin-grid,
+    .hb-admin-health-grid,
     .hb-admin-settings-grid,
     .hb-admin-limits-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .hb-admin-health-card:nth-child(1),
+    .hb-admin-health-card:nth-child(2),
+    .hb-admin-health-card:nth-child(3),
+    .hb-admin-health-card:nth-child(4),
+    .hb-admin-health-card:nth-child(5) {
+        grid-column: auto;
+    }
+
+    .hb-admin-health-metrics,
+    .hb-admin-mini-list,
+    .hb-admin-source-list {
         grid-template-columns: 1fr;
     }
 

@@ -116,7 +116,7 @@ class _HeroChatCardState extends State<_HeroChatCard> {
                     return SingleChildScrollView(
                       key: const Key('chat-message-list'),
                       controller: _scrollController,
-                      padding: const EdgeInsets.only(bottom: 112, top: 6),
+                      padding: const EdgeInsets.only(bottom: 8, top: 6),
                       child: ConstrainedBox(
                         constraints: BoxConstraints(
                           minWidth: constraints.maxWidth,
