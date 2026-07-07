@@ -2303,23 +2303,31 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   void _replaceMessagesFromSession(
     HermesSessionDetails? details, {
     HermesUser? user,
+    bool preserveVisibleMessages = false,
   }) {
-    _messages.clear();
+    final replacementMessages = <HermesMessage>[];
     if (details != null && details.messages.isNotEmpty) {
-      _messages.addAll(
+      replacementMessages.addAll(
         details.messages
             .map(_displayableChatMessage)
             .whereType<HermesMessage>(),
       );
+    }
+    if (replacementMessages.isEmpty) {
+      replacementMessages.add(
+        HermesMessage(
+          id: 0,
+          role: 'assistant',
+          content: _personalizedBeanIntroMessage(user ?? _user),
+        ),
+      );
+    }
+    if (preserveVisibleMessages &&
+        _messages.length > replacementMessages.length) {
       return;
     }
-    _messages.add(
-      HermesMessage(
-        id: 0,
-        role: 'assistant',
-        content: _personalizedBeanIntroMessage(user ?? _user),
-      ),
-    );
+    _messages.clear();
+    _messages.addAll(replacementMessages);
   }
 
   String _personalizedBeanIntroMessage(HermesUser? user) {
@@ -2869,12 +2877,17 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (userIndex == -1) {
         return false;
       }
-      final hasAssistantAfter = messages
-          .skip(userIndex + 1)
-          .any((message) => message.role == 'assistant');
+      final hasAssistantAfter = _hasDisplayableAssistantAfter(
+        messages,
+        userIndex,
+      );
       setState(() {
         _session = details.session;
-        _replaceMessagesFromSession(details, user: _user);
+        _replaceMessagesFromSession(
+          details,
+          user: _user,
+          preserveVisibleMessages: true,
+        );
         _activeBeanWorkMessageId = messages[userIndex].id;
         _chatRunState = hasAssistantAfter ? 'Updated' : 'Working in background';
         if (hasAssistantAfter) {
@@ -3276,13 +3289,16 @@ ${_truncateDiagnostic(stack, 2200)}
         if (run.status == 'completed' ||
             run.status == 'failed' ||
             run.status == 'cancelled') {
-          if (run.status == 'completed' &&
-              run.assistantMessage == null &&
-              await _recoverQueuedRunFromSession(
-                runId: runId,
-                runToken: runToken,
-              )) {
-            return;
+          if (run.status == 'completed' && run.assistantMessage == null) {
+            if (await _recoverQueuedRunFromSession(
+              runId: runId,
+              runToken: runToken,
+            )) {
+              return;
+            }
+            if (attempt < 89) {
+              continue;
+            }
           }
           final finalEvents = sessionId == null
               ? const <HermesActivityEvent>[]
@@ -3373,14 +3389,19 @@ ${_truncateDiagnostic(stack, 2200)}
       );
       if (userIndex == -1) return false;
 
-      final hasAssistantAfter = messages
-          .skip(userIndex + 1)
-          .any((message) => message.role == 'assistant');
+      final hasAssistantAfter = _hasDisplayableAssistantAfter(
+        messages,
+        userIndex,
+      );
       if (!hasAssistantAfter) return false;
       setState(() {
         if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
         _session = details.session;
-        _replaceMessagesFromSession(details, user: _user);
+        _replaceMessagesFromSession(
+          details,
+          user: _user,
+          preserveVisibleMessages: true,
+        );
         _chatRunState = 'Updated';
         _busy = false;
         _error = null;
@@ -3509,6 +3530,18 @@ ${_truncateDiagnostic(stack, 2200)}
           (message.metadata['runtime'] == 'tools' ? 'Done.' : null),
       metadata: message.metadata,
     );
+  }
+
+  bool _hasDisplayableAssistantAfter(
+    List<HermesMessage> messages,
+    int userIndex,
+  ) {
+    return messages
+        .skip(userIndex + 1)
+        .where((message) => message.role == 'assistant')
+        .map(_displayableChatMessage)
+        .whereType<HermesMessage>()
+        .any((message) => (message.content ?? '').trim().isNotEmpty);
   }
 
   bool _assistantMessageShouldStayOutOfChat(HermesMessage message) {
@@ -4027,7 +4060,11 @@ ${_truncateDiagnostic(stack, 2200)}
       setState(() {
         if (sessionDetails != null) {
           _session = sessionDetails.session;
-          _replaceMessagesFromSession(sessionDetails, user: user);
+          _replaceMessagesFromSession(
+            sessionDetails,
+            user: user,
+            preserveVisibleMessages: true,
+          );
         }
         _tasks = _dashboardListForMutationRefresh(
           refreshed: refreshedTasks,

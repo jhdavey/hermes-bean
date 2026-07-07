@@ -5941,6 +5941,32 @@ void main() {
     },
   );
 
+  testWidgets('chat waits through bridge-only completed run recovery', (
+    WidgetTester tester,
+  ) async {
+    final api = _CompletedRunBridgeThenVisibleHermesApiClient();
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-bean')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-input')),
+      'Please add a reminder to call Joe tomorrow at 8am',
+    );
+    await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
+    await tester.tap(find.byKey(const Key('primary-chat-action')));
+    await tester.pumpAndSettle(const Duration(seconds: 2));
+
+    expect(api.queueMessageCalls, 1);
+    expect(api.resumeSessionDetailsCalls, greaterThanOrEqualTo(2));
+    expect(find.text('Done - I added the reminder.'), findsOneWidget);
+    expect(find.textContaining('I didn’t receive that request'), findsNothing);
+    expect(find.textContaining('Bean could not finish'), findsNothing);
+  });
+
   testWidgets(
     'chat recovers direct Bean work through lookup after parse failure',
     (WidgetTester tester) async {
@@ -12589,6 +12615,70 @@ class _BridgeLookupThenSuccessHermesApiClient
         content: 'Done - I added Dr Chen Cardio.',
       ),
       events: [],
+    );
+  }
+}
+
+class _CompletedRunBridgeThenVisibleHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  int resumeSessionDetailsCalls = 0;
+
+  static const _userMessage = HermesMessage(
+    id: 9180,
+    role: 'user',
+    content: 'Please add a reminder to call Joe tomorrow at 8am',
+  );
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    return const HermesMessageResult(
+      status: 'queued',
+      session: HermesSession(id: 42, status: 'queued', title: 'Today'),
+      userMessage: _userMessage,
+      run: HermesAssistantRun(id: 918, status: 'running', source: 'flutter'),
+      events: [],
+    );
+  }
+
+  @override
+  Future<HermesAssistantRun> getAssistantRun(int runId) async =>
+      const HermesAssistantRun(
+        id: 918,
+        status: 'completed',
+        source: 'flutter',
+        userMessageId: 9180,
+      );
+
+  @override
+  Future<HermesSessionDetails> resumeSessionDetails(int sessionId) async {
+    resumeSessionDetailsCalls++;
+    return HermesSessionDetails(
+      session: HermesSession(id: sessionId, status: 'active', title: 'Today'),
+      messages: [
+        _userMessage,
+        if (resumeSessionDetailsCalls == 1)
+          const HermesMessage(
+            id: 9181,
+            role: 'assistant',
+            content:
+                'I didn’t receive that request cleanly. Please send it once more and I’ll take it from there.',
+            metadata: {'runtime': 'missing_run_bridge'},
+          )
+        else
+          const HermesMessage(
+            id: 9182,
+            role: 'assistant',
+            content: 'Done - I added the reminder.',
+          ),
+      ],
     );
   }
 }
