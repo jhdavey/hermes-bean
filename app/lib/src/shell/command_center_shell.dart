@@ -103,6 +103,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int? _editingChatMessageId;
   bool _beanVoiceListening = false;
   String? _beanVoiceDraft;
+  Timer? _beanRealtimeTtsFallbackTimer;
+  String _lastRealtimeTtsFallbackText = '';
   final stt.SpeechToText _beanSpeech = stt.SpeechToText();
   bool _beanSpeechReady = false;
   int _localMessageSequence = -1;
@@ -1240,8 +1242,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         if (!mounted) return;
         setState(() => _chatRunState = status);
       },
+      onAudioOutput: (eventType, _) {
+        if (eventType == 'remote_audio_attached') {
+          _beanRealtimeTtsFallbackTimer?.cancel();
+          _beanRealtimeTtsFallbackTimer = null;
+        }
+      },
       onTranscript: (role, text) {
         if (!mounted || text.trim().isEmpty) return;
+        var shouldScheduleRealtimeTtsFallback = false;
+        var realtimeFallbackText = '';
         setState(() {
           final trimmed = text.trim();
           if (role == 'user_draft') {
@@ -1250,6 +1260,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             return;
           }
           if (role == 'user') {
+            _lastRealtimeTtsFallbackText = '';
             final command = _normalizedVoiceCommand(trimmed);
             if (_beanVoiceListening && _voiceCommandIsCancel(command)) {
               _chatRunState = 'Bean voice ready';
@@ -1294,7 +1305,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _chatRunState = _assistantResponseIsDetailed(trimmed)
               ? 'Full details are in chat'
               : (_beanVoiceListening ? 'listening' : 'Ready');
+          shouldScheduleRealtimeTtsFallback =
+              _realtimeConversation.active &&
+              !_realtimeConversation.hasRemoteAudioOutput &&
+              trimmed != _lastRealtimeTtsFallbackText;
+          realtimeFallbackText = trimmed;
         });
+        if (shouldScheduleRealtimeTtsFallback) {
+          _scheduleRealtimeTtsFallback(realtimeFallbackText);
+        }
       },
       onRunQueued: (runId, userContent) {
         if (!mounted) return;
@@ -1327,6 +1346,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _cancelBeanClientRetryTimers();
     _beanWorkStatusClearTimer?.cancel();
     _beanResponsePreviewTimer?.cancel();
+    _beanRealtimeTtsFallbackTimer?.cancel();
     _reminderDueTimer?.cancel();
     _stopDashboardChangePolling();
     _chatInputController.dispose();
@@ -1335,6 +1355,22 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     unawaited(_pushNotifications.dispose());
     unawaited(_realtimeConversation.stop());
     super.dispose();
+  }
+
+  void _scheduleRealtimeTtsFallback(String text) {
+    final clean = beanSafeAssistantDisplayContent(text).trim();
+    if (clean.isEmpty) return;
+    _beanRealtimeTtsFallbackTimer?.cancel();
+    _beanRealtimeTtsFallbackTimer = Timer(
+      const Duration(milliseconds: 700),
+      () {
+        if (!mounted || !_realtimeConversation.active) return;
+        if (_realtimeConversation.hasRemoteAudioOutput) return;
+        if (clean == _lastRealtimeTtsFallbackText) return;
+        _lastRealtimeTtsFallbackText = clean;
+        unawaited(_speakBeanFallbackText(clean));
+      },
+    );
   }
 
   @override

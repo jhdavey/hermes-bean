@@ -8,6 +8,8 @@ import 'hermes_api_client.dart';
 
 typedef RealtimeTranscriptCallback = void Function(String role, String text);
 typedef RealtimeStatusCallback = void Function(String status);
+typedef RealtimeAudioOutputCallback =
+    void Function(String eventType, Map<String, Object?> details);
 typedef RealtimeRunQueuedCallback =
     void Function(int runId, String userContent);
 typedef RealtimeSessionEndedCallback = void Function(String reason);
@@ -105,6 +107,7 @@ class BeanRealtimeConversation {
     required this.apiClient,
     this.onTranscript,
     this.onStatus,
+    this.onAudioOutput,
     this.onRunQueued,
     this.onSessionEnded,
   });
@@ -112,23 +115,27 @@ class BeanRealtimeConversation {
   final HermesApiClient apiClient;
   RealtimeTranscriptCallback? onTranscript;
   RealtimeStatusCallback? onStatus;
+  RealtimeAudioOutputCallback? onAudioOutput;
   RealtimeRunQueuedCallback? onRunQueued;
   RealtimeSessionEndedCallback? onSessionEnded;
 
   void configureCallbacks({
     RealtimeTranscriptCallback? onTranscript,
     RealtimeStatusCallback? onStatus,
+    RealtimeAudioOutputCallback? onAudioOutput,
     RealtimeRunQueuedCallback? onRunQueued,
     RealtimeSessionEndedCallback? onSessionEnded,
   }) {
     if (onTranscript != null) this.onTranscript = onTranscript;
     if (onStatus != null) this.onStatus = onStatus;
+    if (onAudioOutput != null) this.onAudioOutput = onAudioOutput;
     if (onRunQueued != null) this.onRunQueued = onRunQueued;
     if (onSessionEnded != null) this.onSessionEnded = onSessionEnded;
   }
 
   RTCPeerConnection? _peerConnection;
   RTCDataChannel? _dataChannel;
+  RTCVideoRenderer? _remoteAudioRenderer;
   Completer<void>? _dataChannelOpen;
   Completer<void>? _transcriptionOnlyReleaseCompleter;
   Completer<void>? _sessionUpdateAckCompleter;
@@ -197,9 +204,12 @@ class BeanRealtimeConversation {
   bool _followUpReadyLoggedForTurn = false;
   bool _lastTurnNeededDashboardContext = false;
   bool _endConversationAfterResponse = false;
+  bool _remoteAudioAttached = false;
 
   bool get active => _active;
   bool get conversationActive => _conversationActive;
+  bool get hasRemoteAudioOutput =>
+      _remoteAudioAttached && _remoteAudioRenderer?.srcObject != null;
   int? get localSessionId => _session?.session.id;
 
   Future<HermesSession> start({
@@ -298,6 +308,7 @@ class BeanRealtimeConversation {
     pc.onTrack = (RTCTrackEvent event) {
       if (event.track.kind == 'audio') {
         onStatus?.call("Bean's voice");
+        unawaited(_attachRemoteAudio(event));
       }
     };
 
@@ -459,6 +470,74 @@ class BeanRealtimeConversation {
     return tracks.isNotEmpty && tracks.every((track) => track.enabled);
   }
 
+  Future<void> _attachRemoteAudio(RTCTrackEvent event) async {
+    final stream = event.streams.isNotEmpty ? event.streams.first : null;
+    if (stream == null) {
+      final details = {
+        'track_id': event.track.id,
+        'stream_count': event.streams.length,
+        'reason': 'missing_remote_stream',
+      };
+      onAudioOutput?.call('remote_audio_missing_stream', details);
+      unawaited(
+        _logClientEvent(
+          'flutter_realtime_remote_audio_missing_stream',
+          details,
+        ),
+      );
+      return;
+    }
+
+    try {
+      final renderer = _remoteAudioRenderer ?? RTCVideoRenderer();
+      if (_remoteAudioRenderer == null) {
+        await renderer.initialize();
+        _remoteAudioRenderer = renderer;
+      }
+      renderer.srcObject = stream;
+      await renderer.setVolume(1.0);
+      try {
+        await Helper.setSpeakerphoneOnButPreferBluetooth();
+      } catch (_) {
+        try {
+          await Helper.setSpeakerphoneOn(true);
+        } catch (_) {}
+      }
+      _remoteAudioAttached = true;
+      final details = {
+        'track_id': event.track.id,
+        'stream_id': stream.id,
+        'stream_count': event.streams.length,
+        'audio_track_count': stream.getAudioTracks().length,
+      };
+      onAudioOutput?.call('remote_audio_attached', details);
+      unawaited(
+        _logClientEvent('flutter_realtime_remote_audio_attached', details),
+      );
+    } catch (error) {
+      final details = {
+        'track_id': event.track.id,
+        'stream_id': stream.id,
+        'message': error.toString(),
+      };
+      onAudioOutput?.call('remote_audio_attach_failed', details);
+      unawaited(
+        _logClientEvent('flutter_realtime_remote_audio_attach_failed', details),
+      );
+    }
+  }
+
+  Future<void> _disposeRemoteAudioRenderer() async {
+    final renderer = _remoteAudioRenderer;
+    _remoteAudioRenderer = null;
+    _remoteAudioAttached = false;
+    if (renderer == null) return;
+    try {
+      renderer.srcObject = null;
+      await renderer.dispose();
+    } catch (_) {}
+  }
+
   Future<void> interrupt({
     bool endConversation = true,
     bool cancelBackgroundWork = false,
@@ -574,6 +653,7 @@ class BeanRealtimeConversation {
     _clearBackgroundProgressUpdates();
     _dataChannel?.close();
     await _peerConnection?.close();
+    await _disposeRemoteAudioRenderer();
     _localStream?.getTracks().forEach((track) => track.stop());
     _dataChannel = null;
     _dataChannelOpen = null;
@@ -615,6 +695,7 @@ class BeanRealtimeConversation {
     _currentResponseId = null;
     _assistantAudioStartedAt = null;
     _transportDegraded = false;
+    _remoteAudioAttached = false;
     _resetTurnMetrics();
     _lastTurnNeededDashboardContext = false;
     onStatus?.call('Ready');
@@ -651,6 +732,7 @@ class BeanRealtimeConversation {
     setMicrophoneEnabled(false);
     _dataChannel?.close();
     await _peerConnection?.close();
+    await _disposeRemoteAudioRenderer();
     _localStream?.getTracks().forEach((track) => track.stop());
     _dataChannel = null;
     _dataChannelOpen = null;

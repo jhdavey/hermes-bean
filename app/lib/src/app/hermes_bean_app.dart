@@ -99,10 +99,14 @@ Future<void> _defaultPlayBeanVoiceAudio(
         ),
       ),
     );
-    await audioFile.writeAsBytes(bytes, flush: true);
-    await player.play(
-      DeviceFileSource(audioFile.path, mimeType: cleanContentType),
-    );
+    try {
+      await player.play(BytesSource(bytes, mimeType: cleanContentType));
+    } catch (_) {
+      await audioFile.writeAsBytes(bytes, flush: true);
+      await player.play(
+        DeviceFileSource(audioFile.path, mimeType: cleanContentType),
+      );
+    }
     await player.onPlayerComplete.first.timeout(
       const Duration(seconds: 90),
       onTimeout: () {},

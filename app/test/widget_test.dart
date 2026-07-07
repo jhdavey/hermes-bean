@@ -6016,6 +6016,63 @@ void main() {
     },
   );
 
+  testWidgets(
+    'realtime assistant text falls back to TTS without remote audio',
+    (WidgetTester tester) async {
+      final api = _SignedInFakeHermesApiClient();
+      final realtime = _FakeBeanRealtimeConversation(api)..activeValue = true;
+      final playedAudio = <String>[];
+      await tester.pumpWidget(
+        HermesBeanApp(
+          apiClient: api,
+          tokenStore: _MemoryAuthTokenStore(),
+          realtimeConversation: realtime,
+          playBeanVoiceAudio: (bytes, {contentType = 'audio/wav'}) async {
+            playedAudio.add('$contentType:${String.fromCharCodes(bytes)}');
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      realtime.emitTranscript('assistant', 'Hi, this is Bean.');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 800));
+
+      expect(find.text('Hi, this is Bean.'), findsOneWidget);
+      expect(api.synthesizedSpeechTexts, ['Hi, this is Bean.']);
+      expect(playedAudio, ['audio/wav:fake-wav']);
+    },
+  );
+
+  testWidgets('realtime remote audio suppresses duplicate TTS fallback', (
+    WidgetTester tester,
+  ) async {
+    final api = _SignedInFakeHermesApiClient();
+    final realtime = _FakeBeanRealtimeConversation(api)..activeValue = true;
+    final playedAudio = <String>[];
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: api,
+        tokenStore: _MemoryAuthTokenStore(),
+        realtimeConversation: realtime,
+        playBeanVoiceAudio: (bytes, {contentType = 'audio/wav'}) async {
+          playedAudio.add('$contentType:${String.fromCharCodes(bytes)}');
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    realtime.remoteAudioOutput = true;
+    realtime.emitAudioOutput('remote_audio_attached');
+    realtime.emitTranscript('assistant', 'Hi, this is Bean.');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 800));
+
+    expect(find.text('Hi, this is Bean.'), findsOneWidget);
+    expect(api.synthesizedSpeechTexts, isEmpty);
+    expect(playedAudio, isEmpty);
+  });
+
   testWidgets('failing realtime start does not interrupt dictated voice', (
     WidgetTester tester,
   ) async {
@@ -15877,6 +15934,8 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
 
   bool started = false;
   bool stopped = false;
+  bool activeValue = false;
+  bool remoteAudioOutput = false;
   bool microphoneEnabled = false;
   bool captureStarted = false;
   bool captureEnded = false;
@@ -15886,6 +15945,12 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
   final sentTextEndConversationValues = <bool>[];
 
   @override
+  bool get active => activeValue;
+
+  @override
+  bool get hasRemoteAudioOutput => remoteAudioOutput;
+
+  @override
   Future<HermesSession> start({
     int? sessionId,
     int? workspaceId,
@@ -15893,6 +15958,7 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
     bool microphoneEnabled = true,
   }) async {
     started = true;
+    activeValue = true;
     startMicrophoneValues.add(microphoneEnabled);
     this.microphoneEnabled = microphoneEnabled;
     return const HermesSession(id: 42, status: 'active', title: 'Realtime');
@@ -15924,6 +15990,10 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
     onTranscript?.call(role, text);
   }
 
+  void emitAudioOutput(String eventType) {
+    onAudioOutput?.call(eventType, const {});
+  }
+
   void emitSessionEnded(String reason) {
     onSessionEnded?.call(reason);
   }
@@ -15943,6 +16013,7 @@ class _FakeBeanRealtimeConversation extends BeanRealtimeConversation {
   @override
   Future<void> stop() async {
     stopped = true;
+    activeValue = false;
     microphoneEnabled = false;
   }
 }
