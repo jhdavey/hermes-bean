@@ -5918,7 +5918,7 @@ void main() {
     },
   );
 
-  testWidgets('dictated Bean voice requests use realtime audio first', (
+  testWidgets('dictated Bean voice requests use realtime text and local TTS', (
     WidgetTester tester,
   ) async {
     final api = _SignedInFakeHermesApiClient();
@@ -5949,11 +5949,15 @@ void main() {
     expect(realtime.started, isTrue);
     expect(realtime.startMicrophoneValues, [false]);
     expect(realtime.sentTexts, ['Plan today']);
-    expect(realtime.sentTextAudioResponses, [true]);
+    expect(realtime.sentTextAudioResponses, [false]);
     expect(realtime.sentTextEndConversationValues, [true]);
     expect(api.sentMessages, isEmpty);
-    expect(api.synthesizedSpeechTexts, isEmpty);
-    expect(playedAudio, isEmpty);
+    realtime.remoteAudioOutput = true;
+    realtime.emitAudioOutput('remote_audio_attached');
+    realtime.emitTranscript('assistant', 'Today is planned.');
+    await tester.pump(const Duration(milliseconds: 800));
+    expect(api.synthesizedSpeechTexts, ['Today is planned.']);
+    expect(playedAudio, ['audio/wav:fake-wav']);
 
     final secondGesture = await tester.startGesture(
       tester.getCenter(find.byKey(const Key('nav-bean'))),
@@ -5970,11 +5974,11 @@ void main() {
 
     expect(realtime.startMicrophoneValues, [false]);
     expect(realtime.sentTexts, ['Plan today', 'Plan tomorrow']);
-    expect(realtime.sentTextAudioResponses, [true, true]);
+    expect(realtime.sentTextAudioResponses, [false, false]);
     expect(realtime.sentTextEndConversationValues, [true, true]);
     expect(api.sentMessages, isEmpty);
-    expect(api.synthesizedSpeechTexts, isEmpty);
-    expect(playedAudio, isEmpty);
+    expect(api.synthesizedSpeechTexts, ['Today is planned.']);
+    expect(playedAudio, ['audio/wav:fake-wav']);
   });
 
   testWidgets('dictated voice falls back to chat and TTS when realtime fails', (

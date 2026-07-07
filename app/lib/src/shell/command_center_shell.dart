@@ -105,6 +105,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   String? _beanVoiceDraft;
   Timer? _beanRealtimeTtsFallbackTimer;
   String _lastRealtimeTtsFallbackText = '';
+  bool _forceRealtimeTtsFallbackForNextAssistant = false;
   final stt.SpeechToText _beanSpeech = stt.SpeechToText();
   bool _beanSpeechReady = false;
   int _localMessageSequence = -1;
@@ -1244,8 +1245,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       },
       onAudioOutput: (eventType, _) {
         if (eventType == 'remote_audio_attached') {
-          _beanRealtimeTtsFallbackTimer?.cancel();
-          _beanRealtimeTtsFallbackTimer = null;
+          if (!_forceRealtimeTtsFallbackForNextAssistant) {
+            _beanRealtimeTtsFallbackTimer?.cancel();
+            _beanRealtimeTtsFallbackTimer = null;
+          }
         }
       },
       onTranscript: (role, text) {
@@ -1307,7 +1310,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               : (_beanVoiceListening ? 'listening' : 'Ready');
           shouldScheduleRealtimeTtsFallback =
               _realtimeConversation.active &&
-              !_realtimeConversation.hasRemoteAudioOutput &&
+              (_forceRealtimeTtsFallbackForNextAssistant ||
+                  !_realtimeConversation.hasRemoteAudioOutput) &&
               trimmed != _lastRealtimeTtsFallbackText;
           realtimeFallbackText = trimmed;
         });
@@ -1365,10 +1369,19 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       const Duration(milliseconds: 700),
       () {
         if (!mounted || !_realtimeConversation.active) return;
-        if (_realtimeConversation.hasRemoteAudioOutput) return;
+        final forceFallback = _forceRealtimeTtsFallbackForNextAssistant;
+        if (!forceFallback && _realtimeConversation.hasRemoteAudioOutput) {
+          return;
+        }
         if (clean == _lastRealtimeTtsFallbackText) return;
         _lastRealtimeTtsFallbackText = clean;
-        unawaited(_speakBeanFallbackText(clean));
+        unawaited(
+          _speakBeanFallbackText(clean).whenComplete(() {
+            if (forceFallback) {
+              _forceRealtimeTtsFallbackForNextAssistant = false;
+            }
+          }),
+        );
       },
     );
   }
@@ -2876,10 +2889,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       });
 
       unawaited(_realtimeConversation.refreshDashboardContext());
+      _forceRealtimeTtsFallbackForNextAssistant = true;
       await _realtimeConversation
           .sendText(
             trimmed,
-            audioResponse: true,
+            audioResponse: false,
             endConversationAfterResponse: true,
           )
           .timeout(const Duration(seconds: 5));
@@ -2892,6 +2906,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       return true;
     } catch (error) {
       debugPrint('Dictated Bean realtime voice failed: $error');
+      _forceRealtimeTtsFallbackForNextAssistant = false;
       if (mounted && runToken == _chatRunToken) {
         setState(() {
           _busy = false;
