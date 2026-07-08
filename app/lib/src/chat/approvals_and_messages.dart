@@ -378,13 +378,14 @@ class _MessageBubble extends StatelessWidget {
           ? constraints.maxWidth
           : MediaQuery.sizeOf(context).width;
       final transcript = SizedBox(
-        width: availableWidth * .8,
+        width: availableWidth,
         child: Padding(
           key: alignRight ? const Key('user-message-bubble') : null,
           padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
           child: Text.rich(
             TextSpan(
               children: [
+                if (isBean) const WidgetSpan(child: SizedBox(width: 34)),
                 TextSpan(
                   text: sender,
                   style: TextStyle(
@@ -413,7 +414,7 @@ class _MessageBubble extends StatelessWidget {
       );
 
       return Align(
-        alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+        alignment: Alignment.centerLeft,
         child: hasActions
             ? GestureDetector(
                 behavior: HitTestBehavior.opaque,

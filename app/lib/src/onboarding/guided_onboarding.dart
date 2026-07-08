@@ -917,14 +917,15 @@ class _GuidedOnboardingBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Align(
-    alignment: message.bean ? Alignment.centerLeft : Alignment.centerRight,
+    alignment: Alignment.centerLeft,
     child: FractionallySizedBox(
-      widthFactor: .8,
+      widthFactor: 1,
       child: Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: Text.rich(
           TextSpan(
             children: [
+              if (message.bean) const WidgetSpan(child: SizedBox(width: 34)),
               TextSpan(
                 text: message.bean ? 'Bean' : 'You',
                 style: TextStyle(

@@ -1260,18 +1260,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         caseSensitive: false,
       ).hasMatch(_chatRunState);
 
-  String get _beanStatusTagLabel {
-    final items = _beanVisibleWorkItems;
-    if (items.isNotEmpty && items.every((item) => item.done)) return 'Done';
-    if (items.any((item) => !item.done)) return 'Working...';
-    if (_busy) {
-      final compact = _compactBeanStatusLabel(_chatRunState);
-      return compact == 'Ready' ? 'Thinking...' : compact;
-    }
-    final compact = _compactBeanStatusLabel(_chatRunState);
-    return compact == 'Ready' ? 'Bean is ready' : compact;
-  }
-
   _BeanResponsePreview? get _beanCollapsedResponsePreview {
     if (!_beanChatCollapsed ||
         _selectedDestination != _HomeDestination.bean ||
@@ -6516,7 +6504,6 @@ ${_truncateDiagnostic(stack, 2200)}
                       showComposer:
                           _selectedDestination == _HomeDestination.bean,
                       beanWorkItems: _beanVisibleWorkItems,
-                      beanWorkStatus: _beanStatusTagLabel,
                       beanWorkActive: beanWorkStripActive,
                       composer: _DockedBeanChatComposer(
                         controller: _chatInputController,

@@ -567,18 +567,6 @@
     gap: 0;
 }
 
-.hb-command-center-glance .hb-glance-event {
-    grid-template-columns: 60px minmax(0, 1fr);
-    gap: 5px;
-    min-height: 32px;
-    border: 0 !important;
-    border-bottom: 1px solid color-mix(in srgb, var(--hb-border) 56%, transparent) !important;
-    border-radius: 0;
-    background: transparent !important;
-    box-shadow: none;
-    padding: 5px 0;
-}
-
 .hb-command-center-glance .hb-glance-empty {
     color: var(--hb-muted);
     font-size: 11px;
@@ -633,7 +621,7 @@
     width: 7px;
     height: 7px;
     border-radius: 999px;
-    background: var(--hb-accent-strong);
+    background: var(--hb-command-center-item-color, var(--hb-accent-strong));
 }
 
 .hb-command-center-row-task .hb-command-center-dot {

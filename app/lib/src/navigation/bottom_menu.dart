@@ -4,7 +4,6 @@ class _SignedInBottomDock extends StatelessWidget {
   const _SignedInBottomDock({
     required this.showComposer,
     required this.beanWorkItems,
-    required this.beanWorkStatus,
     required this.beanWorkActive,
     required this.composer,
     required this.menu,
@@ -12,7 +11,6 @@ class _SignedInBottomDock extends StatelessWidget {
 
   final bool showComposer;
   final List<_BeanWorkItem> beanWorkItems;
-  final String beanWorkStatus;
   final bool beanWorkActive;
   final Widget composer;
   final Widget menu;
@@ -46,7 +44,6 @@ class _SignedInBottomDock extends StatelessWidget {
                             ? 'bean-work-dock-strip'
                             : 'bean-global-work-dock-strip',
                       ),
-                      status: beanWorkStatus,
                       items: beanWorkItems,
                     )
                   : const SizedBox(
@@ -184,30 +181,17 @@ class _HeyBeanBottomMenu extends StatelessWidget {
 }
 
 class _BeanWorkDockStrip extends StatelessWidget {
-  const _BeanWorkDockStrip({
-    super.key,
-    required this.status,
-    required this.items,
-  });
+  const _BeanWorkDockStrip({super.key, required this.items});
 
-  final String status;
   final List<_BeanWorkItem> items;
 
   @override
   Widget build(BuildContext context) {
-    final title = _compactBeanStatusLabel(status);
     final displayItems = items
         .where((item) => item.label.trim().isNotEmpty)
         .take(6)
         .toList();
     final completed = displayItems.where((item) => item.done).length;
-    final statusLooksDone = RegExp(
-      r'\b(done|updated|completed|stopped|cancelled|failed)\b',
-      caseSensitive: false,
-    ).hasMatch(title);
-    final hasActiveWork =
-        displayItems.any((item) => !item.done) ||
-        (displayItems.isEmpty && !statusLooksDone);
 
     return Padding(
       padding: EdgeInsets.zero,
@@ -228,76 +212,33 @@ class _BeanWorkDockStrip extends StatelessWidget {
           ],
         ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
+          padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: hasActiveWork
-                        ? CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              HeyBeanTheme.accentStrong,
-                            ),
-                          )
-                        : Icon(
-                            Icons.check_circle_rounded,
-                            size: 18,
-                            color: HeyBeanTheme.accentStrong,
-                          ),
-                  ),
-                  const SizedBox(width: 9),
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: HeyBeanTheme.text,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  if (displayItems.isNotEmpty)
-                    Text(
-                      '$completed/${displayItems.length}',
-                      style: TextStyle(
-                        color: HeyBeanTheme.muted,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                ],
-              ),
-              if (displayItems.isNotEmpty) const SizedBox(height: 7),
-              for (final item in displayItems)
+              for (final entry in displayItems.indexed)
                 Padding(
-                  padding: const EdgeInsets.only(top: 3),
+                  padding: EdgeInsets.only(top: entry.$1 == 0 ? 0 : 6),
                   child: Row(
                     children: [
                       Icon(
-                        item.done
+                        entry.$2.done
                             ? Icons.check_box_rounded
                             : Icons.check_box_outline_blank_rounded,
                         size: 16,
-                        color: item.done
+                        color: entry.$2.done
                             ? HeyBeanTheme.accentStrong
                             : HeyBeanTheme.muted,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          item.label,
+                          entry.$2.label,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: item.done
+                            color: entry.$2.done
                                 ? HeyBeanTheme.muted
                                 : HeyBeanTheme.text,
                             fontSize: 12,
@@ -305,6 +246,17 @@ class _BeanWorkDockStrip extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (entry.$1 == 0) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          '$completed/${displayItems.length}',
+                          style: TextStyle(
+                            color: HeyBeanTheme.muted,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

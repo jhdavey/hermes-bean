@@ -3390,19 +3390,20 @@ export function mountHeyBeanWebApp(mount) {
             </section>`;
     }
 
-    function beanWorkListMarkup(items, className = 'hb-bean-work-list') {
+    function beanWorkListMarkup(items, className = 'hb-bean-work-list', progressLabel = '') {
         return `
             <ul class="${escapeAttr(className)}" aria-label="Bean work queue" ${items.length ? '' : 'aria-hidden="true"'}>
-                ${items.map(beanWorkItemMarkup).join('')}
+                ${items.map((item, index) => beanWorkItemMarkup(item, index === 0 ? progressLabel : '')).join('')}
             </ul>`;
     }
 
-    function beanWorkItemMarkup(item) {
+    function beanWorkItemMarkup(item, progressLabel = '') {
         const done = beanWorkItemDone(item);
         return `
             <li class="hb-bean-work-item ${done ? 'hb-bean-work-item-done' : ''}" data-bean-work-id="${escapeAttr(item.id || '')}">
                 <span class="hb-bean-work-checkbox" data-bean-work-checkbox aria-hidden="true">${done ? icons.checkCircle : ''}</span>
                 <span data-bean-work-label>${escapeHtml(item.label || 'Bean work item')}</span>
+                ${progressLabel ? `<span class="hb-bean-work-progress">${escapeHtml(progressLabel)}</span>` : ''}
             </li>`;
     }
 
@@ -3956,15 +3957,10 @@ export function mountHeyBeanWebApp(mount) {
         const active = beanWorkStatusActive() || (Date.now() < beanWorkStatusHoldUntil && items.length > 0);
         if (!active || !items.length) return '';
         const completedCount = items.filter((item) => beanWorkItemDone(item)).length;
-        const label = beanWorkStatusLabel(items);
+        const progressLabel = `${completedCount}/${items.length}`;
         return `
             <section class="hb-chat-work-strip" aria-live="polite">
-                <div class="hb-chat-work-strip-head">
-                    <span class="hb-chat-work-spinner" aria-hidden="true"></span>
-                    <strong>${escapeHtml(label)}</strong>
-                    <span>${escapeHtml(`${completedCount}/${items.length}`)}</span>
-                </div>
-                ${beanWorkListMarkup(items, 'hb-bean-work-list hb-chat-work-list')}
+                ${beanWorkListMarkup(items, 'hb-bean-work-list hb-chat-work-list', progressLabel)}
             </section>`;
     }
 
@@ -4683,8 +4679,9 @@ export function mountHeyBeanWebApp(mount) {
                 ? `data-edit-task="${escapeAttr(item.id)}"`
                 : `data-edit-reminder="${escapeAttr(item.id)}"`;
         const notesIcon = item.kind === 'event' && item.hasNotes ? `<span class="hb-command-center-notes" aria-label="Has notes" title="Has notes">${icons.notes}</span>` : '';
+        const styleAttr = item.color ? ` style="--hb-command-center-item-color:${escapeAttr(item.color)}"` : '';
         return `
-            <button class="hb-command-center-row hb-command-center-row-${escapeAttr(item.kind)}" type="button" ${dataAttr}>
+            <button class="hb-command-center-row hb-command-center-row-${escapeAttr(item.kind)}" type="button" ${dataAttr}${styleAttr}>
                 <span class="hb-command-center-time">${escapeHtml(item.timeLabel)}</span>
                 <span class="hb-command-center-dot" aria-hidden="true"></span>
                 <span class="hb-command-center-copy">
@@ -4841,12 +4838,15 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function glanceEventMarkup(event) {
-        const color = itemColor(event);
-        return `
-            <button class="hb-glance-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
-                <div class="hb-event-time">${escapeHtml(commandCenterEventTime(event))}</div>
-                ${eventPillTitleMarkup(event)}
-            </button>`;
+        return commandCenterAgendaItemMarkup({
+            id: event.id,
+            kind: 'event',
+            title: eventTitleText(event),
+            timeLabel: commandCenterEventTime(event),
+            subtitle: eventLocationText(event),
+            hasNotes: Boolean(eventNotesText(event)),
+            color: itemColor(event),
+        });
     }
 
     function workspaceMembersMarkup(workspace) {

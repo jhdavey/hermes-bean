@@ -211,7 +211,7 @@ double _beanWorkDockStripHeight(List<_BeanWorkItem> items, bool active) {
     6,
   );
   if (count == 0) return 0;
-  return math.min(196, 48 + (count * 24));
+  return math.min(172, 24 + (count * 24));
 }
 
 class _BeanResponsePreview {
@@ -486,56 +486,6 @@ Map<String, Object?> _flutterChatMetadata({
   'client_context': _clientTemporalContext(),
   ...additional,
 };
-
-String _normalizedBeanCommand(String input) {
-  final normalized = input
-      .toLowerCase()
-      .replaceAll('’', "'")
-      .replaceAll(RegExp(r"[^a-z0-9\s']"), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-  return _stripLeadingCommandFillers(
-    _stripNormalizedWakePhrase(_stripLeadingCommandFillers(normalized)),
-  ).trim();
-}
-
-String _stripLeadingCommandFillers(String command) {
-  if (command.isEmpty) return command;
-  if (RegExp(r'^(?:uh huh|mm hmm|mhm)\b').hasMatch(command)) {
-    return command;
-  }
-  return command
-      .replaceFirst(
-        RegExp(r"^(?:(?:uh|um|umm|erm|er|ah|hmm|hm|mm|mhm|well|so)\s+)+"),
-        '',
-      )
-      .trim();
-}
-
-String _stripNormalizedWakePhrase(String command) {
-  if (command.isEmpty) return command;
-  final wakeStarter = r'(?:hey|hay|hi|hello|okay|ok|kay)';
-  final beanVariant =
-      r'(?:bean|beans|been|ben|beam|beem|bein|being|bin|bing|bien|bain|bane|dean|deen)';
-  final compactBeanVariant =
-      r'b(?:ean|eans|een|en|eam|eem|ein|eing|in|ing|ien|ain|ane)';
-
-  return command
-      .replaceFirst(
-        RegExp(
-          '^(?:'
-          '$wakeStarter\\s+$beanVariant|'
-          '$wakeStarter\\s*$compactBeanVariant|'
-          '$wakeStarter\\s+(?:b|bee)|'
-          r'a\s+bean|'
-          r'heybean|'
-          r'bean'
-          r')\s+',
-        ),
-        '',
-      )
-      .trim();
-}
 
 String beanFriendlyErrorMessage(Object error, {String? action}) {
   final subscriptionLimitMessage = _subscriptionLimitMessageFromError(error);

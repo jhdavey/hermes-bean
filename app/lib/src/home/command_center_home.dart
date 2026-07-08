@@ -470,6 +470,7 @@ class _CommandCenterGlanceList extends StatelessWidget {
         separatorBuilder: (context, index) => const SizedBox(height: 4),
         itemBuilder: (context, index) => _CommandCenterGlanceDayTile(
           day: days[index],
+          showBottomDivider: index < days.length - 1,
           onEventTap: onEventTap,
         ),
       ),
@@ -487,10 +488,12 @@ class _CommandCenterGlanceList extends StatelessWidget {
 class _CommandCenterGlanceDayTile extends StatelessWidget {
   const _CommandCenterGlanceDayTile({
     required this.day,
+    required this.showBottomDivider,
     required this.onEventTap,
   });
 
   final _CommandCenterGlanceDay day;
+  final bool showBottomDivider;
   final ValueChanged<HermesCalendarEvent> onEventTap;
 
   @override
@@ -498,7 +501,9 @@ class _CommandCenterGlanceDayTile extends StatelessWidget {
     key: Key('command-center-glance-day-${_calendarDateKey(day.date)}'),
     padding: const EdgeInsets.fromLTRB(7, 7, 7, 6),
     decoration: BoxDecoration(
-      border: Border(bottom: BorderSide(color: _quietBorderColor(alpha: .46))),
+      border: showBottomDivider
+          ? Border(bottom: BorderSide(color: _quietBorderColor(alpha: .46)))
+          : null,
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -532,7 +537,7 @@ class _CommandCenterGlanceDayTile extends StatelessWidget {
               for (final event in day.events)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 4),
-                  child: _CommandCenterGlanceEventPill(
+                  child: _CommandCenterGlanceEventRow(
                     event: event,
                     onTap: () => onEventTap(event),
                   ),
@@ -544,8 +549,8 @@ class _CommandCenterGlanceDayTile extends StatelessWidget {
   );
 }
 
-class _CommandCenterGlanceEventPill extends StatelessWidget {
-  const _CommandCenterGlanceEventPill({
+class _CommandCenterGlanceEventRow extends StatelessWidget {
+  const _CommandCenterGlanceEventRow({
     required this.event,
     required this.onTap,
   });
@@ -556,62 +561,79 @@ class _CommandCenterGlanceEventPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _calendarEventColor(event);
-    final hasLocation = (event.location ?? '').trim().isNotEmpty;
     final hasNotes = _eventHasNotes(event);
+    final subtitle = (event.location ?? '').trim();
+    const timeWidth = 50.0;
+
     return Material(
       key: Key('command-center-glance-event-${event.id}'),
-      color: color.withValues(alpha: HeyBeanTheme.isDark ? .18 : .11),
-      borderRadius: BorderRadius.circular(8),
+      color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
         child: Container(
-          constraints: const BoxConstraints(minHeight: 32),
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+          height: 42,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: color.withValues(alpha: .30)),
+            border: Border(
+              bottom: BorderSide(color: _quietBorderColor(alpha: .30)),
+            ),
           ),
           child: Row(
             children: [
               SizedBox(
-                width: 60,
-                child: Text(
-                  _commandCenterGlanceEventTime(event),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: HeyBeanTheme.muted,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
+                width: timeWidth,
+                child: _CommandCenterAgendaTimeLabel(
+                  label: _commandCenterGlanceEventTime(event),
+                  allowStackedRange: true,
                 ),
               ),
               const SizedBox(width: 5),
-              Expanded(
-                child: Text(
-                  event.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: HeyBeanTheme.text,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
+              Container(
+                key: Key('command-center-glance-dot-${event.id}'),
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: .82),
+                  shape: BoxShape.circle,
                 ),
               ),
-              if (hasLocation) ...[
-                const SizedBox(width: 5),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      event.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: HeyBeanTheme.text,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      subtitle.isNotEmpty ? subtitle : 'Event',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: HeyBeanTheme.muted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (hasNotes)
                 Icon(
-                  Icons.location_on_outlined,
-                  size: 13,
+                  Icons.notes_rounded,
+                  key: Key('command-center-glance-notes-${event.id}'),
+                  size: 14,
                   color: HeyBeanTheme.muted,
                 ),
-              ],
-              if (hasNotes) ...[
-                const SizedBox(width: 5),
-                Icon(Icons.notes_rounded, size: 13, color: HeyBeanTheme.muted),
-              ],
             ],
           ),
         ),

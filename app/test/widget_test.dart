@@ -2177,7 +2177,7 @@ void main() {
         matching: find.text('Planning sync'),
       ),
     );
-    expect(glanceEventTitle.style?.fontWeight, FontWeight.w500);
+    expect(glanceEventTitle.style?.fontWeight, FontWeight.w600);
     expect(
       find.descendant(
         of: find.byKey(const Key('command-center-glance-event-504')),
