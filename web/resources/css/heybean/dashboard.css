@@ -504,8 +504,6 @@
     height: 100%;
     display: grid;
     grid-template-rows:
-        minmax(74px, var(--hb-command-center-agenda-size, 33.3%))
-        auto
         minmax(74px, 1fr)
         auto
         minmax(156px, var(--hb-command-center-chat-size, 33.3%));
@@ -515,15 +513,12 @@
 
 .hb-command-center-card-collapsed {
     grid-template-rows:
-        minmax(74px, var(--hb-command-center-agenda-size, 33.3%))
-        auto
         minmax(74px, 1fr)
         auto
         auto;
 }
 
-.hb-command-center-agenda,
-.hb-command-center-glance {
+.hb-command-center-agenda {
     min-height: 0;
     overflow: hidden;
 }
@@ -535,39 +530,33 @@
     padding: 0 3px;
 }
 
-.hb-command-center-glance {
-    padding: 0 3px;
-}
-
 .hb-command-center-glance-list {
-    height: 100%;
     min-height: 0;
     display: grid;
     align-content: start;
     gap: 5px;
-    overflow: auto;
-    padding: 3px 0;
+    padding: 8px 0 3px;
 }
 
-.hb-command-center-glance .hb-glance-day {
+.hb-command-center-agenda-list .hb-glance-day {
     gap: 5px;
     padding: 7px 6px;
     border: 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--hb-border) 62%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--hb-border) 62%, transparent);
     background: transparent;
 }
 
-.hb-command-center-glance .hb-glance-day-label {
+.hb-command-center-agenda-list .hb-glance-day-label {
     color: var(--hb-text);
     font-size: 12px;
     font-weight: 650;
 }
 
-.hb-command-center-glance .hb-glance-events {
+.hb-command-center-agenda-list .hb-glance-events {
     gap: 0;
 }
 
-.hb-command-center-glance .hb-glance-empty {
+.hb-command-center-agenda-list .hb-glance-empty {
     color: var(--hb-muted);
     font-size: 11px;
     font-weight: 500;
@@ -583,7 +572,7 @@
     align-items: center;
     gap: 5px;
     border: 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--hb-border) 62%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--hb-border) 62%, transparent);
     border-radius: 0;
     background: transparent;
     box-shadow: none;
@@ -596,6 +585,11 @@
 .hb-command-center-row:hover {
     border-radius: 0;
     background: color-mix(in srgb, var(--hb-surface2) 70%, transparent);
+}
+
+.hb-command-center-agenda-list > .hb-command-center-row:first-child,
+.hb-command-center-agenda-list .hb-glance-events > .hb-command-center-row:first-child {
+    border-top-color: transparent;
 }
 
 .heybean-app-body .hb-command-center-agenda-list .hb-command-center-row,
@@ -681,6 +675,11 @@
     font-size: 13px;
     font-weight: 600;
     text-align: center;
+}
+
+.hb-command-center-empty-inline {
+    height: auto;
+    min-height: 42px;
 }
 
 .hb-command-center-divider {

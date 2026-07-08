@@ -2119,22 +2119,10 @@ void main() {
     final chatPanelHeight = tester
         .getSize(find.byKey(const Key('command-center-chat-panel')))
         .height;
-    final glanceHeight = tester
-        .getSize(find.byKey(const Key('command-center-glance-list')))
-        .height;
-    final resizerHeight = tester
-        .getSize(find.byKey(const Key('command-center-chat-resizer')))
-        .height;
-    final agendaHeight = tester
-        .getSize(find.byKey(const Key('command-center-agenda-stack')))
-        .height;
-    final sharedHeight =
-        agendaHeight + glanceHeight + resizerHeight + chatPanelHeight;
     final expectedChatHeight = math.min(
-      math.max(128.0, sharedHeight * .30),
-      math.max(0.0, sharedHeight - 150.0 - glanceHeight),
+      math.max(128.0, commandCenterHeight * .30),
+      math.max(0.0, commandCenterHeight - 150.0),
     );
-    expect(commandCenterHeight, greaterThanOrEqualTo(sharedHeight));
     expect(chatPanelHeight, closeTo(expectedChatHeight, 1));
 
     final task = find.byKey(const Key('command-center-agenda-task-501'));
@@ -2193,18 +2181,28 @@ void main() {
     await tester.tap(find.byKey(const Key('event-detail-back-action')));
     await tester.pumpAndSettle();
 
+    await tester.dragUntilVisible(
+      task,
+      find.byKey(const Key('command-center-agenda-list')),
+      const Offset(0, 200),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(task);
     await tester.pumpAndSettle();
     expect(find.text('Edit task'), findsOneWidget);
     await tester.tap(find.text('Cancel').last);
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(event);
+    await tester.pumpAndSettle();
     await tester.tap(event);
     await tester.pumpAndSettle();
     expect(find.text('Event Details'), findsOneWidget);
     await tester.tap(find.byKey(const Key('event-detail-back-action')));
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(reminder);
+    await tester.pumpAndSettle();
     await tester.tap(reminder);
     await tester.pumpAndSettle();
     expect(find.text('Edit reminder'), findsOneWidget);

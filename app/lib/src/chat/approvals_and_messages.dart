@@ -313,6 +313,7 @@ class _MessageBubble extends StatelessWidget {
     required this.sender,
     required this.message,
     this.alignRight = false,
+    this.statusLabel,
     this.onCopy,
     this.onEdit,
   });
@@ -320,6 +321,7 @@ class _MessageBubble extends StatelessWidget {
   final String sender;
   final String message;
   final bool alignRight;
+  final String? statusLabel;
   final VoidCallback? onCopy;
   final VoidCallback? onEdit;
 
@@ -406,6 +408,15 @@ class _MessageBubble extends StatelessWidget {
                     fontWeight: FontWeight.w400,
                   ),
                 ),
+                if (statusLabel != null)
+                  TextSpan(
+                    text: '  $statusLabel',
+                    style: TextStyle(
+                      color: HeyBeanTheme.muted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
               ],
             ),
             style: TextStyle(fontSize: 15, height: 1.3),

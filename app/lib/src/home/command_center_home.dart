@@ -153,11 +153,7 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
     return LayoutBuilder(
       key: const Key('command-center-home'),
       builder: (context, constraints) {
-        final glanceHeight = constraints.maxHeight < 520 ? 116.0 : 138.0;
-        final maxChatHeight = math.max(
-          0.0,
-          constraints.maxHeight - 150.0 - glanceHeight,
-        );
+        final maxChatHeight = math.max(0.0, constraints.maxHeight - 150.0);
         final minChatHeight = math.min(72.0, maxChatHeight);
         final fallbackChatHeight = math.min(
           math.max(128.0, constraints.maxHeight * .30),
@@ -175,17 +171,11 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
                 key: widget.agendaPanelKey,
                 child: _CommandCenterAgendaList(
                   items: items,
+                  glanceDays: glanceDays,
                   loading: widget.loading,
                   onItemTap: _openAgendaItem,
+                  onEventTap: _openCalendarEvent,
                 ),
-              ),
-            ),
-            SizedBox(
-              height: glanceHeight,
-              child: _CommandCenterGlanceList(
-                days: glanceDays,
-                loading: widget.loading,
-                onEventTap: _openCalendarEvent,
               ),
             ),
             _CommandCenterSplitDivider(
@@ -449,39 +439,47 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
   }
 }
 
-class _CommandCenterGlanceList extends StatelessWidget {
-  const _CommandCenterGlanceList({
+class _CommandCenterGlanceSection extends StatelessWidget {
+  const _CommandCenterGlanceSection({
     required this.days,
-    required this.loading,
     required this.onEventTap,
   });
 
   final List<_CommandCenterGlanceDay> days;
-  final bool loading;
   final ValueChanged<HermesCalendarEvent> onEventTap;
 
   @override
-  Widget build(BuildContext context) => Stack(
+  Widget build(BuildContext context) => Column(
     key: const Key('command-center-glance-list'),
+    crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      ListView.separated(
-        padding: const EdgeInsets.fromLTRB(0, 4, 0, 6),
-        itemCount: days.length,
-        separatorBuilder: (context, index) => const SizedBox(height: 4),
-        itemBuilder: (context, index) => _CommandCenterGlanceDayTile(
+      for (var index = 0; index < days.length; index++)
+        _CommandCenterGlanceDayTile(
           day: days[index],
           showBottomDivider: index < days.length - 1,
           onEventTap: onEventTap,
         ),
-      ),
-      if (loading)
-        Positioned(
-          key: const Key('command-center-glance-refreshing'),
-          top: 6,
-          right: 4,
-          child: _InlineLoadingBadge(label: 'Updating'),
-        ),
     ],
+  );
+}
+
+class _CommandCenterAgendaEmptyInline extends StatelessWidget {
+  const _CommandCenterAgendaEmptyInline();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('command-center-agenda-empty'),
+    constraints: const BoxConstraints(minHeight: 42),
+    alignment: Alignment.centerLeft,
+    padding: const EdgeInsets.symmetric(horizontal: 7),
+    child: Text(
+      'Nothing else scheduled for today.',
+      style: TextStyle(
+        color: HeyBeanTheme.muted,
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
   );
 }
 
@@ -534,12 +532,13 @@ class _CommandCenterGlanceDayTile extends StatelessWidget {
         else
           Column(
             children: [
-              for (final event in day.events)
+              for (var index = 0; index < day.events.length; index++)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: _CommandCenterGlanceEventRow(
-                    event: event,
-                    onTap: () => onEventTap(event),
+                    event: day.events[index],
+                    showTopDivider: index > 0,
+                    onTap: () => onEventTap(day.events[index]),
                   ),
                 ),
             ],
@@ -552,10 +551,12 @@ class _CommandCenterGlanceDayTile extends StatelessWidget {
 class _CommandCenterGlanceEventRow extends StatelessWidget {
   const _CommandCenterGlanceEventRow({
     required this.event,
+    required this.showTopDivider,
     required this.onTap,
   });
 
   final HermesCalendarEvent event;
+  final bool showTopDivider;
   final VoidCallback onTap;
 
   @override
@@ -574,9 +575,9 @@ class _CommandCenterGlanceEventRow extends StatelessWidget {
           height: 42,
           padding: const EdgeInsets.symmetric(horizontal: 6),
           decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(color: _quietBorderColor(alpha: .30)),
-            ),
+            border: showTopDivider
+                ? Border(top: BorderSide(color: _quietBorderColor(alpha: .30)))
+                : null,
           ),
           child: Row(
             children: [
@@ -696,13 +697,17 @@ class _CommandCenterSplitDivider extends StatelessWidget {
 class _CommandCenterAgendaList extends StatelessWidget {
   const _CommandCenterAgendaList({
     required this.items,
+    required this.glanceDays,
     required this.loading,
     required this.onItemTap,
+    required this.onEventTap,
   });
 
   final List<_CommandCenterAgendaItem> items;
+  final List<_CommandCenterGlanceDay> glanceDays;
   final bool loading;
   final ValueChanged<_CommandCenterAgendaItem> onItemTap;
+  final ValueChanged<HermesCalendarEvent> onEventTap;
 
   @override
   Widget build(BuildContext context) {
@@ -713,34 +718,26 @@ class _CommandCenterAgendaList extends StatelessWidget {
         fillHeight: true,
       );
     }
-    if (items.isEmpty) {
-      return Container(
-        key: const Key('command-center-agenda-empty'),
-        alignment: Alignment.center,
-        decoration: _quietSurfaceDecoration(
-          radius: 18,
-          color: _quietSurfaceColor(alpha: .62),
-          borderAlpha: .32,
-        ),
-        child: Text(
-          'Nothing else scheduled for today.',
-          style: TextStyle(
-            color: HeyBeanTheme.muted,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      );
-    }
 
     return Stack(
       key: const Key('command-center-agenda-stack'),
       children: [
-        ListView.builder(
+        ListView(
           key: const Key('command-center-agenda-list'),
           padding: EdgeInsets.zero,
-          itemCount: items.length,
-          itemBuilder: (context, index) =>
-              _CommandCenterAgendaRow(item: items[index], onTap: onItemTap),
+          children: [
+            if (items.isEmpty) const _CommandCenterAgendaEmptyInline(),
+            for (var index = 0; index < items.length; index++)
+              _CommandCenterAgendaRow(
+                item: items[index],
+                showTopDivider: index > 0,
+                onTap: onItemTap,
+              ),
+            _CommandCenterGlanceSection(
+              days: glanceDays,
+              onEventTap: onEventTap,
+            ),
+          ],
         ),
         if (loading)
           Positioned(
@@ -755,9 +752,14 @@ class _CommandCenterAgendaList extends StatelessWidget {
 }
 
 class _CommandCenterAgendaRow extends StatelessWidget {
-  const _CommandCenterAgendaRow({required this.item, required this.onTap});
+  const _CommandCenterAgendaRow({
+    required this.item,
+    required this.showTopDivider,
+    required this.onTap,
+  });
 
   final _CommandCenterAgendaItem item;
+  final bool showTopDivider;
   final ValueChanged<_CommandCenterAgendaItem> onTap;
 
   @override
@@ -784,9 +786,9 @@ class _CommandCenterAgendaRow extends StatelessWidget {
           height: 42,
           padding: const EdgeInsets.symmetric(horizontal: 6),
           decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(color: _quietBorderColor(alpha: .30)),
-            ),
+            border: showTopDivider
+                ? Border(top: BorderSide(color: _quietBorderColor(alpha: .30)))
+                : null,
           ),
           child: Row(
             children: [

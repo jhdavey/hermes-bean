@@ -105,6 +105,7 @@ export function mountHeyBeanWebApp(mount) {
         chatHistoryOpen: false,
         chatRunState: 'Ready',
         chatDraft: '',
+        chatQueue: [],
         editingChatMessageId: '',
         activeBeanWorkMessageId: null,
         beanWorkItems: [],
@@ -247,6 +248,7 @@ export function mountHeyBeanWebApp(mount) {
     const noteAutosaveTimers = new Map();
     const noteAutosaveDelay = 650;
     let chatRequestCounter = 0;
+    let chatQueueCounter = 0;
     let activeChatRequestId = 0;
     let beanWorkEventPollTimer = 0;
     let beanWorkEventPollToken = 0;
@@ -3893,8 +3895,11 @@ export function mountHeyBeanWebApp(mount) {
                         if (state.beanWorkItems.length && state.beanWorkItems.every((item) => beanWorkItemDone(item))) {
                             scheduleBeanWorkStatusClear();
                         }
+                        state.busy = false;
+                        activeChatRequestId = 0;
                         render();
                         scrollChatToBottom();
+                        scheduleChatQueueDrain();
                         return;
                     }
                 }
@@ -3904,6 +3909,11 @@ export function mountHeyBeanWebApp(mount) {
             if ((clientRequestId || beanWorkStatusActive() || attempt < 3) && attempt < 50) {
                 const delay = clientRequestId || beanWorkStatusActive() ? 350 : 900;
                 beanWorkEventPollTimer = window.setTimeout(() => poll(attempt + 1), delay);
+            } else if (clientRequestId && activeChatRequestId) {
+                state.busy = false;
+                activeChatRequestId = 0;
+                render();
+                scheduleChatQueueDrain();
             }
         };
         beanWorkEventPollTimer = window.setTimeout(() => poll(0), 250);
@@ -3935,10 +3945,11 @@ export function mountHeyBeanWebApp(mount) {
                 <div class="hb-chat-input-stack ${workStrip ? 'hb-chat-input-stack-working' : ''}">
                     ${workStrip}
                     <form class="hb-chat-dock ${workStrip ? 'hb-chat-dock-with-work' : ''}" data-action="chat">
-                        <textarea name="message" placeholder="${escapeAttr(chatInputPlaceholder())}" rows="1" ${state.busy ? 'disabled' : ''}>${escapeHtml(inputValue)}</textarea>
-                        ${state.busy
-                            ? `<button class="hb-button-secondary hb-chat-text-send-button hb-chat-text-stop-button" type="button" data-cancel-turn aria-label="Stop Bean">${icons.stop}</button>`
-                            : `<button class="hb-button-secondary hb-chat-text-send-button" type="submit" aria-label="Send message">${icons.send}</button>`}
+                        <textarea name="message" placeholder="${escapeAttr(chatInputPlaceholder())}" rows="1">${escapeHtml(inputValue)}</textarea>
+                        <span class="hb-chat-action-cluster">
+                            ${state.busy ? `<button class="hb-button-secondary hb-chat-text-send-button hb-chat-text-stop-button" type="button" data-cancel-turn aria-label="Stop Bean">${icons.stop}</button>` : ''}
+                            <button class="hb-button-secondary hb-chat-text-send-button" type="submit" aria-label="${escapeAttr(state.busy ? 'Queue message' : 'Send message')}">${icons.send}</button>
+                        </span>
                     </form>
                 </div>
             </section>`;
@@ -4481,18 +4492,11 @@ export function mountHeyBeanWebApp(mount) {
     function commandCenterMarkup() {
         const items = commandCenterAgendaItems();
         const loading = state.dashboardDataLoading && !items.length;
-        const agendaPercent = commandCenterAgendaPercent();
         const chatPercent = commandCenterChatPercent();
         return `
-            <section class="hb-card hb-command-center-card ${state.commandCenterChatCollapsed ? 'hb-command-center-card-collapsed' : ''}" aria-label="Bean command center" data-command-center-shell style="--hb-command-center-agenda-size:${agendaPercent}%;--hb-command-center-chat-size:${chatPercent}%">
+            <section class="hb-card hb-command-center-card ${state.commandCenterChatCollapsed ? 'hb-command-center-card-collapsed' : ''}" aria-label="Bean command center" data-command-center-shell style="--hb-command-center-chat-size:${chatPercent}%">
                 <div class="hb-command-center-agenda" data-tour-target="command-center-agenda">
                     ${loading ? dashboardLoadingMarkup('Loading today...') : commandCenterAgendaMarkup(items)}
-                </div>
-                <div class="hb-command-center-divider hb-command-center-divider-quiet" role="separator" aria-orientation="horizontal" aria-valuemin="18" aria-valuemax="64" aria-valuenow="${Math.round(agendaPercent)}" aria-label="Resize today's list" tabindex="0" data-command-center-resizer="agenda">
-                    <span aria-hidden="true"></span>
-                </div>
-                <div class="hb-command-center-glance">
-                    ${commandCenterGlanceMarkup()}
                 </div>
                 <div class="hb-command-center-divider" role="separator" aria-orientation="horizontal" aria-valuemin="20" aria-valuemax="64" aria-valuenow="${Math.round(chatPercent)}" aria-label="Resize Bean chat area" tabindex="0" data-command-center-resizer="chat">
                     <span aria-hidden="true"></span>
@@ -4518,10 +4522,6 @@ export function mountHeyBeanWebApp(mount) {
         return clampCommandCenterChatRatio(Number(state.commandCenterChatRatio || (1 / 3)));
     }
 
-    function commandCenterMinGlanceRatio() {
-        return 0.18;
-    }
-
     function commandCenterMinAgendaRatio() {
         return 0.18;
     }
@@ -4532,7 +4532,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function clampCommandCenterAgendaRatio(value, chatRatio = Number(state.commandCenterChatRatio || (1 / 3))) {
         const fallback = 1 / 3;
-        const max = Math.max(commandCenterMinAgendaRatio(), 1 - clampCommandCenterChatRatio(chatRatio, fallback, { skipAgendaConstraint: true }) - commandCenterMinGlanceRatio());
+        const max = Math.max(commandCenterMinAgendaRatio(), 1 - clampCommandCenterChatRatio(chatRatio, fallback, { skipAgendaConstraint: true }));
         if (!Number.isFinite(value)) return Math.min(fallback, max);
         return Math.min(max, Math.max(commandCenterMinAgendaRatio(), value));
     }
@@ -4540,7 +4540,7 @@ export function mountHeyBeanWebApp(mount) {
     function clampCommandCenterChatRatio(value, agendaRatio = Number(state.commandCenterAgendaRatio || (1 / 3)), options = {}) {
         const fallback = 1 / 3;
         const agenda = options.skipAgendaConstraint ? Number(agendaRatio || fallback) : clampCommandCenterAgendaRatio(agendaRatio, fallback);
-        const max = Math.max(commandCenterMinChatRatio(), 1 - agenda - commandCenterMinGlanceRatio());
+        const max = Math.max(commandCenterMinChatRatio(), 1 - agenda);
         if (!Number.isFinite(value)) return Math.min(fallback, max);
         return Math.min(max, Math.max(commandCenterMinChatRatio(), value));
     }
@@ -4561,11 +4561,8 @@ export function mountHeyBeanWebApp(mount) {
 
     function updateCommandCenterLayoutRatios(agendaRatio = commandCenterAgendaRatio(), chatRatio = commandCenterChatRatio()) {
         const shell = mount.querySelector('[data-command-center-shell]');
-        const agendaDivider = mount.querySelector('[data-command-center-resizer="agenda"]');
         const chatDivider = mount.querySelector('[data-command-center-resizer="chat"]');
-        shell?.style.setProperty('--hb-command-center-agenda-size', `${(agendaRatio * 100).toFixed(1)}%`);
         shell?.style.setProperty('--hb-command-center-chat-size', `${(chatRatio * 100).toFixed(1)}%`);
-        agendaDivider?.setAttribute('aria-valuenow', String(Math.round(agendaRatio * 100)));
         chatDivider?.setAttribute('aria-valuenow', String(Math.round(chatRatio * 100)));
         scheduleOnboardingTourLayout();
     }
@@ -4607,10 +4604,6 @@ export function mountHeyBeanWebApp(mount) {
         if (!drag || event.pointerId !== drag.pointerId) return;
         event.preventDefault();
         const delta = (event.clientY - drag.startY) / drag.height;
-        if (drag.target === 'agenda') {
-            setCommandCenterAgendaRatio(drag.agendaRatio + delta);
-            return;
-        }
         setCommandCenterChatRatio(drag.chatRatio - delta);
     }
 
@@ -4629,22 +4622,6 @@ export function mountHeyBeanWebApp(mount) {
         const target = event.currentTarget.dataset.commandCenterResizer || 'chat';
         if (target === 'chat' && state.commandCenterChatCollapsed) return;
         const step = event.shiftKey ? 0.08 : 0.04;
-        if (target === 'agenda') {
-            if (event.key === 'ArrowUp') {
-                event.preventDefault();
-                setCommandCenterAgendaRatio(commandCenterAgendaRatio() - step);
-            } else if (event.key === 'ArrowDown') {
-                event.preventDefault();
-                setCommandCenterAgendaRatio(commandCenterAgendaRatio() + step);
-            } else if (event.key === 'Home') {
-                event.preventDefault();
-                setCommandCenterAgendaRatio(commandCenterMinAgendaRatio());
-            } else if (event.key === 'End') {
-                event.preventDefault();
-                setCommandCenterAgendaRatio(1 - commandCenterChatRatio() - commandCenterMinGlanceRatio());
-            }
-            return;
-        }
         if (event.key === 'ArrowUp') {
             event.preventDefault();
             setCommandCenterChatRatio(commandCenterChatRatio() + step);
@@ -4657,18 +4634,19 @@ export function mountHeyBeanWebApp(mount) {
             setCommandCenterChatRatio(commandCenterMinChatRatio());
         } else if (event.key === 'End') {
             event.preventDefault();
-            setCommandCenterChatRatio(1 - commandCenterAgendaRatio() - commandCenterMinGlanceRatio());
+            setCommandCenterChatRatio(1 - commandCenterAgendaRatio());
             scrollChatToBottom();
         }
     }
 
     function commandCenterAgendaMarkup(items) {
-        if (!items.length) {
-            return '<div class="hb-command-center-empty">Nothing else scheduled for today.</div>';
-        }
+        const todayMarkup = items.length
+            ? items.map(commandCenterAgendaItemMarkup).join('')
+            : '<div class="hb-command-center-empty hb-command-center-empty-inline">Nothing else scheduled for today.</div>';
         return `
-            <div class="hb-command-center-agenda-list" aria-label="Today's list">
-                ${items.map(commandCenterAgendaItemMarkup).join('')}
+            <div class="hb-command-center-agenda-list" aria-label="Today and upcoming list">
+                ${todayMarkup}
+                ${commandCenterGlanceMarkup()}
             </div>`;
     }
 
@@ -5134,11 +5112,29 @@ export function mountHeyBeanWebApp(mount) {
             eventNotesText(event)
                 ? `<span class="hb-month-event-icon" title="Has notes" aria-label="Has notes">${icons.notes}</span>`
                 : '',
+            eventLocationText(event)
+                ? `<span class="hb-month-event-icon" title="Has location" aria-label="Has location">${icons.pin}</span>`
+                : '',
         ].filter(Boolean).join('');
         return `
-            ${time ? `<span class="hb-month-event-time">${escapeHtml(time)}</span>` : ''}
-            ${iconsMarkup ? `<span class="hb-month-event-icons">${iconsMarkup}</span>` : ''}
-            <span class="hb-month-event-title">${escapeHtml(eventTitleText(event))}</span>`;
+            ${monthEventTimeStackMarkup(time)}
+            <span class="hb-month-event-body">
+                <span class="hb-month-event-main">
+                    <span class="hb-month-event-category-dot" aria-hidden="true" style="background:${escapeAttr(itemColor(event))}"></span>
+                    <span class="hb-month-event-title">${escapeHtml(eventTitleText(event))}</span>
+                </span>
+                ${iconsMarkup ? `<span class="hb-month-event-icons">${iconsMarkup}</span>` : '<span class="hb-month-event-icons hb-month-event-icons-empty" aria-hidden="true"></span>'}
+            </span>`;
+    }
+
+    function monthEventTimeStackMarkup(time = '') {
+        const label = String(time || '').trim();
+        if (!label) return '<span class="hb-month-event-time hb-month-event-time-empty" aria-hidden="true"></span>';
+        const parts = label.split(/\s*[–-]\s*/).filter(Boolean);
+        const rows = parts.length === 2
+            ? [`${parts[0]} -`, parts[1]]
+            : [label];
+        return `<span class="hb-month-event-time" aria-label="${escapeAttr(label)}">${rows.map((row) => `<span>${escapeHtml(row)}</span>`).join('')}</span>`;
     }
 
     function monthSwitcherMarkup(selected) {
@@ -5332,12 +5328,14 @@ export function mountHeyBeanWebApp(mount) {
     function messageMarkup(message, index = 0, messages = []) {
         const user = message.role === 'user';
         const content = user ? (message.content || '') : safeAssistantDisplayContent(conversationalMessageContent(message.content || ''));
-        const canEdit = user && !state.busy && !String(message.id || '').startsWith('local-');
+        const canEdit = user && !chatHasActiveTurn() && !String(message.id || '').startsWith('local-');
+        const queued = user && message.metadata?.client_queue_status === 'queued';
         return `
             <article class="hb-message ${user ? 'hb-message-user' : ''}" ${user ? `data-message-id="${escapeAttr(message.id || '')}"` : ''}>
                 <div class="hb-message-line">
                     ${message.progress ? '<span class="hb-spinner" style="width:13px;height:13px;border-width:2px"></span>' : ''}
                     <span class="hb-message-speaker ${user ? 'hb-message-speaker-user' : 'hb-message-speaker-bean'}">${user ? 'You' : 'Bean'}</span><span class="hb-message-separator"> - </span><span class="hb-message-body">${escapeHtml(content)}</span>
+                    ${queued ? '<span class="hb-message-queue-status">Queued</span>' : ''}
                     ${user ? `<span class="hb-message-actions-inline">
                         <button class="hb-message-icon-action" type="button" data-copy-message="${escapeAttr(message.id || '')}" aria-label="Copy message" title="Copy">${icons.copy || icons.notes}</button>
                         ${canEdit ? `<button class="hb-message-icon-action" type="button" data-edit-message="${escapeAttr(message.id || '')}" aria-label="Edit message" title="Edit">${icons.edit}</button>` : ''}
@@ -8974,12 +8972,53 @@ export function mountHeyBeanWebApp(mount) {
         textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
     }
 
+    function chatHasActiveTurn() {
+        return state.busy || activeChatRequestId > 0;
+    }
+
+    function enqueueChatContent(content, options = {}) {
+        const queueId = `queued-${Date.now()}-${++chatQueueCounter}`;
+        const queued = {
+            id: queueId,
+            content,
+            editingMessageId: options.editingMessageId || '',
+        };
+        state.chatQueue.push(queued);
+        state.messages.push({
+            id: queueId,
+            role: 'user',
+            content,
+            metadata: { client_queue_status: 'queued' },
+        });
+        state.chatDraft = '';
+        state.editingChatMessageId = '';
+        render();
+        scrollChatToBottom();
+    }
+
+    function scheduleChatQueueDrain() {
+        window.setTimeout(() => {
+            drainChatQueue().catch(() => {});
+        }, 0);
+    }
+
+    async function drainChatQueue() {
+        if (chatHasActiveTurn() || !state.chatQueue.length) return;
+        const queued = state.chatQueue.shift();
+        state.messages = state.messages.filter((message) => String(message.id || '') !== String(queued.id));
+        await sendChatContent(queued.content, queued.editingMessageId ? { editingMessageId: queued.editingMessageId } : {});
+    }
+
     async function submitChat(event) {
         event.preventDefault();
         const form = event.currentTarget;
         const content = new FormData(form).get('message')?.toString().trim();
-        if (!content || state.busy) return;
+        if (!content) return;
         const editingMessageId = state.editingChatMessageId || '';
+        if (chatHasActiveTurn()) {
+            enqueueChatContent(content, editingMessageId ? { editingMessageId } : {});
+            return;
+        }
         state.editingChatMessageId = '';
         state.chatDraft = '';
         await sendChatContent(content, editingMessageId ? { editingMessageId } : {});
@@ -8999,7 +9038,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function editChatMessage(messageId) {
-        if (state.busy) return;
+        if (chatHasActiveTurn()) return;
         const message = state.messages.find((item) => String(item.id) === String(messageId) && item.role === 'user');
         if (!message) return;
         state.editingChatMessageId = String(message.id);
@@ -9020,6 +9059,7 @@ export function mountHeyBeanWebApp(mount) {
         if (activeChatRequestId) {
             cancelledChatRequestIds.add(activeChatRequestId);
         }
+        activeChatRequestId = 0;
         stopBeanWorkEventPolling();
         state.busy = false;
         state.chatRunState = 'Ready';
@@ -9032,6 +9072,8 @@ export function mountHeyBeanWebApp(mount) {
             state.session = await api(`/assistant/sessions/${state.session.id}/cancel`, { method: 'POST' });
         } catch (error) {
             // A completed turn can race the cancel request; the UI has already been released.
+        } finally {
+            scheduleChatQueueDrain();
         }
     }
 
@@ -9070,11 +9112,11 @@ export function mountHeyBeanWebApp(mount) {
             }
             startBeanWorkEventPolling(state.session.id);
             const useRunEndpoint = !editingMessageId;
-            const metadata = {
+            const metadata = webChatMetadata({
                 source: useRunEndpoint ? 'web_routed_chat' : 'web_direct_chat',
                 client_request_id: clientRequestId,
                 ...(editingMessageId ? { edited_message_id: editingMessageId } : {}),
-            };
+            });
             const path = useRunEndpoint
                 ? `/assistant/sessions/${state.session.id}/runs`
                 : editingMessageId
@@ -9150,11 +9192,11 @@ export function mountHeyBeanWebApp(mount) {
         } finally {
             cancelledChatRequestIds.delete(requestId);
             if (activeChatRequestId === requestId) {
-                activeChatRequestId = 0;
-                state.busy = false;
                 const shouldKeepPollingWork = result
                     && (needsAssistantLookup || ['queued', 'running', 'processing'].includes(String(result.status || '').toLowerCase()))
                     && state.session?.id;
+                activeChatRequestId = shouldKeepPollingWork ? requestId : 0;
+                state.busy = Boolean(shouldKeepPollingWork);
                 if (shouldKeepPollingWork) {
                     startBeanWorkEventPolling(state.session.id, {
                         clientRequestId,
@@ -9162,6 +9204,7 @@ export function mountHeyBeanWebApp(mount) {
                     });
                 } else {
                     stopBeanWorkEventPolling();
+                    scheduleChatQueueDrain();
                 }
             }
             if (state.beanWorkItems.length && state.beanWorkItems.every((item) => beanWorkItemDone(item))) {
@@ -9277,7 +9320,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     async function newSession() {
-        if (state.busy) return;
+        if (chatHasActiveTurn()) return;
         try {
             const onboarding = needsBeanOnboarding();
             state.onboardingJustCompleted = false;
@@ -9296,13 +9339,51 @@ export function mountHeyBeanWebApp(mount) {
         }
     }
 
+    function timezoneOffsetLabel(offsetMinutes) {
+        const sign = offsetMinutes < 0 ? '-' : '+';
+        const absolute = Math.abs(offsetMinutes);
+        const hours = String(Math.floor(absolute / 60)).padStart(2, '0');
+        const minutes = String(absolute % 60).padStart(2, '0');
+        return `${sign}${hours}:${minutes}`;
+    }
+
+    function clientTemporalContext() {
+        const now = new Date();
+        const offsetMinutes = -now.getTimezoneOffset();
+        const offset = timezoneOffsetLabel(offsetMinutes);
+        const localDate = dateOnly(now);
+        const localTime = [
+            String(now.getHours()).padStart(2, '0'),
+            String(now.getMinutes()).padStart(2, '0'),
+            String(now.getSeconds()).padStart(2, '0'),
+        ].join(':');
+        const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(now);
+        const timezoneName = parts.find((part) => part.type === 'timeZoneName')?.value || '';
+        return {
+            current_local_time: `${localDate}T${localTime}${offset}`,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+            timezone_name: timezoneName,
+            timezone_offset: offset,
+            timezone_offset_minutes: offsetMinutes,
+            local_date: localDate,
+            local_time: localTime,
+        };
+    }
+
+    function webChatMetadata(additional = {}) {
+        return {
+            client_context: clientTemporalContext(),
+            ...additional,
+        };
+    }
+
     function chatSessionPayload(onboarding = needsBeanOnboarding()) {
         const today = dateOnly(new Date());
         return {
             title: onboarding ? 'Welcome to Bean' : `${monthDayLabel(today)} with Bean`,
             runtime_mode: onboarding ? 'onboarding' : 'chat',
             workspace_id: currentWorkspaceId() || null,
-            metadata: { daily_date: today, source: 'web_chat' },
+            metadata: webChatMetadata({ daily_date: today, source: 'web_chat' }),
         };
     }
 

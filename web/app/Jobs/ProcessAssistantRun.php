@@ -8,6 +8,7 @@ use App\Models\ConversationMessage;
 use App\Services\HermesRuntimeService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -22,6 +23,22 @@ class ProcessAssistantRun implements ShouldQueue
     public bool $failOnTimeout = true;
 
     public function __construct(public readonly int $assistantRunId) {}
+
+    public function middleware(): array
+    {
+        $run = AssistantRun::query()
+            ->select(['id', 'conversation_session_id'])
+            ->find($this->assistantRunId);
+        $lockKey = $run?->conversation_session_id
+            ? "assistant-session-{$run->conversation_session_id}"
+            : "assistant-run-{$this->assistantRunId}";
+
+        return [
+            (new WithoutOverlapping($lockKey))
+                ->releaseAfter(2)
+                ->expireAfter($this->timeout + 60),
+        ];
+    }
 
     public function handle(HermesRuntimeService $runtime): void
     {

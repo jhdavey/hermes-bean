@@ -134,6 +134,11 @@ class _HeroChatCardState extends State<_HeroChatCard> {
                                         : 'Bean',
                                     message: message.content ?? '',
                                     alignRight: message.role == 'user',
+                                    statusLabel:
+                                        message.metadata['client_queue_status'] ==
+                                            'queued'
+                                        ? 'Queued'
+                                        : null,
                                     onCopy: message.role == 'user'
                                         ? () => unawaited(
                                             widget.onMessageCopied(message),
@@ -256,7 +261,7 @@ class _ChatInputDock extends StatelessWidget {
             maxLines: 4,
             keyboardType: TextInputType.multiline,
             textInputAction: TextInputAction.send,
-            onSubmitted: busy ? null : (_) => onSend(),
+            onSubmitted: (_) => onSend(),
             decoration: InputDecoration(
               hintText: 'Message Bean…',
               border: InputBorder.none,
@@ -267,7 +272,7 @@ class _ChatInputDock extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        if (busy)
+        if (busy) ...[
           FilledButton(
             key: const Key('primary-chat-stop-action'),
             style: FilledButton.styleFrom(
@@ -278,13 +283,14 @@ class _ChatInputDock extends StatelessWidget {
             ),
             onPressed: () => unawaited(onStop()),
             child: Icon(Icons.stop_rounded, size: 18),
-          )
-        else
-          FilledButton(
-            key: const Key('primary-chat-action'),
-            onPressed: onSend,
-            child: Icon(Icons.arrow_upward_rounded, size: 18),
           ),
+          const SizedBox(width: 6),
+        ],
+        FilledButton(
+          key: const Key('primary-chat-action'),
+          onPressed: onSend,
+          child: Icon(Icons.arrow_upward_rounded, size: 18),
+        ),
       ],
     ),
   );

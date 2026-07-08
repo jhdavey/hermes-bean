@@ -1831,57 +1831,7 @@ class StructuredHermesActionService
             return false;
         }
 
-        $requestedMinutes = $this->requestedClockMinutes($message);
-        if ($requestedMinutes === []) {
-            return false;
-        }
-
-        $parsed = Carbon::parse($value);
-        $utcMinutes = ((int) $parsed->copy()->utc()->format('G')) * 60 + (int) $parsed->copy()->utc()->format('i');
-        $local = $parsed->copy()->setTimezone($offset);
-        $localMinutes = ((int) $local->format('G')) * 60 + (int) $local->format('i');
-
-        return in_array($utcMinutes, $requestedMinutes, true)
-            && ! in_array($localMinutes, $requestedMinutes, true);
-    }
-
-    /**
-     * @return array<int, int>
-     */
-    private function requestedClockMinutes(string $message): array
-    {
-        $minutes = [];
-
-        if (preg_match_all('/\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*([ap])\.?m\.?\b/i', $message, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $match) {
-                $hour = (int) $match[1];
-                $minute = isset($match[2]) && $match[2] !== '' ? (int) $match[2] : 0;
-                $meridiem = strtolower($match[3]);
-                if ($meridiem === 'p' && $hour !== 12) {
-                    $hour += 12;
-                }
-                if ($meridiem === 'a' && $hour === 12) {
-                    $hour = 0;
-                }
-                $minutes[] = $hour * 60 + $minute;
-            }
-        }
-
-        if (preg_match_all('/\b([01]?\d|2[0-3]):([0-5]\d)\b/', $message, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $match) {
-                $minutes[] = ((int) $match[1]) * 60 + (int) $match[2];
-            }
-        }
-
-        if (preg_match('/\bnoon\b/i', $message)) {
-            $minutes[] = 12 * 60;
-        }
-
-        if (preg_match('/\bmidnight\b/i', $message)) {
-            $minutes[] = 0;
-        }
-
-        return array_values(array_unique($minutes));
+        return $this->looksLikeLocalDateTime($this->stripUtcTimezone($value));
     }
 
     private function latestUserMessageContent(ConversationSession $session): string

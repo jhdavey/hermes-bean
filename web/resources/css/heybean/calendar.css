@@ -341,20 +341,21 @@
     min-width: 0;
     max-width: 100%;
     overflow: hidden;
-    display: flex;
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
     align-items: start;
-    gap: 3px;
+    column-gap: 5px;
     border: 0;
     border-radius: 0;
     background: transparent;
     color: var(--hb-text);
-    padding: 1px 0;
+    padding: 2px 0;
     text-align: left;
     cursor: pointer;
 }
 
 .hb-month-multi-day-event {
-    display: flex;
+    display: grid;
 }
 
 .hb-month-all-day-event:hover {
@@ -380,14 +381,15 @@
 
 .hb-month-event {
     min-width: 0;
-    display: flex;
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
     align-items: start;
-    gap: 3px;
+    column-gap: 5px;
     border: 0;
     border-radius: 0;
     background: transparent;
     color: var(--hb-text);
-    padding: 1px 0;
+    padding: 2px 0;
     text-align: left;
     cursor: pointer;
 }
@@ -397,39 +399,69 @@
 }
 
 .hb-month-event-time {
+    min-width: 0;
+    display: grid;
+    gap: 1px;
     color: var(--hb-muted);
     font-size: 10px;
     font-weight: 500;
     line-height: 1.1;
     padding-top: 1px;
+    text-align: right;
     white-space: nowrap;
 }
 
+.hb-month-event-time-empty {
+    min-height: 1px;
+}
+
+.hb-month-event-body {
+    min-width: 0;
+    display: grid;
+    gap: 1px;
+}
+
+.hb-month-event-main {
+    min-width: 0;
+    display: flex;
+    align-items: start;
+    gap: 4px;
+}
+
+.hb-month-event-category-dot {
+    width: 6px;
+    height: 6px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    margin-top: 3px;
+}
+
 .hb-month-event-title {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-width: 0;
     color: var(--hb-text);
     font-size: 11px;
     font-weight: 400;
     line-height: 1.15;
-    display: -webkit-box;
+    display: block;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: normal;
+    white-space: nowrap;
     overflow-wrap: anywhere;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
 }
 
 .hb-month-event-icons {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
+    gap: 3px;
     min-width: 0;
     color: var(--hb-muted);
     line-height: 1;
-    padding-top: 1px;
+    min-height: 11px;
+}
+
+.hb-month-event-icons-empty {
+    visibility: hidden;
 }
 
 .hb-month-event-icon {

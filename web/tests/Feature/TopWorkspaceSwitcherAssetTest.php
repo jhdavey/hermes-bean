@@ -64,6 +64,10 @@ class TopWorkspaceSwitcherAssetTest extends TestCase
         $this->assertStringContainsString("? { content, source: 'web_routed_chat', metadata }", $appJs);
         $this->assertStringContainsString('/messages/${encodeURIComponent(editingMessageId)}/branch', $appJs);
         $this->assertStringContainsString('/runs/lookup?client_request_id=', $appJs);
+        $this->assertStringContainsString('chatQueue: []', $appJs);
+        $this->assertStringContainsString('enqueueChatContent(content', $appJs);
+        $this->assertStringContainsString('drainChatQueue()', $appJs);
+        $this->assertStringContainsString('client_context: clientTemporalContext()', $appJs);
         $this->assertStringNotContainsString('beanRequestShouldUseQueuedRuntime', $appJs);
         $this->assertStringNotContainsString('beanAcknowledgementForRequest', $appJs);
         $this->assertStringNotContainsString('beanInitialWorkLabelsForRequest', $appJs);

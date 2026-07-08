@@ -598,6 +598,89 @@ class HermesToolRuntimeServiceTest extends TestCase
         ]);
     }
 
+    public function test_tool_runtime_treats_web_utc_wall_clock_tool_times_as_client_local(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-web-wall-clock-tools',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'tool_calls',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => null,
+                        'tool_calls' => [
+                            [
+                                'id' => 'call_workout_event',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'create_calendar_event',
+                                    'arguments' => json_encode([
+                                        'title' => 'Workout',
+                                        'starts_at' => '2026-07-08T05:00:00Z',
+                                        'ends_at' => '2026-07-08T06:00:00Z',
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ],
+                            [
+                                'id' => 'call_workout_reminder',
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => 'create_reminder',
+                                    'arguments' => json_encode([
+                                        'title' => 'Workout',
+                                        'remind_at' => '2026-07-08T09:00:00Z',
+                                    ], JSON_THROW_ON_ERROR),
+                                ],
+                            ],
+                        ],
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-web-wall-clock-final',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'Done — I added the workout and reminder.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->premiumApiToken('tool-web-wall-clock@example.com');
+        $user = User::where('email', 'tool-web-wall-clock@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'Add workout to my calendar from 5-6am and remind me tomorrow morning.',
+            'metadata' => [
+                'source' => 'web_routed_chat',
+                'client_context' => [
+                    'current_local_time' => '2026-07-07T22:13:00-04:00',
+                    'timezone' => 'America/New_York',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $event = CalendarEvent::query()
+            ->where('user_id', $user->id)
+            ->where('title', 'Workout')
+            ->firstOrFail();
+        $reminder = Reminder::query()
+            ->where('user_id', $user->id)
+            ->where('title', 'Workout')
+            ->firstOrFail();
+
+        $this->assertSame('2026-07-08 09:00:00', $event->starts_at->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-07-08 10:00:00', $event->ends_at->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-07-08 13:00:00', $reminder->remind_at->format('Y-m-d H:i:s'));
+    }
+
     public function test_tool_runtime_keeps_work_item_order_across_separate_tool_turns(): void
     {
         Http::fakeSequence()

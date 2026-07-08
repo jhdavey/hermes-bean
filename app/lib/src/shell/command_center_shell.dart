@@ -24,6 +24,18 @@ class CommandCenterShell extends StatefulWidget {
   State<CommandCenterShell> createState() => _CommandCenterShellState();
 }
 
+class _QueuedBeanChatRequest {
+  const _QueuedBeanChatRequest({
+    required this.localMessageId,
+    required this.content,
+    required this.editingMessageId,
+  });
+
+  final int localMessageId;
+  final String content;
+  final int? editingMessageId;
+}
+
 class _CommandCenterShellState extends State<CommandCenterShell>
     with WidgetsBindingObserver {
   _AuthPhase _phase = _AuthPhase.loading;
@@ -94,8 +106,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   };
   final TextEditingController _chatInputController = TextEditingController();
   final FocusNode _chatInputFocusNode = FocusNode();
+  final List<_QueuedBeanChatRequest> _beanChatQueue =
+      <_QueuedBeanChatRequest>[];
   bool _beanChatCollapsed = false;
   int? _editingChatMessageId;
+  bool _beanChatQueueDraining = false;
   int _localMessageSequence = -1;
   final Set<int> _dismissedReminderBannerIds = <int>{};
   final Set<int> _notifiedReminderIds = <int>{};
@@ -2410,7 +2425,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   void _beginEditingChatMessage(HermesMessage message) {
-    if (_busy || message.role != 'user') return;
+    if (_beanChatHasActiveTurn || message.role != 'user') return;
     setState(() {
       _editingChatMessageId = message.id;
       _chatInputController.text = message.content ?? '';
@@ -2482,10 +2497,67 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _sendChatInputDraft() async {
     final text = _chatInputController.text.trim();
-    if (text.isEmpty || _busy) return;
+    if (text.isEmpty) return;
     final editingMessageId = _editingChatMessageId;
     _chatInputController.clear();
+    if (_beanChatHasActiveTurn) {
+      _enqueueBeanChatRequest(text, editingMessageId: editingMessageId);
+      return;
+    }
     await _sendChat(text, editingMessageId: editingMessageId);
+  }
+
+  bool get _beanChatHasActiveTurn => _busy || _activeAssistantRunId != null;
+
+  void _enqueueBeanChatRequest(String content, {int? editingMessageId}) {
+    final localMessageId = _nextLocalMessageId();
+    final request = _QueuedBeanChatRequest(
+      localMessageId: localMessageId,
+      content: content,
+      editingMessageId: editingMessageId,
+    );
+    setState(() {
+      _editingChatMessageId = null;
+      _beanChatQueue.add(request);
+      _messages.add(
+        HermesMessage(
+          id: localMessageId,
+          role: 'user',
+          content: content,
+          metadata: const {'client_queue_status': 'queued'},
+        ),
+      );
+    });
+  }
+
+  void _scheduleBeanChatQueueDrain() {
+    Future<void>.microtask(_drainBeanChatQueue);
+  }
+
+  Future<void> _drainBeanChatQueue() async {
+    if (_beanChatQueueDraining ||
+        _beanChatHasActiveTurn ||
+        _beanChatQueue.isEmpty) {
+      return;
+    }
+    _beanChatQueueDraining = true;
+    final request = _beanChatQueue.removeAt(0);
+    if (mounted) {
+      setState(() {
+        _messages.removeWhere(
+          (message) => message.id == request.localMessageId,
+        );
+      });
+    }
+    try {
+      await _sendChat(
+        request.content,
+        editingMessageId: request.editingMessageId,
+      );
+    } finally {
+      _beanChatQueueDraining = false;
+      if (mounted) _scheduleBeanChatQueueDrain();
+    }
   }
 
   Future<String?> _sendChat(String content, {int? editingMessageId}) async {
@@ -2809,7 +2881,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       });
       surfacedAssistantText = friendlyFailureMessage;
     } finally {
-      if (mounted && runToken == _chatRunToken) setState(() => _busy = false);
+      if (mounted && runToken == _chatRunToken) {
+        setState(() => _busy = false);
+        _scheduleBeanChatQueueDrain();
+      }
     }
     final assistantText = beanSafeAssistantDisplayContent(
       surfacedAssistantText ?? '',
@@ -2908,6 +2983,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       });
       if (hasAssistantAfter) {
         unawaited(_refreshSignedInViews(showLoading: false));
+        _scheduleBeanChatQueueDrain();
       }
       return true;
     } catch (_) {
@@ -2948,10 +3024,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       return;
     }
 
+    final suppressedAssistantMessage =
+        result.assistantMessage != null &&
+        _assistantMessageShouldStayOutOfChat(result.assistantMessage!);
     setState(() {
-      final suppressedAssistantMessage =
-          result.assistantMessage != null &&
-          _assistantMessageShouldStayOutOfChat(result.assistantMessage!);
       if (result.userMessage != null) {
         _replaceChatMessage(localUserMessageId, result.userMessage!);
         _activeBeanWorkMessageId = result.userMessage!.id;
@@ -2992,6 +3068,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _error = null;
     });
     unawaited(_refreshSignedInViews(showLoading: false));
+    if (!suppressedAssistantMessage) _scheduleBeanChatQueueDrain();
   }
 
   Future<HermesMessageResult> _queueBeanMessageWithRetry({
@@ -3325,6 +3402,7 @@ ${_truncateDiagnostic(stack, 2200)}
           if (!finalEvents.any(_beanActivityEventMutatesDashboard)) {
             unawaited(_refreshSignedInViews(showLoading: false));
           }
+          _scheduleBeanChatQueueDrain();
           return;
         }
         if (attempt > 0 &&
@@ -3354,6 +3432,7 @@ ${_truncateDiagnostic(stack, 2200)}
       _busy = false;
       _chatRunState = 'Working in background';
     });
+    _scheduleBeanChatQueueDrain();
   }
 
   Future<bool> _recoverQueuedRunFromSession({
@@ -3392,6 +3471,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _error = null;
         _completeActiveBeanWorkItems();
       });
+      _scheduleBeanChatQueueDrain();
 
       return true;
     } catch (_) {
@@ -6763,7 +6843,7 @@ ${_truncateDiagnostic(stack, 2200)}
     outlookCalendarStatus: _outlookCalendarStatus,
     events: _events,
     messages: _messages,
-    busy: _busy,
+    busy: _beanChatHasActiveTurn,
     dashboardDataLoading: _dashboardDataLoading,
     chatRunState: _chatRunState,
     chatInputController: _chatInputController,
