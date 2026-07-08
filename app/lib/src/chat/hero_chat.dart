@@ -191,6 +191,7 @@ class _DockedBeanChatComposer extends StatelessWidget {
     required this.controller,
     required this.focusNode,
     required this.busy,
+    required this.disabled,
     required this.attachedToWorkStrip,
     required this.onSend,
     required this.onStop,
@@ -199,6 +200,7 @@ class _DockedBeanChatComposer extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool busy;
+  final bool disabled;
   final bool attachedToWorkStrip;
   final VoidCallback onSend;
   final Future<void> Function() onStop;
@@ -208,6 +210,7 @@ class _DockedBeanChatComposer extends StatelessWidget {
     controller: controller,
     focusNode: focusNode,
     busy: busy,
+    disabled: disabled,
     attachedToWorkStrip: attachedToWorkStrip,
     onSend: onSend,
     onStop: onStop,
@@ -219,6 +222,7 @@ class _ChatInputDock extends StatelessWidget {
     required this.controller,
     required this.focusNode,
     required this.busy,
+    required this.disabled,
     required this.attachedToWorkStrip,
     required this.onSend,
     required this.onStop,
@@ -227,6 +231,7 @@ class _ChatInputDock extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool busy;
+  final bool disabled;
   final bool attachedToWorkStrip;
   final VoidCallback onSend;
   final Future<void> Function() onStop;
@@ -260,11 +265,14 @@ class _ChatInputDock extends StatelessWidget {
             focusNode: focusNode,
             minLines: 1,
             maxLines: 4,
+            enabled: !disabled,
             keyboardType: TextInputType.multiline,
             textInputAction: TextInputAction.send,
-            onSubmitted: (_) => onSend(),
+            onSubmitted: (_) {
+              if (!disabled) onSend();
+            },
             decoration: InputDecoration(
-              hintText: 'Message Bean…',
+              hintText: disabled ? 'Bean is waking up...' : 'Message Bean…',
               border: InputBorder.none,
               enabledBorder: InputBorder.none,
               focusedBorder: InputBorder.none,
@@ -289,7 +297,7 @@ class _ChatInputDock extends StatelessWidget {
         ],
         FilledButton(
           key: const Key('primary-chat-action'),
-          onPressed: onSend,
+          onPressed: disabled ? null : onSend,
           child: Icon(Icons.arrow_upward_rounded, size: 18),
         ),
       ],

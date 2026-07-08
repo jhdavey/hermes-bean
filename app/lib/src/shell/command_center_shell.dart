@@ -2514,6 +2514,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   Future<void> _sendChatInputDraft() async {
+    if (_session == null) return;
     final text = _chatInputController.text.trim();
     if (text.isEmpty) return;
     final editingMessageId = _editingChatMessageId;
@@ -6646,6 +6647,7 @@ ${_truncateDiagnostic(stack, 2200)}
                         controller: _chatInputController,
                         focusNode: _chatInputFocusNode,
                         busy: _beanStopAvailable,
+                        disabled: _session == null,
                         attachedToWorkStrip: beanWorkStripActive,
                         onSend: () => unawaited(_sendChatInputDraft()),
                         onStop: _stopAgent,

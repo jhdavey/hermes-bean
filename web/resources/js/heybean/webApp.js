@@ -102,6 +102,7 @@ export function mountHeyBeanWebApp(mount) {
         messages: [],
         session: null,
         chatSessions: [],
+        chatSessionHydrating: false,
         chatHistoryOpen: false,
         chatRunState: 'Ready',
         chatDraft: '',
@@ -580,6 +581,9 @@ export function mountHeyBeanWebApp(mount) {
                 state.selected = 'bean';
                 state.chatRunState = 'Onboarding';
             }
+            state.session = null;
+            state.messages = [];
+            state.chatSessionHydrating = !needsBeanOnboarding();
             if (state.selected === 'admin') {
                 loadAdminUsage();
             }
@@ -587,10 +591,11 @@ export function mountHeyBeanWebApp(mount) {
                 render();
             }
             startDashboardChangeFeed();
-            state.session = null;
-            state.messages = [];
             loadChatSessions({ resumeToday: true }).catch(() => {
                 // Chat history should hydrate opportunistically and never block the app shell.
+            }).finally(() => {
+                state.chatSessionHydrating = false;
+                render();
             });
 
             const notesAllowed = notesEnabled();
@@ -3927,12 +3932,15 @@ export function mountHeyBeanWebApp(mount) {
 
     function chatMarkup(options = {}) {
         const working = state.busy && state.chatRunState !== 'Ready';
+        const waking = beanChatWaking();
         const messages = (state.messages.length ? state.messages : [
-            { id: 'intro', role: 'assistant', content: needsBeanOnboarding() ? onboardingIntroMessage() : 'Hey! How can I help?' },
+            { id: 'intro', role: 'assistant', content: waking ? 'Bean is waking up...' : (needsBeanOnboarding() ? onboardingIntroMessage() : 'Hey! How can I help?') },
         ]).filter((message) => !assistantMessageShouldStayOutOfChat(message));
         const workStrip = chatDockedWorkStripMarkup();
         const messageListId = options.messageListId || 'hb-chat-messages';
         const inputValue = chatInputValue();
+        const inputDisabled = waking;
+        const sendDisabled = inputDisabled ? 'disabled aria-disabled="true"' : '';
         return `
             <section class="hb-chat ${options.compact ? 'hb-chat-compact' : ''}">
                 ${errorMarkup(state.error)}
@@ -3945,14 +3953,18 @@ export function mountHeyBeanWebApp(mount) {
                 <div class="hb-chat-input-stack ${workStrip ? 'hb-chat-input-stack-working' : ''}">
                     ${workStrip}
                     <form class="hb-chat-dock ${workStrip ? 'hb-chat-dock-with-work' : ''}" data-action="chat">
-                        <textarea name="message" placeholder="${escapeAttr(chatInputPlaceholder())}" rows="1">${escapeHtml(inputValue)}</textarea>
+                        <textarea name="message" placeholder="${escapeAttr(chatInputPlaceholder())}" rows="1" ${inputDisabled ? 'disabled aria-disabled="true"' : ''}>${escapeHtml(inputValue)}</textarea>
                         <span class="hb-chat-action-cluster">
                             ${state.busy ? `<button class="hb-button-secondary hb-chat-text-send-button hb-chat-text-stop-button" type="button" data-cancel-turn aria-label="Stop Bean">${icons.stop}</button>` : ''}
-                            <button class="hb-button-secondary hb-chat-text-send-button" type="submit" aria-label="${escapeAttr(state.busy ? 'Queue message' : 'Send message')}">${icons.send}</button>
+                            <button class="hb-button-secondary hb-chat-text-send-button" type="submit" aria-label="${escapeAttr(waking ? 'Bean is waking up' : (state.busy ? 'Queue message' : 'Send message'))}" ${sendDisabled}>${icons.send}</button>
                         </span>
                     </form>
                 </div>
             </section>`;
+    }
+
+    function beanChatWaking() {
+        return Boolean(state.chatSessionHydrating && !needsBeanOnboarding() && !state.session?.id && !state.busy);
     }
 
     function chatInputValue() {
@@ -9016,6 +9028,7 @@ export function mountHeyBeanWebApp(mount) {
 
     async function submitChat(event) {
         event.preventDefault();
+        if (beanChatWaking()) return;
         const form = event.currentTarget;
         const content = new FormData(form).get('message')?.toString().trim();
         if (!content) return;
@@ -9394,6 +9407,7 @@ export function mountHeyBeanWebApp(mount) {
 
     async function loadChatSessions(options = {}) {
         if (!state.token || state.phase !== 'signedIn') return;
+        if (options.resumeToday) state.chatSessionHydrating = true;
         const params = new URLSearchParams({
             date: dateOnly(new Date()),
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
@@ -9402,17 +9416,21 @@ export function mountHeyBeanWebApp(mount) {
         const workspaceId = currentWorkspaceId();
         if (workspaceId) params.set('workspace_id', workspaceId);
 
-        const result = await api(`/assistant/sessions?${params.toString()}`);
-        state.chatSessions = normalizeList(result.sessions);
+        try {
+            const result = await api(`/assistant/sessions?${params.toString()}`);
+            state.chatSessions = normalizeList(result.sessions);
 
-        if (options.resumeToday && !state.busy) {
-            const todaySession = result.today_session || result.todaySession || null;
-            if (todaySession?.id) {
-                await resumeSession(todaySession.id, { keepHistoryOpen: true });
+            if (options.resumeToday && !state.busy) {
+                const todaySession = result.today_session || result.todaySession || null;
+                if (todaySession?.id) {
+                    await resumeSession(todaySession.id, { keepHistoryOpen: true });
+                }
             }
-        }
 
-        if (options.shouldRender !== false) render();
+            if (options.shouldRender !== false) render();
+        } finally {
+            if (options.resumeToday) state.chatSessionHydrating = false;
+        }
     }
 
     async function resumeSession(id, options = {}) {

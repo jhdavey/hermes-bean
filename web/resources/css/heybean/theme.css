@@ -292,23 +292,32 @@
         linear-gradient(180deg, rgba(21, 28, 36, .98), rgba(10, 14, 19, .98));
 }
 
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-cell,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-day,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-glance-day {
     border-color: rgba(148, 163, 184, .14);
     background: rgba(18, 24, 31, .92);
 }
 
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-cell {
+    border-color: rgba(148, 163, 184, .14);
+    background: rgba(16, 22, 29, .82);
+}
+
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-cell-adjacent {
-    background: rgba(12, 16, 22, .88);
+    background: rgba(10, 14, 19, .78);
     border-color: rgba(148, 163, 184, .10);
 }
 
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-cell-active,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-day-active {
     border-color: rgba(var(--hb-accent-rgb), .46);
     background: linear-gradient(180deg, rgba(var(--hb-accent-rgb), .18), rgba(22, 29, 37, .96));
     box-shadow: inset 0 0 0 1px rgba(var(--hb-accent-rgb), .22);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-cell-active {
+    border-color: rgba(var(--hb-accent-rgb), .34);
+    background: linear-gradient(180deg, rgba(var(--hb-accent-rgb), .12), rgba(18, 25, 32, .88));
+    box-shadow: inset 0 0 0 1px rgba(var(--hb-accent-rgb), .16);
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-event,
@@ -335,11 +344,14 @@
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-task-expand-icon,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-item-title,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-event-title,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-event-title,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-glance-event .hb-event-title,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-timeline-day-head strong {
     color: var(--hb-text);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-event-title {
+    color: color-mix(in srgb, var(--hb-text) 88%, var(--hb-muted));
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-item-meta,
