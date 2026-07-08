@@ -302,11 +302,12 @@ class _ChatInputDock extends StatelessWidget {
             style: FilledButton.styleFrom(
               backgroundColor: HeyBeanTheme.destructive,
               foregroundColor: Colors.white,
-              minimumSize: const Size(44, 44),
+              minimumSize: const Size(40, 40),
+              fixedSize: const Size(40, 40),
               padding: EdgeInsets.zero,
             ),
             onPressed: () => unawaited(onStop()),
-            child: Icon(Icons.stop_rounded, size: 18),
+            child: Icon(Icons.stop_rounded, size: 17),
           ),
           const SizedBox(width: 6),
         ],
@@ -323,12 +324,13 @@ class _ChatInputDock extends StatelessWidget {
               foregroundColor: voiceRecording
                   ? Colors.white
                   : HeyBeanTheme.accent,
-              minimumSize: const Size(44, 44),
+              minimumSize: const Size(40, 40),
+              fixedSize: const Size(40, 40),
               padding: EdgeInsets.zero,
             ),
             child: Icon(
               voiceRecording ? Icons.mic_rounded : Icons.mic_none_rounded,
-              size: 18,
+              size: 17,
             ),
           ),
         ),
@@ -336,7 +338,12 @@ class _ChatInputDock extends StatelessWidget {
         FilledButton(
           key: const Key('primary-chat-action'),
           onPressed: disabled ? null : onSend,
-          child: Icon(Icons.arrow_upward_rounded, size: 18),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(40, 40),
+            fixedSize: const Size(40, 40),
+            padding: EdgeInsets.zero,
+          ),
+          child: Icon(Icons.arrow_upward_rounded, size: 17),
         ),
       ],
     ),

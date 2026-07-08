@@ -553,8 +553,8 @@
 }
 
 .hb-icon-button {
-    width: 38px;
-    height: 38px;
+    width: 34px;
+    height: 34px;
     display: inline-grid;
     place-items: center;
     border: 1px solid var(--hb-border);
@@ -584,6 +584,8 @@
 }
 
 .hb-topbar-action {
+    width: 38px;
+    height: 38px;
     border-color: transparent;
     border-radius: 999px;
     background: transparent;
@@ -640,6 +642,11 @@
 }
 
 .hb-icon-button svg {
+    width: 17px;
+    height: 17px;
+}
+
+.hb-topbar-action svg {
     width: 19px;
     height: 19px;
 }
@@ -946,13 +953,13 @@
 }
 
 .hb-guided-choice-chip {
-    min-height: 44px;
-    padding: 0 14px;
+    min-height: 40px;
+    padding: 0 12px;
     border: 1px solid var(--hb-border);
     border-radius: 999px;
     background: var(--hb-surface);
     color: var(--hb-text);
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 850;
     cursor: pointer;
 }
@@ -978,8 +985,8 @@
     min-height: 0;
     display: grid;
     align-content: start;
-    gap: 6px;
-    padding: 16px;
+    gap: 5px;
+    padding: 14px;
     border: 1px solid var(--hb-border);
     border-radius: 20px;
     background: var(--hb-surface);
@@ -1083,13 +1090,13 @@
 }
 
 .hb-guided-onboarding-send {
-    width: 56px;
-    min-width: 56px;
-    height: 56px;
-    min-height: 56px;
+    width: 50px;
+    min-width: 50px;
+    height: 50px;
+    min-height: 50px;
     padding: 0;
     border-radius: 999px;
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 500;
 }
 
@@ -1697,16 +1704,16 @@
 .hb-button-secondary,
 .hb-button-danger,
 .hb-button-ghost {
-    min-height: 44px;
+    min-height: 40px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 7px;
     border-radius: 999px;
     border: 1px solid transparent;
-    padding: 12px 20px;
+    padding: 10px 16px;
     font-family: inherit;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 700;
     text-decoration: none;
     cursor: pointer;

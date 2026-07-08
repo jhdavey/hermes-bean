@@ -104,18 +104,18 @@
 
 .hb-date-time-trigger {
     width: 100%;
-    min-height: 44px;
+    min-height: 40px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    padding: 10px 12px;
+    gap: 8px;
+    padding: 8px 10px;
     border: 1px solid var(--hb-border);
     border-radius: 14px;
     background: var(--hb-surface);
     color: var(--hb-text);
     font: inherit;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 800;
     text-align: left;
     cursor: pointer;

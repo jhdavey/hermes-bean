@@ -107,8 +107,8 @@ class _CreateButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const size = 40.0;
-    const iconSize = 32.0;
+    const size = 36.0;
+    const iconSize = 28.0;
     final icon = Icon(
       Icons.add_rounded,
       color: _iconColor(context),

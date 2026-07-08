@@ -486,8 +486,8 @@
 }
 
 .hb-note-format-button {
-    min-width: 34px;
-    height: 32px;
+    min-width: 30px;
+    height: 30px;
     border: 1px solid var(--hb-border);
     border-radius: var(--hb-control-radius);
     background: var(--hb-surface);
@@ -500,8 +500,8 @@
 }
 
 .hb-note-format-button svg {
-    width: 17px;
-    height: 17px;
+    width: 16px;
+    height: 16px;
     display: block;
 }
 

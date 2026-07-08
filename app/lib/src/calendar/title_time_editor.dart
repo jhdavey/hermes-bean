@@ -366,8 +366,8 @@ class _DateCalendarNavButton extends StatelessWidget {
       backgroundColor: HeyBeanTheme.surface.withValues(
         alpha: HeyBeanTheme.isDark ? .35 : .78,
       ),
-      fixedSize: const Size.square(38),
-      minimumSize: const Size.square(38),
+      fixedSize: const Size.square(36),
+      minimumSize: const Size.square(36),
       padding: EdgeInsets.zero,
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
     ),

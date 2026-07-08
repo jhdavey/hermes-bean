@@ -178,9 +178,9 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                         icon: Icon(Icons.auto_awesome_rounded),
                         label: Text('Sign up with Bean'),
                         style: OutlinedButton.styleFrom(
-                          minimumSize: const Size.fromHeight(54),
+                          minimumSize: const Size.fromHeight(48),
                           textStyle: const TextStyle(
-                            fontSize: 17,
+                            fontSize: 16,
                             fontWeight: FontWeight.w900,
                           ),
                           side: BorderSide(

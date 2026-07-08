@@ -468,8 +468,8 @@ class HeyBeanTheme {
           foregroundColor: accentInkColor,
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
           elevation: 0,
-          minimumSize: const Size(64, 44),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          minimumSize: const Size(56, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(999),
           ),
@@ -482,8 +482,8 @@ class HeyBeanTheme {
               ? surface2Color.withValues(alpha: .46)
               : Colors.transparent,
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
-          minimumSize: const Size(64, 44),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          minimumSize: const Size(56, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           side: BorderSide(color: borderStrongColor),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(999),
@@ -494,8 +494,17 @@ class HeyBeanTheme {
         style: TextButton.styleFrom(
           foregroundColor: accentStrongColor,
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
-          minimumSize: const Size(48, 40),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          minimumSize: const Size(44, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          fixedSize: const Size(38, 38),
+          minimumSize: const Size(38, 38),
+          iconSize: 20,
+          padding: EdgeInsets.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
       ),
       checkboxTheme: CheckboxThemeData(

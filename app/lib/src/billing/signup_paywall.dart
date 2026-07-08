@@ -604,7 +604,7 @@ class _BillingIntervalButton extends StatelessWidget {
             ? HeyBeanTheme.accentInk
             : HeyBeanTheme.muted,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

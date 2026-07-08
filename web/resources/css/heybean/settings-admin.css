@@ -345,14 +345,14 @@
 }
 
 .hb-admin-growth-range-button {
-    min-height: 32px;
-    padding: 6px 10px;
+    min-height: 28px;
+    padding: 5px 9px;
     border: 1px solid rgba(12, 23, 45, .1);
     border-radius: 999px;
     background: rgba(255, 255, 255, .72);
     color: var(--hb-muted);
     font: inherit;
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 900;
     cursor: pointer;
 }
@@ -1104,14 +1104,14 @@
 }
 
 .hb-admin-mini-action {
-    min-height: 26px;
+    min-height: 24px;
     border: 1px solid rgba(var(--hb-accent-rgb), .26);
     border-radius: 999px;
-    padding: 4px 9px;
+    padding: 3px 8px;
     background: rgba(var(--hb-accent-rgb), .10);
     color: var(--hb-accent);
     font: inherit;
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 900;
     cursor: pointer;
 }

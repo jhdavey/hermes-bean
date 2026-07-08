@@ -228,23 +228,6 @@ String _approvalActionDescription(HermesApproval approval) {
   return 'Bean wants to ${type.replaceAll('.', ' ')}. This action is marked $risk risk.';
 }
 
-String _compactBeanStatusLabel(String value) {
-  final raw = value.trim();
-  if (raw.isEmpty) return 'Ready';
-  final lower = raw.toLowerCase();
-  if (lower.contains("unknown parameter: 'response.modalities'") ||
-      lower.contains('unknown parameter: response.modalities')) {
-    return 'Bean chat issue';
-  }
-  return switch (lower) {
-    'failed' => 'Failed',
-    'blocked' => 'Blocked',
-    'stopped' => 'Stopped',
-    'updated' => 'Updated',
-    _ => raw.length > 44 ? '${raw.substring(0, 41)}...' : raw,
-  };
-}
-
 // ignore: unused_element
 class _QuickPromptRail extends StatelessWidget {
   const _QuickPromptRail({required this.onPrompt});
