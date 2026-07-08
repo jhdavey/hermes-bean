@@ -552,6 +552,10 @@
     font-weight: 650;
 }
 
+.hb-command-center-agenda-list > .hb-command-center-day-label {
+    padding: 7px 6px 5px;
+}
+
 .hb-command-center-agenda-list .hb-glance-events {
     gap: 0;
 }
@@ -700,8 +704,8 @@
 }
 
 .hb-command-center-divider span {
-    height: 1px;
-    background: color-mix(in srgb, var(--hb-border) 70%, transparent);
+    height: 2px;
+    background: color-mix(in srgb, var(--hb-border) 86%, var(--hb-muted));
     transition: background .16s ease, height .16s ease;
 }
 

@@ -483,6 +483,24 @@ class _CommandCenterAgendaEmptyInline extends StatelessWidget {
   );
 }
 
+class _CommandCenterDayHeader extends StatelessWidget {
+  const _CommandCenterDayHeader({super.key, required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    label,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: TextStyle(
+      color: HeyBeanTheme.text,
+      fontSize: 12,
+      fontWeight: FontWeight.w700,
+    ),
+  );
+}
+
 class _CommandCenterGlanceDayTile extends StatelessWidget {
   const _CommandCenterGlanceDayTile({
     required this.day,
@@ -506,16 +524,7 @@ class _CommandCenterGlanceDayTile extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          _commandCenterGlanceDayLabel(day.date),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: HeyBeanTheme.text,
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
+        _CommandCenterDayHeader(label: _commandCenterGlanceDayLabel(day.date)),
         const SizedBox(height: 5),
         if (day.events.isEmpty)
           Padding(
@@ -726,6 +735,13 @@ class _CommandCenterAgendaList extends StatelessWidget {
           key: const Key('command-center-agenda-list'),
           padding: EdgeInsets.zero,
           children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(7, 7, 7, 5),
+              child: _CommandCenterDayHeader(
+                key: const Key('command-center-today-header'),
+                label: _commandCenterGlanceDayLabel(DateTime.now()),
+              ),
+            ),
             if (items.isEmpty) const _CommandCenterAgendaEmptyInline(),
             for (var index = 0; index < items.length; index++)
               _CommandCenterAgendaRow(

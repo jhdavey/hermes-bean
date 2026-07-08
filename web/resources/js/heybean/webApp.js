@@ -4645,6 +4645,7 @@ export function mountHeyBeanWebApp(mount) {
             : '<div class="hb-command-center-empty hb-command-center-empty-inline">Nothing else scheduled for today.</div>';
         return `
             <div class="hb-command-center-agenda-list" aria-label="Today and upcoming list">
+                ${commandCenterDayHeaderMarkup(new Date())}
                 ${todayMarkup}
                 ${commandCenterGlanceMarkup()}
             </div>`;
@@ -4769,11 +4770,15 @@ export function mountHeyBeanWebApp(mount) {
         const events = eventsForDay(day);
         return `
             <div class="hb-glance-day ${events.length ? '' : 'hb-glance-day-empty'}">
-                <div class="hb-glance-day-label">${escapeHtml(glanceDayLabel(day))}</div>
+                ${commandCenterDayHeaderMarkup(day)}
                 <div class="hb-glance-events">
                     ${events.length ? events.map((event) => glanceEventMarkup(event)).join('') : '<div class="hb-empty hb-glance-empty">No events</div>'}
                 </div>
             </div>`;
+    }
+
+    function commandCenterDayHeaderMarkup(day) {
+        return `<div class="hb-glance-day-label hb-command-center-day-label">${escapeHtml(glanceDayLabel(day))}</div>`;
     }
 
     function glanceDayLabel(day) {
