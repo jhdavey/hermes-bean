@@ -643,7 +643,7 @@
 .hb-command-center-copy strong {
     color: var(--hb-text);
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 400;
     line-height: 1.15;
 }
 

@@ -134,11 +134,12 @@ class _HeroChatCardState extends State<_HeroChatCard> {
                                         : 'Bean',
                                     message: message.content ?? '',
                                     alignRight: message.role == 'user',
-                                    statusLabel:
-                                        message.metadata['client_queue_status'] ==
-                                            'queued'
-                                        ? 'Queued'
-                                        : null,
+                                    statusLabel: switch (message
+                                        .metadata['client_queue_status']) {
+                                      'queued' => 'Queued',
+                                      'sending' => 'Sending',
+                                      _ => null,
+                                    },
                                     onCopy: message.role == 'user'
                                         ? () => unawaited(
                                             widget.onMessageCopied(message),

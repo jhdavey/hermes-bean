@@ -2321,16 +2321,34 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         ),
       );
     }
-    final hasLocalPendingMessages = _messages.any(
-      (message) => message.id < 0 || message.metadata['local_ack'] == true,
-    );
-    if (preserveVisibleMessages &&
+    final shouldPreserveLocalMessages =
+        preserveVisibleMessages ||
+        _beanChatQueue.isNotEmpty ||
+        _beanChatQueueDraining;
+    final localPendingMessages = shouldPreserveLocalMessages
+        ? _messages
+              .where(
+                (message) =>
+                    message.id < 0 ||
+                    message.metadata['local_ack'] == true ||
+                    (_beanChatHasActiveTurn &&
+                        message.id == _activeBeanWorkMessageId),
+              )
+              .toList()
+        : const <HermesMessage>[];
+    final hasLocalPendingMessages = localPendingMessages.isNotEmpty;
+    if (shouldPreserveLocalMessages &&
         !hasLocalPendingMessages &&
         _messages.length > replacementMessages.length) {
       return;
     }
     _messages.clear();
     _messages.addAll(replacementMessages);
+    for (final message in localPendingMessages) {
+      if (!_messages.any((candidate) => candidate.id == message.id)) {
+        _messages.add(message);
+      }
+    }
   }
 
   String _personalizedBeanIntroMessage(HermesUser? user) {
@@ -2531,7 +2549,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   void _scheduleBeanChatQueueDrain() {
-    Future<void>.microtask(_drainBeanChatQueue);
+    final completedWorkVisible =
+        _beanWorkItems.isNotEmpty && _beanWorkItems.every((item) => item.done);
+    final delay = completedWorkVisible
+        ? const Duration(milliseconds: 650)
+        : Duration.zero;
+    Future<void>.delayed(delay, _drainBeanChatQueue);
   }
 
   Future<void> _drainBeanChatQueue() async {
@@ -2544,15 +2567,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final request = _beanChatQueue.removeAt(0);
     if (mounted) {
       setState(() {
-        _messages.removeWhere(
-          (message) => message.id == request.localMessageId,
-        );
+        _markLocalQueuedChatMessageSending(request.localMessageId);
       });
     }
     try {
       await _sendChat(
         request.content,
         editingMessageId: request.editingMessageId,
+        localUserMessageId: request.localMessageId,
       );
     } finally {
       _beanChatQueueDraining = false;
@@ -2560,12 +2582,31 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
-  Future<String?> _sendChat(String content, {int? editingMessageId}) async {
+  void _markLocalQueuedChatMessageSending(int localMessageId) {
+    final index = _messages.indexWhere(
+      (message) => message.id == localMessageId,
+    );
+    if (index == -1) return;
+    final message = _messages[index];
+    _messages[index] = HermesMessage(
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      metadata: {...message.metadata, 'client_queue_status': 'sending'},
+    );
+  }
+
+  Future<String?> _sendChat(
+    String content, {
+    int? editingMessageId,
+    int? localUserMessageId,
+  }) async {
     final trimmed = content.trim();
     var session = _session;
     if (trimmed.isEmpty || session == null) return null;
     final runToken = ++_chatRunToken;
-    final localUserMessageId = _nextLocalMessageId();
+    final visibleLocalUserMessageId =
+        localUserMessageId ?? _nextLocalMessageId();
     final editingServerMessageId =
         editingMessageId != null && editingMessageId > 0
         ? editingMessageId
@@ -2588,9 +2629,25 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _messages.removeRange(editIndex, _messages.length);
         }
       }
-      _messages.add(
-        HermesMessage(id: localUserMessageId, role: 'user', content: trimmed),
+      final existingLocalIndex = _messages.indexWhere(
+        (message) => message.id == visibleLocalUserMessageId,
       );
+      if (existingLocalIndex == -1) {
+        _messages.add(
+          HermesMessage(
+            id: visibleLocalUserMessageId,
+            role: 'user',
+            content: trimmed,
+          ),
+        );
+      } else {
+        _messages[existingLocalIndex] = HermesMessage(
+          id: visibleLocalUserMessageId,
+          role: 'user',
+          content: trimmed,
+          metadata: const {'client_queue_status': 'sending'},
+        );
+      }
     });
     try {
       session = _session ?? session;
@@ -2601,7 +2658,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           ? 'branching Bean chat message'
           : 'routing Bean chat message';
       clientRequestId =
-          'flutter-chat-${DateTime.now().microsecondsSinceEpoch}-$localUserMessageId';
+          'flutter-chat-${DateTime.now().microsecondsSinceEpoch}-$visibleLocalUserMessageId';
       final messageMetadata = _flutterChatMetadata(
         additional: {
           'source': 'flutter_routed_chat',
@@ -2642,7 +2699,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (result.status == 'queued') {
         setState(() {
           if (result.userMessage != null) {
-            _replaceChatMessage(localUserMessageId, result.userMessage!);
+            _replaceChatMessage(visibleLocalUserMessageId, result.userMessage!);
             _activeBeanWorkMessageId = result.userMessage!.id;
           }
           _session = result.session;
@@ -2666,7 +2723,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               sessionId: session.id,
               content: trimmed,
               metadata: messageMetadata,
-              localUserMessageId: localUserMessageId,
+              localUserMessageId: visibleLocalUserMessageId,
             ),
           );
         }
@@ -2679,7 +2736,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         );
         setState(() {
           if (result.userMessage != null) {
-            _replaceChatMessage(localUserMessageId, result.userMessage!);
+            _replaceChatMessage(visibleLocalUserMessageId, result.userMessage!);
             _activeBeanWorkMessageId = result.userMessage!.id;
           }
           _session = result.session;
@@ -2749,7 +2806,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _assistantMessageShouldStayOutOfChat(result.assistantMessage!);
       setState(() {
         if (result.userMessage != null) {
-          _replaceChatMessage(localUserMessageId, result.userMessage!);
+          _replaceChatMessage(visibleLocalUserMessageId, result.userMessage!);
           _activeBeanWorkMessageId = result.userMessage!.id;
         }
         _user = refreshedUser;
@@ -2825,7 +2882,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             sessionId: session.id,
             content: trimmed,
             metadata: messageMetadata,
-            localUserMessageId: localUserMessageId,
+            localUserMessageId: visibleLocalUserMessageId,
           ),
         );
       }
@@ -2847,7 +2904,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                   'edited_message_id': editingServerMessageId,
               },
             ),
-        localUserMessageId: localUserMessageId,
+        localUserMessageId: visibleLocalUserMessageId,
         originalContent: trimmed,
       );
       if (recovered) {
