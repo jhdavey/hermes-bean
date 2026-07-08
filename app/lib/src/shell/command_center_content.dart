@@ -84,6 +84,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onThemeModeChanged,
     required this.onCommandCenterLabelChanged,
     required this.onPreferredMapAppChanged,
+    required this.onVoiceChanged,
     required this.launchExternalUrl,
     required this.stripePaymentHandler,
     required this.onBillingChanged,
@@ -271,6 +272,7 @@ class _CommandCenterContent extends StatelessWidget {
   final Future<void> Function(String themeModeKey) onThemeModeChanged;
   final Future<void> Function(String label) onCommandCenterLabelChanged;
   final Future<void> Function(String preferredMapApp) onPreferredMapAppChanged;
+  final Future<void> Function(String voiceKey) onVoiceChanged;
   final ExternalUrlLauncher launchExternalUrl;
   final StripePaymentHandler stripePaymentHandler;
   final Future<void> Function() onBillingChanged;
@@ -438,6 +440,7 @@ class _CommandCenterContent extends StatelessWidget {
             onThemeModeChanged: onThemeModeChanged,
             onCommandCenterLabelChanged: onCommandCenterLabelChanged,
             onPreferredMapAppChanged: onPreferredMapAppChanged,
+            onVoiceChanged: onVoiceChanged,
             onEditAgentOnboarding: onEditAgentOnboarding,
             onWorkspacesChanged: onWorkspacesChanged,
             error: _settingsErrorForDisplay(error),

@@ -310,6 +310,8 @@ class HeyBeanTheme {
     final accentColor = colorTheme.accent;
     final accentStrongColor = colorTheme.accentStrong;
     final accentInkColor = colorTheme.accentInk;
+    const controlRadius = 14.0;
+    const modalRadius = 22.0;
     final colorScheme =
         ColorScheme.fromSeed(
           brightness: brightness,
@@ -382,7 +384,7 @@ class HeyBeanTheme {
           height: 1.35,
         ),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(modalRadius),
           side: BorderSide(color: borderColor),
         ),
       ),
@@ -391,7 +393,9 @@ class HeyBeanTheme {
         modalBackgroundColor: surfaceColor,
         surfaceTintColor: Colors.transparent,
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(modalRadius),
+          ),
         ),
       ),
       dividerTheme: DividerThemeData(
@@ -430,28 +434,28 @@ class HeyBeanTheme {
           vertical: 12,
         ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(controlRadius),
           borderSide: BorderSide(color: borderColor),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(controlRadius),
           borderSide: BorderSide(color: borderColor),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(controlRadius),
           borderSide: BorderSide(
             color: accentColor.withValues(alpha: .62),
             width: 1,
           ),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(controlRadius),
           borderSide: BorderSide(
             color: isDarkTheme ? darkDestructive : lightDestructive,
           ),
         ),
         focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(controlRadius),
           borderSide: BorderSide(
             color: isDarkTheme ? darkDestructive : lightDestructive,
             width: 1,
@@ -464,6 +468,8 @@ class HeyBeanTheme {
           foregroundColor: accentInkColor,
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
           elevation: 0,
+          minimumSize: const Size(64, 44),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(999),
           ),
@@ -476,6 +482,8 @@ class HeyBeanTheme {
               ? surface2Color.withValues(alpha: .46)
               : Colors.transparent,
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
+          minimumSize: const Size(64, 44),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           side: BorderSide(color: borderStrongColor),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(999),
@@ -486,6 +494,36 @@ class HeyBeanTheme {
         style: TextButton.styleFrom(
           foregroundColor: accentStrongColor,
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
+          minimumSize: const Size(48, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        ),
+      ),
+      checkboxTheme: CheckboxThemeData(
+        fillColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? accentStrongColor
+              : Colors.transparent,
+        ),
+        checkColor: WidgetStateProperty.all(Colors.white),
+        side: BorderSide(color: borderStrongColor),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
+      ),
+      radioTheme: RadioThemeData(
+        fillColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? accentStrongColor
+              : mutedColor,
+        ),
+      ),
+      dropdownMenuTheme: DropdownMenuThemeData(
+        textStyle: TextStyle(color: textColor, fontWeight: FontWeight.w600),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: inputSurfaceColor,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(controlRadius),
+            borderSide: BorderSide(color: borderColor),
+          ),
         ),
       ),
       iconTheme: IconThemeData(color: textColor),

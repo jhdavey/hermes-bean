@@ -597,6 +597,23 @@
     background: var(--hb-destructive);
 }
 
+.hb-chat-voice-button {
+    background: color-mix(in srgb, var(--hb-accent) 14%, var(--hb-surface));
+    color: var(--hb-accent-strong);
+    box-shadow: none;
+}
+
+.hb-chat-voice-button-recording {
+    border-color: color-mix(in srgb, var(--hb-destructive) 52%, transparent);
+    background: var(--hb-destructive);
+    color: #fff;
+    box-shadow: 0 8px 18px color-mix(in srgb, var(--hb-destructive) 18%, transparent);
+}
+
+.hb-chat-voice-button-recording:hover {
+    background: var(--hb-destructive);
+}
+
 .hb-chat-text-send-button:hover {
     border-color: rgba(var(--hb-accent-rgb), .58);
     background: var(--hb-accent-strong);

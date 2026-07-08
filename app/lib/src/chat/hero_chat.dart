@@ -195,6 +195,9 @@ class _DockedBeanChatComposer extends StatelessWidget {
     required this.attachedToWorkStrip,
     required this.onSend,
     required this.onStop,
+    required this.onVoiceHoldStart,
+    required this.onVoiceHoldEnd,
+    required this.voiceRecording,
   });
 
   final TextEditingController controller;
@@ -204,6 +207,9 @@ class _DockedBeanChatComposer extends StatelessWidget {
   final bool attachedToWorkStrip;
   final VoidCallback onSend;
   final Future<void> Function() onStop;
+  final VoidCallback onVoiceHoldStart;
+  final VoidCallback onVoiceHoldEnd;
+  final bool voiceRecording;
 
   @override
   Widget build(BuildContext context) => _ChatInputDock(
@@ -214,6 +220,9 @@ class _DockedBeanChatComposer extends StatelessWidget {
     attachedToWorkStrip: attachedToWorkStrip,
     onSend: onSend,
     onStop: onStop,
+    onVoiceHoldStart: onVoiceHoldStart,
+    onVoiceHoldEnd: onVoiceHoldEnd,
+    voiceRecording: voiceRecording,
   );
 }
 
@@ -226,6 +235,9 @@ class _ChatInputDock extends StatelessWidget {
     required this.attachedToWorkStrip,
     required this.onSend,
     required this.onStop,
+    required this.onVoiceHoldStart,
+    required this.onVoiceHoldEnd,
+    required this.voiceRecording,
   });
 
   final TextEditingController controller;
@@ -235,6 +247,9 @@ class _ChatInputDock extends StatelessWidget {
   final bool attachedToWorkStrip;
   final VoidCallback onSend;
   final Future<void> Function() onStop;
+  final VoidCallback onVoiceHoldStart;
+  final VoidCallback onVoiceHoldEnd;
+  final bool voiceRecording;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -295,6 +310,29 @@ class _ChatInputDock extends StatelessWidget {
           ),
           const SizedBox(width: 6),
         ],
+        GestureDetector(
+          key: const Key('primary-chat-voice-action'),
+          onLongPressStart: disabled ? null : (_) => onVoiceHoldStart(),
+          onLongPressEnd: disabled ? null : (_) => onVoiceHoldEnd(),
+          child: FilledButton(
+            onPressed: disabled ? null : () {},
+            style: FilledButton.styleFrom(
+              backgroundColor: voiceRecording
+                  ? HeyBeanTheme.destructive
+                  : HeyBeanTheme.accent.withValues(alpha: .16),
+              foregroundColor: voiceRecording
+                  ? Colors.white
+                  : HeyBeanTheme.accent,
+              minimumSize: const Size(44, 44),
+              padding: EdgeInsets.zero,
+            ),
+            child: Icon(
+              voiceRecording ? Icons.mic_rounded : Icons.mic_none_rounded,
+              size: 18,
+            ),
+          ),
+        ),
+        const SizedBox(width: 6),
         FilledButton(
           key: const Key('primary-chat-action'),
           onPressed: disabled ? null : onSend,

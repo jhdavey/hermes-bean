@@ -106,6 +106,16 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   };
   final TextEditingController _chatInputController = TextEditingController();
   final FocusNode _chatInputFocusNode = FocusNode();
+  final AudioRecorder _voiceRecorder = AudioRecorder();
+  final AudioPlayer _voicePlayer = AudioPlayer();
+  final stt.SpeechToText _speechToText = stt.SpeechToText();
+  bool _speechToTextReady = false;
+  bool _speechToTextListening = false;
+  bool _voiceCapturePending = false;
+  bool _voiceCaptureReleaseRequested = false;
+  bool _voiceRecording = false;
+  bool _voiceProcessing = false;
+  String? _voiceRecordingPath;
   final List<_QueuedBeanChatRequest> _beanChatQueue =
       <_QueuedBeanChatRequest>[];
   bool _beanChatCollapsed = false;
@@ -1227,8 +1237,20 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanResponsePreviewTimer?.cancel();
     _reminderDueTimer?.cancel();
     _stopDashboardChangePolling();
+    final pendingVoiceRecordingPath = _voiceRecordingPath;
+    if (pendingVoiceRecordingPath != null) {
+      unawaited(() async {
+        try {
+          await File(pendingVoiceRecordingPath).delete();
+        } catch (_) {
+          // Temporary voice files are best-effort cleanup.
+        }
+      }());
+    }
     _chatInputController.dispose();
     _chatInputFocusNode.dispose();
+    unawaited(_voiceRecorder.dispose());
+    unawaited(_voicePlayer.dispose());
     unawaited(_pushNotifications.dispose());
     super.dispose();
   }
@@ -2513,6 +2535,209 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     );
   }
 
+  Future<void> _startVoiceChatCapture() async {
+    if (_session == null ||
+        _voiceRecording ||
+        _voiceProcessing ||
+        _voiceCapturePending) {
+      return;
+    }
+    String? startedPath;
+    _voiceCapturePending = true;
+    _voiceCaptureReleaseRequested = false;
+
+    Future<void> cleanupStartedCapture() async {
+      await _voiceRecorder.stop().catchError((_) => null);
+      if (_speechToTextListening) {
+        _speechToTextListening = false;
+        await _speechToText.stop();
+      }
+      if (startedPath != null) {
+        try {
+          await File(startedPath).delete();
+        } catch (_) {
+          // Temporary voice files are best-effort cleanup.
+        }
+      }
+      _voiceCapturePending = false;
+      _voiceCaptureReleaseRequested = false;
+      _voiceRecordingPath = null;
+    }
+
+    try {
+      if (!await _voiceRecorder.hasPermission()) {
+        _voiceCapturePending = false;
+        if (!mounted) return;
+        setState(
+          () => _error = 'Microphone permission is needed to talk to Bean.',
+        );
+        return;
+      }
+      if (_voiceCaptureReleaseRequested) {
+        await cleanupStartedCapture();
+        return;
+      }
+      final directory = await getTemporaryDirectory();
+      final path =
+          '${directory.path}/heybean-voice-${DateTime.now().microsecondsSinceEpoch}.m4a';
+      startedPath = path;
+      if (_voiceCaptureReleaseRequested) {
+        await cleanupStartedCapture();
+        return;
+      }
+      await _voiceRecorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 64000,
+          sampleRate: 24000,
+        ),
+        path: path,
+      );
+      if (_voiceCaptureReleaseRequested || !mounted) {
+        await cleanupStartedCapture();
+        return;
+      }
+      setState(() {
+        _voiceCapturePending = false;
+        _voiceRecording = true;
+        _voiceRecordingPath = path;
+        _error = null;
+        _chatRunState = 'Listening…';
+        _chatInputController.text = 'Listening…';
+        _chatInputController.selection = TextSelection.collapsed(
+          offset: _chatInputController.text.length,
+        );
+      });
+      if (!_speechToTextReady) {
+        _speechToTextReady = await _speechToText.initialize();
+      }
+      if (!_voiceRecording || !_speechToTextReady) return;
+      _speechToTextListening = true;
+      unawaited(
+        _speechToText.listen(
+          listenOptions: stt.SpeechListenOptions(
+            listenMode: stt.ListenMode.dictation,
+            partialResults: true,
+          ),
+          onResult: (result) {
+            if (!mounted || !_voiceRecording) return;
+            final words = result.recognizedWords.trim();
+            if (words.isEmpty) return;
+            setState(() {
+              _chatInputController.text = words;
+              _chatInputController.selection = TextSelection.collapsed(
+                offset: words.length,
+              );
+            });
+          },
+        ),
+      );
+    } catch (error) {
+      await cleanupStartedCapture();
+      if (!mounted) return;
+      setState(() {
+        _voiceRecording = false;
+        _voiceProcessing = false;
+        _error = beanFriendlyErrorMessage(error, action: 'start voice chat');
+      });
+    }
+  }
+
+  Future<void> _finishVoiceChatCapture() async {
+    if (_voiceCapturePending && !_voiceRecording) {
+      _voiceCaptureReleaseRequested = true;
+      return;
+    }
+    if (!_voiceRecording || _voiceProcessing) return;
+    _voiceCapturePending = false;
+    _voiceCaptureReleaseRequested = false;
+    setState(() {
+      _voiceRecording = false;
+      _voiceProcessing = true;
+      _chatRunState = 'Transcribing…';
+      _chatInputController.text = 'Transcribing…';
+    });
+    if (_speechToTextListening) {
+      _speechToTextListening = false;
+      await _speechToText.stop();
+    }
+    try {
+      final stoppedPath = await _voiceRecorder.stop();
+      final path = stoppedPath ?? _voiceRecordingPath;
+      if (path == null) {
+        if (!mounted) return;
+        setState(() {
+          _voiceProcessing = false;
+          _voiceRecordingPath = null;
+          _chatRunState = 'Ready';
+        });
+        return;
+      }
+      try {
+        final transcription = await widget.apiClient.transcribeVoiceFile(
+          File(path),
+        );
+        final text = transcription.text.trim();
+        if (!mounted) return;
+        setState(() {
+          _voiceProcessing = false;
+          _voiceRecordingPath = null;
+          if (text.isEmpty) {
+            _chatRunState = 'Ready';
+          }
+          _chatInputController.text = text;
+          _chatInputController.selection = TextSelection.collapsed(
+            offset: text.length,
+          );
+        });
+        if (text.isEmpty) return;
+        final assistantText = await _sendChat(text, voiceRequest: true);
+        if (assistantText != null && assistantText.trim().isNotEmpty) {
+          unawaited(_playBeanVoiceResponse(assistantText));
+        }
+      } finally {
+        try {
+          await File(path).delete();
+        } catch (_) {
+          // Temporary voice files are best-effort cleanup.
+        }
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _voiceRecording = false;
+        _voiceProcessing = false;
+        _voiceRecordingPath = null;
+        _chatRunState = 'Ready';
+        _error = beanFriendlyErrorMessage(error, action: 'finish voice chat');
+      });
+    }
+  }
+
+  Future<void> _playBeanVoiceResponse(String text) async {
+    try {
+      final speech = await widget.apiClient.synthesizeSpeech(text: text);
+      final bytes = base64Decode(speech.audioBase64);
+      final directory = await getTemporaryDirectory();
+      final path =
+          '${directory.path}/heybean-reply-${DateTime.now().microsecondsSinceEpoch}.mp3';
+      final file = File(path);
+      await file.writeAsBytes(bytes, flush: true);
+      try {
+        await _voicePlayer.setFilePath(path);
+        await _voicePlayer.play();
+      } finally {
+        try {
+          await file.delete();
+        } catch (_) {
+          // Temporary voice files are best-effort cleanup.
+        }
+      }
+    } catch (_) {
+      // Text response already rendered; voice playback should never block chat.
+    }
+  }
+
   Future<void> _sendChatInputDraft() async {
     if (_session == null) return;
     final text = _chatInputController.text.trim();
@@ -2601,6 +2826,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     String content, {
     int? editingMessageId,
     int? localUserMessageId,
+    bool voiceRequest = false,
   }) async {
     final trimmed = content.trim();
     var session = _session;
@@ -2666,6 +2892,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           'client_request_id': clientRequestId,
           if (editingServerMessageId != null)
             'edited_message_id': editingServerMessageId,
+          if (voiceRequest) 'voice_request': true,
+          if (voiceRequest)
+            'requested_response_voice': _user?.currentAgentProfile?.voiceKey,
         },
       );
       messageMetadataForRecovery = messageMetadata;
@@ -6351,6 +6580,31 @@ ${_truncateDiagnostic(stack, 2200)}
     }
   }
 
+  Future<void> _updateBeanVoice(String voiceKey) async {
+    if (_busy) return;
+    final previousUser = _user;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final updatedUser = await widget.apiClient.updateMe(voice: voiceKey);
+      if (!mounted) return;
+      setState(() {
+        _user = updatedUser;
+        _busy = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _user = previousUser;
+        _busy = false;
+        _error = beanFriendlyErrorMessage(error, action: 'update Bean voice');
+      });
+    }
+  }
+
   Future<void> _logout() async {
     if (_busy) return;
     final authGeneration = ++_authGeneration;
@@ -6651,11 +6905,23 @@ ${_truncateDiagnostic(stack, 2200)}
                         attachedToWorkStrip: beanWorkStripActive,
                         onSend: () => unawaited(_sendChatInputDraft()),
                         onStop: _stopAgent,
+                        onVoiceHoldStart: () =>
+                            unawaited(_startVoiceChatCapture()),
+                        onVoiceHoldEnd: () =>
+                            unawaited(_finishVoiceChatCapture()),
+                        voiceRecording: _voiceRecording || _voiceProcessing,
                       ),
                       menu: _HeyBeanBottomMenu(
                         selected: _selectedDestination,
                         beanWorking: _beanStopAvailable,
+                        beanVoiceRecording: _voiceRecording || _voiceProcessing,
                         onSelected: _selectDestination,
+                        onBeanVoiceHoldStart: () {
+                          _selectDestination(_HomeDestination.bean);
+                          unawaited(_startVoiceChatCapture());
+                        },
+                        onBeanVoiceHoldEnd: () =>
+                            unawaited(_finishVoiceChatCapture()),
                         onMorePressed: _openMoreMenu,
                       ),
                     )
@@ -6959,6 +7225,7 @@ ${_truncateDiagnostic(stack, 2200)}
     onThemeModeChanged: _updateThemeMode,
     onCommandCenterLabelChanged: _updateCommandCenterLabel,
     onPreferredMapAppChanged: _updatePreferredMapApp,
+    onVoiceChanged: _updateBeanVoice,
     launchExternalUrl: widget.launchExternalUrl,
     stripePaymentHandler: widget.stripePaymentHandler,
     onBillingChanged: () =>

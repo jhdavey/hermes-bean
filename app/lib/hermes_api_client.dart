@@ -254,6 +254,7 @@ class HermesApiClient {
     String? themeMode,
     String? commandCenterLabel,
     String? preferredMapApp,
+    String? voice,
     String? agentPersonality,
     List<String>? onboardingPriorities,
     String? onboardingContext,
@@ -271,6 +272,7 @@ class HermesApiClient {
         if (commandCenterLabel != null)
           'command_center_label': commandCenterLabel,
         if (preferredMapApp != null) 'preferred_map_app': preferredMapApp,
+        if (voice != null) 'voice': voice,
         if (agentPersonality != null) 'agent_personality': agentPersonality,
         if (onboardingPriorities != null)
           'onboarding_priorities': onboardingPriorities,
@@ -1209,6 +1211,59 @@ class HermesApiClient {
       '/assistant/sessions/$sessionId/cancel',
     );
     return HermesSession.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesVoiceSpeechResult> synthesizeSpeech({
+    required String text,
+    int? workspaceId,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/assistant/voice/speech',
+      body: {
+        'text': text,
+        if (workspaceId != null) 'workspace_id': workspaceId,
+      },
+      responseTimeout: const Duration(seconds: 30),
+    );
+    return HermesVoiceSpeechResult.fromJson(_expectMap(data['data']));
+  }
+
+  Future<HermesVoiceTranscriptionResult> transcribeVoiceFile(File audio) async {
+    final request = await HttpClient()
+        .postUrl(_resolveApiPath('/assistant/voice/transcriptions'))
+        .timeout(const Duration(seconds: 15));
+    request.headers.set('Accept', 'application/json');
+    if (bearerToken != null) {
+      request.headers.set('Authorization', 'Bearer $bearerToken');
+    }
+    final boundary =
+        '----heybean-voice-${DateTime.now().microsecondsSinceEpoch}';
+    request.headers.set(
+      'Content-Type',
+      'multipart/form-data; boundary=$boundary',
+    );
+    final filename = audio.uri.pathSegments.isEmpty
+        ? 'voice.m4a'
+        : audio.uri.pathSegments.last;
+    final header = utf8.encode(
+      '--$boundary\r\n'
+      'Content-Disposition: form-data; name="audio"; filename="$filename"\r\n'
+      'Content-Type: audio/mp4\r\n\r\n',
+    );
+    request.add(header);
+    request.add(await audio.readAsBytes());
+    request.add(utf8.encode('\r\n--$boundary--\r\n'));
+    final response = await request.close().timeout(const Duration(seconds: 30));
+    final responseBody = await utf8.decoder.bind(response).join();
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HermesApiException(response.statusCode, responseBody);
+    }
+    final decoded = jsonDecode(responseBody);
+    if (decoded is! Map<String, Object?>) {
+      throw const FormatException('Expected top-level JSON object');
+    }
+    return HermesVoiceTranscriptionResult.fromJson(_expectMap(decoded['data']));
   }
 
   Future<HermesMessageResult> sendMessage({
@@ -2329,6 +2384,44 @@ class WorkspaceSyncResult {
       );
 }
 
+class HermesVoiceSpeechResult {
+  const HermesVoiceSpeechResult({
+    required this.audioBase64,
+    required this.mimeType,
+    required this.voice,
+    required this.provider,
+  });
+
+  final String audioBase64;
+  final String mimeType;
+  final String voice;
+  final String provider;
+
+  factory HermesVoiceSpeechResult.fromJson(Map<String, Object?> json) =>
+      HermesVoiceSpeechResult(
+        audioBase64: _expectString(json['audio_base64'] ?? json['audioBase64']),
+        mimeType: _expectString(json['mime_type'] ?? json['mimeType']),
+        voice: _expectString(json['voice']),
+        provider: _readStringOrDefault(json['provider'], 'openai'),
+      );
+}
+
+class HermesVoiceTranscriptionResult {
+  const HermesVoiceTranscriptionResult({
+    required this.text,
+    required this.provider,
+  });
+
+  final String text;
+  final String provider;
+
+  factory HermesVoiceTranscriptionResult.fromJson(Map<String, Object?> json) =>
+      HermesVoiceTranscriptionResult(
+        text: _expectString(json['text']),
+        provider: _readStringOrDefault(json['provider'], 'openai'),
+      );
+}
+
 class HermesAgentProfile {
   const HermesAgentProfile({this.id, this.settings = const {}});
 
@@ -2346,6 +2439,34 @@ class HermesAgentProfile {
 
   String get personalityType =>
       settings['personality_type']?.toString() ?? 'balanced';
+
+  String get voiceKey {
+    final voice = settings['voice'];
+    if (voice is Map) {
+      return voice['voice']?.toString() ?? 'alloy';
+    }
+    return 'alloy';
+  }
+
+  List<Map<String, String>> get availableVoices {
+    final voice = settings['voice'];
+    final voices = voice is Map ? voice['available_voices'] : null;
+    if (voices is! List) {
+      return const [
+        {'key': 'alloy', 'label': 'Alloy'},
+      ];
+    }
+    return voices
+        .whereType<Map>()
+        .map(
+          (item) => {
+            'key': item['key']?.toString() ?? '',
+            'label': item['label']?.toString() ?? '',
+          },
+        )
+        .where((item) => item['key']!.isNotEmpty && item['label']!.isNotEmpty)
+        .toList(growable: false);
+  }
 
   List<String> get onboardingPriorities {
     final onboarding = settings['onboarding'];

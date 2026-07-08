@@ -106,6 +106,8 @@ export function mountHeyBeanWebApp(mount) {
         chatHistoryOpen: false,
         chatRunState: 'Ready',
         chatDraft: '',
+        voiceRecording: false,
+        voiceProcessing: false,
         chatQueue: [],
         editingChatMessageId: '',
         activeBeanWorkMessageId: null,
@@ -137,6 +139,13 @@ export function mountHeyBeanWebApp(mount) {
         notice: '',
         modal: null,
     };
+    let voiceRecorder = null;
+    let voiceChunks = [];
+    let voiceStream = null;
+    let voiceRecognition = null;
+    let voiceCapturePending = false;
+    let voiceCaptureReleaseRequested = false;
+
     const guidedSignupPersonalities = [
         {
             key: 'balanced',
@@ -3957,6 +3966,7 @@ export function mountHeyBeanWebApp(mount) {
                         <span class="hb-chat-action-cluster">
                             ${state.busy ? `<button class="hb-button-secondary hb-chat-text-send-button hb-chat-text-stop-button" type="button" data-cancel-turn aria-label="Stop Bean">${icons.stop}</button>` : ''}
                             <button class="hb-button-secondary hb-chat-text-send-button" type="submit" aria-label="${escapeAttr(waking ? 'Bean is waking up' : (state.busy ? 'Queue message' : 'Send message'))}" ${sendDisabled}>${icons.send}</button>
+                            <button class="hb-button-secondary hb-chat-text-send-button hb-chat-voice-button ${state.voiceRecording ? 'hb-chat-voice-button-recording' : ''}" type="button" data-voice-hold aria-label="Hold to talk to Bean" ${sendDisabled}>${icons.mic}</button>
                         </span>
                     </form>
                 </div>
@@ -6668,6 +6678,14 @@ export function mountHeyBeanWebApp(mount) {
             chatInput.addEventListener('keydown', handleChatKeydown);
             resizeChatInput(chatInput);
         }
+        mount.querySelectorAll('[data-voice-hold]').forEach((button) => {
+            button.addEventListener('pointerdown', startVoiceChatCapture);
+            button.addEventListener('pointerup', finishVoiceChatCapture);
+            button.addEventListener('pointercancel', finishVoiceChatCapture);
+            button.addEventListener('pointerleave', (event) => {
+                if (state.voiceRecording || voiceCapturePending) finishVoiceChatCapture(event);
+            });
+        });
         mount.querySelectorAll('[data-cancel-turn]').forEach((button) => button.addEventListener('click', cancelBeanTurn));
         mount.querySelectorAll('[data-copy-message]').forEach((button) => button.addEventListener('click', () => copyChatMessage(button.dataset.copyMessage)));
         mount.querySelectorAll('[data-edit-message]').forEach((button) => button.addEventListener('click', () => editChatMessage(button.dataset.editMessage)));
@@ -9028,6 +9046,160 @@ export function mountHeyBeanWebApp(mount) {
         await sendChatContent(queued.content, queued.editingMessageId ? { editingMessageId: queued.editingMessageId } : {});
     }
 
+    function cleanupVoiceCapture() {
+        try {
+            if (voiceRecorder && voiceRecorder.state !== 'inactive') voiceRecorder.stop();
+        } catch (error) {
+            // Best effort cleanup only.
+        }
+        try {
+            voiceRecognition?.stop?.();
+        } catch (error) {
+            // Best effort cleanup only.
+        }
+        voiceStream?.getTracks?.().forEach((track) => track.stop());
+        voiceRecorder = null;
+        voiceRecognition = null;
+        voiceStream = null;
+        voiceChunks = [];
+        voiceCapturePending = false;
+        voiceCaptureReleaseRequested = false;
+    }
+
+    async function startVoiceChatCapture(event) {
+        event?.preventDefault?.();
+        if (beanChatWaking() || state.voiceRecording || state.voiceProcessing || voiceCapturePending) return;
+        if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+            state.error = 'Voice chat needs microphone support in this browser.';
+            render();
+            return;
+        }
+        voiceCapturePending = true;
+        voiceCaptureReleaseRequested = false;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            voiceStream = stream;
+            if (voiceCaptureReleaseRequested) {
+                cleanupVoiceCapture();
+                return;
+            }
+            voiceChunks = [];
+            voiceRecorder = new MediaRecorder(voiceStream);
+            voiceRecorder.addEventListener('dataavailable', (chunkEvent) => {
+                if (chunkEvent.data?.size) voiceChunks.push(chunkEvent.data);
+            });
+            voiceRecorder.start();
+            const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (Recognition) {
+                voiceRecognition = new Recognition();
+                voiceRecognition.continuous = true;
+                voiceRecognition.interimResults = true;
+                voiceRecognition.onresult = (speechEvent) => {
+                    const transcript = Array.from(speechEvent.results)
+                        .map((result) => result[0]?.transcript || '')
+                        .join(' ')
+                        .trim();
+                    if (!transcript) return;
+                    state.chatDraft = transcript;
+                    const textarea = mount.querySelector('textarea[name="message"]');
+                    if (textarea) {
+                        textarea.value = transcript;
+                        resizeChatInput(textarea);
+                    }
+                };
+                voiceRecognition.start();
+            }
+            if (voiceCaptureReleaseRequested) {
+                cleanupVoiceCapture();
+                return;
+            }
+            voiceCapturePending = false;
+            state.voiceRecording = true;
+            state.chatRunState = 'Listening…';
+            state.chatDraft = 'Listening…';
+            render();
+        } catch (error) {
+            cleanupVoiceCapture();
+            state.error = friendlyError(error, 'start voice chat');
+            state.voiceRecording = false;
+            render();
+        }
+    }
+
+    async function finishVoiceChatCapture(event) {
+        event?.preventDefault?.();
+        if (voiceCapturePending && !state.voiceRecording) {
+            voiceCaptureReleaseRequested = true;
+            return;
+        }
+        if (!state.voiceRecording || !voiceRecorder) return;
+        state.voiceRecording = false;
+        state.voiceProcessing = true;
+        state.chatRunState = 'Transcribing…';
+        state.chatDraft = 'Transcribing…';
+        render();
+        try {
+            voiceRecognition?.stop?.();
+            voiceRecognition = null;
+            const blob = await new Promise((resolve) => {
+                voiceRecorder.addEventListener('stop', () => {
+                    resolve(new Blob(voiceChunks, { type: voiceRecorder.mimeType || 'audio/webm' }));
+                }, { once: true });
+                voiceRecorder.stop();
+            });
+            voiceStream?.getTracks?.().forEach((track) => track.stop());
+            voiceStream = null;
+            voiceRecorder = null;
+            const form = new FormData();
+            form.append('audio', blob, 'voice.webm');
+            const transcription = await apiForm('/assistant/voice/transcriptions', form);
+            const text = String(transcription?.text || '').trim();
+            state.voiceProcessing = false;
+            state.chatDraft = text;
+            if (!text) state.chatRunState = 'Ready';
+            render();
+            const textarea = mount.querySelector('textarea[name="message"]');
+            if (textarea) {
+                textarea.value = text;
+                resizeChatInput(textarea);
+            }
+            if (!text) return;
+            const result = await sendChatContent(text, { voiceRequest: true });
+            if (result?.assistantContent) playBeanVoiceResponse(result.assistantContent).catch(() => {});
+        } catch (error) {
+            voiceRecognition?.stop?.();
+            voiceRecognition = null;
+            voiceStream?.getTracks?.().forEach((track) => track.stop());
+            voiceStream = null;
+            voiceRecorder = null;
+            state.voiceRecording = false;
+            state.voiceProcessing = false;
+            state.chatRunState = 'Ready';
+            state.error = friendlyError(error, 'finish voice chat');
+            render();
+        }
+    }
+
+    async function playBeanVoiceResponse(text) {
+        const speech = await api('/assistant/voice/speech', {
+            method: 'POST',
+            body: { text },
+            timeoutMs: 30000,
+        });
+        if (!speech?.audio_base64) return;
+        const bytes = Uint8Array.from(atob(speech.audio_base64), (char) => char.charCodeAt(0));
+        const blobUrl = URL.createObjectURL(new Blob([bytes], { type: speech.mime_type || 'audio/mpeg' }));
+        const audio = new Audio(blobUrl);
+        audio.addEventListener('ended', () => URL.revokeObjectURL(blobUrl), { once: true });
+        audio.addEventListener('error', () => URL.revokeObjectURL(blobUrl), { once: true });
+        try {
+            await audio.play();
+        } catch (error) {
+            URL.revokeObjectURL(blobUrl);
+            throw error;
+        }
+    }
+
     async function submitChat(event) {
         event.preventDefault();
         if (beanChatWaking()) return;
@@ -9136,6 +9308,7 @@ export function mountHeyBeanWebApp(mount) {
                 source: useRunEndpoint ? 'web_routed_chat' : 'web_direct_chat',
                 client_request_id: clientRequestId,
                 ...(editingMessageId ? { edited_message_id: editingMessageId } : {}),
+                ...(options.voiceRequest ? { voice_request: true, requested_response_voice: state.user?.active_workspace_agent_profile?.settings?.voice?.voice || state.user?.activeWorkspaceAgentProfile?.settings?.voice?.voice || 'alloy' } : {}),
             });
             const path = useRunEndpoint
                 ? `/assistant/sessions/${state.session.id}/runs`

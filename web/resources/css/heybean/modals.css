@@ -14,12 +14,14 @@
     max-height: min(760px, calc(100vh - 40px));
     overflow: auto;
     padding: 18px;
+    border-radius: 22px;
 }
 
 .hb-item-form {
     width: min(680px, 100%);
     gap: 14px;
     padding: 20px;
+    border-radius: 22px;
     background:
         linear-gradient(180deg, rgba(255, 255, 255, .98), rgba(255, 255, 255, .94)),
         var(--hb-surface);

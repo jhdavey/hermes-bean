@@ -20,6 +20,7 @@ use App\Models\Workspace;
 use App\Notifications\ResetPasswordLink;
 use App\Services\AgentProfileService;
 use App\Services\CouponCodeService;
+use App\Services\OpenAiVoiceService;
 use App\Services\PlanLimitService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
@@ -218,6 +219,7 @@ class AuthController extends Controller
             'theme_mode' => ['sometimes', 'string', Rule::in(self::THEME_MODE_KEYS)],
             'command_center_label' => ['sometimes', 'required', 'string', 'max:80'],
             'preferred_map_app' => ['sometimes', 'string', Rule::in(self::MAP_APP_KEYS)],
+            'voice' => ['sometimes', 'string', Rule::in(app(OpenAiVoiceService::class)->voiceKeys())],
             'home_city' => ['sometimes', 'nullable', 'string', 'max:120'],
             'workspace_id' => ['sometimes', 'nullable', 'integer', 'exists:workspaces,id'],
             'notification_preferences' => ['sometimes', 'array'],
@@ -226,6 +228,7 @@ class AuthController extends Controller
         ]);
 
         $profileKeys = ['agent_personality', 'onboarding_priorities', 'onboarding_context'];
+        $voiceData = array_key_exists('voice', $data) ? ['voice' => $data['voice']] : [];
         $homeCityData = array_key_exists('home_city', $data) ? ['home_city' => $data['home_city']] : [];
         $profileData = collect($data)->only($profileKeys)->all();
         $userData = collect($data)->only(['name', 'email', 'theme', 'theme_mode', 'command_center_label', 'preferred_map_app'])->all();
@@ -244,7 +247,7 @@ class AuthController extends Controller
         $user->fill($userData);
         $user->save();
 
-        if ($profileData !== [] || $homeCityData !== []) {
+        if ($profileData !== [] || $homeCityData !== [] || $voiceData !== []) {
             $workspaceService = app(WorkspaceService::class);
             $activeWorkspace = $workspaceService->resolveWorkspace($user->fresh(), $data['workspace_id'] ?? null);
             $profile = app(AgentProfileService::class)->ensureForWorkspace($activeWorkspace, $user);
@@ -256,6 +259,9 @@ class AuthController extends Controller
             }
             if ($homeCityData !== []) {
                 $profile = $profiles->updateHomeCitySettings($profile, $data['home_city']);
+            }
+            if ($voiceData !== []) {
+                $profile = app(OpenAiVoiceService::class)->updateProfileVoice($profile, $data['voice']);
             }
             $user->unsetRelation('agentProfile');
         }

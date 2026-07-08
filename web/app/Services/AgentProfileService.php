@@ -6,6 +6,7 @@ use App\Models\AgentProfile;
 use App\Models\MemoryItem;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\OpenAiVoiceService;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 
@@ -110,6 +111,7 @@ class AgentProfileService
                     'context' => null,
                     'completed_at' => null,
                 ],
+                'voice' => app(OpenAiVoiceService::class)->defaultVoiceSettings(),
             ],
             'tool_policy' => [
                 'allow_internal_calendar' => true,
@@ -224,6 +226,10 @@ class AgentProfileService
 
     public function publicSettings(array $settings): array
     {
+        $settings['voice'] = app(OpenAiVoiceService::class)->defaultVoiceSettings(
+            data_get($settings, 'voice.voice')
+        );
+
         return $settings;
     }
 

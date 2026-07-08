@@ -77,12 +77,18 @@ class _HeyBeanBottomMenu extends StatelessWidget {
     required this.selected,
     required this.onSelected,
     required this.beanWorking,
+    required this.beanVoiceRecording,
+    required this.onBeanVoiceHoldStart,
+    required this.onBeanVoiceHoldEnd,
     required this.onMorePressed,
   });
 
   final _HomeDestination selected;
   final ValueChanged<_HomeDestination> onSelected;
   final bool beanWorking;
+  final bool beanVoiceRecording;
+  final VoidCallback onBeanVoiceHoldStart;
+  final VoidCallback onBeanVoiceHoldEnd;
   final VoidCallback onMorePressed;
 
   @override
@@ -171,7 +177,10 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             child: _BeanFab(
               selected: selected == _HomeDestination.bean,
               working: beanWorking,
+              voiceRecording: beanVoiceRecording,
               onPressed: () => onSelected(_HomeDestination.bean),
+              onVoiceHoldStart: onBeanVoiceHoldStart,
+              onVoiceHoldEnd: onBeanVoiceHoldEnd,
             ),
           ),
         ],
@@ -463,7 +472,10 @@ class _BeanFab extends StatefulWidget {
   const _BeanFab({
     required this.selected,
     this.working = false,
+    this.voiceRecording = false,
     required this.onPressed,
+    this.onVoiceHoldStart,
+    this.onVoiceHoldEnd,
     this.widgetKey = const Key('nav-bean'),
     this.semanticLabel = 'Bean chat',
   });
@@ -471,8 +483,11 @@ class _BeanFab extends StatefulWidget {
   final Key widgetKey;
   final bool selected;
   final bool working;
+  final bool voiceRecording;
   final String semanticLabel;
   final VoidCallback onPressed;
+  final VoidCallback? onVoiceHoldStart;
+  final VoidCallback? onVoiceHoldEnd;
 
   @override
   State<_BeanFab> createState() => _BeanFabState();
@@ -481,7 +496,7 @@ class _BeanFab extends StatefulWidget {
 class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
   late final AnimationController _activityController;
 
-  bool get _visuallyWorking => widget.working;
+  bool get _visuallyWorking => widget.working || widget.voiceRecording;
 
   @override
   void initState() {
@@ -496,7 +511,8 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
   @override
   void didUpdateWidget(covariant _BeanFab oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.working != widget.working) {
+    if (oldWidget.working != widget.working ||
+        oldWidget.voiceRecording != widget.voiceRecording) {
       _syncFabAnimations();
     }
   }
@@ -524,6 +540,12 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
       key: widget.widgetKey,
       behavior: HitTestBehavior.opaque,
       onTap: widget.onPressed,
+      onLongPressStart: (_) {
+        widget.onPressed();
+        widget.onVoiceHoldStart?.call();
+      },
+      onLongPressEnd: (_) => widget.onVoiceHoldEnd?.call(),
+      onLongPressCancel: () => widget.onVoiceHoldEnd?.call(),
       child: SizedBox(
         width: 88,
         height: 88,

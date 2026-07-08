@@ -9507,6 +9507,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     String? themeMode,
     String? commandCenterLabel,
     String? preferredMapApp,
+    String? voice,
     String? agentPersonality,
     List<String>? onboardingPriorities,
     String? onboardingContext,

@@ -20,6 +20,7 @@ class _SettingsView extends StatelessWidget {
     required this.onThemeModeChanged,
     required this.onCommandCenterLabelChanged,
     required this.onPreferredMapAppChanged,
+    required this.onVoiceChanged,
     required this.onEditAgentOnboarding,
     required this.onWorkspacesChanged,
     this.error,
@@ -45,6 +46,7 @@ class _SettingsView extends StatelessWidget {
   final Future<void> Function(String themeModeKey) onThemeModeChanged;
   final Future<void> Function(String label) onCommandCenterLabelChanged;
   final Future<void> Function(String preferredMapApp) onPreferredMapAppChanged;
+  final Future<void> Function(String voiceKey) onVoiceChanged;
   final VoidCallback onEditAgentOnboarding;
   final Future<void> Function() onWorkspacesChanged;
   final String? error;
@@ -107,6 +109,10 @@ class _SettingsView extends StatelessWidget {
               onChanged: onThemeChanged,
               onModeChanged: onThemeModeChanged,
               onCommandCenterLabelChanged: onCommandCenterLabelChanged,
+            ),
+            _BeanVoicePreferencesCard(
+              profile: user.currentAgentProfile,
+              onChanged: onVoiceChanged,
             ),
             _NotificationPreferencesCard(
               preferences: user.notificationPreferences,
@@ -1322,6 +1328,102 @@ IconData _themeModeIcon(String key) => switch (key) {
   'dark' => Icons.dark_mode_rounded,
   _ => Icons.brightness_auto_rounded,
 };
+
+class _BeanVoicePreferencesCard extends StatefulWidget {
+  const _BeanVoicePreferencesCard({
+    required this.profile,
+    required this.onChanged,
+  });
+
+  final HermesAgentProfile? profile;
+  final Future<void> Function(String voiceKey) onChanged;
+
+  @override
+  State<_BeanVoicePreferencesCard> createState() =>
+      _BeanVoicePreferencesCardState();
+}
+
+class _BeanVoicePreferencesCardState extends State<_BeanVoicePreferencesCard> {
+  bool _saving = false;
+
+  Future<void> _save(String? voiceKey) async {
+    if (voiceKey == null || _saving || voiceKey == widget.profile?.voiceKey) {
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await widget.onChanged(voiceKey);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final voices =
+        widget.profile?.availableVoices ??
+        const [
+          {'key': 'alloy', 'label': 'Alloy'},
+        ];
+    final selected = widget.profile?.voiceKey ?? 'alloy';
+
+    return Container(
+      key: const Key('bean-voice-preferences-card'),
+      margin: const EdgeInsets.only(top: 4),
+      decoration: _sectionDividerDecoration(),
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: HeyBeanTheme.accent.withValues(alpha: .16),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(
+              Icons.record_voice_over_rounded,
+              color: HeyBeanTheme.accent,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Bean voice',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Choose the voice Bean uses after voice requests.',
+                  style: TextStyle(fontSize: 12, color: HeyBeanTheme.muted),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          DropdownButton<String>(
+            key: const Key('bean-voice-select'),
+            value: voices.any((voice) => voice['key'] == selected)
+                ? selected
+                : voices.first['key'],
+            onChanged: _saving ? null : _save,
+            items: [
+              for (final voice in voices)
+                DropdownMenuItem<String>(
+                  value: voice['key'],
+                  child: Text(voice['label'] ?? voice['key'] ?? 'Voice'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _NotificationPreferencesCard extends StatefulWidget {
   const _NotificationPreferencesCard({

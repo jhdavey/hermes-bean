@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\AdminSettingsController;
 use App\Http\Controllers\Api\AdminUsageController;
 use App\Http\Controllers\Api\AppleCalendarController;
 use App\Http\Controllers\Api\AssistantRunController;
+use App\Http\Controllers\Api\AssistantVoiceController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BillingController;
 use App\Http\Controllers\Api\ConversationMessageController;
@@ -79,6 +80,9 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::get('/assistant/sessions/{session}/events', [ActivityEventController::class, 'index']);
         Route::get('/assistant/runs/{run}', [AssistantRunController::class, 'show']);
         Route::post('/assistant/runs/{run}/cancel', [AssistantRunController::class, 'cancel']);
+        Route::get('/assistant/voice/voices', [AssistantVoiceController::class, 'voices']);
+        Route::post('/assistant/voice/speech', [AssistantVoiceController::class, 'speech']);
+        Route::post('/assistant/voice/transcriptions', [AssistantVoiceController::class, 'transcriptions']);
         Route::get('/today', [TodaySummaryController::class, 'show']);
         Route::get('/places/autocomplete', [PlaceController::class, 'autocomplete']);
         Route::get('/places/details', [PlaceController::class, 'details']);

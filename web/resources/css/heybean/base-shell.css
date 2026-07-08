@@ -696,8 +696,8 @@
 .hb-card {
     background: var(--hb-surface);
     border: 1px solid var(--hb-border);
-    border-radius: 8px;
-    box-shadow: 0 1px 2px rgba(16, 24, 40, .025);
+    border-radius: 16px;
+    box-shadow: 0 12px 40px rgba(16, 24, 40, .035);
 }
 
 .hb-card-pad {
@@ -707,7 +707,7 @@
 .hb-surface-soft {
     background: var(--hb-surface2);
     border: 1px solid var(--hb-border);
-    border-radius: 8px;
+    border-radius: 16px;
 }
 
 .hb-surface-soft > small {
@@ -1697,14 +1697,14 @@
 .hb-button-secondary,
 .hb-button-danger,
 .hb-button-ghost {
-    min-height: 42px;
+    min-height: 44px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
     border-radius: 999px;
     border: 1px solid transparent;
-    padding: 11px 20px;
+    padding: 12px 20px;
     font-family: inherit;
     font-size: 14px;
     font-weight: 700;
