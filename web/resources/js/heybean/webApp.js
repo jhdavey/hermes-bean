@@ -106,6 +106,7 @@ export function mountHeyBeanWebApp(mount) {
         chatHistoryOpen: false,
         chatRunState: 'Ready',
         chatDraft: '',
+        voiceWakeListening: false,
         voiceRecording: false,
         voiceProcessing: false,
         chatQueue: [],
@@ -145,6 +146,10 @@ export function mountHeyBeanWebApp(mount) {
     let voiceRecognition = null;
     let voiceCapturePending = false;
     let voiceCaptureReleaseRequested = false;
+    let voiceWakeRecognition = null;
+    let voiceWakeActivated = false;
+    let voiceWakeTranscript = '';
+    let voiceWakeSendTimer = 0;
 
     const guidedSignupPersonalities = [
         {
@@ -3972,7 +3977,7 @@ export function mountHeyBeanWebApp(mount) {
                         <span class="hb-chat-action-cluster">
                             ${state.busy ? `<button class="hb-button-secondary hb-chat-text-send-button hb-chat-text-stop-button" type="button" data-cancel-turn aria-label="Stop Bean">${icons.stop}</button>` : ''}
                             <button class="hb-button-secondary hb-chat-text-send-button" type="submit" aria-label="${escapeAttr(waking ? 'Bean is waking up' : (state.busy ? 'Queue message' : 'Send message'))}" ${sendDisabled}>${icons.send}</button>
-                            <button class="hb-button-secondary hb-chat-text-send-button hb-chat-voice-button ${state.voiceRecording ? 'hb-chat-voice-button-recording' : ''}" type="button" data-voice-hold aria-label="Hold to talk to Bean" ${sendDisabled}>${icons.mic}</button>
+                            <button class="hb-button-secondary hb-chat-text-send-button hb-chat-voice-button ${(state.voiceWakeListening || state.voiceRecording) ? 'hb-chat-voice-button-listening' : ''} ${(state.busy || state.voiceProcessing) ? 'hb-chat-voice-button-thinking' : ''}" type="button" data-voice-toggle aria-pressed="${state.voiceWakeListening ? 'true' : 'false'}" aria-label="${state.voiceWakeListening ? 'Turn off Hey Bean listening' : 'Turn on Hey Bean listening'}" ${sendDisabled}><span class="hb-chat-voice-button-inner"><img src="${escapeAttr(logoUrl)}" alt="" aria-hidden="true"></span></button>
                         </span>
                     </form>
                 </div>
@@ -6684,13 +6689,8 @@ export function mountHeyBeanWebApp(mount) {
             chatInput.addEventListener('keydown', handleChatKeydown);
             resizeChatInput(chatInput);
         }
-        mount.querySelectorAll('[data-voice-hold]').forEach((button) => {
-            button.addEventListener('pointerdown', startVoiceChatCapture);
-            button.addEventListener('pointerup', finishVoiceChatCapture);
-            button.addEventListener('pointercancel', finishVoiceChatCapture);
-            button.addEventListener('pointerleave', (event) => {
-                if (state.voiceRecording || voiceCapturePending) finishVoiceChatCapture(event);
-            });
+        mount.querySelectorAll('[data-voice-toggle]').forEach((button) => {
+            button.addEventListener('click', toggleVoiceWakeListening);
         });
         mount.querySelectorAll('[data-cancel-turn]').forEach((button) => button.addEventListener('click', cancelBeanTurn));
         mount.querySelectorAll('[data-copy-message]').forEach((button) => button.addEventListener('click', () => copyChatMessage(button.dataset.copyMessage)));
@@ -9070,6 +9070,169 @@ export function mountHeyBeanWebApp(mount) {
         voiceChunks = [];
         voiceCapturePending = false;
         voiceCaptureReleaseRequested = false;
+    }
+
+    function voiceRecognitionConstructor() {
+        return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+    }
+
+    function updateVoiceWakeDraft(text) {
+        state.chatDraft = text;
+        const textarea = mount.querySelector('textarea[name="message"]');
+        if (textarea) {
+            textarea.value = text;
+            resizeChatInput(textarea);
+        }
+    }
+
+    function textAfterWakeWord(text) {
+        return String(text || '')
+            .replace(/^.*?\bhey[\s,.-]*bean\b[\s,.:;!?-]*/i, '')
+            .trim();
+    }
+
+    function voiceWakeResultText(speechEvent) {
+        return Array.from(speechEvent.results || [])
+            .map((result) => result[0]?.transcript || '')
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function scheduleVoiceWakeSend(text, delay = 1200) {
+        window.clearTimeout(voiceWakeSendTimer);
+        const command = String(text || '').trim();
+        if (!command) return;
+        voiceWakeSendTimer = window.setTimeout(() => {
+            sendVoiceWakeCommand(command).catch((error) => {
+                state.error = friendlyError(error, 'send voice request');
+                state.chatRunState = state.voiceWakeListening ? 'Listening for “Hey Bean”…' : 'Ready';
+                render();
+            });
+        }, delay);
+    }
+
+    async function sendVoiceWakeCommand(command) {
+        const text = String(command || '').trim();
+        if (!text) return;
+        if (chatHasActiveTurn()) {
+            scheduleVoiceWakeSend(text, 700);
+            return;
+        }
+        window.clearTimeout(voiceWakeSendTimer);
+        voiceWakeTranscript = '';
+        voiceWakeActivated = false;
+        updateVoiceWakeDraft('');
+        const result = await sendChatContent(text, { voiceRequest: true });
+        if (result?.assistantContent) {
+            playBeanVoiceResponse(result.assistantContent).catch((error) => {
+                console.warn('Bean voice playback failed.', error);
+            });
+        }
+        if (state.voiceWakeListening) {
+            state.chatRunState = 'Listening for “Hey Bean”…';
+            render();
+        }
+    }
+
+    function stopVoiceWakeListening(options = {}) {
+        window.clearTimeout(voiceWakeSendTimer);
+        voiceWakeSendTimer = 0;
+        voiceWakeActivated = false;
+        voiceWakeTranscript = '';
+        try {
+            voiceWakeRecognition?.stop?.();
+        } catch (error) {
+            // Best effort cleanup only.
+        }
+        voiceWakeRecognition = null;
+        state.voiceWakeListening = false;
+        if (options.clearDraft !== false) updateVoiceWakeDraft('');
+        if (!state.busy) state.chatRunState = 'Ready';
+    }
+
+    function startVoiceWakeListening(event) {
+        event?.preventDefault?.();
+        if (beanChatWaking() || state.voiceProcessing || voiceCapturePending) return;
+        const Recognition = voiceRecognitionConstructor();
+        if (!Recognition) {
+            state.error = 'Hey Bean listening needs browser speech recognition support. Try Chrome or Edge.';
+            render();
+            return;
+        }
+        cleanupVoiceCapture();
+        stopVoiceWakeListening({ clearDraft: false });
+        state.error = '';
+        state.voiceWakeListening = true;
+        state.chatRunState = 'Listening for “Hey Bean”…';
+        updateVoiceWakeDraft('');
+        try {
+            voiceWakeRecognition = new Recognition();
+            voiceWakeRecognition.continuous = true;
+            voiceWakeRecognition.interimResults = true;
+            voiceWakeRecognition.onresult = (speechEvent) => {
+                const transcript = voiceWakeResultText(speechEvent);
+                if (!transcript) return;
+                const heardWakeWord = /\bhey[\s,.-]*bean\b/i.test(transcript);
+                if (!voiceWakeActivated && !heardWakeWord) return;
+                if (!voiceWakeActivated) {
+                    voiceWakeActivated = true;
+                    voiceWakeTranscript = textAfterWakeWord(transcript);
+                    state.chatRunState = 'Listening…';
+                } else {
+                    voiceWakeTranscript = textAfterWakeWord(transcript) || transcript.trim();
+                }
+                updateVoiceWakeDraft(voiceWakeTranscript);
+                if (voiceWakeTranscript) {
+                    const latestResult = speechEvent.results?.[speechEvent.results.length - 1];
+                    scheduleVoiceWakeSend(voiceWakeTranscript, latestResult?.isFinal ? 450 : 1200);
+                }
+                render();
+            };
+            voiceWakeRecognition.onerror = (speechEvent) => {
+                if (!state.voiceWakeListening) return;
+                const errorName = String(speechEvent?.error || '');
+                if (['no-speech', 'aborted'].includes(errorName)) return;
+                state.error = errorName === 'not-allowed'
+                    ? 'Microphone permission is needed for Hey Bean listening.'
+                    : 'Hey Bean listening stopped. Tap the mic to try again.';
+                stopVoiceWakeListening({ clearDraft: false });
+                render();
+            };
+            voiceWakeRecognition.onend = () => {
+                if (!state.voiceWakeListening) return;
+                try {
+                    voiceWakeRecognition?.start?.();
+                } catch (_) {
+                    window.setTimeout(() => {
+                        if (!state.voiceWakeListening) return;
+                        try {
+                            voiceWakeRecognition?.start?.();
+                        } catch (error) {
+                            state.error = 'Hey Bean listening stopped. Tap the mic to try again.';
+                            stopVoiceWakeListening({ clearDraft: false });
+                            render();
+                        }
+                    }, 400);
+                }
+            };
+            voiceWakeRecognition.start();
+            render();
+        } catch (error) {
+            stopVoiceWakeListening({ clearDraft: false });
+            state.error = friendlyError(error, 'start Hey Bean listening');
+            render();
+        }
+    }
+
+    function toggleVoiceWakeListening(event) {
+        event?.preventDefault?.();
+        if (state.voiceWakeListening) {
+            stopVoiceWakeListening();
+            render();
+            return;
+        }
+        startVoiceWakeListening(event);
     }
 
     async function startVoiceChatCapture(event) {
