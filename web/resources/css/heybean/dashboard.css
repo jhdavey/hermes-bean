@@ -568,8 +568,8 @@
 }
 
 .hb-command-center-glance .hb-glance-event {
-    grid-template-columns: 78px minmax(0, 1fr);
-    gap: 6px;
+    grid-template-columns: 60px minmax(0, 1fr);
+    gap: 5px;
     min-height: 32px;
     border: 0 !important;
     border-bottom: 1px solid color-mix(in srgb, var(--hb-border) 56%, transparent) !important;

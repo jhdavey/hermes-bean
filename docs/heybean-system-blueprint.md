@@ -423,10 +423,8 @@ Important queue jobs:
 - `ProcessAssistantRun`
 - `ExtractBeanMemoryFromTurn`
 
-Operational smoke and quality tooling:
+Operational tooling:
 
-- `php artisan bean:production-smoke`
-- voice-quality scenario through `RunBeanProductionSmokeSuite`
 - admin command execution through `AdminCommandRunService`
 
 ## Coexistence Model

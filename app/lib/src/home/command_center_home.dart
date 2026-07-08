@@ -575,7 +575,7 @@ class _CommandCenterGlanceEventPill extends StatelessWidget {
           child: Row(
             children: [
               SizedBox(
-                width: 76,
+                width: 60,
                 child: Text(
                   _commandCenterGlanceEventTime(event),
                   maxLines: 1,
@@ -587,7 +587,7 @@ class _CommandCenterGlanceEventPill extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 7),
+              const SizedBox(width: 5),
               Expanded(
                 child: Text(
                   event.title,
