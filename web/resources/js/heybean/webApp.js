@@ -3891,6 +3891,7 @@ export function mountHeyBeanWebApp(mount) {
         const token = ++beanWorkEventPollToken;
         const clientRequestId = String(options.clientRequestId || '').trim();
         const content = String(options.content || '');
+        const shouldPlayVoiceResponse = Boolean(options.voiceRequest);
         const poll = async (attempt = 0) => {
             if (!sessionId || token !== beanWorkEventPollToken) return;
             try {
@@ -3906,6 +3907,11 @@ export function mountHeyBeanWebApp(mount) {
                     });
                     if (token !== beanWorkEventPollToken) return;
                     if (recovered && (recovered.assistantContent || !['queued', 'running', 'processing'].includes(String(recovered.result?.status || '').toLowerCase()))) {
+                        if (shouldPlayVoiceResponse && recovered.assistantContent) {
+                            playBeanVoiceResponse(recovered.assistantContent).catch((error) => {
+                                console.warn('Bean voice playback failed.', error);
+                            });
+                        }
                         if (state.beanWorkItems.length && state.beanWorkItems.every((item) => beanWorkItemDone(item))) {
                             scheduleBeanWorkStatusClear();
                         }
@@ -9394,6 +9400,7 @@ export function mountHeyBeanWebApp(mount) {
                     startBeanWorkEventPolling(state.session.id, {
                         clientRequestId,
                         content,
+                        voiceRequest: options.voiceRequest,
                     });
                 } else {
                     stopBeanWorkEventPolling();
