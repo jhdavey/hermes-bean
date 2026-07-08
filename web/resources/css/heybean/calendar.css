@@ -328,11 +328,9 @@
 
 .hb-month-all-day-list {
     min-width: 0;
-    display: flex;
-    gap: 4px;
-    overflow-x: auto;
-    overscroll-behavior-inline: contain;
-    scrollbar-width: none;
+    display: grid;
+    gap: 2px;
+    overflow: hidden;
 }
 
 .hb-month-all-day-list::-webkit-scrollbar {
@@ -343,30 +341,24 @@
     min-width: 0;
     max-width: 100%;
     overflow: hidden;
-    flex: 0 1 auto;
-    border: 1px solid var(--hb-border);
-    border-radius: 8px;
-    background: rgba(var(--hb-accent-rgb), .10);
+    display: flex;
+    align-items: start;
+    gap: 3px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
     color: var(--hb-text);
-    padding: 4px 6px;
+    padding: 1px 0;
     text-align: left;
     cursor: pointer;
 }
 
 .hb-month-multi-day-event {
-    display: inline-grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
-    gap: 5px;
-}
-
-.hb-month-multi-day-event .hb-month-event-title:only-child {
-    grid-column: 1 / -1;
+    display: flex;
 }
 
 .hb-month-all-day-event:hover {
-    border-color: var(--hb-border-strong);
-    background: rgba(255, 255, 255, .72);
+    color: var(--hb-accent-strong);
 }
 
 .hb-month-event-list {
@@ -388,22 +380,20 @@
 
 .hb-month-event {
     min-width: 0;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    display: flex;
     align-items: start;
-    gap: 4px;
-    border: 1px solid var(--hb-border);
-    border-radius: 8px;
-    background: rgba(var(--hb-accent-rgb), .10);
+    gap: 3px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
     color: var(--hb-text);
-    padding: 3px 5px;
+    padding: 1px 0;
     text-align: left;
     cursor: pointer;
 }
 
 .hb-month-event:hover {
-    border-color: var(--hb-border-strong);
-    background: rgba(255, 255, 255, .72);
+    color: var(--hb-accent-strong);
 }
 
 .hb-month-event-time {
@@ -416,15 +406,50 @@
 }
 
 .hb-month-event-title {
+    flex: 1 1 auto;
     min-width: 0;
     color: var(--hb-text);
     font-size: 11px;
     font-weight: 400;
     line-height: 1.15;
+    display: -webkit-box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
 }
 
-.hb-month-event-title .hb-critical-star {
-    font-size: 11px;
+.hb-month-event-icons {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    color: var(--hb-muted);
+    line-height: 1;
+    padding-top: 1px;
+}
+
+.hb-month-event-icon {
+    width: 11px;
+    height: 11px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+    font-size: 10px;
+    line-height: 1;
+}
+
+.hb-month-event-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.hb-month-event-critical {
+    color: var(--hb-warning);
 }
 
 .hb-agenda {
@@ -473,7 +498,6 @@
 }
 
 .hb-event-title,
-.hb-month-event-title,
 .hb-glance-event .hb-event-title,
 .hb-multi-day-event-title,
 .hb-all-day-event-title {
@@ -489,28 +513,6 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-
-.hb-month-event-title {
-    align-items: flex-start;
-    width: 100%;
-    max-width: 100%;
-    white-space: normal;
-}
-
-.hb-month-event-title .hb-event-title-inner {
-    display: -webkit-box;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: normal;
-    overflow-wrap: anywhere;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-}
-
-.hb-month-event-title .hb-event-pill-icons {
-    padding-top: 1px;
 }
 
 .hb-event-pill-icons {

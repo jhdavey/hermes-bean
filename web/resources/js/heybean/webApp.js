@@ -5105,30 +5105,40 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function monthAllDayEventMarkup(event) {
-        const color = itemColor(event);
         return `
-            <button class="hb-month-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
-                ${eventPillTitleMarkup(event, 'hb-month-event-title', { showLocation: false })}
+            <button class="hb-month-all-day-event" type="button" data-edit-event="${event.id}">
+                ${monthEventInfoMarkup(event)}
             </button>`;
     }
 
     function monthMultiDayEventMarkup(event, day) {
-        const color = itemColor(event);
         const time = multiDayEventDayTime(event, day, { compact: true, showEndTime: false });
         return `
-            <button class="hb-month-all-day-event hb-month-multi-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
-                ${time ? `<span class="hb-month-event-time">${escapeHtml(time)}</span>` : ''}
-                ${eventPillTitleMarkup(event, 'hb-month-event-title', { showLocation: false })}
+            <button class="hb-month-all-day-event hb-month-multi-day-event" type="button" data-edit-event="${event.id}">
+                ${monthEventInfoMarkup(event, time)}
             </button>`;
     }
 
     function monthEventMarkup(event) {
-        const color = itemColor(event);
         return `
-            <button class="hb-month-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
-                <span class="hb-month-event-time">${escapeHtml(monthEventTime(event))}</span>
-                ${eventPillTitleMarkup(event, 'hb-month-event-title', { showLocation: false })}
+            <button class="hb-month-event" type="button" data-edit-event="${event.id}">
+                ${monthEventInfoMarkup(event, monthEventTime(event))}
             </button>`;
+    }
+
+    function monthEventInfoMarkup(event, time = '') {
+        const iconsMarkup = [
+            event?.is_critical || event?.isCritical
+                ? '<span class="hb-month-event-icon hb-month-event-critical" title="Critical" aria-label="Critical">★</span>'
+                : '',
+            eventNotesText(event)
+                ? `<span class="hb-month-event-icon" title="Has notes" aria-label="Has notes">${icons.notes}</span>`
+                : '',
+        ].filter(Boolean).join('');
+        return `
+            ${time ? `<span class="hb-month-event-time">${escapeHtml(time)}</span>` : ''}
+            ${iconsMarkup ? `<span class="hb-month-event-icons">${iconsMarkup}</span>` : ''}
+            <span class="hb-month-event-title">${escapeHtml(eventTitleText(event))}</span>`;
     }
 
     function monthSwitcherMarkup(selected) {

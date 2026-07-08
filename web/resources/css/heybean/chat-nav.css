@@ -362,7 +362,7 @@
 }
 
 .hb-message {
-    width: 100%;
+    width: 80%;
     max-width: 100%;
     display: block;
     align-self: flex-start;
@@ -374,7 +374,7 @@
 }
 
 .hb-message-user {
-    align-self: flex-start;
+    align-self: flex-end;
     background: transparent;
 }
 
@@ -403,7 +403,7 @@
 
 .hb-message-line {
     color: var(--hb-text);
-    font-size: 15px;
+    font-size: 14px;
     line-height: 1.32;
     overflow-wrap: anywhere;
     white-space: normal;
@@ -688,7 +688,7 @@
 }
 
 .hb-command-center-chat .hb-message {
-    width: 100%;
+    width: 80%;
     max-width: 100%;
     padding: 2px 1px;
     border-radius: 0;
@@ -697,7 +697,7 @@
 
 .hb-command-center-chat .hb-message-line {
     color: var(--hb-text);
-    font-size: 15px;
+    font-size: 13px;
     line-height: 1.3;
 }
 

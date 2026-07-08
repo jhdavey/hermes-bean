@@ -311,7 +311,6 @@
     box-shadow: inset 0 0 0 1px rgba(var(--hb-accent-rgb), .22);
 }
 
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-event,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-event,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-glance-event,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-multi-day-event,
@@ -323,7 +322,6 @@
     color: var(--hb-text);
 }
 
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-event:hover,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-event:hover,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-glance-event:hover {
     border-color: rgba(var(--hb-accent-rgb), .46);

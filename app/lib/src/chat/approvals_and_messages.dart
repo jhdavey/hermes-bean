@@ -370,52 +370,62 @@ class _MessageBubble extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final hasActions = onCopy != null || onEdit != null;
-    final isBean = sender.toLowerCase() == 'bean';
-    final transcript = Padding(
-      key: alignRight ? const Key('user-message-bubble') : null,
-      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
-      child: Text.rich(
-        TextSpan(
-          children: [
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final hasActions = onCopy != null || onEdit != null;
+      final isBean = sender.toLowerCase() == 'bean';
+      final availableWidth = constraints.hasBoundedWidth
+          ? constraints.maxWidth
+          : MediaQuery.sizeOf(context).width;
+      final transcript = SizedBox(
+        width: availableWidth * .8,
+        child: Padding(
+          key: alignRight ? const Key('user-message-bubble') : null,
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
+          child: Text.rich(
             TextSpan(
-              text: sender,
-              style: TextStyle(
-                color: isBean ? HeyBeanTheme.accentStrong : HeyBeanTheme.muted,
-                fontWeight: FontWeight.w700,
-              ),
+              children: [
+                TextSpan(
+                  text: sender,
+                  style: TextStyle(
+                    color: isBean
+                        ? HeyBeanTheme.accentStrong
+                        : HeyBeanTheme.muted,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                TextSpan(
+                  text: ' - ',
+                  style: TextStyle(color: HeyBeanTheme.muted),
+                ),
+                TextSpan(
+                  text: message,
+                  style: TextStyle(
+                    color: HeyBeanTheme.text,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ],
             ),
-            TextSpan(
-              text: ' - ',
-              style: TextStyle(color: HeyBeanTheme.muted),
-            ),
-            TextSpan(
-              text: message,
-              style: TextStyle(
-                color: HeyBeanTheme.text,
-                fontWeight: FontWeight.w400,
-              ),
-            ),
-          ],
+            style: TextStyle(fontSize: 15, height: 1.3),
+          ),
         ),
-        style: TextStyle(fontSize: 15, height: 1.3),
-      ),
-    );
+      );
 
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: hasActions
-          ? GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onLongPressStart: (details) => unawaited(
-                _showMessageActions(context, details.globalPosition),
-              ),
-              child: transcript,
-            )
-          : transcript,
-    );
-  }
+      return Align(
+        alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+        child: hasActions
+            ? GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onLongPressStart: (details) => unawaited(
+                  _showMessageActions(context, details.globalPosition),
+                ),
+                child: transcript,
+              )
+            : transcript,
+      );
+    },
+  );
 }
 
 // ignore: unused_element

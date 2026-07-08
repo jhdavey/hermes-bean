@@ -917,35 +917,38 @@ class _GuidedOnboardingBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Align(
-    alignment: Alignment.centerLeft,
-    child: Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Text.rich(
-        TextSpan(
-          children: [
-            TextSpan(
-              text: message.bean ? 'Bean' : 'You',
-              style: TextStyle(
-                color: message.bean
-                    ? HeyBeanTheme.accentStrong
-                    : HeyBeanTheme.muted,
-                fontWeight: FontWeight.w700,
+    alignment: message.bean ? Alignment.centerLeft : Alignment.centerRight,
+    child: FractionallySizedBox(
+      widthFactor: .8,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: message.bean ? 'Bean' : 'You',
+                style: TextStyle(
+                  color: message.bean
+                      ? HeyBeanTheme.accentStrong
+                      : HeyBeanTheme.muted,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-            TextSpan(
-              text: ' - ',
-              style: TextStyle(color: HeyBeanTheme.muted),
-            ),
-            TextSpan(
-              text: message.masked ? '************' : message.text,
-              style: TextStyle(
-                color: HeyBeanTheme.text,
-                fontWeight: FontWeight.w400,
+              TextSpan(
+                text: ' - ',
+                style: TextStyle(color: HeyBeanTheme.muted),
               ),
-            ),
-          ],
+              TextSpan(
+                text: message.masked ? '************' : message.text,
+                style: TextStyle(
+                  color: HeyBeanTheme.text,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+          style: TextStyle(fontSize: 16, height: 1.35),
         ),
-        style: TextStyle(fontSize: 16, height: 1.35),
       ),
     ),
   );
