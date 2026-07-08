@@ -386,6 +386,21 @@
     background: #fffbeb;
 }
 
+.hb-message-approval .hb-message-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--hb-muted);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.12;
+}
+
+.hb-message-approval .hb-message-body {
+    display: block;
+    margin-top: 6px;
+}
+
 .hb-message-line {
     color: var(--hb-text);
     font-size: 15px;

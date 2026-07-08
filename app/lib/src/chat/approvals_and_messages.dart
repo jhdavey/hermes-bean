@@ -408,8 +408,9 @@ class _MessageBubble extends StatelessWidget {
       child: hasActions
           ? GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onLongPressStart: (details) =>
-                  unawaited(_showMessageActions(context, details.globalPosition)),
+              onLongPressStart: (details) => unawaited(
+                _showMessageActions(context, details.globalPosition),
+              ),
               child: transcript,
             )
           : transcript,

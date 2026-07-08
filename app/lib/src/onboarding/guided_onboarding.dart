@@ -916,54 +916,39 @@ class _GuidedOnboardingBubble extends StatelessWidget {
   final _GuidedOnboardingMessage message;
 
   @override
-  Widget build(BuildContext context) {
-    final align = message.bean ? Alignment.centerLeft : Alignment.centerRight;
-    final bg = message.bean
-        ? HeyBeanTheme.surface2
-        : HeyBeanTheme.accent.withValues(
-            alpha: HeyBeanTheme.isDark ? .22 : .14,
-          );
-    final border = message.bean
-        ? HeyBeanTheme.border
-        : HeyBeanTheme.accent.withValues(alpha: .32);
-    return Align(
-      alignment: align,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 330),
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.centerLeft,
+    child: Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Text.rich(
+        TextSpan(
           children: [
-            Text(
-              message.bean ? 'Bean' : 'You',
+            TextSpan(
+              text: message.bean ? 'Bean' : 'You',
               style: TextStyle(
                 color: message.bean
                     ? HeyBeanTheme.accentStrong
-                    : HeyBeanTheme.accent,
-                fontWeight: FontWeight.w900,
+                    : HeyBeanTheme.muted,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              message.masked ? '************' : message.text,
+            TextSpan(
+              text: ' - ',
+              style: TextStyle(color: HeyBeanTheme.muted),
+            ),
+            TextSpan(
+              text: message.masked ? '************' : message.text,
               style: TextStyle(
                 color: HeyBeanTheme.text,
-                fontSize: 16,
-                height: 1.35,
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w400,
               ),
             ),
           ],
         ),
+        style: TextStyle(fontSize: 16, height: 1.35),
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _GuidedThinkingBubble extends StatefulWidget {
