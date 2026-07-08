@@ -5151,7 +5151,9 @@ export function mountHeyBeanWebApp(mount) {
         const rows = parts.length === 2
             ? [`${parts[0]} -`, parts[1]]
             : [label];
-        return `<span class="hb-month-event-time" aria-label="${escapeAttr(label)}">${rows.map((row) => `<span>${escapeHtml(row)}</span>`).join('')}</span>`;
+        const startsWithHourOnly = parts.length === 2 && /^\d{1,2}(?:\s*(?:am|pm))?$/i.test(parts[0]);
+        const timeClass = `hb-month-event-time${startsWithHourOnly ? ' hb-month-event-time-hour-start' : ''}`;
+        return `<span class="${timeClass}" aria-label="${escapeAttr(label)}">${rows.map((row) => `<span class="hb-month-event-time-row">${escapeHtml(row)}</span>`).join('')}</span>`;
     }
 
     function monthSwitcherMarkup(selected) {
