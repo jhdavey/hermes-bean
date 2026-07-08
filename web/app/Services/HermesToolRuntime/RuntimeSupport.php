@@ -837,6 +837,11 @@ PROMPT;
             return false;
         }
 
+        if (preg_match('/^(can|could|would|will)\s+(you|bean)\b.{0,80}\b(mark|complete|finish|update|change|move|delete|remove|cancel|create|add|make|schedule|set)\b/u', $text)
+            && preg_match('/\b(task|tasks|todo|to\s+do|reminder|reminders|note|notes|event|events|calendar|appointment|appointments|done|complete|completed)\b/u', $text)) {
+            return false;
+        }
+
         return (bool) preg_match(
             '/^(can|could|would|will|do|does|are|is)\s+(you|bean)\b.{0,120}\b(create|add|make|schedule|book|set|update|change|move|reschedule|delete|remove|cancel|complete|mark|remember|forget|look up|find|search|sync|manage|handle|help)\b.{0,80}\??$/u',
             $text

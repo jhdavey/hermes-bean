@@ -150,6 +150,9 @@ export function mountHeyBeanWebApp(mount) {
     let voiceWakeActivated = false;
     let voiceWakeTranscript = '';
     let voiceWakeSendTimer = 0;
+    let beanVoiceAudio = null;
+    let beanVoiceBlobUrl = '';
+    let beanVoicePlaybackUnlocked = false;
 
     const guidedSignupPersonalities = [
         {
@@ -3691,6 +3694,7 @@ export function mountHeyBeanWebApp(mount) {
             if (Number.isFinite(eventId) && eventId <= beanWorkEventFloorId) return;
             if (Number.isFinite(eventId) && beanWorkAppliedEventIds.has(eventId)) return;
             const item = beanWorkItemFromEvent(event);
+            if (beanActivityEventMutatesDashboard(event)) mutationEvents.push(event);
             if (!item) return;
             if (!beanWorkEventBelongsToActiveRequest(event, item)) return;
             if (Number.isFinite(eventId)) {
@@ -3702,7 +3706,6 @@ export function mountHeyBeanWebApp(mount) {
                 resolvedByEvent: true,
                 order: item.order,
             });
-            if (beanActivityEventMutatesDashboard(event)) mutationEvents.push(event);
         });
         refreshDashboardAfterBeanMutationEvents(mutationEvents);
     }
@@ -3919,6 +3922,9 @@ export function mountHeyBeanWebApp(mount) {
                         }
                         if (state.beanWorkItems.length && state.beanWorkItems.every((item) => beanWorkItemDone(item))) {
                             scheduleBeanWorkStatusClear();
+                        }
+                        if (!['queued', 'running', 'processing'].includes(String(recovered.result?.status || '').toLowerCase())) {
+                            refreshOnlyInBackground({ skipCalendarSync: true });
                         }
                         state.busy = false;
                         activeChatRequestId = 0;
@@ -9162,6 +9168,7 @@ export function mountHeyBeanWebApp(mount) {
         }
         cleanupVoiceCapture();
         stopVoiceWakeListening({ clearDraft: false });
+        unlockBeanVoicePlayback().catch(() => {});
         state.error = '';
         state.voiceWakeListening = true;
         state.chatRunState = 'Listening for “Hey Bean”…';
@@ -9349,6 +9356,22 @@ export function mountHeyBeanWebApp(mount) {
         }
     }
 
+    async function unlockBeanVoicePlayback() {
+        if (beanVoicePlaybackUnlocked) return;
+        beanVoiceAudio ??= new Audio();
+        try {
+            beanVoiceAudio.muted = true;
+            beanVoiceAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQQAAAAAAA==';
+            await beanVoiceAudio.play();
+            beanVoiceAudio.pause();
+            beanVoiceAudio.currentTime = 0;
+            beanVoiceAudio.muted = false;
+            beanVoicePlaybackUnlocked = true;
+        } catch (_) {
+            beanVoiceAudio.muted = false;
+        }
+    }
+
     async function playBeanVoiceResponse(text) {
         const speech = await api('/assistant/voice/speech', {
             method: 'POST',
@@ -9357,14 +9380,34 @@ export function mountHeyBeanWebApp(mount) {
         });
         if (!speech?.audio_base64) return;
         const bytes = Uint8Array.from(atob(speech.audio_base64), (char) => char.charCodeAt(0));
-        const blobUrl = URL.createObjectURL(new Blob([bytes], { type: speech.mime_type || 'audio/mpeg' }));
-        const audio = new Audio(blobUrl);
-        audio.addEventListener('ended', () => URL.revokeObjectURL(blobUrl), { once: true });
-        audio.addEventListener('error', () => URL.revokeObjectURL(blobUrl), { once: true });
+        if (beanVoiceBlobUrl) {
+            URL.revokeObjectURL(beanVoiceBlobUrl);
+            beanVoiceBlobUrl = '';
+        }
+        beanVoiceBlobUrl = URL.createObjectURL(new Blob([bytes], { type: speech.mime_type || 'audio/mpeg' }));
+        beanVoiceAudio ??= new Audio();
+        beanVoiceAudio.pause();
+        beanVoiceAudio.src = beanVoiceBlobUrl;
+        beanVoiceAudio.muted = false;
+        beanVoiceAudio.addEventListener('ended', () => {
+            if (beanVoiceBlobUrl) {
+                URL.revokeObjectURL(beanVoiceBlobUrl);
+                beanVoiceBlobUrl = '';
+            }
+        }, { once: true });
+        beanVoiceAudio.addEventListener('error', () => {
+            if (beanVoiceBlobUrl) {
+                URL.revokeObjectURL(beanVoiceBlobUrl);
+                beanVoiceBlobUrl = '';
+            }
+        }, { once: true });
         try {
-            await audio.play();
+            await beanVoiceAudio.play();
         } catch (error) {
-            URL.revokeObjectURL(blobUrl);
+            if (beanVoiceBlobUrl) {
+                URL.revokeObjectURL(beanVoiceBlobUrl);
+                beanVoiceBlobUrl = '';
+            }
             throw error;
         }
     }
