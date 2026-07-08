@@ -153,6 +153,7 @@ export function mountHeyBeanWebApp(mount) {
     let beanVoiceAudio = null;
     let beanVoiceBlobUrl = '';
     let beanVoicePlaybackUnlocked = false;
+    let beanVoiceAudioContext = null;
 
     const guidedSignupPersonalities = [
         {
@@ -9357,6 +9358,13 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     async function unlockBeanVoicePlayback() {
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextCtor) {
+            beanVoiceAudioContext ??= new AudioContextCtor();
+            if (beanVoiceAudioContext.state === 'suspended') {
+                await beanVoiceAudioContext.resume();
+            }
+        }
         if (beanVoicePlaybackUnlocked) return;
         beanVoiceAudio ??= new Audio();
         try {
@@ -9372,14 +9380,32 @@ export function mountHeyBeanWebApp(mount) {
         }
     }
 
-    async function playBeanVoiceResponse(text) {
-        const speech = await api('/assistant/voice/speech', {
-            method: 'POST',
-            body: { text },
-            timeoutMs: 30000,
-        });
-        if (!speech?.audio_base64) return;
-        const bytes = Uint8Array.from(atob(speech.audio_base64), (char) => char.charCodeAt(0));
+    function base64ToArrayBuffer(base64) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+        }
+        return bytes.buffer;
+    }
+
+    async function playBeanVoiceWithAudioContext(audioBase64) {
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextCtor) return false;
+        beanVoiceAudioContext ??= new AudioContextCtor();
+        if (beanVoiceAudioContext.state === 'suspended') {
+            await beanVoiceAudioContext.resume();
+        }
+        const audioBuffer = await beanVoiceAudioContext.decodeAudioData(base64ToArrayBuffer(audioBase64).slice(0));
+        const source = beanVoiceAudioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(beanVoiceAudioContext.destination);
+        source.start(0);
+        return true;
+    }
+
+    async function playBeanVoiceWithElement(speech) {
+        const bytes = new Uint8Array(base64ToArrayBuffer(speech.audio_base64));
         if (beanVoiceBlobUrl) {
             URL.revokeObjectURL(beanVoiceBlobUrl);
             beanVoiceBlobUrl = '';
@@ -9410,6 +9436,21 @@ export function mountHeyBeanWebApp(mount) {
             }
             throw error;
         }
+    }
+
+    async function playBeanVoiceResponse(text) {
+        const speech = await api('/assistant/voice/speech', {
+            method: 'POST',
+            body: { text },
+            timeoutMs: 30000,
+        });
+        if (!speech?.audio_base64) return;
+        try {
+            if (await playBeanVoiceWithAudioContext(speech.audio_base64)) return;
+        } catch (error) {
+            console.warn('Bean Web Audio playback failed; falling back to audio element.', error);
+        }
+        await playBeanVoiceWithElement(speech);
     }
 
     async function submitChat(event) {
