@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Log;
 class AssistantRunService
 {
     /**
-     * @return array{run:AssistantRun,user_message:ConversationMessage,event:ActivityEvent}
+     * @return array{run:AssistantRun,user_message:ConversationMessage,event:ActivityEvent,events:array<int, ActivityEvent>}
      */
     public function queueRun(ConversationSession $session, string $content, array $metadata = [], string $source = 'http'): array
     {
@@ -43,13 +43,38 @@ class AssistantRunService
                 'last_activity_at' => now(),
             ]);
 
+            $events = [];
+            $intent = is_array($metadata['bean_intent'] ?? null) ? $metadata['bean_intent'] : null;
+            if ($intent !== null) {
+                $events[] = $this->recordEvent($run, 'runtime.intent_routed', [
+                    'run_id' => $run->id,
+                    'message_id' => $userMessage->id,
+                    ...$intent,
+                ], 'hermes.router', 'completed');
+
+                foreach ((array) ($intent['work_plan'] ?? []) as $index => $item) {
+                    if (! is_array($item) || trim((string) ($item['label'] ?? '')) === '') {
+                        continue;
+                    }
+                    $events[] = $this->recordEvent($run, 'assistant.work_item.planned', [
+                        'run_id' => $run->id,
+                        'message_id' => $userMessage->id,
+                        'work_item_id' => (string) ($item['id'] ?? 'route-plan-'.$index),
+                        'work_label' => (string) $item['label'],
+                        'label' => (string) $item['label'],
+                        'work_order' => $index,
+                    ], 'hermes.router', 'started');
+                }
+            }
+
             $event = $this->recordEvent($run, 'runtime.run_queued', [
                 'run_id' => $run->id,
                 'message_id' => $userMessage->id,
                 'source' => $source,
             ], 'hermes.runs', 'queued');
+            $events[] = $event;
 
-            return ['run' => $run, 'user_message' => $userMessage, 'event' => $event];
+            return ['run' => $run, 'user_message' => $userMessage, 'event' => $event, 'events' => $events];
         });
 
         $this->dispatchRunAfterResponse($queued['run']->id);
@@ -58,7 +83,7 @@ class AssistantRunService
     }
 
     /**
-     * @return array{run:AssistantRun,user_message:ConversationMessage,event:ActivityEvent}
+     * @return array{run:AssistantRun,user_message:ConversationMessage,event:ActivityEvent,events:array<int, ActivityEvent>}
      */
     public function queueExistingMessage(ConversationSession $session, ConversationMessage $userMessage, array $metadata = [], string $source = 'http'): array
     {
@@ -79,14 +104,39 @@ class AssistantRunService
                 'last_activity_at' => now(),
             ]);
 
+            $events = [];
+            $intent = is_array($metadata['bean_intent'] ?? null) ? $metadata['bean_intent'] : null;
+            if ($intent !== null) {
+                $events[] = $this->recordEvent($run, 'runtime.intent_routed', [
+                    'run_id' => $run->id,
+                    'message_id' => $userMessage->id,
+                    ...$intent,
+                ], 'hermes.router', 'completed');
+
+                foreach ((array) ($intent['work_plan'] ?? []) as $index => $item) {
+                    if (! is_array($item) || trim((string) ($item['label'] ?? '')) === '') {
+                        continue;
+                    }
+                    $events[] = $this->recordEvent($run, 'assistant.work_item.planned', [
+                        'run_id' => $run->id,
+                        'message_id' => $userMessage->id,
+                        'work_item_id' => (string) ($item['id'] ?? 'route-plan-'.$index),
+                        'work_label' => (string) $item['label'],
+                        'label' => (string) $item['label'],
+                        'work_order' => $index,
+                    ], 'hermes.router', 'started');
+                }
+            }
+
             $event = $this->recordEvent($run, 'runtime.run_queued', [
                 'run_id' => $run->id,
                 'message_id' => $userMessage->id,
                 'source' => $source,
                 'reused_user_message' => true,
             ], 'hermes.runs', 'queued');
+            $events[] = $event;
 
-            return ['run' => $run, 'user_message' => $userMessage, 'event' => $event];
+            return ['run' => $run, 'user_message' => $userMessage, 'event' => $event, 'events' => $events];
         });
 
         $this->dispatchRunAfterResponse($queued['run']->id);

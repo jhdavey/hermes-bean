@@ -29,6 +29,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         private readonly BeanMemoryService $memoryService,
         private readonly LiveLookupService $liveLookup,
         private readonly PlanLimitService $planLimits,
+        private readonly BeanIntentRouter $intentRouter,
     ) {}
 
     public function startSession(array $attributes = []): ConversationSession
@@ -105,43 +106,47 @@ class HermesToolRuntimeService implements HermesRuntimeService
             'message_id' => $userMessage->id,
         ]);
 
-        $localGeneralAnswer = $this->localGeneralAnswerContent($userMessage);
-        if ($localGeneralAnswer !== null) {
-            $kind = $localGeneralAnswer['kind'];
-            $localRoute = [
-                'mode' => 'local',
-                'tier' => 'local',
-                'model' => 'local-'.$kind,
-                'billing_model' => 'local-'.$kind,
-                'context_mode' => 'none',
-                'reason' => 'Local read fast path for common Bean questions.',
+        $intentRoute = $this->intentRouter->route($userMessage);
+        if ($session->runtime_mode === 'onboarding' || $this->messageNeedsContextualAgentFollowUp($session, $userMessage)) {
+            $intentRoute = [
+                ...$intentRoute,
+                'lane' => BeanIntentRouter::NEEDS_COMPLEX_REASONING,
+                'runtime' => 'agent_tools',
+                'queue' => true,
+                'tool_mode' => 'full',
+                'reason' => $session->runtime_mode === 'onboarding'
+                    ? 'Onboarding/profile setup requires agent tools.'
+                    : 'Contextual follow-up requires recent agent/tool state.',
+                'confidence' => 0.84,
+                'work_plan' => [[
+                    'id' => 'route-plan-0',
+                    'label' => 'Handle follow-up',
+                    'status' => 'running',
+                ]],
             ];
-            $started = $this->recordEvent($session, 'runtime.tool_model_started', [
-                'message_id' => $userMessage->id,
-                'provider' => 'local',
-                'model' => 'local-'.$kind,
-                'model_route' => $localRoute,
-                'tool_mode' => 'local_read_fast_path',
-                'tool_count' => 0,
-                'history_message_count' => 0,
-                'context_build_ms' => 0,
-                'read_fast_path' => $kind,
-            ], 'hermes.tools', 'started');
-            $session->update(['status' => 'running', 'last_activity_at' => now()]);
+        }
+        $routed = $this->recordEvent($session, 'runtime.intent_routed', [
+            'message_id' => $userMessage->id,
+            ...$intentRoute,
+        ], 'hermes.router', 'completed');
 
-            return $this->completeLocalReadFastPath(
-                $session,
-                $userMessage,
-                $received,
-                $started,
-                $localRoute,
-                'local_read_fast_path:'.$kind,
-                $runtimeStartedAt,
-                0,
-                'local_read_fast_path',
-                $localGeneralAnswer['content'],
-                $kind
-            );
+        if (($intentRoute['runtime'] ?? '') === 'fast_no_tools') {
+            try {
+                return $this->sendFastNoToolsResponse($session, $userMessage, $received, $routed, $intentRoute, $runtimeStartedAt);
+            } catch (\Throwable $exception) {
+                Log::warning('Bean fast no-tools lane fell back to agent runtime.', [
+                    'session_id' => $session->id,
+                    'message_id' => $userMessage->id,
+                    'lane' => $intentRoute['lane'] ?? null,
+                    'exception' => $exception->getMessage(),
+                ]);
+                $this->recordEvent($session, 'runtime.fast_response_fallback', [
+                    'message_id' => $userMessage->id,
+                    'lane' => $intentRoute['lane'] ?? null,
+                    'reason' => $exception->getMessage(),
+                    'duration_ms' => $this->elapsedMs($runtimeStartedAt),
+                ], 'hermes.fast_chat', 'failed');
+            }
         }
 
         $modelRoute = $this->modelRouteFor($session);
@@ -150,13 +155,13 @@ class HermesToolRuntimeService implements HermesRuntimeService
         if (! $preflight['allowed']) {
             $this->usageService->recordBlocked($session, $userMessage, $modelRoute, $preflight, (string) $preflight['reason']);
 
-            return $this->toolRuntimeBlocked($session, $userMessage, collect([$received]), (string) $preflight['reason'], [
+            return $this->toolRuntimeBlocked($session, $userMessage, collect([$received, $routed]), (string) $preflight['reason'], [
                 'failure_type' => 'usage_limit',
                 'model_route' => $modelRoute,
             ]);
         }
 
-        return $this->sendMessageWithTools($session, $userMessage, $received, $modelRoute, $prompt);
+        return $this->sendMessageWithTools($session, $userMessage, $received, $modelRoute, $prompt, collect([$routed]), $intentRoute);
     }
 
     private function sendMessageWithTools(
@@ -164,12 +169,15 @@ class HermesToolRuntimeService implements HermesRuntimeService
         ConversationMessage $userMessage,
         ActivityEvent $received,
         array $modelRoute,
-        string $prompt
+        string $prompt,
+        ?Collection $preludeEvents = null,
+        ?array $intentRoute = null
     ): array {
+        $preludeEvents ??= collect();
         $runtimeStartedAt = microtime(true);
         $apiKey = $this->providerApiKey();
         if ($apiKey === '') {
-            return $this->toolRuntimeFailed($session, $userMessage, collect([$received]), 'Bean is not configured to contact the agent model yet.', [
+            return $this->toolRuntimeFailed($session, $userMessage, collect([$received])->concat($preludeEvents), 'Bean is not configured to contact the agent model yet.', [
                 'failure_type' => 'missing_api_key',
                 'provider' => config('services.hermes_runtime.default_provider'),
                 'key_source' => config('services.hermes_runtime.api_key_source'),
@@ -177,12 +185,15 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
 
         if (! filled($modelRoute['model'] ?? null)) {
-            return $this->toolRuntimeFailed($session, $userMessage, collect([$received]), 'Bean is missing an agent model configuration.', [
+            return $this->toolRuntimeFailed($session, $userMessage, collect([$received])->concat($preludeEvents), 'Bean is missing an agent model configuration.', [
                 'failure_type' => 'missing_model',
             ]);
         }
 
-        $toolMode = $this->toolRoutingMode($userMessage);
+        $toolMode = (string) ($intentRoute['tool_mode'] ?? $this->toolRoutingMode($userMessage));
+        if ($toolMode === 'none') {
+            $toolMode = $this->toolRoutingMode($userMessage);
+        }
         $contextStartedAt = microtime(true);
         $contextPayload = $this->toolContextPayload($session, $userMessage, $toolMode);
         $conversationMessages = $this->modelConversationMessages($session, $userMessage);
@@ -200,23 +211,6 @@ class HermesToolRuntimeService implements HermesRuntimeService
             'context_build_ms' => $contextBuildMs,
         ], 'hermes.tools', 'started');
         $session->update(['status' => 'running', 'last_activity_at' => now()]);
-
-        $localGeneralAnswer = $this->localGeneralAnswerContent($userMessage);
-        if ($localGeneralAnswer !== null) {
-            return $this->completeLocalReadFastPath(
-                $session,
-                $userMessage,
-                $received,
-                $started,
-                $modelRoute,
-                $prompt,
-                $runtimeStartedAt,
-                $contextBuildMs,
-                $toolMode,
-                $localGeneralAnswer['content'],
-                $localGeneralAnswer['kind']
-            );
-        }
 
         if ($this->messageIsRequestHistoryRecall($userMessage)) {
             $historyResult = $this->tryRunRequestHistoryFastPath(
@@ -300,7 +294,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         try {
             for ($turn = 0; $turn < 3; $turn++) {
                 if ($this->isCancellationRequested($session)) {
-                    return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started]));
+                    return $this->toolRuntimeCancelled($session, $userMessage, collect([$received])->concat($preludeEvents)->push($started));
                 }
 
                 $modelCallStartedAt = microtime(true);
@@ -387,7 +381,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
                 foreach ($toolCalls as $toolCall) {
                     if ($this->isCancellationRequested($session)) {
-                        return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started])->concat($domainEvents));
+                        return $this->toolRuntimeCancelled($session, $userMessage, collect([$received])->concat($preludeEvents)->push($started)->concat($domainEvents));
                     }
 
                     if (! is_array($toolCall)) {
@@ -436,7 +430,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 } else {
                     try {
                         if ($this->isCancellationRequested($session)) {
-                            return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started])->concat($domainEvents));
+                            return $this->toolRuntimeCancelled($session, $userMessage, collect([$received])->concat($preludeEvents)->push($started)->concat($domainEvents));
                         }
 
                         $finalResponseStartedAt = microtime(true);
@@ -474,7 +468,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     'exception' => $exception->getMessage(),
                 ]);
 
-                return $this->toolRuntimeFailed($session, $userMessage, collect([$received, $started]), 'I’m on it. I’m syncing against the latest app state now, and I’ll ask for one detail if I need it.', [
+                return $this->toolRuntimeFailed($session, $userMessage, collect([$received])->concat($preludeEvents)->push($started), 'I’m on it. I’m syncing against the latest app state now, and I’ll ask for one detail if I need it.', [
                     'failure_type' => 'tool_runtime_failed',
                     'exception' => $exception->getMessage(),
                 ]);
@@ -489,7 +483,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
         $assistantContent = $this->assistantSafeResponseContent($assistantContent);
 
-        $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $modelRoute, $prompt, $responses, $domainEvents, $assistantContent, $finalResponse, $toolMode, $runtimeStartedAt, $contextBuildMs, $modelCallDurationsMs, $toolExecutionDurationsMs, $finalResponseDurationMs, $actions): array {
+        $result = DB::transaction(function () use ($session, $userMessage, $received, $preludeEvents, $started, $modelRoute, $prompt, $responses, $domainEvents, $assistantContent, $finalResponse, $toolMode, $runtimeStartedAt, $contextBuildMs, $modelCallDurationsMs, $toolExecutionDurationsMs, $finalResponseDurationMs, $actions): array {
             $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
                 'message_id' => $userMessage->id,
                 'response_count' => count($responses),
@@ -541,7 +535,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'session' => $session->refresh(),
                 'user_message' => $userMessage,
                 'assistant_message' => $assistantMessage,
-                'events' => collect([$received, $started, $completed])->concat($domainEvents)->push($messageCompleted),
+                'events' => collect([$received])->concat($preludeEvents)->push($started)->push($completed)->concat($domainEvents)->push($messageCompleted),
                 'usage' => $usageLog,
                 'blocker' => null,
             ];
@@ -657,92 +651,80 @@ class HermesToolRuntimeService implements HermesRuntimeService
         return $result;
     }
 
-    /**
-     * @return array{kind:string,content:string}|null
-     */
-    private function localGeneralAnswerContent(ConversationMessage $message): ?array
-    {
-        if ($this->messageIsCapabilityQuestion($message)) {
-            return [
-                'kind' => 'capability_question',
-                'content' => $this->capabilityQuestionFallbackContent($message),
-            ];
-        }
-
-        $text = str(preg_replace('/^\s*(?:kpi|req)-\d{3}:\s*/iu', '', str_replace('’', "'", (string) $message->content)) ?: (string) $message->content)
-            ->lower()
-            ->replaceMatches('/[^\pL\pN\s\'?.-]+/u', ' ')
-            ->squish()
-            ->toString();
-
-        if ($text === '') {
-            return null;
-        }
-
-        if (preg_match('/\bwhat can (you|bean) help\b|\bwhat can (you|bean) manage\b|\bhelp me manage\b/u', $text)) {
-            return [
-                'kind' => 'heybean_help',
-                'content' => 'I can help manage your calendar, tasks, reminders, notes, saved preferences, and quick day planning. Give me the change or question and I’ll handle it.',
-            ];
-        }
-
-        if (preg_match('/\bdifference between\b.*\b(tasks?|reminders?)\b|\b(tasks?|reminders?)\b.*\bdifference between\b/u', $text)) {
-            return [
-                'kind' => 'task_reminder_difference',
-                'content' => 'A task is something to finish. A reminder is a timed nudge so you do not miss something. If it needs both, I can create both.',
-            ];
-        }
-
-        if (preg_match('/\b(using|use) bean\b.*\b(day|today)\b|\bbean\b.*\b(day|today)\b/u', $text)) {
-            return [
-                'kind' => 'using_bean_for_day',
-                'content' => 'Use Bean for quick changes and day context: ask what is next, add or move events, set reminders, create tasks, or save notes without leaving chat.',
-            ];
-        }
-
-        return null;
-    }
-
-    private function completeLocalReadFastPath(
+    private function sendFastNoToolsResponse(
         ConversationSession $session,
         ConversationMessage $userMessage,
         ActivityEvent $received,
-        ActivityEvent $started,
-        array $modelRoute,
-        string $prompt,
-        float $runtimeStartedAt,
-        int $contextBuildMs,
-        string $toolMode,
-        string $assistantContent,
-        string $kind
+        ActivityEvent $routed,
+        array $intentRoute,
+        float $runtimeStartedAt
     ): array {
-        $responses = [[
-            'id' => 'local-'.$kind,
-            'model' => 'local-'.$kind,
-            'choices' => [[
-                'finish_reason' => 'stop',
-                'message' => ['role' => 'assistant', 'content' => $assistantContent],
-            ]],
-        ]];
+        $model = trim((string) config('services.hermes_runtime.fast_chat_model', ''));
+        $model = $model !== '' ? $model : (string) config('services.hermes_runtime.crud_planner_model', 'gpt-5-nano');
+        $modelRoute = [
+            'mode' => 'fast_no_tools',
+            'tier' => (string) ($intentRoute['lane'] ?? BeanIntentRouter::SIMPLE_CONVERSATION),
+            'model' => $model,
+            'billing_model' => $model,
+            'context_mode' => 'recent_conversation',
+            'reason' => (string) ($intentRoute['reason'] ?? 'Fast no-tools conversational response.'),
+        ];
+        $messages = $this->fastNoToolsMessages($session, $userMessage, $intentRoute);
+        $prompt = json_encode([
+            'route' => $modelRoute,
+            'messages' => $messages,
+        ], JSON_THROW_ON_ERROR);
+        $user = User::findOrFail($session->user_id);
+        $preflight = $this->usageService->preflightDirect(
+            $user,
+            $session->workspace_id,
+            $model,
+            $this->usageService->estimateTokens($prompt),
+            220,
+            null,
+            (string) ($intentRoute['lane'] ?? BeanIntentRouter::SIMPLE_CONVERSATION),
+            [
+                'session' => $session,
+                'message' => $userMessage,
+                'model_route' => $modelRoute,
+            ],
+        );
+        if (! $preflight['allowed']) {
+            $this->usageService->recordBlocked($session, $userMessage, $modelRoute, $preflight, (string) $preflight['reason']);
 
-        $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $modelRoute, $prompt, $responses, $assistantContent, $runtimeStartedAt, $contextBuildMs, $toolMode, $kind): array {
-            $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
+            return $this->toolRuntimeBlocked($session, $userMessage, collect([$received, $routed]), (string) $preflight['reason'], [
+                'failure_type' => 'usage_limit',
+                'model_route' => $modelRoute,
+            ]);
+        }
+
+        $modelCallStartedAt = microtime(true);
+        $started = $this->recordEvent($session, 'runtime.fast_response_started', [
+            'message_id' => $userMessage->id,
+            'lane' => $modelRoute['tier'],
+            'provider' => config('services.hermes_runtime.default_provider'),
+            'model' => $model,
+            'model_route' => $modelRoute,
+            'history_message_count' => max(0, count($messages) - 3),
+        ], 'hermes.fast_chat', 'started');
+        $session->update(['status' => 'running', 'last_activity_at' => now()]);
+
+        $response = $this->chatCompletion($modelRoute, $messages, false, 'none', (float) config('services.hermes_runtime.fast_chat_timeout', 2.5));
+        $assistantContent = $this->assistantSafeResponseContent(
+            $this->normalizedAssistantContent(data_get($response, 'choices.0.message.content', ''))
+        );
+        if ($assistantContent === '') {
+            $assistantContent = 'I’m here.';
+        }
+
+        $result = DB::transaction(function () use ($session, $userMessage, $received, $routed, $started, $modelRoute, $prompt, $response, $assistantContent, $runtimeStartedAt, $modelCallStartedAt): array {
+            $completed = $this->recordEvent($session, 'runtime.fast_response_completed', [
                 'message_id' => $userMessage->id,
-                'response_count' => 1,
-                'finish_reason' => 'stop',
-                'tool_mode' => $toolMode,
-                'read_fast_path' => $kind,
+                'finish_reason' => data_get($response, 'choices.0.finish_reason'),
                 'duration_ms' => $this->elapsedMs($runtimeStartedAt),
-                'context_build_ms' => $contextBuildMs,
-                'model_call_count' => 0,
-                'model_call_ms' => 0,
-                'model_call_durations_ms' => [],
-                'tool_execution_count' => 0,
-                'tool_execution_ms' => 0,
-                'tool_execution_durations_ms' => [],
-                'final_response_ms' => 0,
-                'action_count' => 0,
-            ], 'hermes.tools', 'succeeded');
+                'model_call_ms' => $this->elapsedMs($modelCallStartedAt),
+                'tool_count' => 0,
+            ], 'hermes.fast_chat', 'succeeded');
 
             $assistantMessage = ConversationMessage::create([
                 'user_id' => $session->user_id,
@@ -750,16 +732,17 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'role' => 'assistant',
                 'content' => $assistantContent,
                 'metadata' => [
-                    'runtime' => 'tools',
-                    'provider' => 'local',
-                    'model' => 'local-'.$kind,
+                    'runtime' => 'fast_no_tools',
+                    'provider' => config('services.hermes_runtime.default_provider'),
+                    'model' => $modelRoute['model'],
                     'model_route' => $modelRoute,
-                    'read_fast_path' => $kind,
                 ],
             ]);
 
             $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
                 'message_id' => $assistantMessage->id,
+                'lane' => $modelRoute['tier'],
+                'first_response_ms' => $this->elapsedMs($runtimeStartedAt),
             ]);
 
             $usageLog = $this->usageService->recordCompletion(
@@ -768,7 +751,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 $assistantMessage,
                 $modelRoute,
                 $prompt,
-                json_encode($responses, JSON_THROW_ON_ERROR),
+                json_encode([$response], JSON_THROW_ON_ERROR),
                 collect()
             );
 
@@ -779,7 +762,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'session' => $session->refresh(),
                 'user_message' => $userMessage,
                 'assistant_message' => $assistantMessage,
-                'events' => collect([$received, $started, $completed, $messageCompleted]),
+                'events' => collect([$received, $routed, $started, $completed, $messageCompleted]),
                 'usage' => $usageLog,
                 'blocker' => null,
             ];
@@ -791,6 +774,76 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
 
         return $result;
+    }
+
+    /**
+     * @return array<int, array{role:string, content:string}>
+     */
+    private function fastNoToolsMessages(ConversationSession $session, ConversationMessage $currentMessage, array $intentRoute): array
+    {
+        $profile = $this->profileForSession($session);
+        $style = trim((string) data_get($profile?->settings, 'prompt', ''));
+        $history = $session->messages()
+            ->where('id', '<', $currentMessage->id)
+            ->whereIn('role', ['user', 'assistant'])
+            ->latest('id')
+            ->limit(6)
+            ->get()
+            ->reverse()
+            ->map(fn (ConversationMessage $message): array => [
+                'role' => $message->role === 'assistant' ? 'assistant' : 'user',
+                'content' => mb_substr((string) $message->content, 0, 1200),
+            ])
+            ->values()
+            ->all();
+
+        return [
+            [
+                'role' => 'system',
+                'content' => trim(
+                    "You are Bean, the user's built-in HeyBean personal assistant. Reply naturally and briefly. ".
+                    "This lane has no tools and no live app or web access, so do not claim to have changed, checked, created, updated, deleted, synced, or looked up anything. ".
+                    "If the user asks for app work, external lookup, or deeper work, say you'll take care of it in one short sentence. ".
+                    ($style !== '' ? "Bean style: {$style}" : '')
+                ),
+            ],
+            [
+                'role' => 'system',
+                'content' => 'Intent lane: '.($intentRoute['lane'] ?? BeanIntentRouter::SIMPLE_CONVERSATION).'. Keep the response under 45 words unless the user explicitly asks for a longer explanation.',
+            ],
+            ...$history,
+            [
+                'role' => 'user',
+                'content' => (string) $currentMessage->content,
+            ],
+        ];
+    }
+
+    private function messageNeedsContextualAgentFollowUp(ConversationSession $session, ConversationMessage $message): bool
+    {
+        $text = trim(preg_replace('/\s+/u', ' ', str_replace('’', "'", mb_strtolower((string) $message->content))) ?: '');
+        if ($text === '' || mb_strlen($text) > 80) {
+            return false;
+        }
+
+        $contextual = preg_match('/^(?:yes|yeah|yep|yup|sure|ok|okay|please|yes please|sure please|do it|go ahead|that works|sounds good|correct|right)$/u', $text) === 1
+            || preg_match('/\b(?:it should be|that should be|not a|instead|actually)\b/u', $text) === 1;
+        if (! $contextual) {
+            return false;
+        }
+
+        $lastAssistant = $session->messages()
+            ->where('id', '<', $message->id)
+            ->where('role', 'assistant')
+            ->latest('id')
+            ->first();
+        if (! $lastAssistant instanceof ConversationMessage) {
+            return false;
+        }
+
+        $assistantText = mb_strtolower((string) $lastAssistant->content);
+
+        return preg_match('/\b(?:want me to|should i|do you want|would you like|calendar|event|task|reminder|note|created|updated|deleted|scheduled|found|checked)\b/u', $assistantText) === 1;
     }
 
     /**
@@ -898,7 +951,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         return $result;
     }
 
-    private function chatCompletion(array $modelRoute, array $messages, bool $allowTools, string $toolMode = 'full'): array
+    private function chatCompletion(array $modelRoute, array $messages, bool $allowTools, string $toolMode = 'full', ?float $timeout = null): array
     {
         $payload = [
             'model' => (string) $modelRoute['model'],
@@ -912,7 +965,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         $response = Http::withToken($this->providerApiKey())
             ->acceptJson()
             ->asJson()
-            ->timeout((float) config('services.hermes_runtime.timeout', 30))
+            ->timeout($timeout ?? (float) config('services.hermes_runtime.timeout', 30))
             ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/chat/completions', $payload);
 
         if (! $response->successful()) {

@@ -721,7 +721,7 @@ PROMPT;
             'model' => $model,
             'billing_model' => $model,
             'context_mode' => 'focused',
-            'reason' => 'Laravel does not route by keyword; the configured agent model receives native app tools.',
+            'reason' => 'Backend intent router selected the full agent tools lane.',
         ];
     }
 

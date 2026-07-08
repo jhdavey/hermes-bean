@@ -8,6 +8,7 @@ use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Services\AssistantRunService;
+use App\Services\BeanIntentRouter;
 use App\Services\HermesRuntimeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,6 +20,7 @@ class AssistantRunController extends Controller
     public function __construct(
         private readonly AssistantRunService $runs,
         private readonly HermesRuntimeService $runtime,
+        private readonly BeanIntentRouter $intentRouter,
     ) {}
 
     public function store(Request $request, string $session): JsonResponse
@@ -107,8 +109,40 @@ class AssistantRunController extends Controller
                     'session' => $ownedSession->refresh(),
                     'run' => $queued['run']->refresh(),
                     'user_message' => $queued['user_message'],
-                    'events' => [$queued['event']],
+                    'events' => $queued['events'] ?? [$queued['event']],
                 ]], 202);
+            }
+        }
+
+        $metadata = $data['metadata'] ?? [];
+        $intentRoute = $this->intentRouter->route($data['content']);
+        $metadata['bean_intent'] = $intentRoute;
+        $metadata['bean_intent_lane'] = $intentRoute['lane'];
+
+        if (! $this->intentRouter->shouldQueue($intentRoute)) {
+            $userMessage = $this->findOrCreateQueuedFallbackUserMessage(
+                $ownedSession->refresh(),
+                $data['content'],
+                $metadata
+            );
+
+            try {
+                $result = $this->runtime->sendExistingMessage($ownedSession->refresh(), $userMessage);
+
+                return response()->json(['data' => [
+                    ...$result,
+                    'run' => null,
+                    'intent' => $intentRoute,
+                ]], 201);
+            } catch (Throwable $exception) {
+                Log::warning('Fast routed Bean message failed; queueing background run.', [
+                    'session_id' => $ownedSession->id,
+                    'message_id' => $userMessage->id,
+                    'lane' => $intentRoute['lane'],
+                    'exception' => $exception->getMessage(),
+                ]);
+                $metadata['fast_route_fallback'] = true;
+                $metadata['fast_route_fallback_reason'] = $exception->getMessage();
             }
         }
 
@@ -116,7 +150,7 @@ class AssistantRunController extends Controller
             $queued = $this->runs->queueRun(
                 $ownedSession,
                 $data['content'],
-                $data['metadata'] ?? [],
+                $metadata,
                 $source
             );
         } catch (Throwable $exception) {
@@ -130,7 +164,7 @@ class AssistantRunController extends Controller
             $userMessage = $this->findOrCreateQueuedFallbackUserMessage(
                 $ownedSession->refresh(),
                 $data['content'],
-                $data['metadata'] ?? []
+                $metadata
             );
 
             if ($this->sourcePrefersAsyncPendingFallback($source)) {
@@ -155,7 +189,8 @@ class AssistantRunController extends Controller
             'session' => $ownedSession->refresh(),
             'run' => $queued['run']->refresh(),
             'user_message' => $queued['user_message'],
-            'events' => [$queued['event']],
+            'events' => $queued['events'] ?? [$queued['event']],
+            'intent' => $intentRoute,
         ]], 202);
     }
 
@@ -305,7 +340,9 @@ class AssistantRunController extends Controller
     {
         return in_array($source, [
             'flutter',
+            'flutter_routed_chat',
             'web_queued_chat',
+            'web_routed_chat',
             'production_smoke',
         ], true);
     }

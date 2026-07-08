@@ -256,7 +256,7 @@ class ConversationMessageController extends Controller
             'run' => $queued['run']->refresh(),
             'user_message' => $queued['user_message'],
             'assistant_message' => null,
-            'events' => [$queued['event']],
+            'events' => $queued['events'] ?? [$queued['event']],
             'blocker' => null,
         ];
     }

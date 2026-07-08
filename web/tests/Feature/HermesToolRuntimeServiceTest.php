@@ -29,6 +29,7 @@ class HermesToolRuntimeServiceTest extends TestCase
 
         config()->set('services.hermes_runtime.default_provider', 'openai');
         config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
+        config()->set('services.hermes_runtime.fast_chat_model', 'gpt-test-fast');
         config()->set('services.hermes_runtime.api_key', 'test-key');
         config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
         config()->set('services.hermes_runtime.crud_planner_enabled', false);
@@ -59,7 +60,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             ->json('data.id');
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'hello bean',
+            'content' => 'look up the current weather and add a task to review it tonight',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
             ->assertJsonPath('data.assistant_message.content', 'I can help with that.')
@@ -68,20 +69,26 @@ class HermesToolRuntimeServiceTest extends TestCase
 
         Http::assertSent(function ($request): bool {
             $payload = $request->data();
-            $systemPrompt = (string) data_get($payload, 'messages.0.content');
-            $context = json_decode(str_replace("Runtime context:\n", '', (string) data_get($payload, 'messages.1.content')), true, flags: JSON_THROW_ON_ERROR);
+            $messages = collect($payload['messages'] ?? []);
+            $systemPrompt = (string) data_get($messages->firstWhere('role', 'system'), 'content');
+            $contextMessage = $messages->first(fn (mixed $message): bool => is_array($message)
+                && ($message['role'] ?? null) === 'system'
+                && str_starts_with((string) ($message['content'] ?? ''), "Runtime context:\n"));
+            if (! is_array($contextMessage)) {
+                return false;
+            }
+            $context = json_decode(str_replace("Runtime context:\n", '', (string) $contextMessage['content']), true, flags: JSON_THROW_ON_ERROR);
             $toolNames = collect($payload['tools'] ?? [])->map(fn (array $tool): ?string => data_get($tool, 'function.name'));
 
             return $request->url() === 'https://api.openai.test/v1/chat/completions'
                 && $request->hasHeader('Authorization', 'Bearer test-key')
-                && data_get($payload, 'messages.0.role') === 'system'
                 && str_contains($systemPrompt, 'Do not run a first-login onboarding interview in normal chat')
                 && str_contains($systemPrompt, 'guided signup collects account and Bean preferences')
                 && str_contains($systemPrompt, 'If the user explicitly asks to change Bean preferences later')
                 && str_contains($systemPrompt, 'use get_day_context rather than request history')
-                && data_get($payload, 'messages.1.role') === 'system'
-                && data_get($payload, 'messages.2.role') === 'user'
-                && data_get($payload, 'messages.2.content') === 'hello bean'
+                && $messages->contains(fn (mixed $message): bool => is_array($message)
+                    && ($message['role'] ?? null) === 'user'
+                    && ($message['content'] ?? null) === 'look up the current weather and add a task to review it tonight')
                 && ! array_key_exists('dashboard_state', $context)
                 && isset($context['temporal_context'], $context['workspace'], $context['agent_profile'])
                 && $toolNames->contains('search_tasks')
@@ -123,7 +130,18 @@ class HermesToolRuntimeServiceTest extends TestCase
 
     public function test_capability_question_does_not_execute_write_tool_call(): void
     {
-        Http::fake();
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-capability-fast',
+                'model' => 'gpt-test-fast',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'Yes - I can create calendar events when you give me the details.',
+                    ],
+                ]],
+            ], 200);
 
         $token = $this->apiToken('tool-capability-question@example.com');
         $user = User::where('email', 'tool-capability-question@example.com')->firstOrFail();
@@ -139,19 +157,51 @@ class HermesToolRuntimeServiceTest extends TestCase
         ])->assertCreated()
             ->assertJsonPath('data.status', 'completed')
             ->assertJsonPath('data.assistant_message.content', 'Yes - I can create calendar events when you give me the details.')
-            ->assertJsonFragment(['read_fast_path' => 'capability_question']);
+            ->assertJsonFragment(['lane' => 'simple_question'])
+            ->assertJsonFragment(['event_type' => 'runtime.fast_response_completed']);
 
         $this->assertDatabaseMissing('calendar_events', [
             'user_id' => $user->id,
             'title' => 'New calendar event',
         ]);
 
-        Http::assertNothingSent();
+        Http::assertSent(function ($request): bool {
+            $payload = $request->data();
+
+            return $request->url() === 'https://api.openai.test/v1/chat/completions'
+                && data_get($payload, 'model') === 'gpt-test-fast'
+                && ! array_key_exists('tools', $payload)
+                && str_contains((string) data_get($payload, 'messages.0.content'), 'no tools');
+        });
     }
 
-    public function test_common_general_bean_questions_use_local_fast_path(): void
+    public function test_common_general_bean_questions_use_fast_no_tools_lane(): void
     {
-        Http::fake();
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-general-fast-1',
+                'model' => 'gpt-test-fast',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => ['role' => 'assistant', 'content' => 'I can help manage your day and answer quick questions.'],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-general-fast-2',
+                'model' => 'gpt-test-fast',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => ['role' => 'assistant', 'content' => 'A task is something to finish; a reminder is a timed nudge.'],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-general-fast-3',
+                'model' => 'gpt-test-fast',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => ['role' => 'assistant', 'content' => 'Use Bean for quick planning and simple day context.'],
+                ]],
+            ], 200);
 
         $token = $this->apiToken('tool-general-fast-path@example.com');
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
@@ -161,18 +211,15 @@ class HermesToolRuntimeServiceTest extends TestCase
         $expectations = [
             [
                 'content' => 'What can you help me manage in HeyBean?',
-                'path' => 'heybean_help',
-                'contains' => 'calendar, tasks, reminders, notes',
+                'contains' => 'help manage your day',
             ],
             [
                 'content' => 'What is the difference between a task and a reminder?',
-                'path' => 'task_reminder_difference',
-                'contains' => 'A task is something to finish.',
+                'contains' => 'A task is something to finish',
             ],
             [
                 'content' => 'How should I think about using Bean for my day?',
-                'path' => 'using_bean_for_day',
-                'contains' => 'Use Bean for quick changes and day context',
+                'contains' => 'Use Bean for quick planning',
             ],
         ];
 
@@ -182,7 +229,7 @@ class HermesToolRuntimeServiceTest extends TestCase
                 'metadata' => ['source' => 'web'],
             ])->assertCreated()
                 ->assertJsonPath('data.status', 'completed')
-                ->assertJsonFragment(['read_fast_path' => $expectation['path']]);
+                ->assertJsonFragment(['event_type' => 'runtime.fast_response_completed']);
 
             $this->assertStringContainsString(
                 $expectation['contains'],
@@ -190,7 +237,149 @@ class HermesToolRuntimeServiceTest extends TestCase
             );
         }
 
-        Http::assertNothingSent();
+        Http::assertSentCount(3);
+    }
+
+    public function test_post_action_conversational_acknowledgements_use_fast_no_tools_lane(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-ack-fast-1',
+                'model' => 'gpt-test-fast',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => ['role' => 'assistant', 'content' => 'Glad that helped.'],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-ack-fast-2',
+                'model' => 'gpt-test-fast',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => ['role' => 'assistant', 'content' => 'Happy to help.'],
+                ]],
+            ], 200)
+            ->push([
+                'id' => 'chatcmpl-ack-fast-3',
+                'model' => 'gpt-test-fast',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => ['role' => 'assistant', 'content' => 'You are welcome.'],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-conversation-ack@example.com');
+        $user = User::where('email', 'tool-conversation-ack@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'Write a three paragraph essay in a note.',
+        ]);
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'assistant',
+            'content' => 'Done - I created the note.',
+        ]);
+
+        $expectations = [
+            ['content' => 'That’s awesome, thanks', 'reply' => 'Glad that helped.'],
+            ['content' => 'That’s awesome, thanks for writing that note', 'reply' => 'Happy to help.'],
+            ['content' => 'thanks for writing that note', 'reply' => 'You are welcome.'],
+        ];
+
+        foreach ($expectations as $expectation) {
+            $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+                'content' => $expectation['content'],
+                'metadata' => ['source' => 'web'],
+            ])->assertCreated()
+                ->assertJsonPath('data.status', 'completed')
+                ->assertJsonPath('data.assistant_message.content', $expectation['reply'])
+                ->assertJsonFragment(['lane' => 'simple_conversation'])
+                ->assertJsonFragment(['event_type' => 'runtime.fast_response_completed']);
+        }
+
+        Http::assertSentCount(3);
+    }
+
+    public function test_conversational_acknowledgement_with_new_request_does_not_use_ack_fast_path(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-thanks-new-request',
+                'model' => 'gpt-test-tools',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'I can help with that note.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-conversation-ack-new-request@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'thanks, can you create another note',
+            'metadata' => ['source' => 'web'],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'I can help with that note.');
+
+        Http::assertSentCount(1);
+    }
+
+    public function test_routed_runs_complete_simple_turns_and_queue_app_work_by_lane(): void
+    {
+        Http::fakeSequence()
+            ->push([
+                'id' => 'chatcmpl-routed-simple',
+                'model' => 'gpt-test-fast',
+                'choices' => [[
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'That sounds good.',
+                    ],
+                ]],
+            ], 200);
+
+        $token = $this->apiToken('tool-routed-runs@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => 'sounds good',
+            'source' => 'web_routed_chat',
+            'metadata' => ['client_request_id' => 'simple-1'],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.run', null)
+            ->assertJsonPath('data.assistant_message.content', 'That sounds good.')
+            ->assertJsonPath('data.intent.lane', 'simple_conversation')
+            ->assertJsonFragment(['event_type' => 'runtime.fast_response_completed']);
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => 'create a note called Follow up with one sentence',
+            'source' => 'web_routed_chat',
+            'metadata' => ['client_request_id' => 'write-1'],
+        ])->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.intent.lane', 'needs_app_write')
+            ->assertJsonFragment(['event_type' => 'runtime.intent_routed'])
+            ->assertJsonFragment(['event_type' => 'assistant.work_item.planned'])
+            ->assertJsonFragment(['work_label' => 'Update notes']);
+
+        Http::assertSentCount(1);
     }
 
     public function test_stale_prior_completion_claim_cannot_skip_requested_app_write(): void

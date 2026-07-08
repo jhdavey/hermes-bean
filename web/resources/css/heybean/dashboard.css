@@ -786,12 +786,12 @@
 
 .hb-command-center-chat .hb-message {
     max-width: 100%;
-    padding: 9px 10px;
-    border-radius: 8px;
+    padding: 2px 1px;
+    border-radius: 0;
     font-size: 12px;
 }
 
-.hb-command-center-chat .hb-message-head {
+.hb-command-center-chat .hb-message-line {
     font-weight: 650;
 }
 

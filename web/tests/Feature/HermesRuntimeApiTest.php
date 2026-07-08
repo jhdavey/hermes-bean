@@ -65,8 +65,8 @@ class HermesRuntimeApiTest extends TestCase
             ->assertJsonPath('data.user_message.role', 'user')
             ->assertJsonPath('data.assistant_message.role', 'assistant')
             ->assertJsonPath('data.assistant_message.content', 'Planning complete.')
-            ->assertJsonFragment(['event_type' => 'runtime.tool_model_started'])
-            ->assertJsonFragment(['event_type' => 'runtime.tool_model_completed']);
+            ->assertJsonFragment(['event_type' => 'runtime.intent_routed'])
+            ->assertJsonFragment(['event_type' => 'runtime.fast_response_completed']);
 
         $events = $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/events")
             ->assertOk()
@@ -76,8 +76,9 @@ class HermesRuntimeApiTest extends TestCase
             'runtime.session_started',
             'runtime.session_resumed',
             'runtime.message_received',
-            'runtime.tool_model_started',
-            'runtime.tool_model_completed',
+            'runtime.intent_routed',
+            'runtime.fast_response_started',
+            'runtime.fast_response_completed',
             'runtime.message_completed',
         ], collect($events)->pluck('event_type')->all());
     }

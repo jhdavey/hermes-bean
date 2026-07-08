@@ -362,44 +362,66 @@
 }
 
 .hb-message {
-    width: min(560px, 100%);
+    width: 100%;
     max-width: 100%;
-    display: grid;
-    gap: 2px;
+    display: block;
     align-self: flex-start;
-    padding: 8px 11px;
-    border: 1px solid var(--hb-border);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--hb-surface2) 54%, transparent);
+    padding: 3px 2px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
     box-shadow: none;
 }
 
 .hb-message-user {
-    align-self: flex-end;
-    background: rgba(var(--hb-accent-rgb), .08);
+    align-self: flex-start;
+    background: transparent;
 }
 
 .hb-message-approval {
+    padding: 10px 12px;
+    border: 1px solid rgba(245, 158, 11, .38);
+    border-radius: 12px;
     border-color: rgba(245, 158, 11, .38);
     background: #fffbeb;
 }
 
-.hb-message-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 18px;
+.hb-message-line {
+    color: var(--hb-text);
+    font-size: 15px;
+    line-height: 1.32;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.hb-message-speaker {
+    font-weight: 700;
+}
+
+.hb-message-speaker-user {
     color: var(--hb-muted);
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.12;
+}
+
+.hb-message-speaker-bean {
+    color: var(--hb-accent-strong);
+}
+
+.hb-message-separator {
+    color: var(--hb-muted);
 }
 
 .hb-message-actions-inline {
-    margin-left: auto;
+    margin-left: 6px;
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    opacity: 0;
+    vertical-align: middle;
+    transition: opacity .16s ease;
+}
+
+.hb-message:hover .hb-message-actions-inline,
+.hb-message:focus-within .hb-message-actions-inline {
     opacity: .78;
 }
 
@@ -438,11 +460,10 @@
 }
 
 .hb-message-body {
+    display: inline;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     color: var(--hb-text);
-    font-size: 15px;
-    line-height: 1.28;
 }
 
 .hb-message-actions {
@@ -618,14 +639,14 @@
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-message {
-    border-color: color-mix(in srgb, var(--hb-border) 72%, transparent);
-    background: color-mix(in srgb, var(--hb-surface2) 54%, transparent);
+    border-color: transparent;
+    background: transparent;
     box-shadow: none;
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-message-user {
-    border-color: color-mix(in srgb, var(--hb-border) 76%, rgba(var(--hb-accent-rgb), .18));
-    background: rgba(var(--hb-accent-rgb), .075);
+    border-color: transparent;
+    background: transparent;
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-dock {
@@ -652,24 +673,17 @@
 }
 
 .hb-command-center-chat .hb-message {
-    width: min(560px, 100%);
+    width: 100%;
     max-width: 100%;
-    padding: 8px 11px;
-    border-radius: 12px;
+    padding: 2px 1px;
+    border-radius: 0;
     font-size: inherit;
 }
 
-.hb-command-center-chat .hb-message-head {
-    color: var(--hb-muted);
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.12;
-}
-
-.hb-command-center-chat .hb-message-body {
+.hb-command-center-chat .hb-message-line {
     color: var(--hb-text);
     font-size: 15px;
-    line-height: 1.28;
+    line-height: 1.3;
 }
 
 .hb-command-center-chat .hb-chat-dock {

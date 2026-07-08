@@ -629,6 +629,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     String label, {
     String status = 'running',
     bool resolvedByEvent = false,
+    int? order,
   }) {
     if (id.isEmpty || label.trim().isEmpty) return;
     final cleanLabel = label.trim();
@@ -647,6 +648,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       label: cleanLabel,
       status: cleanStatus,
       resolvedByEvent: resolvedByEvent,
+      order: order,
     );
     if (existingIndex >= 0) {
       _beanWorkItems = [
@@ -660,10 +662,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                     label: next.label,
                     status: next.status,
                     resolvedByEvent: resolvedByEvent,
+                    order: next.order,
                   )
           else
             _beanWorkItems[i],
       ];
+      _sortBeanWorkItemsByServerPlan();
       _scheduleBeanWorkStatusClearIfDone();
       return;
     }
@@ -677,10 +681,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
               label: cleanLabel,
               status: cleanStatus,
               resolvedByEvent: true,
+              order: order,
             )
           else
             _beanWorkItems[i],
       ];
+      _sortBeanWorkItemsByServerPlan();
       _scheduleBeanWorkStatusClearIfDone();
       return;
     }
@@ -689,7 +695,31 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (_beanWorkItems.length > 8) {
       _beanWorkItems = _beanWorkItems.sublist(_beanWorkItems.length - 8);
     }
+    _sortBeanWorkItemsByServerPlan();
     _scheduleBeanWorkStatusClearIfDone();
+  }
+
+  void _sortBeanWorkItemsByServerPlan() {
+    if (!_beanWorkItems.any(
+      (item) => item.resolvedByEvent && item.order != null,
+    )) {
+      return;
+    }
+    final indexed = _beanWorkItems.indexed.toList();
+    indexed.sort((left, right) {
+      final leftItem = left.$2;
+      final rightItem = right.$2;
+      final leftOrder = leftItem.resolvedByEvent ? leftItem.order : null;
+      final rightOrder = rightItem.resolvedByEvent ? rightItem.order : null;
+      if (leftOrder != null && rightOrder != null) {
+        final compare = leftOrder.compareTo(rightOrder);
+        return compare == 0 ? left.$1.compareTo(right.$1) : compare;
+      }
+      if (leftOrder != null) return -1;
+      if (rightOrder != null) return 1;
+      return left.$1.compareTo(right.$1);
+    });
+    _beanWorkItems = [for (final entry in indexed) entry.$2];
   }
 
   void _completeActiveBeanWorkItems([String status = 'completed']) {
@@ -924,376 +954,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkAcceptsOrphanPlanEvents = true;
   }
 
-  void _seedBeanWorkItemsForRequest(String content) {
-    final labels = _beanInitialWorkLabelsForRequest(content);
-    _beanWorkItems = [
-      for (var index = 0; index < labels.length && index < 6; index++)
-        _BeanWorkItem(
-          id: 'request-$index',
-          label: labels[index],
-          status: 'running',
-        ),
+  void _ensurePendingBeanWorkItem() {
+    if (_beanWorkItems.any((item) => !item.done)) return;
+    _beanWorkItems = const [
+      _BeanWorkItem(id: 'request-pending', label: 'Working on request'),
     ];
-  }
-
-  List<String> _beanInitialWorkLabelsForRequest(String content) {
-    final labels = _beanWorkLabelsForRequest(content);
-    if (labels.isNotEmpty) return labels;
-    final backgroundLabel = _beanBackgroundWorkLabelForRequest(content);
-    return backgroundLabel == null ? const [] : [backgroundLabel];
-  }
-
-  bool _beanRequestIsCapabilityQuestion(String content) =>
-      _beanCommandIsCapabilityQuestion(_normalizedBeanCommand(content));
-
-  bool _beanCommandIsCapabilityQuestion(String command) {
-    if (command.isEmpty) return false;
-    final asksCapability = RegExp(
-      r"^(?:can|could|would)\s+you\s+(?:really\s+|actually\s+)?(?:add|create|make|put|schedule|write|save|delete|remove|cancel|update|change|move|reschedule|complete|finish|mark|remind|remember|plan|organize|prioritize)\b|^(?:are you able to|do you know how to|is it possible (?:for you )?to|can bean|could bean|does bean know how to|does bean support)\s+(?:add|create|make|put|schedule|write|save|delete|remove|cancel|update|change|move|reschedule|complete|finish|mark|remind|remember|plan|organize|prioritize)\b",
-    ).hasMatch(command);
-    if (!asksCapability) return false;
-    return !_beanCommandLooksConcreteAction(command);
-  }
-
-  bool _beanCommandLooksConcreteAction(String command) {
-    if (RegExp(
-      r'\b(?:called|named|titled|labelled|labeled|that says|saying|with title|with the title)\b',
-    ).hasMatch(command)) {
-      return true;
-    }
-    if (RegExp(
-      r'\b(?:today|tonight|tomorrow|yesterday|this morning|this afternoon|this evening|next week|next month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
-    ).hasMatch(command)) {
-      return true;
-    }
-    if (RegExp(
-      r'\b(?:at|by|before|after|from|until)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b',
-    ).hasMatch(command)) {
-      return true;
-    }
-    if (RegExp(
-      r'\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b|\b\d{4}-\d{2}-\d{2}\b',
-    ).hasMatch(command)) {
-      return true;
-    }
-    if (RegExp(
-          r'\b(?:for|about|to)\s+(?:me|my|the|a|an)\s+\w+',
-        ).hasMatch(command) &&
-        !RegExp(
-          r'\b(?:something|anything|things|stuff|items)\b',
-        ).hasMatch(command)) {
-      return true;
-    }
-    return false;
-  }
-
-  bool _beanRequestShouldUseQueuedRuntime(String content) {
-    final command = _normalizedBeanCommand(content);
-    if (command.isEmpty || _beanCommandIsCapabilityQuestion(command)) {
-      return false;
-    }
-    return _beanCommandRequiresBackgroundWork(command) ||
-        _beanCommandNeedsAgentWork(command);
-  }
-
-  bool _beanCommandRequiresBackgroundWork(String command) => RegExp(
-    r'\b(weather|forecast|traffic|news|headline|flight|hotel|price|prices|stock|market|sports|score|calendar|agenda|schedule|event|meeting|appointment|task|tasks|todo|to do|reminder|note|notes|approval|workspace|plan|organize|prioritize|available|availability)\b',
-  ).hasMatch(command);
-
-  bool _beanCommandNeedsAgentWork(String command) => RegExp(
-    r'\b(add|create|make|set|delete|remove|update|change|move|reschedule|complete|mark|save|remember|forget|schedule|book|reserve|find|check|look up)\b',
-  ).hasMatch(command);
-
-  String? _beanAcknowledgementForRequest(String content) {
-    final command = _normalizedBeanCommand(content);
-    if (command.isEmpty || _beanCommandIsCapabilityQuestion(command)) {
-      return null;
-    }
-    final multiStep =
-        command.split(RegExp(r'\b(?:and then|then|also|and)\b|[,;]')).length >
-            1 ||
-        RegExp(r'\b(and then|also|as well)\b').hasMatch(command);
-    final action =
-        RegExp(r'\b(delete|remove|cancel|forget)\b').hasMatch(command)
-        ? 'delete'
-        : RegExp(
-            r'\b(update|change|move|reschedule|complete|mark)\b',
-          ).hasMatch(command)
-        ? 'update'
-        : RegExp(
-            r'\b(add|create|make|set|schedule|book|reserve|save|remember)\b',
-          ).hasMatch(command)
-        ? 'create'
-        : '';
-    if (RegExp(r'\b(weather|forecast)\b').hasMatch(command)) {
-      return 'Let me check the forecast.';
-    }
-    if (RegExp(r'\b(traffic|drive|commute)\b').hasMatch(command)) {
-      return 'Let me check the route.';
-    }
-    if (RegExp(r'\b(news|headline|headlines)\b').hasMatch(command)) {
-      return 'Let me look for the latest.';
-    }
-    if (RegExp(
-      r'\b(flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|available|availability|cheapest|price|prices)\b',
-    ).hasMatch(command)) {
-      return 'Let me check availability.';
-    }
-    if (RegExp(r'\b(stock|stocks|market|markets)\b').hasMatch(command)) {
-      return 'Let me check the market.';
-    }
-    if (RegExp(r'\b(sports|score|scores|game|games)\b').hasMatch(command)) {
-      return 'Let me check the score.';
-    }
-    if (RegExp(r'\b(plan|organize|prioritize)\b').hasMatch(command)) {
-      return multiStep ? 'Let me map that out.' : 'I’ll think that through.';
-    }
-    if (RegExp(
-          r'\b(calendar|calendars|agenda|schedule|schedules|event|events|meeting|meetings|appointment|appointments)\b',
-        ).hasMatch(command) &&
-        !RegExp(
-          r'\b(reminder|reminders|remind|task|tasks|todo|to do|note|notes|folder|folders|memory|remember|forget)\b',
-        ).hasMatch(command)) {
-      if (action == 'delete') return 'I’ll take that off your calendar.';
-      if (action == 'update') return 'I’ll adjust that on your calendar.';
-      if (action == 'create') {
-        return multiStep
-            ? 'I’ll handle the calendar pieces.'
-            : 'I’ll put that on your calendar.';
-      }
-      return 'Let me check your calendar.';
-    }
-    if (RegExp(r'\b(reminder|reminders|remind)\b').hasMatch(command)) {
-      if (action == 'delete') return 'I’ll remove that reminder.';
-      if (action == 'update') return 'I’ll update that reminder.';
-      if (action == 'create') return 'I’ll set that reminder.';
-      return 'Let me check your reminders.';
-    }
-    if (RegExp(r'\b(task|tasks|todo|to do)\b').hasMatch(command)) {
-      if (action == 'delete') return 'I’ll remove that task.';
-      if (action == 'update') return 'I’ll update that task.';
-      if (action == 'create') return 'I’ll add that to your tasks.';
-      return 'Let me check your tasks.';
-    }
-    if (RegExp(r'\b(note|notes|folder|folders)\b').hasMatch(command)) {
-      if (action == 'delete') return 'I’ll remove that note.';
-      if (action == 'update') return 'I’ll update that note.';
-      if (action == 'create') return 'I’ll create that note.';
-      return 'Let me check your notes.';
-    }
-    if (RegExp(r'\b(memory|remember|forget)\b').hasMatch(command)) {
-      if (action == 'delete') return 'I’ll forget that.';
-      if (action == 'create') return 'I’ll remember that.';
-      return 'Let me check what I have saved.';
-    }
-    if (RegExp(r'\b(look up|check|find)\b').hasMatch(command)) {
-      return 'Let me check on that.';
-    }
-    if (multiStep) return 'I’ll handle those one at a time.';
-    return 'I’ll take care of that.';
-  }
-
-  String? _beanBackgroundWorkLabelForRequest(String content) {
-    final command = _normalizedBeanCommand(content);
-    if (command.isEmpty || _beanCommandIsCapabilityQuestion(command)) {
-      return null;
-    }
-    final subject = _beanBackgroundWorkSubject(command);
-    String withSubject(String base) =>
-        subject == null ? base : '$base: $subject';
-    if (RegExp(r'\b(weather|forecast)\b').hasMatch(command)) {
-      return withSubject('Checking weather');
-    }
-    if (RegExp(r'\b(traffic|drive|commute)\b').hasMatch(command)) {
-      return withSubject('Checking traffic');
-    }
-    if (RegExp(r'\b(news|headline|headlines)\b').hasMatch(command)) {
-      return withSubject('Checking news');
-    }
-    if (RegExp(
-      r'\b(flight|flights|airfare|airfares|ticket|tickets|hotel|hotels|rental car|rentals|reservation|reservations|booking|bookings|available|availability|cheapest|price|prices)\b',
-    ).hasMatch(command)) {
-      return withSubject('Checking travel');
-    }
-    if (RegExp(r'\b(stock|stocks|market|markets)\b').hasMatch(command)) {
-      return withSubject('Checking markets');
-    }
-    if (RegExp(r'\b(sports|score|scores|game|games)\b').hasMatch(command)) {
-      return withSubject('Checking scores');
-    }
-    if (RegExp(
-      r'\b(calendar|calendars|agenda|schedule|schedules|event|events|meeting|meetings|appointment|appointments)\b',
-    ).hasMatch(command)) {
-      return withSubject('Checking calendar');
-    }
-    if (RegExp(r'\b(task|tasks|todo|to do)\b').hasMatch(command)) {
-      return withSubject('Checking tasks');
-    }
-    if (RegExp(r'\b(reminder|reminders)\b').hasMatch(command)) {
-      return withSubject('Checking reminders');
-    }
-    if (RegExp(r'\b(note|notes)\b').hasMatch(command)) {
-      return withSubject('Checking notes');
-    }
-    if (RegExp(r'\b(approval|approvals)\b').hasMatch(command)) {
-      return withSubject('Checking approvals');
-    }
-    if (RegExp(r'\b(workspace|workspaces)\b').hasMatch(command)) {
-      return withSubject('Checking workspace');
-    }
-    if (RegExp(r'\b(plan|organize|prioritize)\b').hasMatch(command)) {
-      return withSubject('Planning request');
-    }
-    if (_beanCommandRequiresBackgroundWork(command) ||
-        _beanCommandNeedsAgentWork(command)) {
-      return withSubject('Checking request');
-    }
-    return null;
-  }
-
-  String? _beanBackgroundWorkSubject(String command) {
-    var text = command
-        .replaceAll(
-          RegExp(
-            r"\b(can you|could you|would you|please|tell me|show me|give me|get me|find me|check|look up|pull up|what is|what's|whats|what are|what's on|whats on|how is|how's|hows|do i have|anything on|any updates on)\b",
-          ),
-          ' ',
-        )
-        .replaceAll(
-          RegExp(
-            r'\b(the|my|a|an|latest|current|currently|right now|now|today|tonight)\b',
-          ),
-          ' ',
-        )
-        .replaceAll(
-          RegExp(
-            r'\b(weather|forecast|traffic|news|headlines?|stocks?|markets?|sports|scores?|flights?|airfares?|tickets?|hotels?|rental cars?|rentals?|reservations?|bookings?|calendar|calendars|agenda|schedule|schedules|events?|meetings?|appointments?|tasks?|todo|to do|reminders?|approvals?|workspaces?)\b',
-          ),
-          ' ',
-        )
-        .replaceAll(RegExp(r'\b(for|about|in|on|at|near|nearby)\b'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    if (text.isEmpty ||
-        text.length < 3 ||
-        RegExp(
-          r'^(me|it|that|this|there|anything|something)$',
-        ).hasMatch(text)) {
-      return null;
-    }
-    if (text.length > 42) text = '${text.substring(0, 42).trim()}...';
-    return text[0].toUpperCase() + text.substring(1);
-  }
-
-  List<String> _beanWorkLabelsForRequest(String content) {
-    final command = _normalizedBeanCommand(content);
-    if (command.isEmpty || _beanCommandIsCapabilityQuestion(command)) {
-      return const [];
-    }
-    final inheritedTarget = _beanWorkTargetForClause(command);
-    final labels = command
-        .split(RegExp(r'\b(?:and then|then|also|and)\b|[,;]'))
-        .map((clause) => _beanWorkLabelForClause(clause, inheritedTarget))
-        .whereType<String>()
-        .where((label) => !_isGenericBeanWorkLabel(label))
-        .toSet()
-        .toList();
-    if (labels.isNotEmpty) return labels.take(6).toList();
-    final fallback = _beanWorkLabelForClause(command, inheritedTarget);
-    return fallback == null || _isGenericBeanWorkLabel(fallback)
-        ? const []
-        : [fallback];
-  }
-
-  String _beanWorkTargetForClause(String clause) {
-    if (RegExp(r'\b(reminder|reminders|remind)\b').hasMatch(clause)) {
-      return 'reminder';
-    }
-    if (RegExp(r'\b(task|tasks|todo|to do)\b').hasMatch(clause)) {
-      return 'task';
-    }
-    if (RegExp(r'\b(note|notes|folder|folders)\b').hasMatch(clause)) {
-      return 'note';
-    }
-    if (RegExp(r'\b(memory|remember|forget)\b').hasMatch(clause)) {
-      return 'memory';
-    }
-    if (RegExp(
-      r'\b(calendar|event|events|meeting|appointment|schedule)\b',
-    ).hasMatch(clause)) {
-      return 'event';
-    }
-    return '';
-  }
-
-  String? _beanWorkLabelForClause(String rawClause, String inheritedTarget) {
-    final clause = rawClause.trim();
-    if (clause.isEmpty) return null;
-    final action = RegExp(r'\b(delete|remove|cancel|forget)\b').hasMatch(clause)
-        ? 'Delete'
-        : RegExp(
-            r'\b(update|change|move|reschedule|complete|mark)\b',
-          ).hasMatch(clause)
-        ? 'Update'
-        : RegExp(
-            r'\b(add|create|make|set|schedule|book|reserve|save|remember)\b',
-          ).hasMatch(clause)
-        ? 'Create'
-        : '';
-    if (action.isEmpty) return null;
-    final target = _beanWorkTargetForClause(clause).isNotEmpty
-        ? _beanWorkTargetForClause(clause)
-        : inheritedTarget;
-    if (target.isEmpty) return null;
-    final targetLabel = switch (target) {
-      'event' => 'calendar event',
-      'memory' => 'knowledge',
-      _ => target,
-    };
-    final subject = _beanWorkSubjectForClause(clause, target);
-    return subject == null
-        ? '$action $targetLabel'
-        : '$action $targetLabel: $subject';
-  }
-
-  String? _beanWorkSubjectForClause(String clause, String target) {
-    var subject = clause
-        .replaceAll(
-          RegExp(
-            r'\b(can you|could you|would you|please|also|then|and|to my|on my|my|the|a|an)\b',
-          ),
-          ' ',
-        )
-        .replaceAll(
-          RegExp(
-            r'\b(add|create|make|set|schedule|book|reserve|save|remember|delete|remove|cancel|forget|update|change|move|reschedule|complete|mark)\b',
-          ),
-          ' ',
-        )
-        .replaceAll(
-          RegExp(
-            r'\b(calendar|event|events|meeting|appointment|schedule|reminder|reminders|remind|task|tasks|todo|to do|note|notes|folder|folders|memory|knowledge)\b',
-          ),
-          ' ',
-        )
-        .replaceAll(
-          RegExp(
-            r'\b(for|about|called|named|titled|with title|with the title)\b',
-          ),
-          ' ',
-        )
-        .replaceAll(
-          RegExp(
-            r'\b(today|tonight|tomorrow|next week|next month|at|from|until|by|before|after)\b.*$',
-          ),
-          ' ',
-        )
-        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    if (subject.isEmpty || subject.length < 3) return null;
-    if (subject.length > 48) subject = '${subject.substring(0, 48).trim()}...';
-    return subject[0].toUpperCase() + subject.substring(1);
   }
 
   void _applyBeanWorkEvents(List<HermesActivityEvent> events) {
@@ -1332,6 +997,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         item.label,
         status: item.status,
         resolvedByEvent: true,
+        order: item.order,
       );
     }
     _finalizeBeanWorkFromCompletedMutationEvents(appliedEvents);
@@ -1446,6 +1112,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         label: label,
         status: 'running',
         resolvedByEvent: true,
+        order: _intFromPayload(payload, 'work_order'),
       );
     }
     if (type.contains('.duplicate_skipped') && workItemId == null) return null;
@@ -1456,6 +1123,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       label: workLabel ?? label,
       status: _beanWorkEventStatus(status),
       resolvedByEvent: workItemId != null,
+      order: _intFromPayload(payload, 'work_order'),
     );
   }
 
@@ -2837,15 +2505,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     var session = _session;
     if (trimmed.isEmpty || session == null) return null;
     final runToken = ++_chatRunToken;
-    final capabilityQuestion = _beanRequestIsCapabilityQuestion(trimmed);
-    final needsQueuedRuntime = _beanRequestShouldUseQueuedRuntime(trimmed);
-    final localAcknowledgement = needsQueuedRuntime
-        ? _beanAcknowledgementForRequest(trimmed)
-        : null;
     final localUserMessageId = _nextLocalMessageId();
-    final localAckMessageId = localAcknowledgement == null
-        ? null
-        : _nextLocalMessageId();
     final editingServerMessageId =
         editingMessageId != null && editingMessageId > 0
         ? editingMessageId
@@ -2858,15 +2518,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() {
       _busy = true;
       _editingChatMessageId = null;
-      _chatRunState = capabilityQuestion || !needsQueuedRuntime
-          ? 'Thinking…'
-          : 'Bean is working…';
-      if (capabilityQuestion) {
-        _prepareBeanWorkForFreshRequest();
-      } else {
-        _beginBeanWorkEventContext(freshRequest: true);
-        if (needsQueuedRuntime) _seedBeanWorkItemsForRequest(trimmed);
-      }
+      _chatRunState = 'Thinking…';
+      _beginBeanWorkEventContext(freshRequest: true);
       if (editingMessageId != null) {
         final editIndex = _messages.indexWhere(
           (message) => message.id == editingMessageId && message.role == 'user',
@@ -2878,39 +2531,20 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _messages.add(
         HermesMessage(id: localUserMessageId, role: 'user', content: trimmed),
       );
-      if (localAcknowledgement != null && localAckMessageId != null) {
-        _messages.add(
-          HermesMessage(
-            id: localAckMessageId,
-            role: 'assistant',
-            content: localAcknowledgement,
-            metadata: {'local_ack': true},
-          ),
-        );
-      }
     });
     try {
       session = _session ?? session;
       final needsBeanIntroduction = _needsBeanIntroduction;
-      final useDirectConversationReply =
-          !needsBeanIntroduction &&
-          (capabilityQuestion ||
-              _shouldUseDirectConversationReply(trimmed) ||
-              !needsQueuedRuntime);
       chatPhase = needsBeanIntroduction
           ? 'sending Bean introduction message'
           : editingServerMessageId != null
           ? 'branching Bean chat message'
-          : useDirectConversationReply
-          ? 'sending Bean conversation reply'
-          : 'queueing Bean chat message';
+          : 'routing Bean chat message';
       clientRequestId =
           'flutter-chat-${DateTime.now().microsecondsSinceEpoch}-$localUserMessageId';
       final messageMetadata = _flutterChatMetadata(
         additional: {
-          'source': useDirectConversationReply
-              ? 'flutter_direct_chat'
-              : 'flutter',
+          'source': 'flutter_routed_chat',
           'client_request_id': clientRequestId,
           if (editingServerMessageId != null)
             'edited_message_id': editingServerMessageId,
@@ -2937,23 +2571,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             metadata: messageMetadata,
           );
         }
-      } else if (useDirectConversationReply) {
-        try {
-          result = await widget.apiClient.sendMessage(
-            sessionId: session.id,
-            content: trimmed,
-            metadata: messageMetadata,
-          );
-        } catch (error) {
-          if (!_shouldRetryQueuedBeanRequest(error)) rethrow;
-          chatPhase =
-              'queueing Bean conversation reply after transient failure';
-          result = await _queueBeanMessageWithRetry(
-            sessionId: session.id,
-            content: trimmed,
-            metadata: messageMetadata,
-          );
-        }
       } else {
         result = await _queueBeanMessageWithRetry(
           sessionId: session.id,
@@ -2973,6 +2590,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _events = _mergeEvents(result.events, _events);
           _applyBeanWorkEvents(result.events);
           _applyBeanDashboardMutationEvents(result.events);
+          _ensurePendingBeanWorkItem();
         });
         final run = result.run;
         if (run != null) {
@@ -3013,6 +2631,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           } else if (suppressedAssistantMessage) {
             _chatRunState = 'Working in background';
             _beginBeanWorkEventContext();
+            _ensurePendingBeanWorkItem();
           } else {
             final displayMessage = _displayableChatMessage(
               result.assistantMessage!,
@@ -3327,6 +2946,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _applyBeanWorkEvents(result.events);
         _applyBeanDashboardMutationEvents(result.events);
         _beginBeanWorkEventContext();
+        _ensurePendingBeanWorkItem();
         final run = result.run;
         if (run != null) {
           _activeAssistantRunId = run.id;
@@ -3364,6 +2984,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         } else {
           _chatRunState = 'Working in background';
           _beginBeanWorkEventContext();
+          _ensurePendingBeanWorkItem();
         }
       }
       _chatRunState = suppressedAssistantMessage
@@ -3377,6 +2998,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _completeActiveBeanWorkItems();
       } else if (suppressedAssistantMessage) {
         _beginBeanWorkEventContext();
+        _ensurePendingBeanWorkItem();
       }
       _activeAssistantRunId = null;
       _error = null;
@@ -3504,6 +3126,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         setState(() {
           _chatRunState = 'Working in background';
           _beginBeanWorkEventContext();
+          _ensurePendingBeanWorkItem();
           _error = null;
         });
       }
@@ -3548,37 +3171,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _shouldRetryQueuedBeanRequest(Object error) {
     return beanShouldRecoverQueuedRequest(error);
   }
-
-  bool _shouldUseDirectConversationReply(String content) {
-    if (!_isConversationDecline(content)) return false;
-    final lastAssistant = _messages.reversed.where(
-      (message) => message.role == 'assistant',
-    );
-    if (lastAssistant.isEmpty) return false;
-    final normalized = _normalizeChatRoutingText(
-      lastAssistant.first.content ?? '',
-    );
-    return normalized.contains('want me to') ||
-        normalized.contains('would you like') ||
-        normalized.contains('do you want') ||
-        normalized.contains('should i') ||
-        normalized.contains('want help') ||
-        normalized.contains('help set up');
-  }
-
-  bool _isConversationDecline(String content) {
-    final normalized = _normalizeChatRoutingText(content);
-    return RegExp(
-      r"^(no|nope|nah|no thanks|no thank you|not now|not right now|skip|nothing else|all set|i'm good|im good|i am good|that's all|that is all)$",
-    ).hasMatch(normalized);
-  }
-
-  String _normalizeChatRoutingText(String value) => value
-      .toLowerCase()
-      .replaceAll('’', "'")
-      .replaceAll(RegExp(r"[^a-z0-9\s']"), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
 
   Future<void> _reportChatFailure({
     required Object error,

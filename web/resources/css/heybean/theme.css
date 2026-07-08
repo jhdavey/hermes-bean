@@ -199,7 +199,6 @@
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-critical-popover,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-modal,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-dock,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-message,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-log-modal {
     border-color: var(--hb-border);
     background: linear-gradient(180deg, rgba(22, 29, 37, .96), rgba(13, 18, 24, .96));
@@ -471,10 +470,6 @@
 .heybean-app-body[data-hb-theme-resolved="dark"] input[type="time"]::-webkit-calendar-picker-indicator {
     filter: invert(.82);
     opacity: .74;
-}
-
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-message-actions-inline {
-    opacity: 1;
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-message-icon-action {

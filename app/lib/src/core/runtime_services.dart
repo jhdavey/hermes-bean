@@ -172,12 +172,14 @@ class _BeanWorkItem {
     required this.label,
     this.status = 'running',
     this.resolvedByEvent = false,
+    this.order,
   });
 
   final String id;
   final String label;
   final String status;
   final bool resolvedByEvent;
+  final int? order;
 
   bool get done => const {
     'completed',
@@ -192,11 +194,13 @@ class _BeanWorkItem {
     String? label,
     String? status,
     bool? resolvedByEvent,
+    int? order,
   }) => _BeanWorkItem(
     id: id,
     label: label ?? this.label,
     status: status ?? this.status,
     resolvedByEvent: resolvedByEvent ?? this.resolvedByEvent,
+    order: order ?? this.order,
   );
 }
 
@@ -486,6 +490,7 @@ Map<String, Object?> _flutterChatMetadata({
 String _normalizedBeanCommand(String input) {
   final normalized = input
       .toLowerCase()
+      .replaceAll('’', "'")
       .replaceAll(RegExp(r"[^a-z0-9\s']"), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();

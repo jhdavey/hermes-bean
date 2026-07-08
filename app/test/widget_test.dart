@@ -1105,7 +1105,7 @@ void main() {
 
       expect(api.sentMessages, contains('Schedule dentist tomorrow at 3pm'));
       final scheduleMetadata = api.sentMessageMetadata.last;
-      expect(scheduleMetadata?['source'], 'flutter');
+      expect(scheduleMetadata?['source'], 'flutter_routed_chat');
       final clientContext = scheduleMetadata?['client_context'];
       expect(clientContext, isA<Map<String, Object?>>());
       final typedClientContext = clientContext! as Map<String, Object?>;
@@ -2922,7 +2922,7 @@ void main() {
     expect(find.text('Plan tomorrow'), findsOneWidget);
   });
 
-  testWidgets('declining optional Bean setup uses a direct reply', (
+  testWidgets('declining optional Bean setup uses routed simple chat', (
     WidgetTester tester,
   ) async {
     final api = _OptionalSetupDeclineFakeHermesApiClient();
@@ -2945,13 +2945,42 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.sentMessages, ['no thanks']);
-    expect(api.sendMessageCalls, 1);
-    expect(api.queueMessageCalls, 0);
+    expect(api.sendMessageCalls, 0);
+    expect(api.queueMessageCalls, 1);
     expect(find.text('I’m working on that in the background.'), findsNothing);
     expect(find.text('No problem — we can skip that.'), findsOneWidget);
   });
 
-  testWidgets('queued Bean chat shows immediate work acknowledgement', (
+  testWidgets(
+    'post-action thanks uses routed simple chat without visible work',
+    (WidgetTester tester) async {
+      final api = _PostActionThanksFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'That’s awesome, thanks for writing that note',
+      );
+      await tester.tap(find.byKey(const Key('primary-chat-action')));
+      await tester.pumpAndSettle();
+
+      expect(api.sentMessages, [
+        'That’s awesome, thanks for writing that note',
+      ]);
+      expect(api.sendMessageCalls, 0);
+      expect(api.queueMessageCalls, 1);
+      expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+      expect(find.byKey(const Key('heybean-working-ring')), findsNothing);
+      expect(find.text('I’m working on that in the background.'), findsNothing);
+    },
+  );
+
+  testWidgets('queued Bean chat waits for backend-routed acknowledgement', (
     WidgetTester tester,
   ) async {
     final api = _DelayedQueueFakeHermesApiClient();
@@ -2971,10 +3000,10 @@ void main() {
 
     expect(api.queueMessageCalls, 1);
     expect(find.text('working...'), findsNothing);
-    expect(find.text('Let me check the forecast.'), findsOneWidget);
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(find.text('Let me check the forecast.'), findsNothing);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
     expect(find.byKey(const Key('heybean-working-ring')), findsOneWidget);
-    expect(find.textContaining('Checking weather'), findsOneWidget);
+    expect(find.textContaining('Checking weather'), findsNothing);
 
     api.completeQueue();
     await tester.pumpAndSettle();
@@ -3001,7 +3030,7 @@ void main() {
     await tester.pump();
 
     expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
-    expect(find.textContaining('Checking notes'), findsOneWidget);
+    expect(find.text('Working on request'), findsOneWidget);
 
     await tester.pump(const Duration(milliseconds: 800));
     await tester.pumpAndSettle();
@@ -3178,7 +3207,7 @@ void main() {
     await tester.pump();
 
     expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
-    expect(find.text('I’ll set that reminder.'), findsOneWidget);
+    expect(find.text('I’ll set that reminder.'), findsNothing);
     expect(find.textContaining('calendar pieces'), findsNothing);
 
     await tester.pump(const Duration(milliseconds: 600));
@@ -6079,7 +6108,7 @@ void main() {
       await tester.pumpAndSettle(const Duration(seconds: 2));
 
       expect(api.sendMessageCalls, 1);
-      expect(api.lookupQueuedMessageCalls, 1);
+      expect(api.lookupQueuedMessageCalls, 2);
       expect(api.resumeSessionDetailsCalls, 1);
       expect(api.issueReports, isEmpty);
       expect(find.text('Done - I found the saved response.'), findsOneWidget);
@@ -6091,7 +6120,7 @@ void main() {
     },
   );
 
-  testWidgets('chat queues direct replies after transient send failures', (
+  testWidgets('chat completes routed replies without direct send fallback', (
     WidgetTester tester,
   ) async {
     final api = _TransientDirectSendFailureHermesApiClient();
@@ -6110,13 +6139,9 @@ void main() {
     await tester.tap(find.byKey(const Key('primary-chat-action')));
     await tester.pumpAndSettle(const Duration(seconds: 2));
 
-    expect(api.sendMessageCalls, 1);
     expect(api.queueMessageCalls, 1);
-    expect(api.sentMessageMetadata.single?['client_request_id'], isNotNull);
-    expect(
-      api.sentMessageMetadata.single?['client_request_id'],
-      api.queuedMetadata.single?['client_request_id'],
-    );
+    expect(api.sendMessageCalls, 0);
+    expect(api.queuedMetadata.single?['client_request_id'], isNotNull);
     expect(find.text('Done - I queued that request.'), findsOneWidget);
     expect(
       find.textContaining('I hit a snag while working on that'),
@@ -10239,7 +10264,20 @@ class _ReadOnlyQuestionFakeHermesApiClient
         role: 'assistant',
         content: 'You have two tasks due today.',
       ),
-      events: const [],
+      events: const [
+        HermesActivityEvent(
+          id: 8302,
+          eventType: 'assistant.work_item.planned',
+          status: 'planned',
+          toolName: 'assistant.work',
+          payload: {
+            'work_item_id': 'read-tasks',
+            'work_order': 0,
+            'action_type': 'task.read',
+            'label': 'Checking tasks',
+          },
+        ),
+      ],
     );
   }
 }
@@ -10364,6 +10402,10 @@ class _ReminderBeforeMeetingFakeHermesApiClient
       payload: {
         'reminder_id': 77,
         'title': 'Parent-teacher check-in - 1 hour before',
+        'work_item_id': 'reminder-parent-teacher',
+        'work_order': 0,
+        'work_label':
+            'Create reminder: Parent-teacher check-in - 1 hour before',
         'action_type': 'reminder.create',
       },
     ),
@@ -10396,9 +10438,21 @@ class _ReminderBeforeMeetingFakeHermesApiClient
       ),
       events: const [
         HermesActivityEvent(
-          id: 39,
+          id: 38,
           eventType: 'runtime.run_queued',
           status: 'queued',
+        ),
+        HermesActivityEvent(
+          id: 39,
+          eventType: 'assistant.work_item.planned',
+          status: 'planned',
+          toolName: 'assistant.work',
+          payload: {
+            'work_item_id': 'reminder-parent-teacher',
+            'work_order': 0,
+            'action_type': 'reminder.create',
+            'label': 'Create reminder: Parent-teacher check-in - 1 hour before',
+          },
         ),
       ],
     );
@@ -11533,12 +11587,20 @@ class _ActiveTasksFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   Completer<void>? reopenTaskCompleter;
   Completer<void>? deleteTaskCompleter;
   bool _pastTaskReopened = false;
+  DateTime _todayFutureTime(int offsetMinutes) {
+    final now = DateTime.now();
+    final latestToday = DateTime(now.year, now.month, now.day, 23, 59);
+    final minutesLeft = math.max(1, latestToday.difference(now).inMinutes);
+    final clampedOffset = math.min(offsetMinutes, minutesLeft);
+    return now.add(Duration(minutes: clampedOffset));
+  }
+
   late List<HermesTask> _activeTasks = [
     HermesTask(
       id: 101,
       title: 'Pack bags',
       status: 'open',
-      dueAt: DateTime.now().toIso8601String(),
+      dueAt: _todayFutureTime(20).toIso8601String(),
       category: 'Travel',
       color: '#007AFF',
     ),
@@ -11546,7 +11608,7 @@ class _ActiveTasksFakeHermesApiClient extends _SignedInFakeHermesApiClient {
       id: 102,
       title: 'Call pharmacy',
       status: 'open',
-      dueAt: DateTime.now().toIso8601String(),
+      dueAt: _todayFutureTime(40).toIso8601String(),
     ),
     HermesTask(
       id: 103,
@@ -11570,7 +11632,7 @@ class _ActiveTasksFakeHermesApiClient extends _SignedInFakeHermesApiClient {
         id: 201,
         title: 'Archived oil change',
         status: 'open',
-        dueAt: DateTime.now().toIso8601String(),
+        dueAt: _todayFutureTime(60).toIso8601String(),
       ),
     ..._activeTasks,
   ];
@@ -11741,9 +11803,82 @@ class _OptionalSetupDeclineFakeHermesApiClient
     required String content,
     Map<String, Object?>? metadata,
     String source = 'flutter',
-  }) {
+  }) async {
     queueMessageCalls++;
-    throw StateError('declines should not be queued');
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    return const HermesMessageResult(
+      status: 'completed',
+      session: HermesSession(id: 42, status: 'active', title: 'Bean'),
+      assistantMessage: HermesMessage(
+        id: 71,
+        role: 'assistant',
+        content: 'No problem — we can skip that.',
+      ),
+      events: [],
+    );
+  }
+}
+
+class _PostActionThanksFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  _PostActionThanksFakeHermesApiClient() {
+    todaySession = const HermesSession(id: 42, status: 'active', title: 'Bean');
+    todaySessionMessages = const [
+      HermesMessage(
+        id: 70,
+        role: 'user',
+        content: 'Write a three paragraph essay in a note.',
+      ),
+      HermesMessage(
+        id: 71,
+        role: 'assistant',
+        content: 'Done - I created the note.',
+      ),
+    ];
+  }
+
+  @override
+  Future<HermesMessageResult> sendMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+  }) async {
+    sendMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    return const HermesMessageResult(
+      status: 'completed',
+      session: HermesSession(id: 42, status: 'active', title: 'Bean'),
+      assistantMessage: HermesMessage(
+        id: 72,
+        role: 'assistant',
+        content: "You're welcome.",
+      ),
+      events: [],
+    );
+  }
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    Map<String, Object?>? metadata,
+    String source = 'flutter',
+  }) async {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    return const HermesMessageResult(
+      status: 'completed',
+      session: HermesSession(id: 42, status: 'active', title: 'Bean'),
+      assistantMessage: HermesMessage(
+        id: 72,
+        role: 'assistant',
+        content: "You're welcome.",
+      ),
+      events: [],
+    );
   }
 }
 

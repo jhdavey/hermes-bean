@@ -44,6 +44,8 @@ return [
         'crud_planner_enabled' => env('HERMES_CRUD_PLANNER_ENABLED', true),
         'crud_planner_model' => env('HERMES_CRUD_PLANNER_MODEL', 'gpt-5-nano'),
         'crud_planner_timeout' => (float) env('HERMES_CRUD_PLANNER_TIMEOUT', 20),
+        'fast_chat_model' => env('HERMES_FAST_CHAT_MODEL', env('HERMES_CRUD_PLANNER_MODEL', 'gpt-5-nano')),
+        'fast_chat_timeout' => (float) env('HERMES_FAST_CHAT_TIMEOUT', 2.5),
         'api_key' => $openAiPublicKey,
         'api_key_source' => $openAiPublicKey !== '' ? 'OPENAI_PUBLIC_KEY' : null,
         'api_base' => $hermesApiBase,

@@ -54,16 +54,19 @@ class TopWorkspaceSwitcherAssetTest extends TestCase
         $this->assertStringNotContainsString("api('/workspaces/default'", $appJs);
     }
 
-    public function test_web_bean_chat_uses_queued_run_endpoint_for_work_bearing_turns(): void
+    public function test_web_bean_chat_uses_backend_routed_run_endpoint_for_normal_turns(): void
     {
         $appJs = $this->appJsSource();
 
-        $this->assertStringContainsString('const useRunEndpoint = useQueuedRuntime && !editingMessageId;', $appJs);
-        $this->assertStringContainsString("source: useRunEndpoint ? 'web_queued_chat' : 'web_direct_chat'", $appJs);
+        $this->assertStringContainsString('const useRunEndpoint = !editingMessageId;', $appJs);
+        $this->assertStringContainsString("source: useRunEndpoint ? 'web_routed_chat' : 'web_direct_chat'", $appJs);
         $this->assertStringContainsString('? `/assistant/sessions/${state.session.id}/runs`', $appJs);
-        $this->assertStringContainsString("? { content, source: 'web_queued_chat', metadata }", $appJs);
+        $this->assertStringContainsString("? { content, source: 'web_routed_chat', metadata }", $appJs);
         $this->assertStringContainsString('/messages/${encodeURIComponent(editingMessageId)}/branch', $appJs);
         $this->assertStringContainsString('/runs/lookup?client_request_id=', $appJs);
+        $this->assertStringNotContainsString('beanRequestShouldUseQueuedRuntime', $appJs);
+        $this->assertStringNotContainsString('beanAcknowledgementForRequest', $appJs);
+        $this->assertStringNotContainsString('beanInitialWorkLabelsForRequest', $appJs);
     }
 
     private function appJsSource(): string
