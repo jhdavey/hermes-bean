@@ -3,15 +3,13 @@
 namespace App\Services;
 
 use App\Models\AgentProfile;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
 class OpenAiVoiceService
 {
     public const DEFAULT_VOICE = 'alloy';
-    public const SPEECH_MODEL = 'gpt-4o-mini-tts';
-    public const TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
+    public const DEFAULT_REALTIME_MODEL = 'gpt-4o-realtime-preview';
 
     private const VOICES = [
         'alloy' => 'Alloy',
@@ -44,11 +42,10 @@ class OpenAiVoiceService
         $selected = $this->normalizeVoice($voice);
 
         return [
-            'provider' => 'openai',
+            'provider' => 'openai_realtime',
             'voice' => $selected,
             'voice_label' => self::VOICES[$selected],
-            'speech_model' => self::SPEECH_MODEL,
-            'transcription_model' => self::TRANSCRIPTION_MODEL,
+            'realtime_model' => $this->realtimeModel(),
             'available_voices' => $this->availableVoices(),
         ];
     }
@@ -67,57 +64,81 @@ class OpenAiVoiceService
         return $profile->refresh();
     }
 
-    public function synthesizeSpeech(string $text, AgentProfile $profile): array
+    public function createRealtimeSession(AgentProfile $profile, array $context = []): array
     {
-        $input = trim($text);
-        if ($input === '') {
-            throw new RuntimeException('Speech text cannot be empty.');
-        }
+        $voice = $this->normalizeVoice(data_get($profile->settings ?? [], 'voice.voice'));
+        $model = $this->realtimeModel();
+        $instructions = $this->realtimeInstructions($profile, $context);
 
         $response = Http::withToken($this->apiKey())
-            ->accept('audio/mpeg')
-            ->asJson()
-            ->timeout((float) config('services.openai.speech_timeout', 20))
-            ->post($this->endpoint('/audio/speech'), [
-                'model' => (string) config('services.openai.speech_model', self::SPEECH_MODEL),
-                'voice' => $this->normalizeVoice(data_get($profile->settings ?? [], 'voice.voice')),
-                'input' => mb_substr($input, 0, 4096),
-                'response_format' => 'mp3',
+            ->acceptJson()
+            ->timeout((float) config('services.openai.realtime_session_timeout', 10))
+            ->post($this->endpoint('/realtime/sessions'), [
+                'model' => $model,
+                'voice' => $voice,
+                'instructions' => $instructions,
+                'modalities' => ['audio', 'text'],
+                'input_audio_transcription' => [
+                    'model' => (string) config('services.openai.realtime_transcription_model', 'gpt-4o-mini-transcribe'),
+                ],
+                'turn_detection' => [
+                    'type' => 'server_vad',
+                    'threshold' => (float) config('services.openai.realtime_vad_threshold', 0.5),
+                    'prefix_padding_ms' => (int) config('services.openai.realtime_vad_prefix_padding_ms', 300),
+                    'silence_duration_ms' => (int) config('services.openai.realtime_vad_silence_duration_ms', 650),
+                    'create_response' => true,
+                    'interrupt_response' => true,
+                ],
+                'tools' => $this->realtimeTools(),
+                'tool_choice' => 'auto',
             ]);
 
         if (! $response->successful()) {
-            throw new RuntimeException('OpenAI speech request failed with status '.$response->status().'.');
+            throw new RuntimeException('OpenAI realtime session request failed with status '.$response->status().'.');
         }
 
-        $voice = $this->normalizeVoice(data_get($profile->settings ?? [], 'voice.voice'));
+        $payload = $response->json();
+        $clientSecret = data_get($payload, 'client_secret.value') ?: data_get($payload, 'client_secret');
+        if (! is_string($clientSecret) || trim($clientSecret) === '') {
+            throw new RuntimeException('OpenAI realtime session response did not include a client secret.');
+        }
 
         return [
-            'provider' => 'openai',
+            'provider' => 'openai_realtime',
+            'model' => $model,
             'voice' => $voice,
             'voice_label' => self::VOICES[$voice],
-            'mime_type' => $response->header('Content-Type') ?: 'audio/mpeg',
-            'audio_base64' => base64_encode($response->body()),
+            'client_secret' => $clientSecret,
+            'expires_at' => data_get($payload, 'client_secret.expires_at'),
+            'session_id' => data_get($payload, 'id'),
+            'realtime_url' => rtrim((string) config('services.openai.realtime_webrtc_url', 'https://api.openai.com/v1/realtime'), '?'),
+            'tools' => $this->realtimeTools(),
         ];
     }
 
-    public function transcribe(UploadedFile $audio): array
+    public function realtimeTools(): array
     {
-        $response = Http::withToken($this->apiKey())
-            ->acceptJson()
-            ->timeout((float) config('services.openai.transcription_timeout', 20))
-            ->attach('file', file_get_contents($audio->getRealPath()), $audio->getClientOriginalName() ?: 'voice.webm')
-            ->post($this->endpoint('/audio/transcriptions'), [
-                'model' => (string) config('services.openai.transcription_model', self::TRANSCRIPTION_MODEL),
-                'response_format' => 'json',
-            ]);
-
-        if (! $response->successful()) {
-            throw new RuntimeException('OpenAI transcription request failed with status '.$response->status().'.');
-        }
-
         return [
-            'provider' => 'openai',
-            'text' => trim((string) $response->json('text', '')),
+            [
+                'type' => 'function',
+                'name' => 'send_bean_request',
+                'description' => 'Send a user request to HeyBean Laravel when app data, tools, tasks, reminders, notes, calendar, memory, approvals, or longer-running agent work are needed. Laravel authenticates, scopes, executes, persists, and returns the result.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'request' => [
+                            'type' => 'string',
+                            'description' => 'The user request to execute in HeyBean.',
+                        ],
+                        'reason' => [
+                            'type' => 'string',
+                            'description' => 'Why Laravel app/tool execution is needed.',
+                        ],
+                    ],
+                    'required' => ['request'],
+                    'additionalProperties' => false,
+                ],
+            ],
         ];
     }
 
@@ -126,6 +147,19 @@ class OpenAiVoiceService
         $key = strtolower(trim((string) $voice));
 
         return array_key_exists($key, self::VOICES) ? $key : self::DEFAULT_VOICE;
+    }
+
+    private function realtimeInstructions(AgentProfile $profile, array $context): string
+    {
+        $beanName = trim((string) ($profile->display_name ?: 'Bean')) ?: 'Bean';
+        $timezone = trim((string) data_get($context, 'timezone', config('app.timezone', 'UTC'))) ?: 'UTC';
+
+        return trim("You are {$beanName}, HeyBean's realtime voice assistant. Be warm, concise, and fast like Alexa or Siri. The user starts a voice session by saying \"Hey Bean\" or by tapping the Bean button. While the session is active, accept natural follow-ups without requiring the wake word for about 30 seconds. If the user says thanks, thank you, nevermind, cancel, stop, stop talking, stop listening, that's all, all done, no thanks, goodbye, bye, or close variants, stop the conversation and do not continue. If the user interrupts while you are speaking, stop and listen. For simple conversational answers, answer directly in one or two short sentences. For requests that need HeyBean app data or mutations, call send_bean_request instead of inventing results. Never claim to create, update, delete, complete, schedule, or fetch private app data unless Laravel returns that result. User timezone: {$timezone}.");
+    }
+
+    private function realtimeModel(): string
+    {
+        return (string) config('services.openai.realtime_model', self::DEFAULT_REALTIME_MODEL);
     }
 
     private function apiKey(): string

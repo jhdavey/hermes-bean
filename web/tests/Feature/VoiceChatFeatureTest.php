@@ -3,9 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\AgentProfile;
+use App\Models\ConversationMessage;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -13,14 +13,15 @@ class VoiceChatFeatureTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_auth_me_exposes_default_voice_settings_and_available_openai_voices(): void
+    public function test_auth_me_exposes_default_realtime_voice_settings_and_available_openai_voices(): void
     {
         $token = $this->apiToken('voice-default@example.com');
 
         $this->withToken($token)->getJson('/api/auth/me')
             ->assertOk()
-            ->assertJsonPath('data.active_workspace_agent_profile.settings.voice.provider', 'openai')
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.voice.provider', 'openai_realtime')
             ->assertJsonPath('data.active_workspace_agent_profile.settings.voice.voice', 'alloy')
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.voice.realtime_model', 'gpt-4o-realtime-preview')
             ->assertJsonPath('data.active_workspace_agent_profile.settings.voice.available_voices.0.key', 'alloy')
             ->assertJsonPath('data.active_workspace_agent_profile.settings.voice.available_voices.0.label', 'Alloy');
     }
@@ -33,6 +34,7 @@ class VoiceChatFeatureTest extends TestCase
         $this->withToken($token)->patchJson('/api/auth/me', [
             'voice' => 'nova',
         ])->assertOk()
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.voice.provider', 'openai_realtime')
             ->assertJsonPath('data.active_workspace_agent_profile.settings.voice.voice', 'nova');
 
         $profile = AgentProfile::where('workspace_id', $user->fresh()->default_workspace_id)->firstOrFail();
@@ -43,58 +45,99 @@ class VoiceChatFeatureTest extends TestCase
         ])->assertUnprocessable();
     }
 
-    public function test_voice_speech_endpoint_uses_selected_openai_voice_and_returns_audio_payload(): void
+    public function test_authenticated_user_can_create_openai_realtime_voice_session_without_exposing_server_key(): void
     {
         config()->set('services.openai.server_api_key', 'test-openai-key');
+        config()->set('services.openai.realtime_model', 'gpt-realtime-test');
+        config()->set('services.openai.realtime_webrtc_url', 'https://api.openai.test/v1/realtime');
         config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
-        $token = $this->apiToken('voice-speech@example.com');
+        $token = $this->apiToken('voice-realtime@example.com');
 
         $this->withToken($token)->patchJson('/api/auth/me', ['voice' => 'shimmer'])->assertOk();
 
         Http::fake([
-            'api.openai.test/v1/audio/speech' => Http::response('fake-mp3-bytes', 200, [
-                'Content-Type' => 'audio/mpeg',
-            ]),
-        ]);
-
-        $this->withToken($token)->postJson('/api/assistant/voice/speech', [
-            'text' => 'Done — I moved lunch to tomorrow.',
-        ])->assertOk()
-            ->assertJsonPath('data.provider', 'openai')
-            ->assertJsonPath('data.voice', 'shimmer')
-            ->assertJsonPath('data.mime_type', 'audio/mpeg')
-            ->assertJsonPath('data.audio_base64', base64_encode('fake-mp3-bytes'));
-
-        Http::assertSent(function ($request): bool {
-            return $request->url() === 'https://api.openai.test/v1/audio/speech'
-                && $request->hasHeader('Authorization', 'Bearer test-openai-key')
-                && $request['model'] === 'gpt-4o-mini-tts'
-                && $request['voice'] === 'shimmer'
-                && $request['input'] === 'Done — I moved lunch to tomorrow.';
-        });
-    }
-
-    public function test_voice_transcription_endpoint_uses_openai_and_returns_text(): void
-    {
-        config()->set('services.openai.server_api_key', 'test-openai-key');
-        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
-        $token = $this->apiToken('voice-transcribe@example.com');
-
-        Http::fake([
-            'api.openai.test/v1/audio/transcriptions' => Http::response([
-                'text' => 'Move lunch to tomorrow at noon.',
+            'api.openai.test/v1/realtime/sessions' => Http::response([
+                'id' => 'sess_test_123',
+                'client_secret' => [
+                    'value' => 'ephemeral-client-secret',
+                    'expires_at' => 1893456000,
+                ],
             ], 200),
         ]);
 
-        $this->withToken($token)->post('/api/assistant/voice/transcriptions', [
-            'audio' => UploadedFile::fake()->createWithContent('voice.webm', 'fake-audio-bytes'),
+        $this->withToken($token)->postJson('/api/assistant/voice/realtime/session', [
+            'timezone' => 'America/New_York',
         ])->assertOk()
-            ->assertJsonPath('data.text', 'Move lunch to tomorrow at noon.')
-            ->assertJsonPath('data.provider', 'openai');
+            ->assertJsonPath('data.provider', 'openai_realtime')
+            ->assertJsonPath('data.model', 'gpt-realtime-test')
+            ->assertJsonPath('data.voice', 'shimmer')
+            ->assertJsonPath('data.client_secret', 'ephemeral-client-secret')
+            ->assertJsonPath('data.session_id', 'sess_test_123')
+            ->assertJsonPath('data.realtime_url', 'https://api.openai.test/v1/realtime')
+            ->assertJsonMissing(['test-openai-key']);
 
         Http::assertSent(function ($request): bool {
-            return $request->url() === 'https://api.openai.test/v1/audio/transcriptions'
-                && $request->hasHeader('Authorization', 'Bearer test-openai-key');
+            $payload = $request->data();
+
+            return $request->url() === 'https://api.openai.test/v1/realtime/sessions'
+                && $request->hasHeader('Authorization', 'Bearer test-openai-key')
+                && data_get($payload, 'model') === 'gpt-realtime-test'
+                && data_get($payload, 'voice') === 'shimmer'
+                && data_get($payload, 'turn_detection.type') === 'server_vad'
+                && data_get($payload, 'turn_detection.interrupt_response') === true
+                && collect($payload['tools'] ?? [])->contains(fn (array $tool): bool => $tool['name'] === 'send_bean_request')
+                && str_contains((string) data_get($payload, 'instructions'), 'Hey Bean');
         });
+    }
+
+    public function test_realtime_tool_bridge_validates_supported_laravel_tool_calls(): void
+    {
+        $token = $this->apiToken('voice-tool@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/realtime/tool', [
+            'name' => 'send_bean_request',
+            'arguments' => [
+                'request' => 'Mark preschool tuition done.',
+                'reason' => 'Task completion needs Laravel tools.',
+            ],
+        ])->assertOk()
+            ->assertJsonPath('data.approved', true)
+            ->assertJsonPath('data.route', 'assistant_runs')
+            ->assertJsonPath('data.request', 'Mark preschool tuition done.');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/realtime/tool', [
+            'name' => 'unsupported_tool',
+            'arguments' => ['request' => 'anything'],
+        ])->assertUnprocessable();
+    }
+
+    public function test_realtime_turn_endpoint_persists_voice_transcript_without_running_rest_tts_or_transcription(): void
+    {
+        $token = $this->apiToken('voice-turn@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
+            'session_id' => $sessionId,
+            'user_text' => 'Hey Bean, what is today?',
+            'assistant_text' => 'Today is Wednesday.',
+        ])->assertCreated()
+            ->assertJsonPath('data.user_message.role', 'user')
+            ->assertJsonPath('data.assistant_message.role', 'assistant')
+            ->assertJsonPath('data.assistant_message.metadata.source', 'openai_realtime_voice')
+            ->assertJsonPath('data.assistant_message.metadata.voice_request', true);
+
+        $this->assertDatabaseHas('conversation_messages', [
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'Hey Bean, what is today?',
+        ]);
+        $this->assertDatabaseHas('conversation_messages', [
+            'conversation_session_id' => $sessionId,
+            'role' => 'assistant',
+            'content' => 'Today is Wednesday.',
+        ]);
+        $this->assertSame(2, ConversationMessage::where('conversation_session_id', $sessionId)->count());
     }
 }

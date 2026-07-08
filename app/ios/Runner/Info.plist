@@ -44,9 +44,9 @@
 	<key>NSCameraUsageDescription</key>
 	<string>HeyBean uses the camera only when you choose camera-based features, such as scanning a payment card with Stripe.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>HeyBean uses the microphone when you hold the Bean button so Bean can transcribe and respond to your spoken request.</string>
+	<string>HeyBean uses the microphone for Bean voice features when realtime voice is available.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>HeyBean uses speech recognition while you hold the Bean button to show a live draft of what you are saying.</string>
+	<string>HeyBean may use speech recognition for Bean voice features when realtime voice is available.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>

@@ -140,25 +140,18 @@ export function mountHeyBeanWebApp(mount) {
         notice: '',
         modal: null,
     };
-    let voiceRecorder = null;
-    let voiceChunks = [];
-    let voiceStream = null;
-    let voiceRecognition = null;
-    let voiceCapturePending = false;
-    let voiceCaptureReleaseRequested = false;
-    let voiceWakeRecognition = null;
-    let voiceWakeActivated = false;
-    let voiceWakeTranscript = '';
-    let voiceWakeSendTimer = 0;
-    let voiceFollowUpUntil = 0;
-    let voiceFollowUpTimer = 0;
-    let voiceWakePausedForBean = false;
-    let voiceWakeRestartTimer = 0;
-    let beanVoiceAudio = null;
-    let beanVoiceBlobUrl = '';
-    let beanVoicePlaybackUnlocked = false;
-    let beanVoiceAudioContext = null;
-    let beanVoiceAudioSource = null;
+    let realtimePeerConnection = null;
+    let realtimeDataChannel = null;
+    let realtimeLocalStream = null;
+    let realtimeRemoteAudio = null;
+    let realtimeSession = null;
+    let realtimeVoiceActive = false;
+    let realtimeWakeActivated = false;
+    let realtimeFollowUpUntil = 0;
+    let realtimeFollowUpTimer = 0;
+    let realtimePendingTranscript = '';
+    let realtimeAssistantDraft = '';
+    let realtimeToolCalls = new Map();
 
     const guidedSignupPersonalities = [
         {
@@ -3996,7 +3989,7 @@ export function mountHeyBeanWebApp(mount) {
                         <span class="hb-chat-action-cluster">
                             ${state.busy ? `<button class="hb-button-secondary hb-chat-text-send-button hb-chat-text-stop-button" type="button" data-cancel-turn aria-label="Stop Bean">${icons.stop}</button>` : ''}
                             <button class="hb-button-secondary hb-chat-text-send-button" type="submit" aria-label="${escapeAttr(waking ? 'Bean is waking up' : (state.busy ? 'Queue message' : 'Send message'))}" ${sendDisabled}>${icons.send}</button>
-                            <button class="hb-button-secondary hb-chat-text-send-button hb-chat-voice-button ${(state.voiceWakeListening || state.voiceRecording) ? 'hb-chat-voice-button-listening' : ''} ${(state.busy || state.voiceProcessing) ? 'hb-chat-voice-button-thinking' : ''}" type="button" data-voice-toggle aria-pressed="${state.voiceWakeListening ? 'true' : 'false'}" aria-label="${state.voiceWakeListening ? 'Turn off Hey Bean listening' : 'Turn on Hey Bean listening'}" ${sendDisabled}><span class="hb-chat-voice-button-inner"><img src="${escapeAttr(logoUrl)}" alt="" aria-hidden="true"></span></button>
+                            <button class="hb-button-secondary hb-chat-text-send-button hb-chat-voice-button ${state.voiceWakeListening ? 'hb-chat-voice-button-listening' : ''} ${(state.busy || state.voiceProcessing) ? 'hb-chat-voice-button-thinking' : ''}" type="button" data-voice-toggle aria-pressed="${state.voiceWakeListening ? 'true' : 'false'}" aria-label="${state.voiceWakeListening ? 'Turn off realtime Bean voice' : 'Turn on realtime Bean voice'}" ${sendDisabled}><span class="hb-chat-voice-button-inner"><img src="${escapeAttr(logoUrl)}" alt="" aria-hidden="true"></span></button>
                         </span>
                     </form>
                 </div>
@@ -9071,30 +9064,6 @@ export function mountHeyBeanWebApp(mount) {
         await sendChatContent(queued.content, queued.editingMessageId ? { editingMessageId: queued.editingMessageId } : {});
     }
 
-    function cleanupVoiceCapture() {
-        try {
-            if (voiceRecorder && voiceRecorder.state !== 'inactive') voiceRecorder.stop();
-        } catch (error) {
-            // Best effort cleanup only.
-        }
-        try {
-            voiceRecognition?.stop?.();
-        } catch (error) {
-            // Best effort cleanup only.
-        }
-        voiceStream?.getTracks?.().forEach((track) => track.stop());
-        voiceRecorder = null;
-        voiceRecognition = null;
-        voiceStream = null;
-        voiceChunks = [];
-        voiceCapturePending = false;
-        voiceCaptureReleaseRequested = false;
-    }
-
-    function voiceRecognitionConstructor() {
-        return window.SpeechRecognition || window.webkitSpeechRecognition || null;
-    }
-
     function updateVoiceWakeDraft(text) {
         state.chatDraft = text;
         const textarea = mount.querySelector('textarea[name="message"]');
@@ -9102,52 +9071,6 @@ export function mountHeyBeanWebApp(mount) {
             textarea.value = text;
             resizeChatInput(textarea);
         }
-    }
-
-    function pauseVoiceWakeRecognitionForBean() {
-        if (!state.voiceWakeListening || voiceWakePausedForBean) return;
-        voiceWakePausedForBean = true;
-        window.clearTimeout(voiceWakeRestartTimer);
-        try {
-            voiceWakeRecognition?.stop?.();
-        } catch (_) {}
-    }
-
-    function resumeVoiceWakeRecognitionAfterBean() {
-        if (!state.voiceWakeListening) return;
-        voiceWakePausedForBean = false;
-        window.clearTimeout(voiceWakeRestartTimer);
-        voiceWakeRestartTimer = window.setTimeout(() => {
-            if (!state.voiceWakeListening || voiceWakePausedForBean || !voiceWakeRecognition) return;
-            try {
-                voiceWakeRecognition.start();
-            } catch (_) {}
-        }, 350);
-    }
-
-    function resetVoiceWakeCaptureForNextUtterance() {
-        window.clearTimeout(voiceWakeSendTimer);
-        voiceWakeSendTimer = 0;
-        voiceWakeTranscript = '';
-        voiceWakeActivated = false;
-        updateVoiceWakeDraft('');
-    }
-
-    function textAfterWakeWord(text) {
-        return String(text || '')
-            .replace(/^.*?\bhey[\s,.-]*bean\b[\s,.:;!?-]*/i, '')
-            .trim();
-    }
-
-    function voiceWakeResultText(speechEvent) {
-        const results = Array.from(speechEvent.results || []);
-        const start = Number.isFinite(speechEvent.resultIndex) ? speechEvent.resultIndex : 0;
-        return results
-            .slice(Math.max(0, start))
-            .map((result) => result[0]?.transcript || '')
-            .join(' ')
-            .replace(/\s+/g, ' ')
-            .trim();
     }
 
     function normalizedVoiceCommand(text) {
@@ -9161,49 +9084,344 @@ export function mountHeyBeanWebApp(mount) {
     function voiceStopCommand(text) {
         const normalized = normalizedVoiceCommand(text).replace(/\bhey\s+bean\b/g, '').trim();
         if (!normalized) return false;
-        return /^(thanks|thank you|thx|nevermind|never mind|cancel|stop|stop listening|stop talking|that'?s all|that is all|all done|we'?re good|were good|i'?m good|im good|no thanks|no thank you|goodbye|bye)( bean)?$/i.test(normalized)
-            || /^(bean )?(thanks|thank you|nevermind|never mind|cancel|stop|stop listening|stop talking|that'?s all|that is all|all done|goodbye|bye)$/i.test(normalized);
+        return /^(thanks|thank you|thx|nevermind|never mind|cancel|stop|stop listening|stop talking|that'?s all|that is all|all done|we'?re good|were good|i'?m good|im good|no thanks|no thank you|goodbye|bye|shut up)( bean)?$/i.test(normalized)
+            || /^(bean )?(thanks|thank you|nevermind|never mind|cancel|stop|stop listening|stop talking|that'?s all|that is all|all done|goodbye|bye|shut up)$/i.test(normalized);
     }
 
-    function voiceFollowUpActive() {
-        return voiceFollowUpUntil > Date.now();
+    function textAfterWakeWord(text) {
+        return String(text || '')
+            .replace(/^.*?\bhey[\s,.-]*bean\b[\s,.:;!?-]*/i, '')
+            .trim();
     }
 
-    function clearVoiceFollowUpWindow() {
-        window.clearTimeout(voiceFollowUpTimer);
-        voiceFollowUpTimer = 0;
-        voiceFollowUpUntil = 0;
+    function realtimeFollowUpActive() {
+        return realtimeFollowUpUntil > Date.now();
     }
 
-    function setVoiceFollowUpWindow() {
-        window.clearTimeout(voiceFollowUpTimer);
-        voiceFollowUpUntil = Date.now() + 30000;
-        resetVoiceWakeCaptureForNextUtterance();
-        resumeVoiceWakeRecognitionAfterBean();
-        voiceFollowUpTimer = window.setTimeout(() => {
-            voiceFollowUpUntil = 0;
-            if (state.voiceWakeListening && !state.busy && !voiceWakeActivated) {
+    function clearRealtimeFollowUpWindow() {
+        window.clearTimeout(realtimeFollowUpTimer);
+        realtimeFollowUpTimer = 0;
+        realtimeFollowUpUntil = 0;
+    }
+
+    function setRealtimeFollowUpWindow() {
+        window.clearTimeout(realtimeFollowUpTimer);
+        realtimeFollowUpUntil = Date.now() + 30000;
+        realtimeWakeActivated = true;
+        realtimeFollowUpTimer = window.setTimeout(() => {
+            realtimeFollowUpUntil = 0;
+            realtimeWakeActivated = false;
+            if (state.voiceWakeListening && !state.busy) {
                 state.chatRunState = 'Listening for “Hey Bean”…';
                 render();
             }
         }, 30000);
     }
 
-    function stopBeanVoicePlayback() {
+    function realtimeSend(event) {
+        if (!realtimeDataChannel || realtimeDataChannel.readyState !== 'open') return false;
+        realtimeDataChannel.send(JSON.stringify(event));
+        return true;
+    }
+
+    function stopBeanVoicePlayback(options = {}) {
         try {
-            beanVoiceAudioSource?.stop?.();
+            realtimeSend({ type: 'response.cancel' });
         } catch (_) {}
-        beanVoiceAudioSource = null;
+        if (options.teardown && realtimeRemoteAudio) {
+            try {
+                realtimeRemoteAudio.pause();
+                realtimeRemoteAudio.currentTime = 0;
+                realtimeRemoteAudio.srcObject = null;
+            } catch (_) {}
+        }
+    }
+
+    function pauseVoiceWakeRecognitionForBean() {
+        // Realtime uses server-side VAD and interruption instead of pausing local recognition.
+    }
+
+    function setVoiceFollowUpWindow() {
+        setRealtimeFollowUpWindow();
+    }
+
+    function clearVoiceFiller() {
+        // REST voice filler removed; realtime audio provides immediate acknowledgement/turn state.
+    }
+
+    function scheduleVoiceFiller() {
+        // REST voice filler removed; realtime audio provides immediate acknowledgement/turn state.
+    }
+
+    async function playBeanVoiceResponse() {
+        // REST text-to-speech was intentionally removed in favor of OpenAI Realtime streamed audio.
+    }
+
+    function realtimeInstructionsUpdate() {
+        return {
+            type: 'session.update',
+            session: {
+                instructions: 'You are Bean inside an active HeyBean realtime voice session. Do not respond before the user says Hey Bean unless a follow-up window is active. During the follow-up window, accept natural follow-ups without the wake word. If the user says thanks, nevermind, cancel, stop, stop talking, stop listening, that is all, all done, no thanks, goodbye, bye, shut up, or close variants, stop speaking and end the session. Keep voice answers concise. Use send_bean_request for HeyBean app data, task/reminder/note/calendar/memory mutations, approvals, or longer-running agent work.',
+            },
+        };
+    }
+
+    async function openRealtimeSession() {
+        if (!state.session?.id) {
+            const onboarding = needsBeanOnboarding();
+            state.session = await api('/assistant/sessions', {
+                method: 'POST',
+                body: chatSessionPayload(onboarding),
+            });
+        }
+        return api('/assistant/voice/realtime/session', {
+            method: 'POST',
+            body: { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '' },
+            timeoutMs: 15000,
+        });
+    }
+
+    async function connectRealtimeVoice() {
+        if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
+            throw new Error('Realtime voice needs microphone and WebRTC support in this browser.');
+        }
+
+        realtimeSession = await openRealtimeSession();
+        const secret = String(realtimeSession?.client_secret || '').trim();
+        if (!secret) throw new Error('Realtime voice session did not include a client secret.');
+
+        realtimeLocalStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+            },
+        });
+
+        realtimePeerConnection = new RTCPeerConnection();
+        realtimeRemoteAudio = new Audio();
+        realtimeRemoteAudio.autoplay = true;
+        realtimePeerConnection.ontrack = (event) => {
+            const [stream] = event.streams;
+            if (stream) realtimeRemoteAudio.srcObject = stream;
+        };
+        realtimeLocalStream.getTracks().forEach((track) => realtimePeerConnection.addTrack(track, realtimeLocalStream));
+
+        realtimeDataChannel = realtimePeerConnection.createDataChannel('oai-events');
+        realtimeDataChannel.addEventListener('open', () => {
+            realtimeSend(realtimeInstructionsUpdate());
+            state.chatRunState = 'Listening for “Hey Bean”…';
+            render();
+        });
+        realtimeDataChannel.addEventListener('message', (event) => handleRealtimeEvent(event));
+
+        const offer = await realtimePeerConnection.createOffer();
+        await realtimePeerConnection.setLocalDescription(offer);
+        const model = encodeURIComponent(String(realtimeSession.model || 'gpt-4o-realtime-preview'));
+        const baseUrl = String(realtimeSession.realtime_url || 'https://api.openai.com/v1/realtime').replace(/\?+$/, '');
+        const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${secret}`,
+                'Content-Type': 'application/sdp',
+            },
+            body: offer.sdp,
+        });
+        if (!sdpResponse.ok) throw new Error(`Realtime voice connection failed (${sdpResponse.status}).`);
+        await realtimePeerConnection.setRemoteDescription({ type: 'answer', sdp: await sdpResponse.text() });
+    }
+
+    function handleRealtimeEvent(event) {
+        let payload = null;
         try {
-            beanVoiceAudio?.pause?.();
-            if (beanVoiceAudio) beanVoiceAudio.currentTime = 0;
-        } catch (_) {}
+            payload = JSON.parse(event.data);
+        } catch (_) {
+            return;
+        }
+        if (!payload?.type) return;
+
+        if (payload.type === 'input_audio_buffer.speech_started') {
+            stopBeanVoicePlayback();
+            state.chatRunState = realtimeWakeActivated || realtimeFollowUpActive() ? 'Listening…' : 'Listening for “Hey Bean”…';
+            render();
+            return;
+        }
+
+        if (payload.type === 'conversation.item.input_audio_transcription.completed') {
+            handleRealtimeUserTranscript(payload.transcript || '');
+            return;
+        }
+
+        if (payload.type === 'response.audio_transcript.delta' || payload.type === 'response.text.delta' || payload.type === 'response.output_text.delta') {
+            const delta = String(payload.delta || '');
+            if (delta) {
+                realtimeAssistantDraft += delta;
+                state.chatRunState = 'Bean is speaking…';
+                render();
+            }
+            return;
+        }
+
+        if (payload.type === 'response.audio_transcript.done' || payload.type === 'response.output_text.done') {
+            const text = String(payload.transcript || payload.text || realtimeAssistantDraft || '').trim();
+            if (text) {
+                pushRealtimeAssistantMessage(text);
+                persistRealtimeTurn(realtimePendingTranscript, text).catch(() => {});
+            }
+            realtimeAssistantDraft = '';
+            setRealtimeFollowUpWindow();
+            state.chatRunState = 'Listening for follow-up…';
+            render();
+            return;
+        }
+
+        if (payload.type === 'response.function_call_arguments.delta') {
+            const callId = payload.call_id || payload.item_id;
+            if (callId) realtimeToolCalls.set(callId, `${realtimeToolCalls.get(callId) || ''}${payload.delta || ''}`);
+            return;
+        }
+
+        if (payload.type === 'response.function_call_arguments.done') {
+            handleRealtimeToolCall(payload).catch((error) => {
+                state.error = friendlyError(error, 'run realtime voice tool');
+                render();
+            });
+            return;
+        }
+
+        if (payload.type === 'response.done') {
+            const output = normalizeList(payload.response?.output);
+            output.forEach((item) => {
+                if (item?.type === 'function_call') {
+                    handleRealtimeToolCall(item).catch((error) => {
+                        state.error = friendlyError(error, 'run realtime voice tool');
+                        render();
+                    });
+                }
+            });
+            return;
+        }
+
+        if (payload.type === 'error') {
+            state.error = payload.error?.message || 'Realtime voice stopped unexpectedly.';
+            render();
+        }
+    }
+
+    function handleRealtimeUserTranscript(transcript) {
+        const text = String(transcript || '').trim();
+        if (!text) return;
+        realtimePendingTranscript = text;
+        updateVoiceWakeDraft(text);
+        if (voiceStopCommand(text)) {
+            stopVoiceConversationFromSpeech().catch(() => {});
+            return;
+        }
+        const heardWakeWord = /\bhey[\s,.-]*bean\b/i.test(text);
+        if (!realtimeWakeActivated && heardWakeWord) {
+            realtimeWakeActivated = true;
+            const afterWake = textAfterWakeWord(text);
+            if (afterWake) replaceOrAppendRealtimeUserMessage(afterWake);
+            state.chatRunState = afterWake ? 'Thinking…' : 'Listening…';
+            render();
+            return;
+        }
+        if (realtimeWakeActivated || realtimeFollowUpActive()) {
+            replaceOrAppendRealtimeUserMessage(heardWakeWord ? textAfterWakeWord(text) : text);
+            state.chatRunState = 'Thinking…';
+            render();
+        }
+    }
+
+    function replaceOrAppendRealtimeUserMessage(text) {
+        const content = String(text || '').trim();
+        if (!content) return;
+        const last = state.messages[state.messages.length - 1];
+        if (last?.metadata?.realtime_draft && last.role === 'user') {
+            last.content = content;
+            return;
+        }
+        state.messages.push({ id: `realtime-user-${Date.now()}`, role: 'user', content, metadata: { realtime_draft: true } });
+    }
+
+    function pushRealtimeAssistantMessage(text) {
+        const content = safeAssistantDisplayContent(conversationalMessageContent(String(text || '').trim()));
+        if (!content) return;
+        state.messages.forEach((message) => {
+            if (message?.metadata?.realtime_draft) delete message.metadata.realtime_draft;
+        });
+        const last = state.messages[state.messages.length - 1];
+        if (last?.role === 'assistant' && last?.metadata?.realtime_response) {
+            last.content = content;
+        } else {
+            state.messages.push({ id: `realtime-assistant-${Date.now()}`, role: 'assistant', content, metadata: { realtime_response: true } });
+        }
+    }
+
+    async function persistRealtimeTurn(userText, assistantText) {
+        const user = String(userText || '').trim();
+        const assistant = String(assistantText || '').trim();
+        if (!state.session?.id || !user || !assistant) return;
+        const persisted = await api('/assistant/voice/realtime/turn', {
+            method: 'POST',
+            body: {
+                session_id: state.session.id,
+                user_text: user,
+                assistant_text: assistant,
+                metadata: webChatMetadata({
+                    client_request_id: `web-realtime-${Date.now()}`,
+                }),
+            },
+        });
+        state.session = persisted.session || state.session;
+        if (persisted.user_message || persisted.assistant_message) {
+            state.messages = state.messages.filter((message) => !message?.metadata?.realtime_response && !message?.metadata?.realtime_draft);
+            if (persisted.user_message) state.messages.push(persisted.user_message);
+            if (persisted.assistant_message) state.messages.push({
+                ...persisted.assistant_message,
+                content: safeAssistantDisplayContent(conversationalMessageContent(persisted.assistant_message.content || '')),
+            });
+            loadChatSessions({ resumeToday: false, shouldRender: false }).then(() => render()).catch(() => {});
+        }
+    }
+
+    async function handleRealtimeToolCall(payload) {
+        const callId = payload.call_id || payload.item_id;
+        const name = payload.name || payload.function?.name || 'send_bean_request';
+        const rawArguments = payload.arguments || realtimeToolCalls.get(callId) || '{}';
+        if (callId) realtimeToolCalls.delete(callId);
+        let args = {};
+        try {
+            args = JSON.parse(rawArguments || '{}');
+        } catch (_) {
+            args = { request: realtimePendingTranscript || rawArguments };
+        }
+        const approval = await api('/assistant/voice/realtime/tool', {
+            method: 'POST',
+            body: { name, arguments: args, session_id: state.session?.id || null },
+        });
+        const request = String(approval?.request || args.request || realtimePendingTranscript || '').trim();
+        let output = 'I could not route that request.';
+        if (request) {
+            const result = await sendChatContent(request, { realtimeToolRequest: true });
+            output = result?.assistantContent || 'I sent that to HeyBean.';
+        }
+        if (callId) {
+            realtimeSend({
+                type: 'conversation.item.create',
+                item: {
+                    type: 'function_call_output',
+                    call_id: callId,
+                    output,
+                },
+            });
+            realtimeSend({ type: 'response.create' });
+        }
     }
 
     async function stopVoiceConversationFromSpeech() {
-        window.clearTimeout(voiceWakeSendTimer);
-        clearVoiceFollowUpWindow();
-        stopBeanVoicePlayback();
+        clearRealtimeFollowUpWindow();
+        stopBeanVoicePlayback({ teardown: true });
         stopVoiceWakeListening();
         if (state.busy || activeChatRequestId) {
             await cancelBeanTurn();
@@ -9212,398 +9430,64 @@ export function mountHeyBeanWebApp(mount) {
         }
     }
 
-    function scheduleVoiceWakeSend(text, delay = 1200) {
-        window.clearTimeout(voiceWakeSendTimer);
-        const command = String(text || '').trim();
-        if (!command) return;
-        voiceWakeSendTimer = window.setTimeout(() => {
-            sendVoiceWakeCommand(command).catch((error) => {
-                state.error = friendlyError(error, 'send voice request');
-                state.chatRunState = state.voiceWakeListening ? 'Listening for “Hey Bean”…' : 'Ready';
-                render();
-            });
-        }, delay);
-    }
-
-    async function sendVoiceWakeCommand(command) {
-        const text = String(command || '').trim();
-        if (!text) return;
-        if (voiceStopCommand(text)) {
-            await stopVoiceConversationFromSpeech();
-            return;
-        }
-        if (chatHasActiveTurn()) {
-            scheduleVoiceWakeSend(text, 700);
-            return;
-        }
-        window.clearTimeout(voiceWakeSendTimer);
-        resetVoiceWakeCaptureForNextUtterance();
-        pauseVoiceWakeRecognitionForBean();
-        state.chatRunState = 'Thinking…';
-        render();
-        const result = await sendChatContent(text, { voiceRequest: true });
-        if (result?.assistantContent) {
-            try {
-                await playBeanVoiceResponse(result.assistantContent);
-            } catch (error) {
-                console.warn('Bean voice playback failed.', error);
-            }
-        }
-        if (state.voiceWakeListening) {
-            setVoiceFollowUpWindow();
-            state.chatRunState = 'Listening for follow-up…';
-            render();
-        }
-    }
-
     function stopVoiceWakeListening(options = {}) {
-        window.clearTimeout(voiceWakeSendTimer);
-        window.clearTimeout(voiceWakeRestartTimer);
-        voiceWakeSendTimer = 0;
-        voiceWakeRestartTimer = 0;
-        voiceWakePausedForBean = false;
-        if (options.clearFollowUp !== false) clearVoiceFollowUpWindow();
-        voiceWakeActivated = false;
-        voiceWakeTranscript = '';
-        try {
-            voiceWakeRecognition?.stop?.();
-        } catch (error) {
-            // Best effort cleanup only.
-        }
-        voiceWakeRecognition = null;
+        clearRealtimeFollowUpWindow();
+        realtimeWakeActivated = false;
+        realtimePendingTranscript = '';
+        realtimeAssistantDraft = '';
+        realtimeToolCalls.clear();
+        realtimeVoiceActive = false;
         state.voiceWakeListening = false;
+        state.voiceProcessing = false;
         if (options.clearDraft !== false) updateVoiceWakeDraft('');
+        try { realtimeDataChannel?.close?.(); } catch (_) {}
+        try { realtimePeerConnection?.close?.(); } catch (_) {}
+        realtimeLocalStream?.getTracks?.().forEach((track) => track.stop());
+        realtimeDataChannel = null;
+        realtimePeerConnection = null;
+        realtimeLocalStream = null;
+        realtimeSession = null;
+        if (realtimeRemoteAudio) {
+            try {
+                realtimeRemoteAudio.pause();
+                realtimeRemoteAudio.srcObject = null;
+            } catch (_) {}
+        }
+        realtimeRemoteAudio = null;
         if (!state.busy) state.chatRunState = 'Ready';
     }
 
-    function startVoiceWakeListening(event) {
+    async function startVoiceWakeListening(event) {
         event?.preventDefault?.();
-        if (beanChatWaking() || state.voiceProcessing || voiceCapturePending) return;
-        const Recognition = voiceRecognitionConstructor();
-        if (!Recognition) {
-            state.error = 'Hey Bean listening needs browser speech recognition support. Try Chrome or Edge.';
-            render();
-            return;
-        }
-        cleanupVoiceCapture();
-        stopVoiceWakeListening({ clearDraft: false });
-        unlockBeanVoicePlayback().catch(() => {});
+        if (beanChatWaking() || state.voiceProcessing || realtimeVoiceActive) return;
         state.error = '';
-        state.voiceWakeListening = true;
-        state.chatRunState = 'Listening for “Hey Bean”…';
-        updateVoiceWakeDraft('');
+        state.voiceProcessing = true;
+        state.chatRunState = 'Starting realtime Bean voice…';
+        render();
         try {
-            voiceWakeRecognition = new Recognition();
-            voiceWakeRecognition.continuous = true;
-            voiceWakeRecognition.interimResults = true;
-            voiceWakeRecognition.onresult = (speechEvent) => {
-                const transcript = voiceWakeResultText(speechEvent);
-                if (!transcript || voiceWakePausedForBean) return;
-                if (voiceStopCommand(transcript)) {
-                    stopVoiceConversationFromSpeech().catch((error) => {
-                        state.error = friendlyError(error, 'stop voice conversation');
-                        render();
-                    });
-                    return;
-                }
-                const heardWakeWord = /\bhey[\s,.-]*bean\b/i.test(transcript);
-                const acceptsFollowUp = voiceFollowUpActive();
-                if (!voiceWakeActivated && !heardWakeWord && !acceptsFollowUp) return;
-                if (!voiceWakeActivated) {
-                    voiceWakeActivated = true;
-                    voiceWakeTranscript = heardWakeWord ? textAfterWakeWord(transcript) : transcript.trim();
-                    state.chatRunState = 'Listening…';
-                } else {
-                    voiceWakeTranscript = heardWakeWord ? textAfterWakeWord(transcript) : transcript.trim();
-                }
-                if (voiceStopCommand(voiceWakeTranscript)) {
-                    stopVoiceConversationFromSpeech().catch((error) => {
-                        state.error = friendlyError(error, 'stop voice conversation');
-                        render();
-                    });
-                    return;
-                }
-                updateVoiceWakeDraft(voiceWakeTranscript);
-                if (voiceWakeTranscript) {
-                    const latestResult = speechEvent.results?.[speechEvent.results.length - 1];
-                    scheduleVoiceWakeSend(voiceWakeTranscript, latestResult?.isFinal ? 450 : 1200);
-                }
-                render();
-            };
-            voiceWakeRecognition.onerror = (speechEvent) => {
-                if (!state.voiceWakeListening) return;
-                const errorName = String(speechEvent?.error || '');
-                if (['no-speech', 'aborted'].includes(errorName)) return;
-                state.error = errorName === 'not-allowed'
-                    ? 'Microphone permission is needed for Hey Bean listening.'
-                    : 'Hey Bean listening stopped. Tap the mic to try again.';
-                stopVoiceWakeListening({ clearDraft: false });
-                render();
-            };
-            voiceWakeRecognition.onend = () => {
-                if (!state.voiceWakeListening || voiceWakePausedForBean) return;
-                try {
-                    voiceWakeRecognition?.start?.();
-                } catch (_) {
-                    window.setTimeout(() => {
-                        if (!state.voiceWakeListening) return;
-                        try {
-                            voiceWakeRecognition?.start?.();
-                        } catch (error) {
-                            state.error = 'Hey Bean listening stopped. Tap the mic to try again.';
-                            stopVoiceWakeListening({ clearDraft: false });
-                            render();
-                        }
-                    }, 400);
-                }
-            };
-            voiceWakeRecognition.start();
+            await connectRealtimeVoice();
+            realtimeVoiceActive = true;
+            state.voiceWakeListening = true;
+            state.voiceProcessing = false;
+            state.chatRunState = 'Listening for “Hey Bean”…';
+            updateVoiceWakeDraft('');
             render();
         } catch (error) {
             stopVoiceWakeListening({ clearDraft: false });
-            state.error = friendlyError(error, 'start Hey Bean listening');
+            state.error = friendlyError(error, 'start realtime Bean voice');
+            state.voiceProcessing = false;
             render();
         }
     }
 
     function toggleVoiceWakeListening(event) {
         event?.preventDefault?.();
-        if (state.voiceWakeListening) {
+        if (state.voiceWakeListening || realtimeVoiceActive || state.voiceProcessing) {
             stopVoiceWakeListening();
             render();
             return;
         }
         startVoiceWakeListening(event);
-    }
-
-    async function startVoiceChatCapture(event) {
-        event?.preventDefault?.();
-        if (beanChatWaking() || state.voiceRecording || state.voiceProcessing || voiceCapturePending) return;
-        if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-            state.error = 'Voice chat needs microphone support in this browser.';
-            render();
-            return;
-        }
-        voiceCapturePending = true;
-        voiceCaptureReleaseRequested = false;
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            voiceStream = stream;
-            if (voiceCaptureReleaseRequested) {
-                cleanupVoiceCapture();
-                return;
-            }
-            voiceChunks = [];
-            voiceRecorder = new MediaRecorder(voiceStream);
-            voiceRecorder.addEventListener('dataavailable', (chunkEvent) => {
-                if (chunkEvent.data?.size) voiceChunks.push(chunkEvent.data);
-            });
-            voiceRecorder.start();
-            const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (Recognition) {
-                voiceRecognition = new Recognition();
-                voiceRecognition.continuous = true;
-                voiceRecognition.interimResults = true;
-                voiceRecognition.onresult = (speechEvent) => {
-                    const transcript = Array.from(speechEvent.results)
-                        .map((result) => result[0]?.transcript || '')
-                        .join(' ')
-                        .trim();
-                    if (!transcript) return;
-                    state.chatDraft = transcript;
-                    const textarea = mount.querySelector('textarea[name="message"]');
-                    if (textarea) {
-                        textarea.value = transcript;
-                        resizeChatInput(textarea);
-                    }
-                };
-                voiceRecognition.start();
-            }
-            if (voiceCaptureReleaseRequested) {
-                cleanupVoiceCapture();
-                return;
-            }
-            voiceCapturePending = false;
-            state.voiceRecording = true;
-            state.chatRunState = 'Listening…';
-            state.chatDraft = 'Listening…';
-            render();
-        } catch (error) {
-            cleanupVoiceCapture();
-            state.error = friendlyError(error, 'start voice chat');
-            state.voiceRecording = false;
-            render();
-        }
-    }
-
-    async function finishVoiceChatCapture(event) {
-        event?.preventDefault?.();
-        if (voiceCapturePending && !state.voiceRecording) {
-            voiceCaptureReleaseRequested = true;
-            return;
-        }
-        if (!state.voiceRecording || !voiceRecorder) return;
-        state.voiceRecording = false;
-        state.voiceProcessing = true;
-        state.chatRunState = 'Transcribing…';
-        state.chatDraft = 'Transcribing…';
-        render();
-        try {
-            voiceRecognition?.stop?.();
-            voiceRecognition = null;
-            const blob = await new Promise((resolve) => {
-                voiceRecorder.addEventListener('stop', () => {
-                    resolve(new Blob(voiceChunks, { type: voiceRecorder.mimeType || 'audio/webm' }));
-                }, { once: true });
-                voiceRecorder.stop();
-            });
-            voiceStream?.getTracks?.().forEach((track) => track.stop());
-            voiceStream = null;
-            voiceRecorder = null;
-            const form = new FormData();
-            form.append('audio', blob, 'voice.webm');
-            const transcription = await apiForm('/assistant/voice/transcriptions', form);
-            const text = String(transcription?.text || '').trim();
-            state.voiceProcessing = false;
-            state.chatDraft = text;
-            if (!text) state.chatRunState = 'Ready';
-            render();
-            const textarea = mount.querySelector('textarea[name="message"]');
-            if (textarea) {
-                textarea.value = text;
-                resizeChatInput(textarea);
-            }
-            if (!text) return;
-            const result = await sendChatContent(text, { voiceRequest: true });
-            if (result?.assistantContent) playBeanVoiceResponse(result.assistantContent).catch(() => {});
-        } catch (error) {
-            voiceRecognition?.stop?.();
-            voiceRecognition = null;
-            voiceStream?.getTracks?.().forEach((track) => track.stop());
-            voiceStream = null;
-            voiceRecorder = null;
-            state.voiceRecording = false;
-            state.voiceProcessing = false;
-            state.chatRunState = 'Ready';
-            state.error = friendlyError(error, 'finish voice chat');
-            render();
-        }
-    }
-
-    async function unlockBeanVoicePlayback() {
-        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-        if (AudioContextCtor) {
-            beanVoiceAudioContext ??= new AudioContextCtor();
-            if (beanVoiceAudioContext.state === 'suspended') {
-                await beanVoiceAudioContext.resume();
-            }
-        }
-        if (beanVoicePlaybackUnlocked) return;
-        beanVoiceAudio ??= new Audio();
-        try {
-            beanVoiceAudio.muted = true;
-            beanVoiceAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQQAAAAAAA==';
-            await beanVoiceAudio.play();
-            beanVoiceAudio.pause();
-            beanVoiceAudio.currentTime = 0;
-            beanVoiceAudio.muted = false;
-            beanVoicePlaybackUnlocked = true;
-        } catch (_) {
-            beanVoiceAudio.muted = false;
-        }
-    }
-
-    function base64ToArrayBuffer(base64) {
-        const binary = atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let index = 0; index < binary.length; index += 1) {
-            bytes[index] = binary.charCodeAt(index);
-        }
-        return bytes.buffer;
-    }
-
-    async function playBeanVoiceWithAudioContext(audioBase64) {
-        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContextCtor) return false;
-        beanVoiceAudioContext ??= new AudioContextCtor();
-        if (beanVoiceAudioContext.state === 'suspended') {
-            await beanVoiceAudioContext.resume();
-        }
-        const audioBuffer = await beanVoiceAudioContext.decodeAudioData(base64ToArrayBuffer(audioBase64).slice(0));
-        stopBeanVoicePlayback();
-        const source = beanVoiceAudioContext.createBufferSource();
-        beanVoiceAudioSource = source;
-        source.buffer = audioBuffer;
-        source.connect(beanVoiceAudioContext.destination);
-        source.onended = () => {
-            if (beanVoiceAudioSource === source) beanVoiceAudioSource = null;
-        };
-        await new Promise((resolve) => {
-            source.onended = () => {
-                if (beanVoiceAudioSource === source) beanVoiceAudioSource = null;
-                resolve();
-            };
-            source.start(0);
-        });
-        return true;
-    }
-
-    async function playBeanVoiceWithElement(speech) {
-        const bytes = new Uint8Array(base64ToArrayBuffer(speech.audio_base64));
-        if (beanVoiceBlobUrl) {
-            URL.revokeObjectURL(beanVoiceBlobUrl);
-            beanVoiceBlobUrl = '';
-        }
-        beanVoiceBlobUrl = URL.createObjectURL(new Blob([bytes], { type: speech.mime_type || 'audio/mpeg' }));
-        beanVoiceAudio ??= new Audio();
-        beanVoiceAudio.pause();
-        beanVoiceAudio.src = beanVoiceBlobUrl;
-        beanVoiceAudio.muted = false;
-        beanVoiceAudio.addEventListener('ended', () => {
-            if (beanVoiceBlobUrl) {
-                URL.revokeObjectURL(beanVoiceBlobUrl);
-                beanVoiceBlobUrl = '';
-            }
-        }, { once: true });
-        beanVoiceAudio.addEventListener('error', () => {
-            if (beanVoiceBlobUrl) {
-                URL.revokeObjectURL(beanVoiceBlobUrl);
-                beanVoiceBlobUrl = '';
-            }
-        }, { once: true });
-        try {
-            await beanVoiceAudio.play();
-            await new Promise((resolve, reject) => {
-                beanVoiceAudio.addEventListener('ended', resolve, { once: true });
-                beanVoiceAudio.addEventListener('error', reject, { once: true });
-            });
-        } catch (error) {
-            if (beanVoiceBlobUrl) {
-                URL.revokeObjectURL(beanVoiceBlobUrl);
-                beanVoiceBlobUrl = '';
-            }
-            throw error;
-        }
-    }
-
-    async function playBeanVoiceResponse(text) {
-        pauseVoiceWakeRecognitionForBean();
-        if (state.voiceWakeListening) {
-            state.chatRunState = 'Bean is speaking…';
-            render();
-        }
-        const speech = await api('/assistant/voice/speech', {
-            method: 'POST',
-            body: { text },
-            timeoutMs: 30000,
-        });
-        if (!speech?.audio_base64) return;
-        try {
-            if (await playBeanVoiceWithAudioContext(speech.audio_base64)) return;
-        } catch (error) {
-            console.warn('Bean Web Audio playback failed; falling back to audio element.', error);
-        }
-        await playBeanVoiceWithElement(speech);
     }
 
     async function submitChat(event) {
@@ -9701,6 +9585,7 @@ export function mountHeyBeanWebApp(mount) {
         resetBeanWorkItems([]);
         state.error = '';
         render();
+        if (options.voiceRequest) scheduleVoiceFiller(requestId);
         try {
             if (!state.session?.id) {
                 const onboarding = needsBeanOnboarding();
@@ -9790,6 +9675,7 @@ export function mountHeyBeanWebApp(mount) {
                 state.chatRunState = 'Failed';
             }
         } finally {
+            if (options.voiceRequest) clearVoiceFiller();
             cancelledChatRequestIds.delete(requestId);
             if (activeChatRequestId === requestId) {
                 const shouldKeepPollingWork = result

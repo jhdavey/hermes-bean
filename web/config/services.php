@@ -88,6 +88,13 @@ return [
     'openai' => [
         'server_api_key' => $openAiPublicKey,
         'public_key' => $openAiPublicKey,
+        'realtime_model' => env('OPENAI_REALTIME_MODEL', 'gpt-4o-realtime-preview'),
+        'realtime_webrtc_url' => env('OPENAI_REALTIME_WEBRTC_URL', 'https://api.openai.com/v1/realtime'),
+        'realtime_session_timeout' => (float) env('OPENAI_REALTIME_SESSION_TIMEOUT', 10),
+        'realtime_transcription_model' => env('OPENAI_REALTIME_TRANSCRIPTION_MODEL', 'gpt-4o-mini-transcribe'),
+        'realtime_vad_threshold' => (float) env('OPENAI_REALTIME_VAD_THRESHOLD', 0.5),
+        'realtime_vad_prefix_padding_ms' => (int) env('OPENAI_REALTIME_VAD_PREFIX_PADDING_MS', 300),
+        'realtime_vad_silence_duration_ms' => (int) env('OPENAI_REALTIME_VAD_SILENCE_DURATION_MS', 650),
     ],
 
     'firebase' => [

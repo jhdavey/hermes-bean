@@ -106,16 +106,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   };
   final TextEditingController _chatInputController = TextEditingController();
   final FocusNode _chatInputFocusNode = FocusNode();
-  final AudioRecorder _voiceRecorder = AudioRecorder();
-  final AudioPlayer _voicePlayer = AudioPlayer();
-  final stt.SpeechToText _speechToText = stt.SpeechToText();
-  bool _speechToTextReady = false;
-  bool _speechToTextListening = false;
-  bool _voiceCapturePending = false;
-  bool _voiceCaptureReleaseRequested = false;
   bool _voiceRecording = false;
   bool _voiceProcessing = false;
-  String? _voiceRecordingPath;
   final List<_QueuedBeanChatRequest> _beanChatQueue =
       <_QueuedBeanChatRequest>[];
   bool _beanChatCollapsed = false;
@@ -1237,20 +1229,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanResponsePreviewTimer?.cancel();
     _reminderDueTimer?.cancel();
     _stopDashboardChangePolling();
-    final pendingVoiceRecordingPath = _voiceRecordingPath;
-    if (pendingVoiceRecordingPath != null) {
-      unawaited(() async {
-        try {
-          await File(pendingVoiceRecordingPath).delete();
-        } catch (_) {
-          // Temporary voice files are best-effort cleanup.
-        }
-      }());
-    }
     _chatInputController.dispose();
     _chatInputFocusNode.dispose();
-    unawaited(_voiceRecorder.dispose());
-    unawaited(_voicePlayer.dispose());
     unawaited(_pushNotifications.dispose());
     super.dispose();
   }
@@ -2536,206 +2516,23 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   Future<void> _startVoiceChatCapture() async {
-    if (_session == null ||
-        _voiceRecording ||
-        _voiceProcessing ||
-        _voiceCapturePending) {
-      return;
-    }
-    String? startedPath;
-    _voiceCapturePending = true;
-    _voiceCaptureReleaseRequested = false;
-
-    Future<void> cleanupStartedCapture() async {
-      await _voiceRecorder.stop().catchError((_) => null);
-      if (_speechToTextListening) {
-        _speechToTextListening = false;
-        await _speechToText.stop();
-      }
-      if (startedPath != null) {
-        try {
-          await File(startedPath).delete();
-        } catch (_) {
-          // Temporary voice files are best-effort cleanup.
-        }
-      }
-      _voiceCapturePending = false;
-      _voiceCaptureReleaseRequested = false;
-      _voiceRecordingPath = null;
-    }
-
-    try {
-      if (!await _voiceRecorder.hasPermission()) {
-        _voiceCapturePending = false;
-        if (!mounted) return;
-        setState(
-          () => _error = 'Microphone permission is needed to talk to Bean.',
-        );
-        return;
-      }
-      if (_voiceCaptureReleaseRequested) {
-        await cleanupStartedCapture();
-        return;
-      }
-      final directory = await getTemporaryDirectory();
-      final path =
-          '${directory.path}/heybean-voice-${DateTime.now().microsecondsSinceEpoch}.m4a';
-      startedPath = path;
-      if (_voiceCaptureReleaseRequested) {
-        await cleanupStartedCapture();
-        return;
-      }
-      await _voiceRecorder.start(
-        const RecordConfig(
-          encoder: AudioEncoder.aacLc,
-          bitRate: 64000,
-          sampleRate: 24000,
-        ),
-        path: path,
-      );
-      if (_voiceCaptureReleaseRequested || !mounted) {
-        await cleanupStartedCapture();
-        return;
-      }
-      setState(() {
-        _voiceCapturePending = false;
-        _voiceRecording = true;
-        _voiceRecordingPath = path;
-        _error = null;
-        _chatRunState = 'Listening…';
-        _chatInputController.text = 'Listening…';
-        _chatInputController.selection = TextSelection.collapsed(
-          offset: _chatInputController.text.length,
-        );
-      });
-      if (!_speechToTextReady) {
-        _speechToTextReady = await _speechToText.initialize();
-      }
-      if (!_voiceRecording || !_speechToTextReady) return;
-      _speechToTextListening = true;
-      unawaited(
-        _speechToText.listen(
-          listenOptions: stt.SpeechListenOptions(
-            listenMode: stt.ListenMode.dictation,
-            partialResults: true,
-          ),
-          onResult: (result) {
-            if (!mounted || !_voiceRecording) return;
-            final words = result.recognizedWords.trim();
-            if (words.isEmpty) return;
-            setState(() {
-              _chatInputController.text = words;
-              _chatInputController.selection = TextSelection.collapsed(
-                offset: words.length,
-              );
-            });
-          },
-        ),
-      );
-    } catch (error) {
-      await cleanupStartedCapture();
-      if (!mounted) return;
-      setState(() {
-        _voiceRecording = false;
-        _voiceProcessing = false;
-        _error = beanFriendlyErrorMessage(error, action: 'start voice chat');
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      _voiceRecording = false;
+      _voiceProcessing = false;
+      _chatRunState = 'Ready';
+      _error =
+          'Bean voice now uses OpenAI Realtime. Mobile realtime voice is being rebuilt without the old REST transcription/TTS fallback; use Laravel web voice for launch testing.';
+    });
   }
 
   Future<void> _finishVoiceChatCapture() async {
-    if (_voiceCapturePending && !_voiceRecording) {
-      _voiceCaptureReleaseRequested = true;
-      return;
-    }
-    if (!_voiceRecording || _voiceProcessing) return;
-    _voiceCapturePending = false;
-    _voiceCaptureReleaseRequested = false;
+    if (!mounted) return;
     setState(() {
       _voiceRecording = false;
-      _voiceProcessing = true;
-      _chatRunState = 'Transcribing…';
-      _chatInputController.text = 'Transcribing…';
+      _voiceProcessing = false;
+      _chatRunState = 'Ready';
     });
-    if (_speechToTextListening) {
-      _speechToTextListening = false;
-      await _speechToText.stop();
-    }
-    try {
-      final stoppedPath = await _voiceRecorder.stop();
-      final path = stoppedPath ?? _voiceRecordingPath;
-      if (path == null) {
-        if (!mounted) return;
-        setState(() {
-          _voiceProcessing = false;
-          _voiceRecordingPath = null;
-          _chatRunState = 'Ready';
-        });
-        return;
-      }
-      try {
-        final transcription = await widget.apiClient.transcribeVoiceFile(
-          File(path),
-        );
-        final text = transcription.text.trim();
-        if (!mounted) return;
-        setState(() {
-          _voiceProcessing = false;
-          _voiceRecordingPath = null;
-          if (text.isEmpty) {
-            _chatRunState = 'Ready';
-          }
-          _chatInputController.text = text;
-          _chatInputController.selection = TextSelection.collapsed(
-            offset: text.length,
-          );
-        });
-        if (text.isEmpty) return;
-        final assistantText = await _sendChat(text, voiceRequest: true);
-        if (assistantText != null && assistantText.trim().isNotEmpty) {
-          unawaited(_playBeanVoiceResponse(assistantText));
-        }
-      } finally {
-        try {
-          await File(path).delete();
-        } catch (_) {
-          // Temporary voice files are best-effort cleanup.
-        }
-      }
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _voiceRecording = false;
-        _voiceProcessing = false;
-        _voiceRecordingPath = null;
-        _chatRunState = 'Ready';
-        _error = beanFriendlyErrorMessage(error, action: 'finish voice chat');
-      });
-    }
-  }
-
-  Future<void> _playBeanVoiceResponse(String text) async {
-    try {
-      final speech = await widget.apiClient.synthesizeSpeech(text: text);
-      final bytes = base64Decode(speech.audioBase64);
-      final directory = await getTemporaryDirectory();
-      final path =
-          '${directory.path}/heybean-reply-${DateTime.now().microsecondsSinceEpoch}.mp3';
-      final file = File(path);
-      await file.writeAsBytes(bytes, flush: true);
-      try {
-        await _voicePlayer.setFilePath(path);
-        await _voicePlayer.play();
-      } finally {
-        try {
-          await file.delete();
-        } catch (_) {
-          // Temporary voice files are best-effort cleanup.
-        }
-      }
-    } catch (_) {
-      // Text response already rendered; voice playback should never block chat.
-    }
   }
 
   Future<void> _sendChatInputDraft() async {

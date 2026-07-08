@@ -1213,59 +1213,6 @@ class HermesApiClient {
     return HermesSession.fromJson(_expectMap(data['data']));
   }
 
-  Future<HermesVoiceSpeechResult> synthesizeSpeech({
-    required String text,
-    int? workspaceId,
-  }) async {
-    final data = await _sendJson(
-      'POST',
-      '/assistant/voice/speech',
-      body: {
-        'text': text,
-        if (workspaceId != null) 'workspace_id': workspaceId,
-      },
-      responseTimeout: const Duration(seconds: 30),
-    );
-    return HermesVoiceSpeechResult.fromJson(_expectMap(data['data']));
-  }
-
-  Future<HermesVoiceTranscriptionResult> transcribeVoiceFile(File audio) async {
-    final request = await HttpClient()
-        .postUrl(_resolveApiPath('/assistant/voice/transcriptions'))
-        .timeout(const Duration(seconds: 15));
-    request.headers.set('Accept', 'application/json');
-    if (bearerToken != null) {
-      request.headers.set('Authorization', 'Bearer $bearerToken');
-    }
-    final boundary =
-        '----heybean-voice-${DateTime.now().microsecondsSinceEpoch}';
-    request.headers.set(
-      'Content-Type',
-      'multipart/form-data; boundary=$boundary',
-    );
-    final filename = audio.uri.pathSegments.isEmpty
-        ? 'voice.m4a'
-        : audio.uri.pathSegments.last;
-    final header = utf8.encode(
-      '--$boundary\r\n'
-      'Content-Disposition: form-data; name="audio"; filename="$filename"\r\n'
-      'Content-Type: audio/mp4\r\n\r\n',
-    );
-    request.add(header);
-    request.add(await audio.readAsBytes());
-    request.add(utf8.encode('\r\n--$boundary--\r\n'));
-    final response = await request.close().timeout(const Duration(seconds: 30));
-    final responseBody = await utf8.decoder.bind(response).join();
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw HermesApiException(response.statusCode, responseBody);
-    }
-    final decoded = jsonDecode(responseBody);
-    if (decoded is! Map<String, Object?>) {
-      throw const FormatException('Expected top-level JSON object');
-    }
-    return HermesVoiceTranscriptionResult.fromJson(_expectMap(decoded['data']));
-  }
-
   Future<HermesMessageResult> sendMessage({
     required int sessionId,
     required String content,
@@ -2381,44 +2328,6 @@ class WorkspaceSyncResult {
         tasks: _readIntOrNull(json['tasks']) ?? 0,
         reminders: _readIntOrNull(json['reminders']) ?? 0,
         calendarEvents: _readIntOrNull(json['calendar_events']) ?? 0,
-      );
-}
-
-class HermesVoiceSpeechResult {
-  const HermesVoiceSpeechResult({
-    required this.audioBase64,
-    required this.mimeType,
-    required this.voice,
-    required this.provider,
-  });
-
-  final String audioBase64;
-  final String mimeType;
-  final String voice;
-  final String provider;
-
-  factory HermesVoiceSpeechResult.fromJson(Map<String, Object?> json) =>
-      HermesVoiceSpeechResult(
-        audioBase64: _expectString(json['audio_base64'] ?? json['audioBase64']),
-        mimeType: _expectString(json['mime_type'] ?? json['mimeType']),
-        voice: _expectString(json['voice']),
-        provider: _readStringOrDefault(json['provider'], 'openai'),
-      );
-}
-
-class HermesVoiceTranscriptionResult {
-  const HermesVoiceTranscriptionResult({
-    required this.text,
-    required this.provider,
-  });
-
-  final String text;
-  final String provider;
-
-  factory HermesVoiceTranscriptionResult.fromJson(Map<String, Object?> json) =>
-      HermesVoiceTranscriptionResult(
-        text: _expectString(json['text']),
-        provider: _readStringOrDefault(json['provider'], 'openai'),
       );
 }
 
