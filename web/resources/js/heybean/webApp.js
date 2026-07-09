@@ -9205,7 +9205,9 @@ export function mountHeyBeanWebApp(mount) {
             const [stream] = event.streams;
             if (stream) realtimeRemoteAudio.srcObject = stream;
         };
-        realtimeLocalStream.getTracks().forEach((track) => realtimePeerConnection.addTrack(track, realtimeLocalStream));
+        const [audioTrack] = realtimeLocalStream.getAudioTracks();
+        if (!audioTrack) throw new Error('Microphone did not provide an audio track.');
+        realtimePeerConnection.addTransceiver(audioTrack, { direction: 'sendrecv', streams: [realtimeLocalStream] });
 
         realtimeDataChannel = realtimePeerConnection.createDataChannel('oai-events');
         realtimeDataChannel.addEventListener('open', () => {
@@ -9224,10 +9226,20 @@ export function mountHeyBeanWebApp(mount) {
             headers: {
                 Authorization: `Bearer ${secret}`,
                 'Content-Type': 'application/sdp',
+                Accept: 'application/sdp, application/json',
             },
             body: offer.sdp,
         });
-        if (!sdpResponse.ok) throw new Error(`Realtime voice connection failed (${sdpResponse.status}).`);
+        if (!sdpResponse.ok) {
+            const errorBody = await sdpResponse.text().catch(() => '');
+            let detail = '';
+            try {
+                detail = JSON.parse(errorBody)?.error?.message || '';
+            } catch (_) {
+                detail = errorBody.trim().slice(0, 220);
+            }
+            throw new Error(`Realtime voice connection failed (${sdpResponse.status})${detail ? `: ${detail}` : ''}.`);
+        }
         await realtimePeerConnection.setRemoteDescription({ type: 'answer', sdp: await sdpResponse.text() });
     }
 
