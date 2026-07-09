@@ -156,6 +156,8 @@ export function mountHeyBeanWebApp(mount) {
     let realtimeResponseActive = false;
     let realtimeLastCommandKey = '';
     let realtimeLastCommandAt = 0;
+    let realtimeTurnGuardUntil = 0;
+    let realtimeIgnoreInputUntil = 0;
     let realtimeToolCalls = new Map();
 
     const guidedSignupPersonalities = [
@@ -9211,6 +9213,7 @@ export function mountHeyBeanWebApp(mount) {
         realtimeAssistantDraft = '';
         stopBeanVoicePlayback();
         realtimeResponseActive = true;
+        realtimeIgnoreInputUntil = Date.now() + 2500;
         return realtimeSend({
             type: 'response.create',
             response: { instructions: content },
@@ -9319,6 +9322,7 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         if (payload.type === 'input_audio_buffer.speech_started') {
+            if (Date.now() < realtimeIgnoreInputUntil || realtimeLaravelTurnInFlight) return;
             stopBeanVoicePlayback();
             state.chatRunState = realtimeWakeActivated || realtimeFollowUpActive() ? 'Listening…' : 'Listening for “Hey Bean”…';
             render();
@@ -9374,6 +9378,7 @@ export function mountHeyBeanWebApp(mount) {
 
         if (payload.type === 'response.done') {
             realtimeResponseActive = false;
+            realtimeIgnoreInputUntil = Date.now() + 1200;
             const output = normalizeList(payload.response?.output);
             output.forEach((item) => {
                 if (item?.type === 'function_call') {
@@ -9406,6 +9411,8 @@ export function mountHeyBeanWebApp(mount) {
             await stopVoiceConversationFromSpeech();
             return;
         }
+        const now = Date.now();
+        if (now < realtimeIgnoreInputUntil || realtimeResponseActive || realtimeLaravelTurnInFlight || now < realtimeTurnGuardUntil) return;
         const heardWakeWord = voiceWakeWordPattern().test(text);
         const acceptsFollowUp = realtimeWakeActivated || realtimeFollowUpActive();
         if (!acceptsFollowUp && !heardWakeWord) return;
@@ -9420,7 +9427,6 @@ export function mountHeyBeanWebApp(mount) {
         if (realtimeLaravelTurnInFlight || chatHasActiveTurn()) return;
 
         const commandKey = normalizedVoiceCommand(command);
-        const now = Date.now();
         if (commandKey && realtimeLastCommandKey === commandKey && now - realtimeLastCommandAt < 8000) return;
         realtimeLastCommandKey = commandKey;
         realtimeLastCommandAt = now;
@@ -9454,8 +9460,9 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
 
-        await speakRealtimeInstructions(realtimeWorkingAckInstructions(command));
+        realtimeTurnGuardUntil = now + 20000;
         realtimeLaravelTurnInFlight = true;
+        await speakRealtimeInstructions(realtimeWorkingAckInstructions(command));
         state.chatRunState = 'Thinking…';
         state.chatDraft = '';
         state.messages = state.messages.filter((message) => !message?.metadata?.realtime_draft);
@@ -9474,6 +9481,7 @@ export function mountHeyBeanWebApp(mount) {
             render();
         } finally {
             realtimeLaravelTurnInFlight = false;
+            realtimeTurnGuardUntil = Date.now() + 5000;
         }
     }
 
@@ -9584,6 +9592,8 @@ export function mountHeyBeanWebApp(mount) {
         realtimeResponseActive = false;
         realtimeLastCommandKey = '';
         realtimeLastCommandAt = 0;
+        realtimeTurnGuardUntil = 0;
+        realtimeIgnoreInputUntil = 0;
         realtimeToolCalls.clear();
         realtimeVoiceActive = false;
         state.voiceWakeListening = false;
