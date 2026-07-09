@@ -153,6 +153,9 @@ export function mountHeyBeanWebApp(mount) {
     let realtimeAssistantDraft = '';
     let realtimeLaravelTurnInFlight = false;
     let realtimeSuppressNextAssistantTranscript = false;
+    let realtimeResponseActive = false;
+    let realtimeLastCommandKey = '';
+    let realtimeLastCommandAt = 0;
     let realtimeToolCalls = new Map();
 
     const guidedSignupPersonalities = [
@@ -9083,16 +9086,27 @@ export function mountHeyBeanWebApp(mount) {
             .trim();
     }
 
+    function voiceWakeWordPattern() {
+        return /\bhey[\s,.-]*(bean|ben|bin|bing|being|beane|beam)\b/i;
+    }
+
+    function stripVoiceWakeWords(text) {
+        return String(text || '')
+            .replace(/\bhey[\s,.-]*(bean|ben|bin|bing|being|beane|beam)\b/ig, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
     function voiceStopCommand(text) {
-        const normalized = normalizedVoiceCommand(text).replace(/\bhey\s+bean\b/g, '').trim();
+        const normalized = normalizedVoiceCommand(stripVoiceWakeWords(text));
         if (!normalized) return false;
-        return /^(thanks|thank you|thx|nevermind|never mind|cancel|stop|stop listening|stop talking|that'?s all|that is all|all done|we'?re good|were good|i'?m good|im good|no thanks|no thank you|goodbye|bye|shut up)( bean)?$/i.test(normalized)
-            || /^(bean )?(thanks|thank you|nevermind|never mind|cancel|stop|stop listening|stop talking|that'?s all|that is all|all done|goodbye|bye|shut up)$/i.test(normalized);
+        return /^(thanks|thank you|thx|nevermind|never mind|cancel|stop|stop listening|stop talking|that'?s all|that is all|all done|we'?re good|were good|i'?m good|im good|no thanks|no thank you|goodbye|bye|shut up)( bean| ben| bin| bing| being)?$/i.test(normalized)
+            || /^(bean|ben|bin|bing|being) (thanks|thank you|nevermind|never mind|cancel|stop|stop listening|stop talking|that'?s all|that is all|all done|goodbye|bye|shut up)$/i.test(normalized);
     }
 
     function textAfterWakeWord(text) {
         return String(text || '')
-            .replace(/^.*?\bhey[\s,.-]*bean\b[\s,.:;!?-]*/i, '')
+            .replace(/^.*?\bhey[\s,.-]*(bean|ben|bin|bing|being|beane|beam)\b[\s,.:;!?-]*/i, '')
             .trim();
     }
 
@@ -9127,9 +9141,12 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function stopBeanVoicePlayback(options = {}) {
-        try {
-            realtimeSend({ type: 'response.cancel' });
-        } catch (_) {}
+        if (realtimeResponseActive) {
+            try {
+                realtimeSend({ type: 'response.cancel' });
+            } catch (_) {}
+            realtimeResponseActive = false;
+        }
         if (options.teardown && realtimeRemoteAudio) {
             try {
                 realtimeRemoteAudio.pause();
@@ -9164,9 +9181,8 @@ export function mountHeyBeanWebApp(mount) {
         if (!content || !realtimeDataChannel || realtimeDataChannel.readyState !== 'open') return;
         realtimeSuppressNextAssistantTranscript = true;
         realtimeAssistantDraft = '';
-        try {
-            realtimeSend({ type: 'response.cancel' });
-        } catch (_) {}
+        stopBeanVoicePlayback();
+        realtimeResponseActive = true;
         realtimeSend({
             type: 'response.create',
             response: {
@@ -9266,6 +9282,11 @@ export function mountHeyBeanWebApp(mount) {
         }
         if (!payload?.type) return;
 
+        if (payload.type === 'response.created') {
+            realtimeResponseActive = true;
+            return;
+        }
+
         if (payload.type === 'input_audio_buffer.speech_started') {
             stopBeanVoicePlayback();
             state.chatRunState = realtimeWakeActivated || realtimeFollowUpActive() ? 'Listening…' : 'Listening for “Hey Bean”…';
@@ -9321,6 +9342,7 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         if (payload.type === 'response.done') {
+            realtimeResponseActive = false;
             const output = normalizeList(payload.response?.output);
             output.forEach((item) => {
                 if (item?.type === 'function_call') {
@@ -9334,7 +9356,12 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         if (payload.type === 'error') {
-            state.error = payload.error?.message || 'Realtime voice stopped unexpectedly.';
+            const errorMessage = payload.error?.message || 'Realtime voice stopped unexpectedly.';
+            if (/Cancellation failed: no active response found/i.test(errorMessage)) {
+                realtimeResponseActive = false;
+                return;
+            }
+            state.error = errorMessage;
             render();
         }
     }
@@ -9348,7 +9375,7 @@ export function mountHeyBeanWebApp(mount) {
             await stopVoiceConversationFromSpeech();
             return;
         }
-        const heardWakeWord = /\bhey[\s,.-]*bean\b/i.test(text);
+        const heardWakeWord = voiceWakeWordPattern().test(text);
         const acceptsFollowUp = realtimeWakeActivated || realtimeFollowUpActive();
         if (!acceptsFollowUp && !heardWakeWord) return;
 
@@ -9360,6 +9387,12 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
         if (realtimeLaravelTurnInFlight || chatHasActiveTurn()) return;
+
+        const commandKey = normalizedVoiceCommand(command);
+        const now = Date.now();
+        if (commandKey && realtimeLastCommandKey === commandKey && now - realtimeLastCommandAt < 8000) return;
+        realtimeLastCommandKey = commandKey;
+        realtimeLastCommandAt = now;
 
         realtimeWakeActivated = true;
         clearRealtimeFollowUpWindow();
@@ -9373,8 +9406,7 @@ export function mountHeyBeanWebApp(mount) {
             if (result?.assistantContent) {
                 await playBeanVoiceResponse(result.assistantContent);
                 if (state.voiceWakeListening) {
-                    setRealtimeFollowUpWindow();
-                    state.chatRunState = 'Listening for follow-up…';
+                    state.chatRunState = 'Bean is speaking…';
                     render();
                 }
             }
@@ -9490,6 +9522,9 @@ export function mountHeyBeanWebApp(mount) {
         realtimeAssistantDraft = '';
         realtimeLaravelTurnInFlight = false;
         realtimeSuppressNextAssistantTranscript = false;
+        realtimeResponseActive = false;
+        realtimeLastCommandKey = '';
+        realtimeLastCommandAt = 0;
         realtimeToolCalls.clear();
         realtimeVoiceActive = false;
         state.voiceWakeListening = false;
