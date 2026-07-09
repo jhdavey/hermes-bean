@@ -9152,16 +9152,11 @@ export function mountHeyBeanWebApp(mount) {
 
     function setRealtimeFollowUpWindow() {
         window.clearTimeout(realtimeFollowUpTimer);
-        realtimeFollowUpUntil = Date.now() + 30000;
+        realtimeFollowUpUntil = Date.now() + 15000;
         realtimeWakeActivated = true;
         realtimeFollowUpTimer = window.setTimeout(() => {
-            realtimeFollowUpUntil = 0;
-            realtimeWakeActivated = false;
-            if (state.voiceWakeListening && !state.busy) {
-                state.chatRunState = 'Listening for “Hey Bean”…';
-                render();
-            }
-        }, 30000);
+            resetRealtimeConversationToWakeMode();
+        }, 15000);
     }
 
     function realtimeSend(event) {
@@ -9571,14 +9566,34 @@ export function mountHeyBeanWebApp(mount) {
         }
     }
 
-    async function stopVoiceConversationFromSpeech() {
+    function resetRealtimeConversationToWakeMode(options = {}) {
         clearRealtimeFollowUpWindow();
-        stopBeanVoicePlayback({ teardown: true });
-        stopVoiceWakeListening();
+        realtimeWakeActivated = false;
+        realtimePendingTranscript = '';
+        realtimeAssistantDraft = '';
+        realtimeLaravelTurnInFlight = false;
+        realtimeSuppressNextAssistantTranscript = false;
+        if (options.stopPlayback !== false) stopBeanVoicePlayback({ teardown: false });
+        realtimeResponseActive = false;
+        realtimeLastCommandKey = '';
+        realtimeLastCommandAt = 0;
+        realtimeTurnGuardUntil = Date.now() + (options.guardMs ?? 1200);
+        realtimeIgnoreInputUntil = Date.now() + (options.guardMs ?? 1200);
+        realtimeToolCalls.clear();
+        updateVoiceWakeDraft('');
+        if (state.voiceWakeListening || realtimeVoiceActive) {
+            state.voiceWakeListening = true;
+            state.voiceProcessing = false;
+            if (!state.busy) state.chatRunState = 'Listening for “Hey Bean”…';
+            render();
+        }
+    }
+
+    async function stopVoiceConversationFromSpeech() {
+        resetRealtimeConversationToWakeMode({ stopPlayback: true, guardMs: 1500 });
         if (state.busy || activeChatRequestId) {
             await cancelBeanTurn();
-        } else {
-            render();
+            resetRealtimeConversationToWakeMode({ stopPlayback: false, guardMs: 1500 });
         }
     }
 
