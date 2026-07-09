@@ -9110,6 +9110,14 @@ export function mountHeyBeanWebApp(mount) {
             .trim();
     }
 
+    function realtimeVoiceStatusAnswer(text) {
+        const normalized = normalizedVoiceCommand(stripVoiceWakeWords(text));
+        if (/^(can you hear me|do you hear me|are you listening|can you listen|is the mic working|can you hear my voice)$/.test(normalized)) {
+            return 'Yes — I can hear you. What would you like me to help with?';
+        }
+        return '';
+    }
+
     function realtimeFollowUpActive() {
         return realtimeFollowUpUntil > Date.now();
     }
@@ -9395,6 +9403,23 @@ export function mountHeyBeanWebApp(mount) {
 
         realtimeWakeActivated = true;
         clearRealtimeFollowUpWindow();
+        const voiceStatusAnswer = realtimeVoiceStatusAnswer(command);
+        if (voiceStatusAnswer) {
+            state.chatRunState = 'Bean is speaking…';
+            state.chatDraft = '';
+            state.messages = state.messages.filter((message) => !message?.metadata?.realtime_draft);
+            state.messages.push({ id: `realtime-user-${Date.now()}`, role: 'user', content: command, metadata: { realtime_voice_status: true } });
+            state.messages.push({ id: `realtime-assistant-${Date.now() + 1}`, role: 'assistant', content: voiceStatusAnswer, metadata: { realtime_voice_status: true } });
+            render();
+            await playBeanVoiceResponse(voiceStatusAnswer);
+            if (state.voiceWakeListening) {
+                setRealtimeFollowUpWindow();
+                state.chatRunState = 'Listening for follow-up…';
+                render();
+            }
+            return;
+        }
+
         realtimeLaravelTurnInFlight = true;
         state.chatRunState = 'Thinking…';
         state.chatDraft = '';
