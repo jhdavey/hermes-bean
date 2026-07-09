@@ -9118,6 +9118,32 @@ export function mountHeyBeanWebApp(mount) {
         return '';
     }
 
+    function realtimeNeedsLaravel(command) {
+        const normalized = normalizedVoiceCommand(command);
+        return /\b(task|tasks|todo|todos|to do|reminder|reminders|note|notes|calendar|event|events|schedule|appointment|appointments|dashboard|approval|approvals|weather|forecast|temperature|email|message|text|contact|contacts|account|profile|workspace|list|show|find|search|lookup|look up|create|add|make|update|change|edit|delete|remove|complete|finish|mark|move|reschedule|cancel)\b/.test(normalized);
+    }
+
+    function realtimeDirectAnswerInstructions(command) {
+        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'the user\'s local timezone';
+        const now = new Date();
+        return [
+            'You are Bean in a live voice conversation. Answer the user directly, warmly, and very briefly.',
+            'This is a simple conversational question that does not need HeyBean app data, private workspace data, actions, or external lookups.',
+            `User local time context: ${now.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' })} (${timezone}).`,
+            'If the user asks for date or time, use that local time context. Do not say you cannot hear audio; this is an active voice session.',
+            `User said: ${command}`,
+        ].join('\n');
+    }
+
+    function realtimeWorkingAckInstructions(command) {
+        return [
+            'You are Bean in a live voice conversation. Give one short, natural acknowledgement that you heard the user and are working on it.',
+            'Vary the wording like a real person. Do not use a canned phrase. Do not answer the request yet. Do not mention tools, Laravel, OpenAI, or systems.',
+            'Keep it under 12 words.',
+            `User request: ${command}`,
+        ].join('\n');
+    }
+
     function realtimeFollowUpActive() {
         return realtimeFollowUpUntil > Date.now();
     }
@@ -9184,19 +9210,23 @@ export function mountHeyBeanWebApp(mount) {
         await speakRealtimeBeanText(text);
     }
 
-    async function speakRealtimeBeanText(text) {
-        const content = String(text || '').trim();
-        if (!content || !realtimeDataChannel || realtimeDataChannel.readyState !== 'open') return;
-        realtimeSuppressNextAssistantTranscript = true;
+    async function speakRealtimeInstructions(instructions, options = {}) {
+        const content = String(instructions || '').trim();
+        if (!content || !realtimeDataChannel || realtimeDataChannel.readyState !== 'open') return false;
+        realtimeSuppressNextAssistantTranscript = options.suppressTranscript !== false;
         realtimeAssistantDraft = '';
         stopBeanVoicePlayback();
         realtimeResponseActive = true;
-        realtimeSend({
+        return realtimeSend({
             type: 'response.create',
-            response: {
-                instructions: `Speak this HeyBean answer exactly and do not add any extra facts or tasks:\n\n${content}`,
-            },
+            response: { instructions: content },
         });
+    }
+
+    async function speakRealtimeBeanText(text) {
+        const content = String(text || '').trim();
+        if (!content || !realtimeDataChannel || realtimeDataChannel.readyState !== 'open') return;
+        await speakRealtimeInstructions(`Speak this HeyBean answer exactly and do not add any extra facts or tasks:\n\n${content}`);
     }
 
     function realtimeInstructionsUpdate() {
@@ -9420,6 +9450,17 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
 
+        if (!realtimeNeedsLaravel(command)) {
+            state.chatRunState = 'Bean is speaking…';
+            state.chatDraft = '';
+            state.messages = state.messages.filter((message) => !message?.metadata?.realtime_draft);
+            state.messages.push({ id: `realtime-user-${Date.now()}`, role: 'user', content: command, metadata: { realtime_direct: true } });
+            render();
+            await speakRealtimeInstructions(realtimeDirectAnswerInstructions(command), { suppressTranscript: false });
+            return;
+        }
+
+        await speakRealtimeInstructions(realtimeWorkingAckInstructions(command));
         realtimeLaravelTurnInFlight = true;
         state.chatRunState = 'Thinking…';
         state.chatDraft = '';
