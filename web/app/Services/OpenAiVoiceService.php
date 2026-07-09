@@ -88,6 +88,8 @@ class OpenAiVoiceService
                                 'threshold' => (float) config('services.openai.realtime_vad_threshold', 0.5),
                                 'prefix_padding_ms' => (int) config('services.openai.realtime_vad_prefix_padding_ms', 300),
                                 'silence_duration_ms' => (int) config('services.openai.realtime_vad_silence_duration_ms', 650),
+                                'create_response' => false,
+                                'interrupt_response' => true,
                             ],
                         ],
                         'output' => [
