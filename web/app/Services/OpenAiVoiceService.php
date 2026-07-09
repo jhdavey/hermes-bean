@@ -73,24 +73,30 @@ class OpenAiVoiceService
         $response = Http::withToken($this->apiKey())
             ->acceptJson()
             ->timeout((float) config('services.openai.realtime_session_timeout', 10))
-            ->post($this->endpoint('/realtime/sessions'), [
-                'model' => $model,
-                'voice' => $voice,
-                'instructions' => $instructions,
-                'modalities' => ['audio', 'text'],
-                'input_audio_transcription' => [
-                    'model' => (string) config('services.openai.realtime_transcription_model', 'gpt-4o-mini-transcribe'),
+            ->post($this->endpoint('/realtime/client_secrets'), [
+                'session' => [
+                    'type' => 'realtime',
+                    'model' => $model,
+                    'instructions' => $instructions,
+                    'audio' => [
+                        'input' => [
+                            'transcription' => [
+                                'model' => (string) config('services.openai.realtime_transcription_model', 'gpt-4o-mini-transcribe'),
+                            ],
+                            'turn_detection' => [
+                                'type' => 'server_vad',
+                                'threshold' => (float) config('services.openai.realtime_vad_threshold', 0.5),
+                                'prefix_padding_ms' => (int) config('services.openai.realtime_vad_prefix_padding_ms', 300),
+                                'silence_duration_ms' => (int) config('services.openai.realtime_vad_silence_duration_ms', 650),
+                            ],
+                        ],
+                        'output' => [
+                            'voice' => $voice,
+                        ],
+                    ],
+                    'tools' => $this->realtimeTools(),
+                    'tool_choice' => 'auto',
                 ],
-                'turn_detection' => [
-                    'type' => 'server_vad',
-                    'threshold' => (float) config('services.openai.realtime_vad_threshold', 0.5),
-                    'prefix_padding_ms' => (int) config('services.openai.realtime_vad_prefix_padding_ms', 300),
-                    'silence_duration_ms' => (int) config('services.openai.realtime_vad_silence_duration_ms', 650),
-                    'create_response' => true,
-                    'interrupt_response' => true,
-                ],
-                'tools' => $this->realtimeTools(),
-                'tool_choice' => 'auto',
             ]);
 
         if (! $response->successful()) {
@@ -98,7 +104,7 @@ class OpenAiVoiceService
         }
 
         $payload = $response->json();
-        $clientSecret = data_get($payload, 'client_secret.value') ?: data_get($payload, 'client_secret');
+        $clientSecret = data_get($payload, 'value') ?: data_get($payload, 'client_secret.value') ?: data_get($payload, 'client_secret');
         if (! is_string($clientSecret) || trim($clientSecret) === '') {
             throw new RuntimeException('OpenAI realtime session response did not include a client secret.');
         }
@@ -109,8 +115,8 @@ class OpenAiVoiceService
             'voice' => $voice,
             'voice_label' => self::VOICES[$voice],
             'client_secret' => $clientSecret,
-            'expires_at' => data_get($payload, 'client_secret.expires_at'),
-            'session_id' => data_get($payload, 'id'),
+            'expires_at' => data_get($payload, 'expires_at') ?: data_get($payload, 'client_secret.expires_at'),
+            'session_id' => data_get($payload, 'session.id') ?: data_get($payload, 'id'),
             'realtime_url' => rtrim((string) config('services.openai.realtime_webrtc_url', 'https://api.openai.com/v1/realtime'), '?'),
             'tools' => $this->realtimeTools(),
         ];

@@ -56,11 +56,11 @@ class VoiceChatFeatureTest extends TestCase
         $this->withToken($token)->patchJson('/api/auth/me', ['voice' => 'shimmer'])->assertOk();
 
         Http::fake([
-            'api.openai.test/v1/realtime/sessions' => Http::response([
-                'id' => 'sess_test_123',
-                'client_secret' => [
-                    'value' => 'ephemeral-client-secret',
-                    'expires_at' => 1893456000,
+            'api.openai.test/v1/realtime/client_secrets' => Http::response([
+                'value' => 'ephemeral-client-secret',
+                'expires_at' => 1893456000,
+                'session' => [
+                    'id' => 'sess_test_123',
                 ],
             ], 200),
         ]);
@@ -79,14 +79,14 @@ class VoiceChatFeatureTest extends TestCase
         Http::assertSent(function ($request): bool {
             $payload = $request->data();
 
-            return $request->url() === 'https://api.openai.test/v1/realtime/sessions'
+            return $request->url() === 'https://api.openai.test/v1/realtime/client_secrets'
                 && $request->hasHeader('Authorization', 'Bearer test-openai-key')
-                && data_get($payload, 'model') === 'gpt-realtime-test'
-                && data_get($payload, 'voice') === 'shimmer'
-                && data_get($payload, 'turn_detection.type') === 'server_vad'
-                && data_get($payload, 'turn_detection.interrupt_response') === true
-                && collect($payload['tools'] ?? [])->contains(fn (array $tool): bool => $tool['name'] === 'send_bean_request')
-                && str_contains((string) data_get($payload, 'instructions'), 'Hey Bean');
+                && data_get($payload, 'session.type') === 'realtime'
+                && data_get($payload, 'session.model') === 'gpt-realtime-test'
+                && data_get($payload, 'session.audio.output.voice') === 'shimmer'
+                && data_get($payload, 'session.audio.input.turn_detection.type') === 'server_vad'
+                && collect(data_get($payload, 'session.tools', []))->contains(fn (array $tool): bool => $tool['name'] === 'send_bean_request')
+                && str_contains((string) data_get($payload, 'session.instructions'), 'Hey Bean');
         });
     }
 
