@@ -9,7 +9,7 @@ use RuntimeException;
 class OpenAiVoiceService
 {
     public const DEFAULT_VOICE = 'alloy';
-    public const DEFAULT_REALTIME_MODEL = 'gpt-4o-realtime-preview';
+    public const DEFAULT_REALTIME_MODEL = 'gpt-realtime';
 
     private const VOICES = [
         'alloy' => 'Alloy',
@@ -117,7 +117,7 @@ class OpenAiVoiceService
             'client_secret' => $clientSecret,
             'expires_at' => data_get($payload, 'expires_at') ?: data_get($payload, 'client_secret.expires_at'),
             'session_id' => data_get($payload, 'session.id') ?: data_get($payload, 'id'),
-            'realtime_url' => rtrim((string) config('services.openai.realtime_webrtc_url', 'https://api.openai.com/v1/realtime'), '?'),
+            'realtime_url' => rtrim((string) config('services.openai.realtime_webrtc_url', 'https://api.openai.com/v1/realtime/calls'), '?'),
             'tools' => $this->realtimeTools(),
         ];
     }

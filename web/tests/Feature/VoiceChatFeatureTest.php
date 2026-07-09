@@ -21,7 +21,7 @@ class VoiceChatFeatureTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.active_workspace_agent_profile.settings.voice.provider', 'openai_realtime')
             ->assertJsonPath('data.active_workspace_agent_profile.settings.voice.voice', 'alloy')
-            ->assertJsonPath('data.active_workspace_agent_profile.settings.voice.realtime_model', 'gpt-4o-realtime-preview')
+            ->assertJsonPath('data.active_workspace_agent_profile.settings.voice.realtime_model', 'gpt-realtime')
             ->assertJsonPath('data.active_workspace_agent_profile.settings.voice.available_voices.0.key', 'alloy')
             ->assertJsonPath('data.active_workspace_agent_profile.settings.voice.available_voices.0.label', 'Alloy');
     }
@@ -49,7 +49,7 @@ class VoiceChatFeatureTest extends TestCase
     {
         config()->set('services.openai.server_api_key', 'test-openai-key');
         config()->set('services.openai.realtime_model', 'gpt-realtime-test');
-        config()->set('services.openai.realtime_webrtc_url', 'https://api.openai.test/v1/realtime');
+        config()->set('services.openai.realtime_webrtc_url', 'https://api.openai.test/v1/realtime/calls');
         config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
         $token = $this->apiToken('voice-realtime@example.com');
 
@@ -73,7 +73,7 @@ class VoiceChatFeatureTest extends TestCase
             ->assertJsonPath('data.voice', 'shimmer')
             ->assertJsonPath('data.client_secret', 'ephemeral-client-secret')
             ->assertJsonPath('data.session_id', 'sess_test_123')
-            ->assertJsonPath('data.realtime_url', 'https://api.openai.test/v1/realtime')
+            ->assertJsonPath('data.realtime_url', 'https://api.openai.test/v1/realtime/calls')
             ->assertJsonMissing(['test-openai-key']);
 
         Http::assertSent(function ($request): bool {

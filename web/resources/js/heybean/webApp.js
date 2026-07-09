@@ -9190,13 +9190,7 @@ export function mountHeyBeanWebApp(mount) {
         const secret = String(realtimeSession?.client_secret || '').trim();
         if (!secret) throw new Error('Realtime voice session did not include a client secret.');
 
-        realtimeLocalStream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
-            },
-        });
+        realtimeLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
         realtimePeerConnection = new RTCPeerConnection();
         realtimeRemoteAudio = new Audio();
@@ -9219,7 +9213,7 @@ export function mountHeyBeanWebApp(mount) {
 
         const offer = await realtimePeerConnection.createOffer();
         await realtimePeerConnection.setLocalDescription(offer);
-        const model = encodeURIComponent(String(realtimeSession.model || 'gpt-4o-realtime-preview'));
+        const model = encodeURIComponent(String(realtimeSession.model || 'gpt-realtime'));
         const baseUrl = String(realtimeSession.realtime_url || 'https://api.openai.com/v1/realtime').replace(/\?+$/, '');
         const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
             method: 'POST',

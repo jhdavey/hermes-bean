@@ -88,8 +88,8 @@ return [
     'openai' => [
         'server_api_key' => $openAiPublicKey,
         'public_key' => $openAiPublicKey,
-        'realtime_model' => env('OPENAI_REALTIME_MODEL', 'gpt-4o-realtime-preview'),
-        'realtime_webrtc_url' => env('OPENAI_REALTIME_WEBRTC_URL', 'https://api.openai.com/v1/realtime'),
+        'realtime_model' => env('OPENAI_REALTIME_MODEL', 'gpt-realtime'),
+        'realtime_webrtc_url' => env('OPENAI_REALTIME_WEBRTC_URL', 'https://api.openai.com/v1/realtime/calls'),
         'realtime_session_timeout' => (float) env('OPENAI_REALTIME_SESSION_TIMEOUT', 10),
         'realtime_transcription_model' => env('OPENAI_REALTIME_TRANSCRIPTION_MODEL', 'gpt-4o-mini-transcribe'),
         'realtime_vad_threshold' => (float) env('OPENAI_REALTIME_VAD_THRESHOLD', 0.5),
