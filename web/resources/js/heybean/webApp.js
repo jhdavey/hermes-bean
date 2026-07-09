@@ -9186,7 +9186,6 @@ export function mountHeyBeanWebApp(mount) {
         realtimeSend({
             type: 'response.create',
             response: {
-                modalities: ['audio', 'text'],
                 instructions: `Speak this HeyBean answer exactly and do not add any extra facts or tasks:\n\n${content}`,
             },
         });
