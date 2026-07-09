@@ -420,10 +420,6 @@
     display: block;
 }
 
-.hb-month-event-time-hour-start .hb-month-event-time-row:first-child {
-    text-align: left;
-}
-
 .hb-month-event-body {
     min-width: 0;
     display: grid;
