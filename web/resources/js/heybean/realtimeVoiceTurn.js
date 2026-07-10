@@ -22,7 +22,7 @@ export function isStrictRealtimeWakePhrase(text) {
 
 export function stripRealtimeLocalWakePrefix(text) {
     return String(text || '')
-        .replace(/^\s*(?:(?:hey|they)[\s,.-]+(?:bean|ben|bin|bing|being|beane|beam)|habe(?:en|ing))\b[\s,.:;!?-]*/i, '')
+        .replace(/^\s*(?:(?:hey|they|he)[\s,.-]+(?:bean|ben|bin|bing|being|beane|beam)|habe(?:en|ing))\b[\s,.:;!?-]*/i, '')
         .trim();
 }
 

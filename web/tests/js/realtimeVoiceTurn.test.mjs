@@ -248,6 +248,7 @@ test('a local wake activates one current epoch before any provider transcript ex
 test('the first provider transcript after local wake drops only validated wake-prefix variants', () => {
     assert.equal(stripRealtimeLocalWakePrefix('Hey Bean, what is the weather?'), 'what is the weather?');
     assert.equal(stripRealtimeLocalWakePrefix('They being add milk'), 'add milk');
+    assert.equal(stripRealtimeLocalWakePrefix('He being what time is it?'), 'what time is it?');
     assert.equal(stripRealtimeLocalWakePrefix('Habeen remind me tomorrow'), 'remind me tomorrow');
     assert.equal(stripRealtimeLocalWakePrefix('What is the weather?'), 'What is the weather?');
     assert.equal(stripRealtimeLocalWakePrefix('Being honest is important'), 'Being honest is important');

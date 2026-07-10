@@ -7,8 +7,10 @@
 const TARGET_SAMPLE_RATE = 16000;
 const MAX_AUDIO_SAMPLES = 3200;
 const MAX_DECODES_PER_MESSAGE = 32;
+const NON_WAKE_SILENCE_RESET_CHUNKS = 7;
+const SPEECH_RMS_THRESHOLD = 0.012;
 const KEYWORD_ALIAS = 'HEY_BEAN';
-const WAKE_PREFIX = /^(?:(?:HEY|THEY)\s+(?:BEAN|BEING)|HABE(?:EN|ING))\b/;
+const WAKE_PREFIX = /^(?:(?:HEY|THEY|HE)\s+(?:BEAN|BEING)|HABE(?:EN|ING))\b/;
 const assetBaseUrl = new URL('./', self.location.href);
 
 let currentGeneration = initialGeneration();
@@ -19,6 +21,8 @@ let ready = false;
 let armed = false;
 let failed = false;
 let closed = false;
+let speechObserved = false;
+let silentChunksAfterSpeech = 0;
 
 self.addEventListener('message', handleMessage);
 self.addEventListener('error', (event) => {
@@ -187,6 +191,7 @@ function handleAudio(message) {
     }
 
     try {
+        trackUtteranceActivity(samples);
         recognitionStream.acceptWaveform(TARGET_SAMPLE_RATE, samples);
 
         let decodeCount = 0;
@@ -210,6 +215,12 @@ function handleAudio(message) {
                 variant: wakeVariant,
                 generation: currentGeneration,
             });
+        } else if (shouldResetNonWakeUtterance()) {
+            // The matcher is intentionally anchored. Start a clean stream after
+            // a completed non-wake utterance so ambient speech cannot poison
+            // every later, valid Hey Bean attempt for this microphone session.
+            replaceRecognitionStream();
+            resetUtteranceActivity();
         }
 
         acknowledge(sequence, generation, true);
@@ -238,6 +249,32 @@ function replaceRecognitionStream() {
     }
     recognitionStream = recognizer.createStream();
     if (!recognitionStream?.handle) throw new Error('The local speech stream could not be created.');
+    resetUtteranceActivity();
+}
+
+function trackUtteranceActivity(samples) {
+    let squareSum = 0;
+    for (let index = 0; index < samples.length; index += 1) {
+        squareSum += samples[index] * samples[index];
+    }
+    const rms = Math.sqrt(squareSum / samples.length);
+    if (rms >= SPEECH_RMS_THRESHOLD) {
+        speechObserved = true;
+        silentChunksAfterSpeech = 0;
+        return;
+    }
+    if (speechObserved) silentChunksAfterSpeech += 1;
+}
+
+function shouldResetNonWakeUtterance() {
+    return armed
+        && speechObserved
+        && silentChunksAfterSpeech >= NON_WAKE_SILENCE_RESET_CHUNKS;
+}
+
+function resetUtteranceActivity() {
+    speechObserved = false;
+    silentChunksAfterSpeech = 0;
 }
 
 function matchedWakeVariant(text) {

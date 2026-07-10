@@ -1,5 +1,5 @@
 export const LOCAL_WAKE_GATE_PROCESSOR_URL = '/voice/wake/gate-processor.js';
-export const LOCAL_WAKE_WORKER_URL = '/voice/wake/wake-worker.js';
+export const LOCAL_WAKE_WORKER_URL = '/voice/wake/wake-worker.js?v=3';
 export const LOCAL_WAKE_GATE_PROCESSOR_NAME = 'hey-bean-gate';
 
 export class LocalWakeGateError extends Error {
@@ -125,7 +125,7 @@ export class LocalWakeGate {
             }
             this.derivedStream = new this.MediaStream([derivedTrack]);
 
-            const workerUrl = `${this.wakeWorkerUrl}?generation=${encodeURIComponent(generation)}`;
+            const workerUrl = `${this.wakeWorkerUrl}${this.wakeWorkerUrl.includes('?') ? '&' : '?'}generation=${encodeURIComponent(generation)}`;
             this.worker = new this.Worker(workerUrl, { name: 'heybean-local-wake' });
             this.#bindHandlers(generation);
 

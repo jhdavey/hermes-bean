@@ -28,6 +28,50 @@ test('orchestration protocol matches the packaged same-origin worker and worklet
     assert.match(worker, /type:\s*'detected'/);
 });
 
+test('the packaged worker accepts observed Hey Bean acoustics without broad homophone wakes', async () => {
+    const source = await readFile(
+        new URL('../../public/voice/wake/wake-worker.js', import.meta.url),
+        'utf8',
+    );
+    const context = {
+        URL,
+        importScripts() { throw new Error('vendor runtime intentionally skipped'); },
+        postMessage() {},
+        self: {
+            location: { href: 'https://example.test/voice/wake/wake-worker.js?generation=1' },
+            addEventListener() {},
+            close() {},
+        },
+    };
+    runInNewContext(`${source}
+globalThis.__matchedWakeVariant = matchedWakeVariant;
+globalThis.__wakeBoundary = {
+    track: trackUtteranceActivity,
+    shouldReset: shouldResetNonWakeUtterance,
+    reset: resetUtteranceActivity,
+    setArmed(value) { armed = value; },
+};`, context);
+
+    assert.equal(context.__matchedWakeVariant('HEY BEAN WHAT TIME IS IT'), 'HEY BEAN');
+    assert.equal(context.__matchedWakeVariant('HE BEING WHAT TIME IS IT'), 'HE BEING');
+    assert.equal(context.__matchedWakeVariant('HEY BEN WHAT TIME IS IT'), '');
+    assert.equal(context.__matchedWakeVariant('HEY BEAM WHAT TIME IS IT'), '');
+    assert.equal(context.__matchedWakeVariant('TO BEGIN SAY HEY BEAN'), '');
+
+    const speech = new Float32Array(1600).fill(0.08);
+    const silence = new Float32Array(1600);
+    context.__wakeBoundary.setArmed(true);
+    context.__wakeBoundary.track(speech);
+    for (let chunk = 0; chunk < 6; chunk += 1) {
+        context.__wakeBoundary.track(silence);
+        assert.equal(context.__wakeBoundary.shouldReset(), false);
+    }
+    context.__wakeBoundary.track(silence);
+    assert.equal(context.__wakeBoundary.shouldReset(), true);
+    context.__wakeBoundary.reset();
+    assert.equal(context.__wakeBoundary.shouldReset(), false);
+});
+
 test('the packaged worklet is exact-zero while closed and releases buffered command onset after wake', async () => {
     const source = await readFile(
         new URL('../../public/voice/wake/gate-processor.js', import.meta.url),
@@ -296,7 +340,7 @@ test('start exposes only a closed derived track through a same-origin static gra
         type: 'close',
         generation: harness.gate.currentGeneration(),
     });
-    assert.equal(worker.url, `${LOCAL_WAKE_WORKER_URL}?generation=${harness.gate.currentGeneration()}`);
+    assert.equal(worker.url, `${LOCAL_WAKE_WORKER_URL}&generation=${harness.gate.currentGeneration()}`);
     assert.deepEqual(worker.options, { name: 'heybean-local-wake' });
     assert.ok(harness.order.includes(`module:${LOCAL_WAKE_GATE_PROCESSOR_URL}`));
     assert.equal(harness.gate.isOpen(), false);
