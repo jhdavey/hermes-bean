@@ -521,7 +521,7 @@
 }
 
 .hb-timeline {
-    --hb-hour-height: 88px;
+    --hb-hour-height: 64px;
     --hb-timeline-head-height: 0px;
     --hb-multi-day-row-height: 0px;
     display: grid;
@@ -759,6 +759,70 @@
 
 .heybean-app-body .hb-timed-event {
     border-radius: 12px;
+}
+
+@media (min-width: 701px) {
+    .hb-timeline-day-head {
+        padding: 8px 10px;
+    }
+
+    .hb-timeline-hour {
+        padding: 8px 10px;
+        font-size: 10px;
+    }
+
+    .hb-timeline-slot {
+        padding: 5px;
+    }
+
+    .hb-timed-event {
+        left: 5px;
+        right: 5px;
+        gap: 1px;
+        padding: 4px 6px;
+    }
+
+    .hb-timed-event .hb-event-time {
+        font-size: 9.5px;
+        line-height: 1.05;
+    }
+
+    .hb-timed-event .hb-event-title {
+        gap: 3px;
+        font-size: 10.5px;
+        font-weight: 650;
+        line-height: 1.08;
+    }
+
+    .hb-timed-event .hb-event-title-inner {
+        display: block;
+    }
+
+    .hb-multi-day-cell,
+    .hb-all-day-cell {
+        gap: 4px;
+        min-height: 32px;
+        padding: 5px;
+    }
+
+    .hb-multi-day-event,
+    .hb-all-day-event {
+        min-height: 24px;
+        padding: 3px 6px;
+        font-size: 10px;
+        font-weight: 650;
+    }
+
+    .hb-multi-day-event-title,
+    .hb-all-day-event-title {
+        gap: 3px;
+        font-size: 10px;
+        font-weight: 650;
+    }
+
+    .hb-multi-day-event-time {
+        font-size: 9px;
+    }
 }
 
 .hb-timed-event-short {

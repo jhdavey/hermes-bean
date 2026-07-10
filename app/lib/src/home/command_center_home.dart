@@ -798,11 +798,11 @@ class _CommandCenterAgendaRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = switch (item.kind) {
-      _CommandCenterAgendaKind.event => HeyBeanTheme.accentStrong,
-      _CommandCenterAgendaKind.task => HeyBeanTheme.warning,
-      _CommandCenterAgendaKind.reminder => const Color(0xFF3B82F6),
-    };
+    final categoryColor = _safeCategoryColor(switch (item.kind) {
+      _CommandCenterAgendaKind.event => item.event?.color,
+      _CommandCenterAgendaKind.task => item.task?.color,
+      _CommandCenterAgendaKind.reminder => item.reminder?.color,
+    });
     final kindLabel = switch (item.kind) {
       _CommandCenterAgendaKind.event => 'Event',
       _CommandCenterAgendaKind.task => 'Task',
@@ -818,70 +818,77 @@ class _CommandCenterAgendaRow extends StatelessWidget {
         onTap: () => onTap(item),
         child: Container(
           height: 42,
-          padding: const EdgeInsets.symmetric(horizontal: 6),
+          padding: const EdgeInsets.only(left: 8, right: 6),
           decoration: BoxDecoration(
             border: showTopDivider
                 ? Border(top: BorderSide(color: _quietBorderColor(alpha: .30)))
                 : null,
           ),
-          child: Row(
+          child: Stack(
             children: [
-              SizedBox(
-                key: Key('command-center-agenda-time-${item.key}'),
-                width: timeWidth,
-                child: _CommandCenterAgendaTimeLabel(
-                  label: item.timeLabel,
-                  allowStackedRange:
-                      item.kind == _CommandCenterAgendaKind.event,
+              Positioned(
+                key: Key('command-center-agenda-category-rail-${item.key}'),
+                left: 0,
+                top: 9,
+                bottom: 9,
+                child: Container(
+                  width: 3,
+                  decoration: BoxDecoration(
+                    color: categoryColor.withValues(alpha: .72),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
                 ),
               ),
-              const SizedBox(width: 5),
-              Container(
-                key: Key('command-center-agenda-dot-${item.key}'),
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: .82),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: HeyBeanTheme.text,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
+              Row(
+                children: [
+                  SizedBox(
+                    key: Key('command-center-agenda-time-${item.key}'),
+                    width: timeWidth,
+                    child: _CommandCenterAgendaTimeLabel(
+                      label: item.timeLabel,
+                      allowStackedRange:
+                          item.kind == _CommandCenterAgendaKind.event,
                     ),
-                    const SizedBox(height: 1),
-                    Text(
-                      item.subtitle.isNotEmpty ? item.subtitle : kindLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: HeyBeanTheme.muted,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: HeyBeanTheme.text,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          item.subtitle.isNotEmpty ? item.subtitle : kindLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: HeyBeanTheme.muted,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  if (hasEventNotes)
+                    Icon(
+                      Icons.notes_rounded,
+                      key: Key('command-center-event-notes-${item.key}'),
+                      size: 14,
+                      color: HeyBeanTheme.muted,
+                    ),
+                ],
               ),
-              if (hasEventNotes)
-                Icon(
-                  Icons.notes_rounded,
-                  key: Key('command-center-event-notes-${item.key}'),
-                  size: 14,
-                  color: HeyBeanTheme.muted,
-                ),
             ],
           ),
         ),

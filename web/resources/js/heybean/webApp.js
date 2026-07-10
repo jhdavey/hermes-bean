@@ -4726,7 +4726,6 @@ export function mountHeyBeanWebApp(mount) {
         return `
             <button class="hb-command-center-row hb-command-center-row-${escapeAttr(item.kind)}" type="button" ${dataAttr}${styleAttr}>
                 <span class="hb-command-center-time">${escapeHtml(item.timeLabel)}</span>
-                <span class="hb-command-center-dot" aria-hidden="true"></span>
                 <span class="hb-command-center-copy">
                     <strong>${escapeHtml(item.title || 'Untitled')}</strong>
                     <small>${escapeHtml(item.subtitle || commandCenterKindLabel(item.kind))}</small>
@@ -4768,6 +4767,7 @@ export function mountHeyBeanWebApp(mount) {
                 timeLabel: commandCenterEventTime(event),
                 subtitle: eventLocationText(event),
                 hasNotes: Boolean(eventNotesText(event)),
+                color: itemColor(event),
             });
         });
 
@@ -4788,6 +4788,7 @@ export function mountHeyBeanWebApp(mount) {
                 timeLabel: overdue && dateOnlyDue ? 'Overdue' : (dateOnlyDue ? 'Today' : formatCompactMeridiemTime(due)),
                 subtitle: [overdue ? 'overdue' : '', task.category || ''].filter(Boolean).join(' · '),
                 isOverdue: overdue,
+                color: itemColor(task),
             });
         });
 
@@ -4808,6 +4809,7 @@ export function mountHeyBeanWebApp(mount) {
                 timeLabel: overdue && dateOnlyDue ? 'Overdue' : (dateOnlyDue ? 'Today' : formatCompactMeridiemTime(due)),
                 subtitle: [overdue ? 'overdue' : '', reminder.category || ''].filter(Boolean).join(' · '),
                 isOverdue: overdue,
+                color: itemColor(reminder),
             });
         });
 
@@ -4871,12 +4873,14 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function eventPillIndicatorsMarkup(event = {}, options = {}) {
+        if (options.showIndicators === false) return '';
         const showLocation = options.showLocation !== false;
+        const showNotes = options.showNotes !== false;
         const indicators = [];
         if (showLocation && eventLocationText(event)) {
             indicators.push(`<span class="hb-event-pill-icon" title="Has location" aria-label="Has location">${icons.pin}</span>`);
         }
-        if (eventNotesText(event)) {
+        if (showNotes && eventNotesText(event)) {
             indicators.push(`<span class="hb-event-pill-icon" title="Has notes" aria-label="Has notes">${icons.notes}</span>`);
         }
         return indicators.length ? `<span class="hb-event-pill-icons">${indicators.join('')}</span>` : '';
@@ -5351,13 +5355,13 @@ export function mountHeyBeanWebApp(mount) {
         return `
             <button class="hb-event hb-timed-event${shortClass}" type="button" data-edit-event="${event.id}" style="${style.css};background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}" data-duration-minutes="${style.minutes}">
                 <div class="hb-event-time">${escapeHtml(commandCenterEventTime(event))}</div>
-                ${eventPillTitleMarkup(event)}
+                ${eventPillTitleMarkup(event, 'hb-event-title', { showIndicators: false })}
             </button>`;
     }
 
     function allDayEventMarkup(event) {
         const color = itemColor(event);
-        return `<button class="hb-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">${eventPillTitleMarkup(event, 'hb-all-day-event-title')}</button>`;
+        return `<button class="hb-all-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">${eventPillTitleMarkup(event, 'hb-all-day-event-title', { showIndicators: false })}</button>`;
     }
 
     function multiDayEventMarkup(event, day) {
@@ -5366,7 +5370,7 @@ export function mountHeyBeanWebApp(mount) {
         return `
             <button class="hb-multi-day-event" type="button" data-edit-event="${event.id}" style="background:${hexAlpha(color, .12)};border-color:${hexAlpha(color, .30)}">
                 ${time ? `<span class="hb-multi-day-event-time">${escapeHtml(time)}</span>` : ''}
-                ${eventPillTitleMarkup(event, 'hb-multi-day-event-title')}
+                ${eventPillTitleMarkup(event, 'hb-multi-day-event-title', { showIndicators: false })}
             </button>`;
     }
 
@@ -11371,7 +11375,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function timelineHourHeight() {
-        return window.matchMedia?.('(max-width: 700px)').matches ? 64 : 88;
+        return 64;
     }
 
     function timelineGutterWidth() {

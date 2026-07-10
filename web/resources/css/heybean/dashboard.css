@@ -572,16 +572,16 @@
     min-width: 0;
     height: 42px;
     display: grid;
-    grid-template-columns: 50px 7px minmax(0, 1fr) auto;
+    grid-template-columns: 50px minmax(0, 1fr) auto;
     align-items: center;
-    gap: 5px;
+    gap: 8px;
     border: 0;
     border-top: 1px solid color-mix(in srgb, var(--hb-border) 62%, transparent);
     border-radius: 0;
     background: transparent;
-    box-shadow: none;
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--hb-command-center-item-color, var(--hb-accent)) 70%, transparent);
     color: var(--hb-text);
-    padding: 0 6px;
+    padding: 0 6px 0 8px;
     text-align: left;
     cursor: pointer;
 }
@@ -613,21 +613,6 @@
     line-height: 1.05;
     text-overflow: ellipsis;
     white-space: normal;
-}
-
-.hb-command-center-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
-    background: var(--hb-command-center-item-color, var(--hb-accent-strong));
-}
-
-.hb-command-center-row-task .hb-command-center-dot {
-    background: var(--hb-warning);
-}
-
-.hb-command-center-row-reminder .hb-command-center-dot {
-    background: #3b82f6;
 }
 
 .hb-command-center-copy {

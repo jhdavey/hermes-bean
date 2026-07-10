@@ -2136,10 +2136,10 @@ void main() {
     final taskTimeRect = tester.getRect(
       find.byKey(const Key('command-center-agenda-time-task-501')),
     );
-    final taskDotRect = tester.getRect(
-      find.byKey(const Key('command-center-agenda-dot-task-501')),
+    final taskRailRect = tester.getRect(
+      find.byKey(const Key('command-center-agenda-category-rail-task-501')),
     );
-    expect(taskDotRect.left - taskTimeRect.right, closeTo(5, .1));
+    expect(taskRailRect.right, lessThan(taskTimeRect.left));
     expect(tester.getTopLeft(task).dy, lessThan(tester.getTopLeft(event).dy));
     expect(
       tester.getTopLeft(event).dy,
