@@ -532,6 +532,7 @@
 
 .hb-chat-dock {
     --hb-chat-input-max-height: 68px;
+    --hb-voice-level: 0;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
@@ -541,6 +542,14 @@
     border-radius: 18px 18px 0 0;
     background: var(--hb-surface);
     box-shadow: 0 6px 14px rgba(0, 0, 0, .06);
+    transition: border-color .12s ease-out, box-shadow .12s ease-out;
+}
+
+.hb-chat-dock-hearing {
+    border-color: rgba(var(--hb-accent-strong-rgb), var(--hb-voice-border-opacity, .46));
+    box-shadow:
+        0 6px 14px rgba(0, 0, 0, .06),
+        0 0 0 var(--hb-voice-dock-ring, 1px) rgba(var(--hb-accent-rgb), var(--hb-voice-dock-glow-opacity, .08));
 }
 
 .hb-chat-input-stack {
@@ -631,6 +640,7 @@
 
 .hb-chat-voice-button::before {
     border: 2px solid rgba(var(--hb-accent-strong-rgb), .48);
+    transition: transform 70ms linear, opacity 70ms linear, box-shadow 70ms linear;
 }
 
 .hb-chat-voice-button::after {
@@ -662,8 +672,8 @@
 }
 
 .hb-chat-voice-button-listening::before {
-    animation: hbBeanVoicePulse 1.55s ease-in-out infinite;
-    opacity: 1;
+    opacity: .38;
+    transform: scale(1.02);
 }
 
 .hb-chat-voice-button-thinking::after {
@@ -674,6 +684,14 @@
 .hb-chat-voice-button-thinking::before {
     animation: none;
     opacity: 0;
+}
+
+.hb-chat-voice-button-hearing::before,
+.hb-chat-voice-button-thinking.hb-chat-voice-button-hearing::before {
+    animation: none;
+    opacity: var(--hb-voice-opacity, .48);
+    transform: scale(var(--hb-voice-scale, 1.03));
+    box-shadow: 0 0 var(--hb-voice-glow-size, 5px) rgba(var(--hb-accent-rgb), var(--hb-voice-glow-opacity, .12));
 }
 
 .hb-chat-voice-button:hover {
@@ -692,17 +710,6 @@
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-voice-button-listening {
     border-color: rgba(var(--hb-accent-strong-rgb), .64);
     background: #fff;
-}
-
-@keyframes hbBeanVoicePulse {
-    0%, 100% {
-        transform: scale(1);
-        opacity: .35;
-    }
-    50% {
-        transform: scale(1.15);
-        opacity: .9;
-    }
 }
 
 @keyframes hbBeanVoiceSpin {
@@ -796,6 +803,13 @@
     border-color: color-mix(in srgb, var(--hb-border) 78%, transparent);
     background: var(--hb-surface);
     box-shadow: 0 6px 14px rgba(0, 0, 0, .18);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-dock-hearing {
+    border-color: rgba(var(--hb-accent-strong-rgb), var(--hb-voice-border-opacity, .54));
+    box-shadow:
+        0 6px 14px rgba(0, 0, 0, .18),
+        0 0 0 var(--hb-voice-dock-ring, 1px) rgba(var(--hb-accent-rgb), var(--hb-voice-dock-glow-opacity, .1));
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-chat-text-stop-button,
@@ -1163,6 +1177,8 @@
     .hb-bean-button::before,
     .hb-bean-button::after,
     .hb-chat-text-send-button,
+    .hb-chat-dock,
+    .hb-chat-voice-button::before,
     .hb-message-icon-action {
         transition: none;
     }

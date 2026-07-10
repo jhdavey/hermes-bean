@@ -42,6 +42,7 @@ export class LocalWakeGate {
             ? Math.min(requestedInFlightPcm, 32)
             : 4;
         this.onDetected = typeof options.onDetected === 'function' ? options.onDetected : () => {};
+        this.onActivity = typeof options.onActivity === 'function' ? options.onActivity : () => {};
         this.onError = typeof options.onError === 'function' ? options.onError : () => {};
 
         this.state = 'idle';
@@ -184,6 +185,7 @@ export class LocalWakeGate {
     }
 
     close() {
+        this.#reportActivity(0, this.generation);
         const closeError = this.#forceClosed(this.generation);
         if (closeError) {
             this.#fail(closeError, this.generation);
@@ -222,6 +224,7 @@ export class LocalWakeGate {
     }
 
     async stop() {
+        this.#reportActivity(0, this.generation);
         const closeError = this.#forceClosed(this.generation);
         if (closeError) this.#reportError(closeError);
 
@@ -290,6 +293,11 @@ export class LocalWakeGate {
             this.#fail(new LocalWakeGateError(String(data.message || 'The wake gate processor failed.'), {
                 code: 'processor_failed',
             }), generation);
+            return;
+        }
+        if (data.type === 'activity') {
+            if (data.generation !== generation) return;
+            this.#reportActivity(data.level, generation, data.rms);
             return;
         }
         if (data.type !== 'audio' || !this.workerReady || this.gateOpen || !this.worker) return;
@@ -497,6 +505,20 @@ export class LocalWakeGate {
             this.onError(error);
         } catch {
             // Consumer error handlers cannot reopen or bypass the gate.
+        }
+    }
+
+    #reportActivity(level, generation, rms = 0) {
+        const normalizedLevel = Math.max(0, Math.min(1, Number(level) || 0));
+        const normalizedRms = Math.max(0, Math.min(1, Number(rms) || 0));
+        try {
+            this.onActivity(Object.freeze({
+                generation,
+                level: normalizedLevel,
+                rms: normalizedRms,
+            }));
+        } catch {
+            // Presentation feedback cannot interfere with the fail-closed gate.
         }
     }
 }

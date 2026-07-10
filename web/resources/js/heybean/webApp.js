@@ -11,6 +11,7 @@ import {
 import {
     RealtimeCallDeduper,
     RealtimeConversationController,
+    RealtimeInputTranscriptBuffer,
     RealtimeResponseLifecycle,
     RealtimeTurnPersistenceQueue,
     restoreSupersededUserTurn,
@@ -228,12 +229,15 @@ export function mountHeyBeanWebApp(mount) {
     let realtimeToolCalls = new Map();
     let realtimeDisconnectedTimer = 0;
     let realtimeMicrophoneMuteTimer = 0;
+    let realtimeVoiceActivityDecayTimer = 0;
+    let realtimeVoiceActivityLevel = 0;
     let chatAnnouncementTimer = 0;
     let chatAnnouncementSessionId = null;
     let chatAnnouncementSeenKeys = new Set();
     let lastChatAnnouncement = '';
     const realtimeCallDeduper = new RealtimeCallDeduper();
     const realtimeConversation = new RealtimeConversationController();
+    const realtimeInputTranscripts = new RealtimeInputTranscriptBuffer();
     const realtimeResponseLifecycle = new RealtimeResponseLifecycle();
     const realtimeTurnPersistenceQueue = new RealtimeTurnPersistenceQueue();
     const realtimeMediaRecoveryGraceMs = 5000;
@@ -4188,6 +4192,9 @@ export function mountHeyBeanWebApp(mount) {
         const inputValue = chatInputValue();
         const inputDisabled = waking;
         const sendDisabled = inputDisabled ? 'disabled aria-disabled="true"' : '';
+        const hearingClass = state.voiceRecording ? 'hb-chat-dock-hearing' : '';
+        const voiceHearingClass = state.voiceRecording ? 'hb-chat-voice-button-hearing' : '';
+        const voiceActivityStyle = realtimeVoiceActivityStyle(state.voiceRecording ? realtimeVoiceActivityLevel : 0);
         return `
             <section class="hb-chat ${options.compact ? 'hb-chat-compact' : ''}">
                 ${errorMarkup(state.error)}
@@ -4199,12 +4206,12 @@ export function mountHeyBeanWebApp(mount) {
                 </div>
                 <div class="hb-chat-input-stack ${workStrip ? 'hb-chat-input-stack-working' : ''}">
                     ${workStrip}
-                    <form class="hb-chat-dock ${workStrip ? 'hb-chat-dock-with-work' : ''}" data-action="chat" data-chat-instance="${escapeAttr(messageListId)}">
+                    <form class="hb-chat-dock ${workStrip ? 'hb-chat-dock-with-work' : ''} ${hearingClass}" style="${voiceActivityStyle}" data-action="chat" data-chat-instance="${escapeAttr(messageListId)}">
                         <textarea name="message" data-chat-focus-control="message" placeholder="${escapeAttr(chatInputPlaceholder())}" rows="1" ${inputDisabled ? 'disabled aria-disabled="true"' : ''}>${escapeHtml(inputValue)}</textarea>
                         <span class="hb-chat-action-cluster">
                             ${state.busy ? `<button class="hb-button-secondary hb-chat-text-send-button hb-chat-text-stop-button" type="button" data-cancel-turn data-chat-focus-control="stop" aria-label="Stop Bean">${icons.stop}</button>` : ''}
                             <button class="hb-button-secondary hb-chat-text-send-button" type="submit" data-chat-focus-control="send" aria-label="${escapeAttr(waking ? 'Bean is waking up' : (state.busy ? 'Queue message' : 'Send message'))}" ${sendDisabled}>${icons.send}</button>
-                            <button class="hb-button-secondary hb-chat-text-send-button hb-chat-voice-button ${state.voiceWakeListening ? 'hb-chat-voice-button-listening' : ''} ${(state.busy || state.voiceProcessing) ? 'hb-chat-voice-button-thinking' : ''}" type="button" data-voice-toggle data-chat-focus-control="voice" aria-pressed="${state.voiceWakeListening ? 'true' : 'false'}" aria-label="${state.voiceWakeListening ? 'Turn off realtime Bean voice' : 'Turn on realtime Bean voice'}" ${sendDisabled}><span class="hb-chat-voice-button-inner"><img src="${escapeAttr(logoUrl)}" alt="" aria-hidden="true"></span></button>
+                            <button class="hb-button-secondary hb-chat-text-send-button hb-chat-voice-button ${state.voiceWakeListening ? 'hb-chat-voice-button-listening' : ''} ${voiceHearingClass} ${(state.busy || state.voiceProcessing) ? 'hb-chat-voice-button-thinking' : ''}" style="${voiceActivityStyle}" type="button" data-voice-toggle data-chat-focus-control="voice" aria-pressed="${state.voiceWakeListening ? 'true' : 'false'}" aria-label="${state.voiceRecording ? 'Microphone is hearing you' : (state.voiceWakeListening ? 'Turn off realtime Bean voice' : 'Turn on realtime Bean voice')}" ${sendDisabled}><span class="hb-chat-voice-button-inner"><img src="${escapeAttr(logoUrl)}" alt="" aria-hidden="true"></span></button>
                         </span>
                     </form>
                 </div>
@@ -9275,11 +9282,79 @@ export function mountHeyBeanWebApp(mount) {
 
     function updateVoiceWakeDraft(text) {
         state.chatDraft = text;
-        const textarea = mount.querySelector('textarea[name="message"]');
-        if (textarea) {
+        mount.querySelectorAll('textarea[name="message"]').forEach((textarea) => {
             textarea.value = text;
             resizeChatInput(textarea);
+        });
+    }
+
+    function applyRealtimeVoiceActivity() {
+        const level = state.voiceRecording ? realtimeVoiceActivityLevel : 0;
+        const properties = realtimeVoiceActivityProperties(level);
+        mount.querySelectorAll('.hb-chat-dock').forEach((dock) => {
+            dock.classList.toggle('hb-chat-dock-hearing', state.voiceRecording);
+            Object.entries(properties).forEach(([name, value]) => dock.style.setProperty(name, value));
+        });
+        mount.querySelectorAll('.hb-chat-voice-button').forEach((button) => {
+            button.classList.toggle('hb-chat-voice-button-hearing', state.voiceRecording);
+            Object.entries(properties).forEach(([name, value]) => button.style.setProperty(name, value));
+            button.setAttribute(
+                'aria-label',
+                state.voiceRecording
+                    ? 'Microphone is hearing you'
+                    : state.voiceWakeListening
+                        ? 'Turn off realtime Bean voice'
+                        : 'Turn on realtime Bean voice',
+            );
+        });
+    }
+
+    function realtimeVoiceActivityProperties(level) {
+        const normalized = Math.max(0, Math.min(1, Number(level) || 0));
+        return {
+            '--hb-voice-level': normalized.toFixed(3),
+            '--hb-voice-scale': (1.03 + normalized * 0.16).toFixed(3),
+            '--hb-voice-opacity': (0.48 + normalized * 0.5).toFixed(3),
+            '--hb-voice-border-opacity': (0.46 + normalized * 0.42).toFixed(3),
+            '--hb-voice-glow-opacity': (0.12 + normalized * 0.26).toFixed(3),
+            '--hb-voice-glow-size': `${(5 + normalized * 12).toFixed(1)}px`,
+            '--hb-voice-dock-ring': `${(1 + normalized * 2).toFixed(1)}px`,
+            '--hb-voice-dock-glow-opacity': (0.08 + normalized * 0.18).toFixed(3),
+        };
+    }
+
+    function realtimeVoiceActivityStyle(level) {
+        return Object.entries(realtimeVoiceActivityProperties(level))
+            .map(([name, value]) => `${name}: ${value}`)
+            .join('; ');
+    }
+
+    function updateRealtimeVoiceActivity(level, { decay = true } = {}) {
+        window.clearTimeout(realtimeVoiceActivityDecayTimer);
+        realtimeVoiceActivityDecayTimer = 0;
+        const normalized = Math.max(0, Math.min(1, Number(level) || 0));
+        const microphoneAvailable = Boolean(
+            realtimeLocalWakeGate
+            && (state.voiceProcessing || state.voiceWakeListening || realtimeVoiceActive),
+        );
+        realtimeVoiceActivityLevel = microphoneAvailable ? normalized : 0;
+        state.voiceRecording = microphoneAvailable && normalized >= 0.055;
+        applyRealtimeVoiceActivity();
+
+        if (state.voiceRecording && decay) {
+            realtimeVoiceActivityDecayTimer = window.setTimeout(() => {
+                updateRealtimeVoiceActivity(0, { decay: false });
+            }, 180);
         }
+    }
+
+    function clearRealtimeVoiceInputFeedback() {
+        window.clearTimeout(realtimeVoiceActivityDecayTimer);
+        realtimeVoiceActivityDecayTimer = 0;
+        realtimeVoiceActivityLevel = 0;
+        state.voiceRecording = false;
+        realtimeInputTranscripts.clear();
+        applyRealtimeVoiceActivity();
     }
 
     function normalizedVoiceCommand(text) {
@@ -9658,6 +9733,11 @@ export function mountHeyBeanWebApp(mount) {
         const localWakeGate = new LocalWakeGate({
             audioContext: preparedAudioContext,
             onDetected: () => handleLocalWakeDetected(localWakeGate, connectionGeneration),
+            onActivity: ({ level }) => {
+                if (localWakeConnectionIsCurrent(localWakeGate, connectionGeneration)) {
+                    updateRealtimeVoiceActivity(level);
+                }
+            },
             onError: () => handleLocalWakeFailure(localWakeGate, connectionGeneration),
         });
         realtimeLocalWakeGate = localWakeGate;
@@ -9825,7 +9905,13 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         if (payload.type === 'input_audio_buffer.speech_started') {
-            realtimeConversation.noteTranscriptOrigin(payload.item_id || payload.item?.id || '');
+            const transcriptId = payload.item_id || payload.item?.id || '';
+            realtimeConversation.noteTranscriptOrigin(transcriptId);
+            if (realtimeConversation.isActive()) {
+                realtimeInputTranscripts.discard({ itemId: transcriptId, contentIndex: 0 });
+                updateVoiceWakeDraft('');
+            }
+            updateRealtimeVoiceActivity(Math.max(realtimeVoiceActivityLevel, 0.72));
             if (realtimeResponseActive) {
                 stopBeanVoicePlayback({ reason: 'interrupted' });
                 realtimeIgnoreInputUntil = 0;
@@ -9840,6 +9926,11 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
 
+        if (payload.type === 'input_audio_buffer.speech_stopped') {
+            updateRealtimeVoiceActivity(0, { decay: false });
+            return;
+        }
+
         if (payload.type === 'input_audio_buffer.committed') {
             realtimeConversation.noteTranscriptOrigin(payload.item_id || payload.item?.id || '');
             return;
@@ -9850,9 +9941,31 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
 
+        if (payload.type === 'conversation.item.input_audio_transcription.delta') {
+            const transcriptId = payload.item_id || payload.item?.id || '';
+            if (!realtimeConversation.isActive() || !transcriptId) return;
+            realtimeConversation.noteTranscriptOrigin(transcriptId);
+            const draft = realtimeInputTranscripts.append({
+                itemId: transcriptId,
+                contentIndex: payload.content_index,
+                delta: payload.delta,
+            });
+            if (draft) {
+                updateVoiceWakeDraft(draft);
+                state.chatRunState = 'Listening…';
+            }
+            return;
+        }
+
         if (payload.type === 'conversation.item.input_audio_transcription.completed') {
             const transcriptId = payload.item_id || payload.item?.id || '';
-            handleRealtimeUserTranscript(payload.transcript || '', { transcriptId })
+            const transcript = realtimeInputTranscripts.complete({
+                itemId: transcriptId,
+                contentIndex: payload.content_index,
+                transcript: payload.transcript,
+            });
+            updateRealtimeVoiceActivity(0, { decay: false });
+            handleRealtimeUserTranscript(transcript, { transcriptId })
                 .then((admission) => {
                     if (admission?.reason === 'wake_required' && transcriptId) {
                         realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
@@ -9866,6 +9979,11 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         if (payload.type === 'conversation.item.input_audio_transcription.failed') {
+            realtimeInputTranscripts.discard({
+                itemId: payload.item_id || payload.item?.id || '',
+                contentIndex: payload.content_index,
+            });
+            updateRealtimeVoiceActivity(0, { decay: false });
             if (realtimeConversation.isActive()) {
                 state.error = payload.error?.message || payload.item?.error?.message || 'Bean could not understand that audio. Please try again.';
                 setRealtimeListeningStatus();
@@ -10517,6 +10635,7 @@ export function mountHeyBeanWebApp(mount) {
         // Close the provider-bound microphone path before any asynchronous
         // cancellation, persistence, or acknowledgement work begins.
         realtimeLocalWakeGate?.resetAfterTurn();
+        clearRealtimeVoiceInputFeedback();
         const conversationEpoch = realtimeConversation.stop();
         clearQueuedRealtimeFollowUp();
         realtimeAppConversationActive = false;
@@ -10557,6 +10676,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function stopVoiceWakeListening(options = {}) {
         const localWakeStopping = realtimeLocalWakeGate?.stop();
+        clearRealtimeVoiceInputFeedback();
         realtimeLocalWakeGate = null;
         realtimeConnectionGeneration += 1;
         clearRealtimeMediaRecoveryTimers();
@@ -10618,6 +10738,7 @@ export function mountHeyBeanWebApp(mount) {
         event?.preventDefault?.();
         if (beanChatWaking() || state.voiceProcessing || realtimeVoiceActive) return;
         const connectionGeneration = ++realtimeConnectionGeneration;
+        clearRealtimeVoiceInputFeedback();
         state.error = '';
         state.voiceProcessing = true;
         state.chatRunState = 'Starting private “Hey Bean” detection…';

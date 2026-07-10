@@ -5,6 +5,7 @@ import {
     REALTIME_CONVERSATION_STATES,
     RealtimeCallDeduper,
     RealtimeConversationController,
+    RealtimeInputTranscriptBuffer,
     RealtimeResponseLifecycle,
     RealtimeTurnPersistenceQueue,
     restoreSupersededUserTurn,
@@ -68,6 +69,20 @@ test('repeated transcript items and function calls are claimed once', () => {
     deduper.reset();
     assert.equal(deduper.claimTranscript('input-1'), true);
     assert.equal(deduper.claimToolCall('call-1'), true);
+});
+
+test('input transcript deltas stream into one draft and finalize per audio item', () => {
+    const transcripts = new RealtimeInputTranscriptBuffer();
+
+    assert.equal(transcripts.append({ itemId: 'voice-1', contentIndex: 0, delta: 'Hey' }), 'Hey');
+    assert.equal(transcripts.append({ itemId: 'voice-1', contentIndex: 0, delta: ' Bean' }), 'Hey Bean');
+    assert.equal(transcripts.append({ itemId: 'voice-2', contentIndex: 0, delta: 'Next' }), 'Next');
+    assert.equal(transcripts.complete({ itemId: 'voice-1', contentIndex: 0 }), 'Hey Bean');
+    assert.equal(transcripts.complete({ itemId: 'voice-2', contentIndex: 0, transcript: 'Next request.' }), 'Next request.');
+
+    transcripts.append({ itemId: 'voice-3', delta: 'Discard me' });
+    transcripts.discard({ itemId: 'voice-3' });
+    assert.equal(transcripts.complete({ itemId: 'voice-3' }), '');
 });
 
 test('accepted and terminal persistence for one client turn is serialized', async () => {

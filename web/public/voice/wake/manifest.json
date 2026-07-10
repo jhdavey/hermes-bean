@@ -7,6 +7,7 @@
   "processorName": "hey-bean-gate",
   "sampleRate": 16000,
   "audioBatchSamples": 1600,
+  "activityReportMs": 50,
   "maxWorkerChunkSamples": 3200,
   "providerPreRollMs": 1200,
   "keywordAlias": "HEY_BEAN",

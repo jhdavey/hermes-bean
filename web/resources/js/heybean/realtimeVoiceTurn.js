@@ -26,6 +26,44 @@ export function stripRealtimeLocalWakePrefix(text) {
         .trim();
 }
 
+export class RealtimeInputTranscriptBuffer {
+    constructor() {
+        this.parts = new Map();
+    }
+
+    append({ itemId = '', contentIndex = 0, delta = '' } = {}) {
+        const key = this.#key(itemId, contentIndex);
+        if (!key) return '';
+        const next = `${this.parts.get(key) || ''}${String(delta || '')}`;
+        this.parts.set(key, next);
+        return next;
+    }
+
+    complete({ itemId = '', contentIndex = 0, transcript = '' } = {}) {
+        const key = this.#key(itemId, contentIndex);
+        const buffered = key ? this.parts.get(key) || '' : '';
+        if (key) this.parts.delete(key);
+        return String(transcript || buffered).trim();
+    }
+
+    discard({ itemId = '', contentIndex = 0 } = {}) {
+        const key = this.#key(itemId, contentIndex);
+        if (key) this.parts.delete(key);
+    }
+
+    clear() {
+        this.parts.clear();
+    }
+
+    #key(itemId, contentIndex) {
+        const id = String(itemId || '').trim();
+        if (!id) return '';
+        const numericIndex = Number(contentIndex);
+        const index = Number.isSafeInteger(numericIndex) && numericIndex >= 0 ? numericIndex : 0;
+        return `${id}:${index}`;
+    }
+}
+
 export function realtimeNeedsAppRuntime(command, { appConversationActive = false, backendSyncRequired = false } = {}) {
     if (appConversationActive || backendSyncRequired) return true;
     const normalized = String(command || '')

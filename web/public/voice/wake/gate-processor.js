@@ -3,6 +3,7 @@
 const TARGET_SAMPLE_RATE = 16000;
 const AUDIO_BATCH_SAMPLES = 1600;
 const MAX_RESAMPLED_SAMPLES_PER_RENDER = 512;
+const ACTIVITY_REPORT_MS = 50;
 // Streaming ASR can confirm the two-word wake phrase several hundred
 // milliseconds after the speaker has already started the command. Keep enough
 // locally buffered audio to deliver the complete wake-and-command onset once
@@ -25,6 +26,9 @@ class HeyBeanGateProcessor extends AudioWorkletProcessor {
         this.weightedFrameCount = 0;
         this.audioBatch = new Float32Array(AUDIO_BATCH_SAMPLES);
         this.audioBatchOffset = 0;
+        this.activitySquareSum = 0;
+        this.activityFrameCount = 0;
+        this.activityReportFrames = Math.max(1, Math.round(sampleRate * ACTIVITY_REPORT_MS / 1000));
         this.providerDelay = new Float32Array(
             Math.max(1, Math.round(sampleRate * PROVIDER_PRE_ROLL_MS / 1000)),
         );
@@ -108,6 +112,7 @@ class HeyBeanGateProcessor extends AudioWorkletProcessor {
 
             if (monoInput) {
                 this.validateSamples(monoInput);
+                this.measureAndPostActivity(monoInput);
                 this.resampleAndPost(monoInput);
             }
 
@@ -126,6 +131,28 @@ class HeyBeanGateProcessor extends AudioWorkletProcessor {
                 throw new Error('The microphone supplied a non-finite audio sample.');
             }
         }
+    }
+
+    measureAndPostActivity(samples) {
+        for (let index = 0; index < samples.length; index += 1) {
+            const sample = Math.max(-1, Math.min(1, samples[index]));
+            this.activitySquareSum += sample * sample;
+            this.activityFrameCount += 1;
+        }
+        if (this.activityFrameCount < this.activityReportFrames) return;
+
+        const rms = Math.sqrt(this.activitySquareSum / this.activityFrameCount);
+        // Ignore the quiet noise floor, then map conversational levels into a
+        // stable UI signal without exposing any microphone samples.
+        const level = Math.max(0, Math.min(1, (rms - 0.008) / 0.16));
+        this.port.postMessage({
+            type: 'activity',
+            level,
+            rms,
+            generation: this.generation,
+        });
+        this.activitySquareSum = 0;
+        this.activityFrameCount = 0;
     }
 
     resampleAndPost(samples) {
@@ -229,6 +256,8 @@ class HeyBeanGateProcessor extends AudioWorkletProcessor {
         this.weightedSampleSum = 0;
         this.weightedFrameCount = 0;
         this.sourceFramesUntilTargetFrame = this.sourceFramesPerTargetFrame;
+        this.activitySquareSum = 0;
+        this.activityFrameCount = 0;
         this.providerDelay.fill(0);
         this.providerDelayWriteIndex = 0;
         this.providerDelayFrames = 0;

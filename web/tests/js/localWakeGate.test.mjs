@@ -35,12 +35,13 @@ test('the packaged worklet is exact-zero while closed and releases buffered comm
     );
     let Processor = null;
     let processorName = '';
+    const processorMessages = [];
     class FakeAudioWorkletProcessor {
         constructor() {
             this.port = {
                 close() {},
                 onmessage: null,
-                postMessage() {},
+                postMessage(message) { processorMessages.push(message); },
             };
         }
     }
@@ -80,6 +81,7 @@ test('the packaged worklet is exact-zero while closed and releases buffered comm
     beforeWake.fill(0.25, 16_000, 17_600);
     const closedOutput = render(beforeWake);
     assert.equal(closedOutput.every((sample) => Object.is(sample, 0)), true);
+    assert.ok(processorMessages.some((message) => message.type === 'activity' && message.level > 0));
 
     processor.handleControlMessage({ type: 'open', generation: 1 });
     const openOutput = render(new Float32Array(20_800));
@@ -238,6 +240,7 @@ function createHarness({ addModuleError = null, maxInFlightPcm = 2 } = {}) {
         }
     }
 
+    const activities = [];
     const errors = [];
     const detections = [];
     const gate = new LocalWakeGate({
@@ -246,6 +249,7 @@ function createHarness({ addModuleError = null, maxInFlightPcm = 2 } = {}) {
         Worker: FakeWorker,
         MediaStream: FakeMediaStream,
         maxInFlightPcm,
+        onActivity: (activity) => activities.push(activity),
         onError: (error) => errors.push(error),
         onDetected: (detection) => {
             order.push('detected');
@@ -258,6 +262,7 @@ function createHarness({ addModuleError = null, maxInFlightPcm = 2 } = {}) {
 
     return {
         contexts,
+        activities,
         detections,
         errors,
         gate,
@@ -363,6 +368,20 @@ test('PCM transfer is bounded until matching worker acknowledgements release cap
     assert.equal(pcmMessages().length, 3);
     assert.equal(harness.gate.pendingPcmChunks(), 2);
     assert.deepEqual(pcmMessages()[2].transfer, [buffers[2]]);
+});
+
+test('current-generation microphone activity is normalized for presentation only', async () => {
+    const harness = createHarness();
+    await harness.gate.start(harness.rawStream);
+    const worklet = harness.worklets[0];
+    const generation = harness.gate.currentGeneration();
+
+    worklet.port.emit({ type: 'activity', generation: generation - 1, level: 0.8, rms: 0.2 });
+    worklet.port.emit({ type: 'activity', generation, level: 1.7, rms: 0.18 });
+    assert.deepEqual(harness.activities, [{ generation, level: 1, rms: 0.18 }]);
+
+    harness.gate.close();
+    assert.deepEqual(harness.activities.at(-1), { generation, level: 0, rms: 0 });
 });
 
 test('worker errors close first, report failure, and tear down every microphone path', async () => {
