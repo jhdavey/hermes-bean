@@ -5140,23 +5140,26 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function monthAllDayEventMarkup(event) {
+        const color = itemColor(event);
         return `
-            <button class="hb-month-all-day-event" type="button" data-edit-event="${event.id}">
+            <button class="hb-month-all-day-event" type="button" data-edit-event="${event.id}" style="--hb-month-event-color:${escapeAttr(color)};--hb-month-event-bg:${escapeAttr(hexAlpha(color, .14))};--hb-month-event-bg-hover:${escapeAttr(hexAlpha(color, .20))};--hb-month-event-border:${escapeAttr(hexAlpha(color, .26))}">
                 ${monthEventInfoMarkup(event)}
             </button>`;
     }
 
     function monthMultiDayEventMarkup(event, day) {
         const time = multiDayEventDayTime(event, day, { compact: true, showEndTime: false });
+        const color = itemColor(event);
         return `
-            <button class="hb-month-all-day-event hb-month-multi-day-event" type="button" data-edit-event="${event.id}">
+            <button class="hb-month-all-day-event hb-month-multi-day-event" type="button" data-edit-event="${event.id}" style="--hb-month-event-color:${escapeAttr(color)};--hb-month-event-bg:${escapeAttr(hexAlpha(color, .14))};--hb-month-event-bg-hover:${escapeAttr(hexAlpha(color, .20))};--hb-month-event-border:${escapeAttr(hexAlpha(color, .26))}">
                 ${monthEventInfoMarkup(event, time)}
             </button>`;
     }
 
     function monthEventMarkup(event) {
+        const color = itemColor(event);
         return `
-            <button class="hb-month-event" type="button" data-edit-event="${event.id}">
+            <button class="hb-month-event" type="button" data-edit-event="${event.id}" style="--hb-month-event-color:${escapeAttr(color)};--hb-month-event-bg:${escapeAttr(hexAlpha(color, .14))};--hb-month-event-bg-hover:${escapeAttr(hexAlpha(color, .20))};--hb-month-event-border:${escapeAttr(hexAlpha(color, .26))}">
                 ${monthEventInfoMarkup(event, monthEventTime(event))}
             </button>`;
     }
@@ -5166,7 +5169,6 @@ export function mountHeyBeanWebApp(mount) {
             ${monthEventTimeStackMarkup(time)}
             <span class="hb-month-event-body">
                 <span class="hb-month-event-main">
-                    <span class="hb-month-event-category-dot" aria-hidden="true" style="background:${escapeAttr(itemColor(event))}"></span>
                     <span class="hb-month-event-title">${escapeHtml(eventTitleText(event))}</span>
                 </span>
             </span>`;
