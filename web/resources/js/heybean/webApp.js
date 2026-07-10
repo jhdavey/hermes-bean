@@ -13,6 +13,7 @@ import {
     RealtimeResponseLifecycle,
     buildRealtimeResponseEvent,
     canQueueRealtimeFollowUp,
+    realtimeFollowUpExpiry,
     shouldDeferAssistantMessage,
 } from './realtimeVoiceTurn.js';
 
@@ -9231,11 +9232,12 @@ export function mountHeyBeanWebApp(mount) {
 
     function setRealtimeFollowUpWindow() {
         window.clearTimeout(realtimeFollowUpTimer);
-        realtimeFollowUpUntil = Date.now() + 15000;
+        const now = Date.now();
+        realtimeFollowUpUntil = realtimeFollowUpExpiry(now);
         realtimeWakeActivated = true;
         realtimeFollowUpTimer = window.setTimeout(() => {
             resetRealtimeConversationToWakeMode();
-        }, 15000);
+        }, realtimeFollowUpUntil - now);
     }
 
     function realtimeSend(event) {

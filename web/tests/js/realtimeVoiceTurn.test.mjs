@@ -6,6 +6,7 @@ import {
     RealtimeResponseLifecycle,
     buildRealtimeResponseEvent,
     canQueueRealtimeFollowUp,
+    realtimeFollowUpExpiry,
     shouldDeferAssistantMessage,
 } from '../../resources/js/heybean/realtimeVoiceTurn.js';
 
@@ -44,6 +45,11 @@ test('deferred voice answers reject hidden bridge messages', () => {
 test('follow-ups can remain queued while the active voice turn is working', () => {
     assert.equal(canQueueRealtimeFollowUp({ content: 'Actually, only work events', wakeActivated: true, followUpActive: false, turnActive: true }), true);
     assert.equal(canQueueRealtimeFollowUp({ content: 'Background noise', wakeActivated: false, followUpActive: false, turnActive: false }), false);
+});
+
+test('the follow-up window remains open through a long first answer', () => {
+    const playbackSignalAt = 1_000;
+    assert.ok(realtimeFollowUpExpiry(playbackSignalAt) > playbackSignalAt + 45_000);
 });
 
 test('a stale cancelled response cannot complete the next spoken response', async () => {

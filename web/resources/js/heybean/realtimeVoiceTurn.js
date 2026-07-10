@@ -1,3 +1,9 @@
+const REALTIME_FOLLOW_UP_WINDOW_MS = 60_000;
+
+export function realtimeFollowUpExpiry(now = Date.now()) {
+    return Number(now) + REALTIME_FOLLOW_UP_WINDOW_MS;
+}
+
 export function canQueueRealtimeFollowUp({ content, wakeActivated, followUpActive, turnActive }) {
     return Boolean(String(content || '').trim()) && Boolean(wakeActivated || followUpActive || turnActive);
 }
