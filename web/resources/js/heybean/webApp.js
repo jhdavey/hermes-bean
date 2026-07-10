@@ -5162,17 +5162,6 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function monthEventInfoMarkup(event, time = '') {
-        const iconsMarkup = [
-            event?.is_critical || event?.isCritical
-                ? '<span class="hb-month-event-icon hb-month-event-critical" title="Critical" aria-label="Critical">★</span>'
-                : '',
-            eventNotesText(event)
-                ? `<span class="hb-month-event-icon" title="Has notes" aria-label="Has notes">${icons.notes}</span>`
-                : '',
-            eventLocationText(event)
-                ? `<span class="hb-month-event-icon" title="Has location" aria-label="Has location">${icons.pin}</span>`
-                : '',
-        ].filter(Boolean).join('');
         return `
             ${monthEventTimeStackMarkup(time)}
             <span class="hb-month-event-body">
@@ -5180,7 +5169,6 @@ export function mountHeyBeanWebApp(mount) {
                     <span class="hb-month-event-category-dot" aria-hidden="true" style="background:${escapeAttr(itemColor(event))}"></span>
                     <span class="hb-month-event-title">${escapeHtml(eventTitleText(event))}</span>
                 </span>
-                ${iconsMarkup ? `<span class="hb-month-event-icons">${iconsMarkup}</span>` : '<span class="hb-month-event-icons hb-month-event-icons-empty" aria-hidden="true"></span>'}
             </span>`;
     }
 
