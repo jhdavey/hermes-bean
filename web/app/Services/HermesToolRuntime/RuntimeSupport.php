@@ -1467,31 +1467,41 @@ PROMPT;
     {
         $date = (string) ($output['date'] ?? 'today');
         $items = [];
+        $isRequestedDate = static function (array $item, string $field) use ($date): bool {
+            $itemDate = trim((string) ($item[$field] ?? ''));
+
+            return $itemDate === '' ? ! array_key_exists($field, $item) : $itemDate === $date;
+        };
+        $withoutTypePrefix = static function (string $title, string $type): string {
+            $normalized = preg_replace('/^(?:'.preg_quote($type, '/').'\s*:\s*)+/iu', '', trim($title));
+
+            return trim((string) $normalized) ?: trim($title);
+        };
 
         foreach ((array) ($output['calendar_events'] ?? []) as $event) {
-            if (! is_array($event)) {
+            if (! is_array($event) || ! $isRequestedDate($event, 'display_start_date')) {
                 continue;
             }
             $time = trim((string) ($event['display_start_time'] ?? ''));
-            $title = trim((string) ($event['title'] ?? 'Untitled event'));
+            $title = $withoutTypePrefix((string) ($event['title'] ?? 'Untitled event'), 'Event');
             $items[] = trim(($time !== '' ? "{$time} - " : '')."Event: {$title}");
         }
 
         foreach ((array) ($output['tasks'] ?? []) as $task) {
-            if (! is_array($task)) {
+            if (! is_array($task) || ! $isRequestedDate($task, 'display_due_date')) {
                 continue;
             }
             $time = trim((string) ($task['display_due_time'] ?? ''));
-            $title = trim((string) ($task['title'] ?? 'Untitled task'));
+            $title = $withoutTypePrefix((string) ($task['title'] ?? 'Untitled task'), 'Task');
             $items[] = trim(($time !== '' ? "{$time} - " : '')."Task: {$title}");
         }
 
         foreach ((array) ($output['reminders'] ?? []) as $reminder) {
-            if (! is_array($reminder)) {
+            if (! is_array($reminder) || ! $isRequestedDate($reminder, 'display_remind_date')) {
                 continue;
             }
             $time = trim((string) ($reminder['display_remind_time'] ?? ''));
-            $title = trim((string) ($reminder['title'] ?? 'Untitled reminder'));
+            $title = $withoutTypePrefix((string) ($reminder['title'] ?? 'Untitled reminder'), 'Reminder');
             $items[] = trim(($time !== '' ? "{$time} - " : '')."Reminder: {$title}");
         }
 

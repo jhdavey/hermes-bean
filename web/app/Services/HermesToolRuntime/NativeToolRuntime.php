@@ -456,9 +456,7 @@ trait NativeToolRuntime
         }
         [$from, $to] = $this->toolDateWindow($session, $arguments);
         if ($from && $to) {
-            $query->where(function ($query) use ($from, $to): void {
-                $query->whereBetween('due_at', [$from, $to])->orWhereNull('due_at');
-            });
+            $query->whereBetween('due_at', [$from, $to]);
         }
 
         $items = $query->latest('is_critical')

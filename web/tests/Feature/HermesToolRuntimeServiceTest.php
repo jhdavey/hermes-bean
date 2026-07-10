@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
+use App\Models\ConversationSession;
 use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
@@ -3618,6 +3619,50 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(0);
     }
 
+    public function test_day_context_tool_returns_only_items_on_the_requested_local_date(): void
+    {
+        $token = $this->apiToken('tool-day-context-date@example.com');
+        $user = User::where('email', 'tool-day-context-date@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+        $session = ConversationSession::findOrFail($sessionId);
+        $workspaceId = (int) $session->workspace_id;
+
+        ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => "What's on my calendar for today?",
+            'metadata' => ['client_context' => ['timezone' => 'America/New_York']],
+        ]);
+
+        foreach ([
+            ['Today task', '2026-07-10 14:00:00'],
+            ['Tomorrow task', '2026-07-11 14:00:00'],
+        ] as [$title, $dueAt]) {
+            Task::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspaceId,
+                'title' => $title,
+                'status' => 'open',
+                'due_at' => Carbon::parse($dueAt, 'America/New_York')->utc(),
+            ]);
+        }
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'title' => 'Undated task',
+            'status' => 'open',
+            'due_at' => null,
+        ]);
+
+        $service = app(HermesToolRuntimeService::class);
+        $method = (new \ReflectionClass($service))->getMethod('dayContextForTool');
+        $method->setAccessible(true);
+        $result = $method->invoke($service, $session, ['date' => '2026-07-10']);
+
+        $this->assertSame(['Today task'], collect($result['tasks'])->pluck('title')->all());
+    }
+
     public function test_day_context_fallback_dedupes_identical_items(): void
     {
         $service = app(HermesToolRuntimeService::class);
@@ -3627,18 +3672,29 @@ class HermesToolRuntimeServiceTest extends TestCase
         $content = (string) $method->invoke($service, [
             'date' => '2026-07-02',
             'calendar_events' => [
-                ['display_start_time' => '3:50 PM', 'title' => 'Grocery shopping'],
-                ['display_start_time' => '3:50 PM', 'title' => 'Grocery shopping'],
+                ['display_start_date' => '2026-07-02', 'display_start_time' => '3:50 PM', 'title' => 'Grocery shopping'],
+                ['display_start_date' => '2026-07-02', 'display_start_time' => '3:50 PM', 'title' => 'Grocery shopping'],
+                ['display_start_date' => '2026-07-03', 'display_start_time' => '9:00 AM', 'title' => 'Tomorrow event'],
             ],
-            'tasks' => [],
+            'tasks' => [
+                ['display_due_date' => '2026-07-02', 'display_due_time' => '4:00 PM', 'title' => 'Today task'],
+                ['display_due_date' => '2026-07-03', 'display_due_time' => '8:00 AM', 'title' => 'Tomorrow task'],
+                ['display_due_date' => null, 'display_due_time' => '', 'title' => 'Undated task'],
+            ],
             'reminders' => [
-                ['display_remind_time' => '5:15 PM', 'title' => 'Reminder: Workout'],
-                ['display_remind_time' => '5:15 PM', 'title' => 'Reminder: Workout'],
+                ['display_remind_date' => '2026-07-02', 'display_remind_time' => '5:15 PM', 'title' => 'Reminder: Workout'],
+                ['display_remind_date' => '2026-07-02', 'display_remind_time' => '5:15 PM', 'title' => 'Reminder: Workout'],
+                ['display_remind_date' => '2026-07-03', 'display_remind_time' => '7:00 AM', 'title' => 'Tomorrow reminder'],
             ],
         ]);
 
         $this->assertSame(1, substr_count($content, 'Event: Grocery shopping'));
-        $this->assertSame(1, substr_count($content, 'Reminder: Reminder: Workout'));
+        $this->assertSame(1, substr_count($content, 'Reminder: Workout'));
+        $this->assertStringNotContainsString('Reminder: Reminder:', $content);
+        $this->assertStringNotContainsString('Tomorrow event', $content);
+        $this->assertStringNotContainsString('Tomorrow task', $content);
+        $this->assertStringNotContainsString('Tomorrow reminder', $content);
+        $this->assertStringNotContainsString('Undated task', $content);
     }
 
     public function test_native_read_fallback_prefers_day_context_over_request_history_when_both_were_read(): void

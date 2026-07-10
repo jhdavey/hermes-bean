@@ -164,7 +164,20 @@ class DashboardContextSnapshotService
                 ->map(fn (Task $task): array => $this->taskPayload($task, $timezone, $workspacesById))
                 ->values()
                 ->all(),
-            'reminders_due' => $reminders
+            'reminders_overdue' => $reminders
+                ->filter(fn (Reminder $reminder): bool => $reminder->remind_at?->lt($todayStart) ?? false)
+                ->take(20)
+                ->map(fn (Reminder $reminder): array => $this->reminderPayload($reminder, $timezone, $workspacesById))
+                ->values()
+                ->all(),
+            'reminders_due_today' => $reminders
+                ->filter(fn (Reminder $reminder): bool => $reminder->remind_at ? $reminder->remind_at->betweenIncluded($todayStart, $todayEnd) : false)
+                ->take(20)
+                ->map(fn (Reminder $reminder): array => $this->reminderPayload($reminder, $timezone, $workspacesById))
+                ->values()
+                ->all(),
+            'reminders_upcoming_next_7_days' => $reminders
+                ->filter(fn (Reminder $reminder): bool => $reminder->remind_at?->gt($todayEnd) ?? false)
                 ->take(30)
                 ->map(fn (Reminder $reminder): array => $this->reminderPayload($reminder, $timezone, $workspacesById))
                 ->values()
@@ -190,6 +203,7 @@ Dashboard context snapshot for fast read-only answers.
 Use this cross-workspace snapshot to answer simple questions about today's calendar, upcoming events, current tasks, reminders, and recent notes without calling tools. It includes the user's accessible workspaces and only warms app data through window.ends_on, up to 7 days in the future, plus recent notes. If the user asks for anything outside this snapshot, needs a write/change, or needs fresh external data, call queue_bean_work. Treat this snapshot as current as of generated_at.
 If weather_current.ok is true and the user asks for current weather without naming a location, use weather_current as the default location and answer immediately without tools. Also answer immediately when they name the same place as weather_current.location. If they ask for a different location or a forecast not covered by weather_current, call queue_bean_work.
 When the snapshot contains the answer, the turn is complete: answer once from the snapshot and do not queue background work, bridge updates, or a second final answer.
+For a request limited to today, use only calendar_today, tasks_due_today, and reminders_due_today. Never include calendar_upcoming, tasks_upcoming_next_7_days, reminders_upcoming_next_7_days, overdue items, or unscheduled tasks unless the user explicitly asks for those categories or a broader range.
 Timed *_at timestamps in this snapshot are formatted in the snapshot timezone and match the user-visible dashboard. Use display_* fields for dates and times you mention to the user; use *_utc only as canonical instants. For all_day events, ignore midnight wall-clock internals and use display_start_date/display_end_date. When multiple workspaces are relevant, mention the workspace names only when needed to avoid ambiguity.
 {$json}
 TEXT;
