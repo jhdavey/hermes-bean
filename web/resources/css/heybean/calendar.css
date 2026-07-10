@@ -292,7 +292,6 @@
 
 .hb-month-cell-active {
     border-color: var(--hb-accent);
-    background: rgba(var(--hb-accent-rgb), .04);
 }
 
 .hb-month-cell-head {
