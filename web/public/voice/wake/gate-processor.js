@@ -3,7 +3,11 @@
 const TARGET_SAMPLE_RATE = 16000;
 const AUDIO_BATCH_SAMPLES = 1600;
 const MAX_RESAMPLED_SAMPLES_PER_RENDER = 512;
-const PROVIDER_PRE_ROLL_MS = 320;
+// Streaming ASR can confirm the two-word wake phrase several hundred
+// milliseconds after the speaker has already started the command. Keep enough
+// locally buffered audio to deliver the complete wake-and-command onset once
+// the local detector admits the turn.
+const PROVIDER_PRE_ROLL_MS = 1200;
 const PROCESSOR_NAME = 'hey-bean-gate';
 
 class HeyBeanGateProcessor extends AudioWorkletProcessor {

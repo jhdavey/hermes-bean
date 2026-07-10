@@ -74,15 +74,17 @@ test('the packaged worklet is exact-zero while closed and releases buffered comm
         return result;
     }
 
-    const beforeWake = new Float32Array(8_000);
-    beforeWake.fill(0.25, 4_000, 4_800);
+    // Simulate a short wake-and-command onset that started almost a second
+    // before the local recognizer confirmed the keyword.
+    const beforeWake = new Float32Array(32_000);
+    beforeWake.fill(0.25, 16_000, 17_600);
     const closedOutput = render(beforeWake);
     assert.equal(closedOutput.every((sample) => Object.is(sample, 0)), true);
 
     processor.handleControlMessage({ type: 'open', generation: 1 });
-    const openOutput = render(new Float32Array(6_400));
+    const openOutput = render(new Float32Array(20_800));
     const firstRecoveredSample = openOutput.findIndex((sample) => Math.abs(sample) > 0.24);
-    assert.ok(firstRecoveredSample >= 1_000 && firstRecoveredSample <= 1_300);
+    assert.ok(firstRecoveredSample >= 3_100 && firstRecoveredSample <= 3_300);
     assert.equal(Math.max(...openOutput), 0.25);
 });
 

@@ -8,7 +8,7 @@
   "sampleRate": 16000,
   "audioBatchSamples": 1600,
   "maxWorkerChunkSamples": 3200,
-  "providerPreRollMs": 320,
+  "providerPreRollMs": 1200,
   "keywordAlias": "HEY_BEAN",
   "acceptedWakePrefixes": [
     "HEY BEAN",
