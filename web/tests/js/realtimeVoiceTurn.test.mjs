@@ -14,6 +14,7 @@ import {
     buildRealtimePlaybackCancellationEvents,
     buildRealtimeResponseEvent,
     buildRealtimeTargetedResponseCancellationEvent,
+    cancelRealtimeTurnWithoutBlockingReplacement,
     extractRealtimeResponseTranscript,
     isCompletedRealtimeResponse,
     isRealtimeVoiceStopCommand,
@@ -429,6 +430,25 @@ test('barge-in marks the interrupted speech response as cancelled', async () => 
         audioStartLatencyMs: null,
         responseDurationMs: 125,
     });
+});
+
+test('barge-in cancellation cannot block the replacement on a hung old request', async () => {
+    let cancelCalled = 0;
+    let settleOldRequest;
+    const oldRequest = new Promise((resolve) => { settleOldRequest = resolve; });
+
+    assert.equal(cancelRealtimeTurnWithoutBlockingReplacement(() => {
+        cancelCalled += 1;
+        return oldRequest;
+    }), true);
+    assert.equal(cancelCalled, 1);
+
+    let replacementRan = false;
+    await Promise.resolve().then(() => { replacementRan = true; });
+    assert.equal(replacementRan, true);
+
+    settleOldRequest();
+    await oldRequest;
 });
 
 test('an activated voice conversation stays open until explicit reset', () => {

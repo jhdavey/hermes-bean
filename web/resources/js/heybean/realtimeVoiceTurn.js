@@ -161,6 +161,16 @@ export function buildRealtimeConversationItemDeleteEvent(itemId) {
     };
 }
 
+export function cancelRealtimeTurnWithoutBlockingReplacement(cancel) {
+    if (typeof cancel !== 'function') return false;
+    try {
+        Promise.resolve(cancel()).catch(() => {});
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 export function isCompletedRealtimeResponse(response) {
     return String(response?.status || '').toLowerCase() === 'completed';
 }

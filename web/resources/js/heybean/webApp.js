@@ -20,6 +20,7 @@ import {
     buildRealtimePlaybackCancellationEvents,
     buildRealtimeResponseEvent,
     buildRealtimeTargetedResponseCancellationEvent,
+    cancelRealtimeTurnWithoutBlockingReplacement,
     extractRealtimeResponseTranscript,
     isCompletedRealtimeResponse,
     isRealtimeVoiceStopCommand,
@@ -10121,32 +10122,27 @@ export function mountHeyBeanWebApp(mount) {
         }
         if (now < realtimeIgnoreInputUntil || realtimeResponseActive || realtimeLaravelTurnInFlight || now < realtimeTurnGuardUntil || chatHasActiveTurn()) {
             let queuedAdmission = admission;
-            let cancellation = null;
             let supersedesClientRequestId = String(options.supersedesClientRequestId || '').trim();
             if (realtimeLaravelTurnInFlight || chatHasActiveTurn()) {
                 const canSupersedeActiveRequest = activeChatSupersessionEligible && activeChatClientRequestId !== '';
                 supersedesClientRequestId = canSupersedeActiveRequest
                     ? activeChatClientRequestId
                     : supersedesClientRequestId;
-                const requestSettlement = activeChatRequestSettlement;
                 queuedAdmission = realtimeConversation.supersedeTranscript({ content: text });
                 realtimeLaravelTurnInFlight = false;
                 realtimeTurnGuardUntil = Date.now() + 400;
                 if (canSupersedeActiveRequest) {
-                    cancellation = Promise.allSettled([
-                        cancelBeanTurn(null, { drainQueue: false }),
-                        requestSettlement,
-                    ]);
+                    cancelRealtimeTurnWithoutBlockingReplacement(
+                        () => cancelBeanTurn(null, { drainQueue: false }),
+                    );
                 } else {
                     stopBeanVoicePlayback({ reason: 'superseded' });
-                    cancellation = requestSettlement;
                 }
             }
             queueRealtimeFollowUpTranscript(text, {
                 admission: queuedAdmission,
                 transcriptCompletedAtMs,
                 supersedesClientRequestId,
-                ready: cancellation,
             });
             return;
         }
