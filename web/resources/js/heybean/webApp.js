@@ -4692,15 +4692,27 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function commandCenterAgendaMarkup(items) {
-        const todayMarkup = items.length
-            ? items.map(commandCenterAgendaItemMarkup).join('')
+        const overdueItems = items.filter((item) => item.isOverdue);
+        const todayItems = items.filter((item) => !item.isOverdue);
+        const overdueMarkup = overdueItems.length
+            ? `
+                ${commandCenterSectionHeaderMarkup('Overdue')}
+                ${overdueItems.map(commandCenterAgendaItemMarkup).join('')}`
+            : '';
+        const todayMarkup = todayItems.length
+            ? todayItems.map(commandCenterAgendaItemMarkup).join('')
             : '<div class="hb-command-center-empty hb-command-center-empty-inline">Nothing else scheduled for today.</div>';
         return `
             <div class="hb-command-center-agenda-list" aria-label="Today and upcoming list">
-                ${commandCenterDayHeaderMarkup(new Date())}
+                ${overdueMarkup}
+                ${commandCenterSectionHeaderMarkup(glanceDayLabel(new Date()))}
                 ${todayMarkup}
                 ${commandCenterGlanceMarkup()}
             </div>`;
+    }
+
+    function commandCenterSectionHeaderMarkup(label) {
+        return `<div class="hb-glance-day-label hb-command-center-day-label">${escapeHtml(label)}</div>`;
     }
 
     function commandCenterAgendaItemMarkup(item) {
@@ -4775,6 +4787,7 @@ export function mountHeyBeanWebApp(mount) {
                 time: overdue ? due : (dateOnlyDue ? endOfToday : due),
                 timeLabel: overdue && dateOnlyDue ? 'Overdue' : (dateOnlyDue ? 'Today' : formatCompactMeridiemTime(due)),
                 subtitle: [overdue ? 'overdue' : '', task.category || ''].filter(Boolean).join(' · '),
+                isOverdue: overdue,
             });
         });
 
@@ -4794,6 +4807,7 @@ export function mountHeyBeanWebApp(mount) {
                 time: overdue ? due : (dateOnlyDue ? endOfToday : due),
                 timeLabel: overdue && dateOnlyDue ? 'Overdue' : (dateOnlyDue ? 'Today' : formatCompactMeridiemTime(due)),
                 subtitle: [overdue ? 'overdue' : '', reminder.category || ''].filter(Boolean).join(' · '),
+                isOverdue: overdue,
             });
         });
 
@@ -4830,7 +4844,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function commandCenterDayHeaderMarkup(day) {
-        return `<div class="hb-glance-day-label hb-command-center-day-label">${escapeHtml(glanceDayLabel(day))}</div>`;
+        return commandCenterSectionHeaderMarkup(glanceDayLabel(day));
     }
 
     function glanceDayLabel(day) {

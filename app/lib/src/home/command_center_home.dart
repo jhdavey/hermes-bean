@@ -720,6 +720,9 @@ class _CommandCenterAgendaList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final overdueItems = items.where((item) => item.isOverdue).toList();
+    final todayItems = items.where((item) => !item.isOverdue).toList();
+
     if (loading && items.isEmpty) {
       return const _InlineLoadingSurface(
         key: Key('command-center-agenda-loading'),
@@ -735,6 +738,21 @@ class _CommandCenterAgendaList extends StatelessWidget {
           key: const Key('command-center-agenda-list'),
           padding: EdgeInsets.zero,
           children: [
+            if (overdueItems.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(7, 7, 7, 5),
+                child: _CommandCenterDayHeader(
+                  key: const Key('command-center-overdue-header'),
+                  label: 'Overdue',
+                ),
+              ),
+              for (var index = 0; index < overdueItems.length; index++)
+                _CommandCenterAgendaRow(
+                  item: overdueItems[index],
+                  showTopDivider: index > 0,
+                  onTap: onItemTap,
+                ),
+            ],
             Padding(
               padding: const EdgeInsets.fromLTRB(7, 7, 7, 5),
               child: _CommandCenterDayHeader(
@@ -742,10 +760,10 @@ class _CommandCenterAgendaList extends StatelessWidget {
                 label: _commandCenterGlanceDayLabel(DateTime.now()),
               ),
             ),
-            if (items.isEmpty) const _CommandCenterAgendaEmptyInline(),
-            for (var index = 0; index < items.length; index++)
+            if (todayItems.isEmpty) const _CommandCenterAgendaEmptyInline(),
+            for (var index = 0; index < todayItems.length; index++)
               _CommandCenterAgendaRow(
-                item: items[index],
+                item: todayItems[index],
                 showTopDivider: index > 0,
                 onTap: onItemTap,
               ),
@@ -940,6 +958,7 @@ class _CommandCenterAgendaItem {
     required this.time,
     required this.timeLabel,
     this.subtitle = '',
+    this.isOverdue = false,
     this.event,
     this.task,
     this.reminder,
@@ -951,6 +970,7 @@ class _CommandCenterAgendaItem {
   final DateTime time;
   final String timeLabel;
   final String subtitle;
+  final bool isOverdue;
   final HermesCalendarEvent? event;
   final HermesTask? task;
   final HermesReminder? reminder;

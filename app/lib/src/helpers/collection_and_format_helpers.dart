@@ -605,6 +605,7 @@ List<_CommandCenterAgendaItem> _commandCenterAgendaItems({
           if (overdue) 'overdue',
           if ((task.category ?? '').trim().isNotEmpty) task.category!.trim(),
         ].join(' · '),
+        isOverdue: overdue,
         task: task,
       ),
     );
@@ -637,6 +638,7 @@ List<_CommandCenterAgendaItem> _commandCenterAgendaItems({
           if ((reminder.category ?? '').trim().isNotEmpty)
             reminder.category!.trim(),
         ].join(' · '),
+        isOverdue: overdue,
         reminder: reminder,
       ),
     );
