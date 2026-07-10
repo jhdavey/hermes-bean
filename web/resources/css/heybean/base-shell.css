@@ -594,9 +594,10 @@
 }
 
 .hb-topbar-action:hover {
-    background: rgba(100, 116, 139, .08);
+    background: transparent;
     border-color: transparent;
     color: var(--hb-text);
+    transform: none;
 }
 
 .hb-create-menu {

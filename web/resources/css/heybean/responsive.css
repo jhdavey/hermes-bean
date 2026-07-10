@@ -106,8 +106,8 @@
     }
 
     .hb-top-nav .hb-nav-item-active {
-        border-color: rgba(var(--hb-accent-rgb), .22);
-        background: rgba(var(--hb-accent-rgb), .10);
+        border-color: transparent;
+        background: transparent;
     }
 
     .hb-top-nav .hb-nav-item svg {

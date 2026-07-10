@@ -157,6 +157,15 @@
     box-shadow: none;
 }
 
+.hb-month-arrow:hover,
+.hb-month-arrow:focus-visible {
+    border-color: transparent;
+    background: transparent;
+    color: var(--hb-text);
+    box-shadow: none;
+    transform: none;
+}
+
 .hb-month-current {
     min-width: 0;
     min-height: 36px;

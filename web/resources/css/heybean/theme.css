@@ -320,6 +320,12 @@
     box-shadow: inset 0 0 0 1px rgba(var(--hb-accent-rgb), .16);
 }
 
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-cell-active .hb-month-date strong {
+    border: 2px solid var(--hb-accent);
+    background: transparent;
+    color: var(--hb-text);
+}
+
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-event,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-glance-event,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-multi-day-event,
