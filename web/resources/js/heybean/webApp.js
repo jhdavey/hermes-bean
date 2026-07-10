@@ -158,6 +158,8 @@ export function mountHeyBeanWebApp(mount) {
     let realtimeLastCommandAt = 0;
     let realtimeTurnGuardUntil = 0;
     let realtimeIgnoreInputUntil = 0;
+    let realtimeQueuedFollowUpTranscript = '';
+    let realtimeQueuedFollowUpTimer = 0;
     let realtimeToolCalls = new Map();
 
     const guidedSignupPersonalities = [
@@ -9150,6 +9152,31 @@ export function mountHeyBeanWebApp(mount) {
         realtimeFollowUpUntil = 0;
     }
 
+    function clearQueuedRealtimeFollowUp() {
+        window.clearTimeout(realtimeQueuedFollowUpTimer);
+        realtimeQueuedFollowUpTimer = 0;
+        realtimeQueuedFollowUpTranscript = '';
+    }
+
+    function queueRealtimeFollowUpTranscript(text) {
+        const content = String(text || '').trim();
+        if (!content || !realtimeFollowUpActive()) return;
+        realtimeQueuedFollowUpTranscript = content;
+        window.clearTimeout(realtimeQueuedFollowUpTimer);
+        const waitMs = Math.max(250, Math.min(2500, Math.max(realtimeIgnoreInputUntil, realtimeTurnGuardUntil) - Date.now() + 100));
+        realtimeQueuedFollowUpTimer = window.setTimeout(() => {
+            const queued = realtimeQueuedFollowUpTranscript;
+            realtimeQueuedFollowUpTranscript = '';
+            realtimeQueuedFollowUpTimer = 0;
+            if (queued && state.voiceWakeListening && realtimeFollowUpActive()) {
+                handleRealtimeUserTranscript(queued).catch((error) => {
+                    state.error = friendlyError(error, 'send realtime follow-up');
+                    render();
+                });
+            }
+        }, waitMs);
+    }
+
     function setRealtimeFollowUpWindow() {
         window.clearTimeout(realtimeFollowUpTimer);
         realtimeFollowUpUntil = Date.now() + 15000;
@@ -9407,7 +9434,6 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
         const now = Date.now();
-        if (now < realtimeIgnoreInputUntil || realtimeResponseActive || realtimeLaravelTurnInFlight || now < realtimeTurnGuardUntil) return;
         const heardWakeWord = voiceWakeWordPattern().test(text);
         const acceptsFollowUp = realtimeWakeActivated || realtimeFollowUpActive();
         if (!acceptsFollowUp && !heardWakeWord) return;
@@ -9419,7 +9445,10 @@ export function mountHeyBeanWebApp(mount) {
             render();
             return;
         }
-        if (realtimeLaravelTurnInFlight || chatHasActiveTurn()) return;
+        if (now < realtimeIgnoreInputUntil || realtimeResponseActive || realtimeLaravelTurnInFlight || now < realtimeTurnGuardUntil || chatHasActiveTurn()) {
+            queueRealtimeFollowUpTranscript(command);
+            return;
+        }
 
         const commandKey = normalizedVoiceCommand(command);
         if (commandKey && realtimeLastCommandKey === commandKey && now - realtimeLastCommandAt < 8000) return;
@@ -9568,6 +9597,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function resetRealtimeConversationToWakeMode(options = {}) {
         clearRealtimeFollowUpWindow();
+        clearQueuedRealtimeFollowUp();
         realtimeWakeActivated = false;
         realtimePendingTranscript = '';
         realtimeAssistantDraft = '';
@@ -9599,6 +9629,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function stopVoiceWakeListening(options = {}) {
         clearRealtimeFollowUpWindow();
+        clearQueuedRealtimeFollowUp();
         realtimeWakeActivated = false;
         realtimePendingTranscript = '';
         realtimeAssistantDraft = '';
