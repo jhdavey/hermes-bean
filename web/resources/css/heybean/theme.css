@@ -234,6 +234,21 @@
     color: var(--hb-accent);
 }
 
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-icon-button.hb-topbar-action,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-icon-button.hb-month-arrow,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-icon-button.hb-topbar-action:hover,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-icon-button.hb-month-arrow:hover,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-icon-button.hb-topbar-action:focus-visible,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-icon-button.hb-month-arrow:focus-visible,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-create-menu[open] .hb-create-trigger,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-top-nav .hb-nav-item-active {
+    border-color: transparent;
+    background: transparent;
+    color: var(--hb-accent);
+    box-shadow: none;
+    transform: none;
+}
+
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-button,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-button-secondary,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-button-ghost,
@@ -315,13 +330,13 @@
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-cell-active {
-    border-color: rgba(var(--hb-accent-rgb), .34);
-    background: linear-gradient(180deg, rgba(var(--hb-accent-rgb), .12), rgba(18, 25, 32, .88));
-    box-shadow: inset 0 0 0 1px rgba(var(--hb-accent-rgb), .16);
+    border-color: var(--hb-accent);
+    background: rgba(var(--hb-accent-rgb), .06);
+    box-shadow: none;
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-month-cell-active .hb-month-date strong {
-    border: 2px solid var(--hb-accent);
+    border: 0;
     background: transparent;
     color: var(--hb-text);
 }

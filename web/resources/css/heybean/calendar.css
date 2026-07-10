@@ -259,7 +259,7 @@
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     gap: 6px;
-    border: 0;
+    border: 1px solid transparent;
     border-radius: 4px;
     background: rgba(255, 255, 255, .72);
     color: var(--hb-text);
@@ -291,7 +291,8 @@
 }
 
 .hb-month-cell-active {
-    background: rgba(var(--hb-accent-rgb), .08);
+    border-color: var(--hb-accent);
+    background: rgba(var(--hb-accent-rgb), .04);
 }
 
 .hb-month-cell-head {
@@ -327,8 +328,8 @@
 }
 
 .hb-month-cell-active .hb-month-date strong {
-    background: var(--hb-accent);
-    color: #fff;
+    background: transparent;
+    color: var(--hb-text);
 }
 
 .hb-month-cell-adjacent .hb-month-event,
