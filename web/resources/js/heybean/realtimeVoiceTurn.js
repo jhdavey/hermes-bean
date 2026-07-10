@@ -1,7 +1,33 @@
-const REALTIME_FOLLOW_UP_WINDOW_MS = 60_000;
+export function realtimeFollowUpExpiry() {
+    return Number.POSITIVE_INFINITY;
+}
 
-export function realtimeFollowUpExpiry(now = Date.now()) {
-    return Number(now) + REALTIME_FOLLOW_UP_WINDOW_MS;
+export function realtimeNeedsAppRuntime(command, { appConversationActive = false } = {}) {
+    if (appConversationActive) return true;
+    const normalized = String(command || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return /\b(task|tasks|todo|todos|to do|remind\w*|note|notes|calendar|event|events|schedul\w*|appointment|appointments|dashboard|approval|approvals|weather|forecast|temperature|email|message|text|contact|contacts|account|profile|workspace|list|show|find|search|lookup|look up|create|add|make|update|change|edit|delete|remove|complete|finish|mark|move|reschedul\w*|cancel)\b/.test(normalized);
+}
+
+export function isVoiceFillerOnly(text) {
+    const normalized = String(text || '')
+        .toLowerCase()
+        .replace(/[^a-z\s]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return /^(um+|uh+|erm+|hmm+|mm+|ah+|okay um|ok um)$/.test(normalized);
+}
+
+export function extractRealtimeResponseTranscript(response) {
+    return (Array.isArray(response?.output) ? response.output : [])
+        .flatMap((item) => Array.isArray(item?.content) ? item.content : [])
+        .map((part) => String(part?.transcript || part?.text || '').trim())
+        .filter(Boolean)
+        .join('\n')
+        .trim();
 }
 
 export function canQueueRealtimeFollowUp({ content, wakeActivated, followUpActive, turnActive }) {

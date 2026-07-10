@@ -13,7 +13,10 @@ import {
     RealtimeResponseLifecycle,
     buildRealtimeResponseEvent,
     canQueueRealtimeFollowUp,
+    extractRealtimeResponseTranscript,
+    isVoiceFillerOnly,
     realtimeFollowUpExpiry,
+    realtimeNeedsAppRuntime,
     shouldDeferAssistantMessage,
 } from './realtimeVoiceTurn.js';
 
@@ -155,6 +158,7 @@ export function mountHeyBeanWebApp(mount) {
     let realtimeSession = null;
     let realtimeVoiceActive = false;
     let realtimeWakeActivated = false;
+    let realtimeAppConversationActive = false;
     let realtimeFollowUpUntil = 0;
     let realtimeFollowUpTimer = 0;
     let realtimePendingTranscript = '';
@@ -9131,11 +9135,6 @@ export function mountHeyBeanWebApp(mount) {
         return '';
     }
 
-    function realtimeNeedsLaravel(command) {
-        const normalized = normalizedVoiceCommand(command);
-        return /\b(task|tasks|todo|todos|to do|reminder|reminders|note|notes|calendar|event|events|schedule|appointment|appointments|dashboard|approval|approvals|weather|forecast|temperature|email|message|text|contact|contacts|account|profile|workspace|list|show|find|search|lookup|look up|create|add|make|update|change|edit|delete|remove|complete|finish|mark|move|reschedule|cancel)\b/.test(normalized);
-    }
-
     function realtimeDirectAnswerInstructions(command) {
         const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'the user\'s local timezone';
         const now = new Date();
@@ -9232,12 +9231,9 @@ export function mountHeyBeanWebApp(mount) {
 
     function setRealtimeFollowUpWindow() {
         window.clearTimeout(realtimeFollowUpTimer);
-        const now = Date.now();
-        realtimeFollowUpUntil = realtimeFollowUpExpiry(now);
+        realtimeFollowUpTimer = 0;
+        realtimeFollowUpUntil = realtimeFollowUpExpiry();
         realtimeWakeActivated = true;
-        realtimeFollowUpTimer = window.setTimeout(() => {
-            resetRealtimeConversationToWakeMode();
-        }, realtimeFollowUpUntil - now);
     }
 
     function realtimeSend(event) {
@@ -9468,6 +9464,7 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         if (payload.type === 'response.done') {
+            realtimeResponseLifecycle.captureTranscript(extractRealtimeResponseTranscript(payload.response));
             const trackedResponseActive = realtimeResponseLifecycle.isActive();
             const completedResponse = realtimeResponseLifecycle.markResponseDone(payload.response?.id);
             if (trackedResponseActive && !completedResponse) return;
@@ -9500,6 +9497,11 @@ export function mountHeyBeanWebApp(mount) {
     async function handleRealtimeUserTranscript(transcript) {
         const text = String(transcript || '').trim();
         if (!text) return;
+        if (isVoiceFillerOnly(stripVoiceWakeWords(text))) {
+            realtimePendingTranscript = '';
+            updateVoiceWakeDraft('');
+            return;
+        }
         realtimePendingTranscript = text;
         updateVoiceWakeDraft(text);
         if (voiceStopCommand(text)) {
@@ -9547,7 +9549,8 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
 
-        if (!realtimeNeedsLaravel(command)) {
+        const needsAppRuntime = realtimeNeedsAppRuntime(command, { appConversationActive: realtimeAppConversationActive });
+        if (!needsAppRuntime) {
             state.chatRunState = 'Bean is speaking…';
             state.chatDraft = '';
             state.messages = state.messages.filter((message) => !message?.metadata?.realtime_draft);
@@ -9567,6 +9570,7 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
 
+        realtimeAppConversationActive = true;
         realtimeTurnGuardUntil = now + 20000;
         realtimeLaravelTurnInFlight = true;
         state.chatRunState = realtimeWorkingStatus(command);

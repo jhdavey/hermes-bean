@@ -6,7 +6,10 @@ import {
     RealtimeResponseLifecycle,
     buildRealtimeResponseEvent,
     canQueueRealtimeFollowUp,
+    extractRealtimeResponseTranscript,
+    isVoiceFillerOnly,
     realtimeFollowUpExpiry,
+    realtimeNeedsAppRuntime,
     shouldDeferAssistantMessage,
 } from '../../resources/js/heybean/realtimeVoiceTurn.js';
 
@@ -33,6 +36,27 @@ test('repeated transcript items and function calls are claimed once', () => {
     assert.equal(deduper.claimToolCall('call-1'), true);
 });
 
+test('calendar schedule questions and their corrections stay on the app runtime', () => {
+    assert.equal(realtimeNeedsAppRuntime('When do I have long runs scheduled?'), true);
+    assert.equal(realtimeNeedsAppRuntime('I thought I had them for Saturday.', { appConversationActive: true }), true);
+    assert.equal(realtimeNeedsAppRuntime('Yes.', { appConversationActive: true }), true);
+    assert.equal(realtimeNeedsAppRuntime('Tell me a short joke.'), false);
+});
+
+test('filler-only recognition is not submitted as a user turn', () => {
+    assert.equal(isVoiceFillerOnly('um...'), true);
+    assert.equal(isVoiceFillerOnly('uh, I thought they were Saturday'), false);
+});
+
+test('completed realtime output supplies assistant text when transcript events are missing', () => {
+    assert.equal(extractRealtimeResponseTranscript({
+        output: [{
+            type: 'message',
+            content: [{ type: 'audio', transcript: 'Your long runs start on Saturdays.' }],
+        }],
+    }), 'Your long runs start on Saturdays.');
+});
+
 test('deferred voice answers reject hidden bridge messages', () => {
     const hiddenBridge = { role: 'assistant', content: 'Working', metadata: { runtime: 'direct_queue_bridge' } };
     const finalAnswer = { role: 'assistant', content: 'You have two events today.', metadata: {} };
@@ -47,9 +71,8 @@ test('follow-ups can remain queued while the active voice turn is working', () =
     assert.equal(canQueueRealtimeFollowUp({ content: 'Background noise', wakeActivated: false, followUpActive: false, turnActive: false }), false);
 });
 
-test('the follow-up window remains open through a long first answer', () => {
-    const playbackSignalAt = 1_000;
-    assert.ok(realtimeFollowUpExpiry(playbackSignalAt) > playbackSignalAt + 45_000);
+test('an activated voice conversation stays open until explicit reset', () => {
+    assert.equal(realtimeFollowUpExpiry(1_000), Number.POSITIVE_INFINITY);
 });
 
 test('a stale cancelled response cannot complete the next spoken response', async () => {
