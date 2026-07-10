@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Models\AiUsageLog;
 use App\Models\AdminSetting;
+use App\Models\AiUsageLog;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Models\PageViewEvent;
@@ -161,7 +161,7 @@ class AiUsageGuardrailTest extends TestCase
         ])->assertCreated()->json('data.id');
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Please plan my whole week.',
+            'content' => 'Please plan out my whole week with a deep dive into priorities and tradeoffs.',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'blocked')
             ->assertJsonPath('data.assistant_message.content', 'This account has reached today\'s AI usage limit.')

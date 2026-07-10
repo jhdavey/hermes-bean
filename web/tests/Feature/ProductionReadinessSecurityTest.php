@@ -24,7 +24,7 @@ class ProductionReadinessSecurityTest extends TestCase
             ->assertHeader('X-Content-Type-Options', 'nosniff')
             ->assertHeader('X-Frame-Options', 'DENY')
             ->assertHeader('Referrer-Policy', 'no-referrer')
-            ->assertHeader('Permissions-Policy', 'camera=(), geolocation=(self)')
+            ->assertHeader('Permissions-Policy', 'camera=(), geolocation=(self), microphone=(self), autoplay=(self)')
             ->assertJsonPath('error.code', 'unauthenticated')
             ->assertJsonPath('error.message', 'Unauthenticated.');
     }
@@ -70,14 +70,18 @@ class ProductionReadinessSecurityTest extends TestCase
 
     public function test_web_pages_receive_security_headers(): void
     {
+        $contentSecurityPolicy = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.openai.com wss://api.openai.com; media-src 'self' blob: mediastream:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'";
+
         foreach (['/', '/privacy', '/terms'] as $path) {
             $this->get($path)
                 ->assertOk()
                 ->assertHeader('X-Content-Type-Options', 'nosniff')
                 ->assertHeader('X-Frame-Options', 'DENY')
                 ->assertHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
-                ->assertHeader('Permissions-Policy', 'camera=(), geolocation=(self)')
-                ->assertHeader('Content-Security-Policy');
+                ->assertHeader('Permissions-Policy', 'camera=(), geolocation=(self), microphone=(self), autoplay=(self)')
+                ->assertHeader('Content-Security-Policy', $contentSecurityPolicy)
+                ->assertHeaderMissing('Cross-Origin-Opener-Policy')
+                ->assertHeaderMissing('Cross-Origin-Embedder-Policy');
         }
     }
 

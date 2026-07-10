@@ -762,7 +762,7 @@ class AssistantDomainApiTest extends TestCase
         ])->assertCreated()->json('data.id');
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Plan my day',
+            'content' => 'Plan out my day with tasks, reminders, and calendar priorities.',
         ])->assertCreated();
 
         $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/events")

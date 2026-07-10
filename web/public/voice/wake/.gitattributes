@@ -1,0 +1,6 @@
+# Preserve generated Emscripten output byte-for-byte and keep binary payloads
+# out of textual diffs.
+runtime.js binary
+asr-api.js binary
+runtime.wasm binary
+model.data binary

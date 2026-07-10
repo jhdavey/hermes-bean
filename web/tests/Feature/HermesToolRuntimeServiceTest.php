@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ProcessAssistantRun;
 use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
@@ -10,6 +11,8 @@ use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\HermesToolRuntimeService;
+use App\Services\LiveLookupService;
+use App\Services\OpenMeteoWeatherService;
 use App\Services\WorkspaceItemSyncService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -17,6 +20,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Assert;
 use Tests\TestCase;
 
@@ -340,6 +344,8 @@ class HermesToolRuntimeServiceTest extends TestCase
 
     public function test_routed_runs_complete_simple_turns_and_queue_app_work_by_lane(): void
     {
+        Queue::fake();
+
         Http::fakeSequence()
             ->push([
                 'id' => 'chatcmpl-routed-simple',
@@ -381,6 +387,7 @@ class HermesToolRuntimeServiceTest extends TestCase
             ->assertJsonFragment(['work_label' => 'Update notes']);
 
         Http::assertSentCount(1);
+        Queue::assertPushed(ProcessAssistantRun::class, 1);
     }
 
     public function test_stale_prior_completion_claim_cannot_skip_requested_app_write(): void
@@ -1451,6 +1458,395 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
         Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
         Http::assertSentCount(2);
+    }
+
+    public function test_direct_weather_parser_separates_location_date_and_time(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-10 12:30:00', 'America/New_York'));
+
+        $token = $this->apiToken('tool-weather-time-parser@example.com');
+        $user = User::where('email', 'tool-weather-time-parser@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+        $session = ConversationSession::findOrFail($sessionId);
+        $message = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => "Okay, and what's the weather in Orlando at 5 p.m. today?",
+            'metadata' => ['client_context' => ['timezone' => 'America/New_York']],
+        ]);
+
+        $service = app(HermesToolRuntimeService::class);
+        $method = (new \ReflectionClass($service))->getMethod('directExternalLookupArguments');
+        $method->setAccessible(true);
+        $arguments = $method->invoke($service, $session, $message);
+
+        $this->assertSame('weather', data_get($arguments, 'domain'));
+        $this->assertSame('weather_forecast', data_get($arguments, 'intent'));
+        $this->assertSame('Orlando', data_get($arguments, 'location'));
+        $this->assertSame('2026-07-10', data_get($arguments, 'date'));
+        $this->assertSame('17:00', data_get($arguments, 'time'));
+
+        $timeBeforeLocation = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => "What's the weather at 5 p.m. today in Orlando?",
+            'metadata' => ['client_context' => ['timezone' => 'America/New_York']],
+        ]);
+        $timeBeforeLocationArguments = $method->invoke($service, $session, $timeBeforeLocation);
+
+        $this->assertSame('Orlando', data_get($timeBeforeLocationArguments, 'location'));
+        $this->assertSame('2026-07-10', data_get($timeBeforeLocationArguments, 'date'));
+        $this->assertSame('17:00', data_get($timeBeforeLocationArguments, 'time'));
+
+        $spokenTime = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => "What's the weather in Orlando at five thirty p.m. today?",
+            'metadata' => ['client_context' => ['timezone' => 'America/New_York']],
+        ]);
+        $spokenTimeArguments = $method->invoke($service, $session, $spokenTime);
+        $this->assertSame('Orlando', data_get($spokenTimeArguments, 'location'));
+        $this->assertSame('17:30', data_get($spokenTimeArguments, 'time'));
+
+        $halfPastTime = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => "What's the weather in Orlando at half past five p.m. today?",
+            'metadata' => ['client_context' => ['timezone' => 'America/New_York']],
+        ]);
+        $halfPastTimeArguments = $method->invoke($service, $session, $halfPastTime);
+        $this->assertSame('Orlando', data_get($halfPastTimeArguments, 'location'));
+        $this->assertSame('17:30', data_get($halfPastTimeArguments, 'time'));
+
+        $dayPartTime = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => "What's the weather in Orlando at 5 o'clock this afternoon?",
+            'metadata' => ['client_context' => ['timezone' => 'America/New_York']],
+        ]);
+        $dayPartTimeArguments = $method->invoke($service, $session, $dayPartTime);
+        $this->assertSame('Orlando', data_get($dayPartTimeArguments, 'location'));
+        $this->assertSame('17:00', data_get($dayPartTimeArguments, 'time'));
+
+        $compactTime = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => "What's the weather in Orlando at 1700 today?",
+            'metadata' => ['client_context' => ['timezone' => 'America/New_York']],
+        ]);
+        $compactTimeArguments = $method->invoke($service, $session, $compactTime);
+        $this->assertSame('Orlando', data_get($compactTimeArguments, 'location'));
+        $this->assertSame('17:00', data_get($compactTimeArguments, 'time'));
+
+        $midnightTonight = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => "What's the weather in Orlando at 12 tonight?",
+            'metadata' => ['client_context' => ['timezone' => 'America/New_York']],
+        ]);
+        $midnightTonightArguments = $method->invoke($service, $session, $midnightTonight);
+        $this->assertSame('00:00', data_get($midnightTonightArguments, 'time'));
+        $this->assertSame('2026-07-11', data_get($midnightTonightArguments, 'date'));
+
+        $oneTonight = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => "What's the weather in Orlando at 1 tonight?",
+            'metadata' => ['client_context' => ['timezone' => 'America/New_York']],
+        ]);
+        $oneTonightArguments = $method->invoke($service, $session, $oneTonight);
+        $this->assertSame('01:00', data_get($oneTonightArguments, 'time'));
+        $this->assertSame('2026-07-11', data_get($oneTonightArguments, 'date'));
+
+        $fiveTonight = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => "What's the weather in Orlando at 5 tonight?",
+            'metadata' => ['client_context' => ['timezone' => 'America/New_York']],
+        ]);
+        $fiveTonightArguments = $method->invoke($service, $session, $fiveTonight);
+        $this->assertSame('17:00', data_get($fiveTonightArguments, 'time'));
+        $this->assertSame('2026-07-10', data_get($fiveTonightArguments, 'date'));
+
+        $ambiguousBareHour = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => "What's the weather in Orlando at 5 today?",
+            'metadata' => ['client_context' => ['timezone' => 'America/New_York']],
+        ]);
+        $this->assertNull($method->invoke($service, $session, $ambiguousBareHour));
+
+        $namedDate = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => "What's the weather in Orlando at 5 p.m. on Monday?",
+            'metadata' => ['client_context' => ['timezone' => 'America/New_York']],
+        ]);
+        $namedDateArguments = $method->invoke($service, $session, $namedDate);
+        $this->assertSame('Orlando', data_get($namedDateArguments, 'location'));
+        $this->assertSame('2026-07-13', data_get($namedDateArguments, 'date'));
+        $this->assertSame('17:00', data_get($namedDateArguments, 'time'));
+
+        $monthDate = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => "What's the weather in Orlando at 5 p.m. on July 14th?",
+            'metadata' => ['client_context' => ['timezone' => 'America/New_York']],
+        ]);
+        $monthDateArguments = $method->invoke($service, $session, $monthDate);
+        $this->assertSame('Orlando', data_get($monthDateArguments, 'location'));
+        $this->assertSame('2026-07-14', data_get($monthDateArguments, 'date'));
+        $this->assertSame('17:00', data_get($monthDateArguments, 'time'));
+
+        $locationMethod = (new \ReflectionClass($service))->getMethod('directWeatherLocation');
+        $locationMethod->setAccessible(true);
+        $this->assertSame('Orlando', $locationMethod->invoke($service, 'Weather in Orlando later in the afternoon'));
+        $this->assertSame('Orlando', $locationMethod->invoke($service, 'Weather in Orlando in July'));
+
+        $vagueTime = ConversationMessage::create([
+            'user_id' => $user->id,
+            'conversation_session_id' => $session->id,
+            'role' => 'user',
+            'content' => 'Weather in Orlando later in the afternoon',
+        ]);
+        $this->assertNull($method->invoke($service, $session, $vagueTime));
+
+        Carbon::setTestNow();
+    }
+
+    public function test_hourly_weather_rejects_invalid_explicit_time_instead_of_degrading_to_daily(): void
+    {
+        Http::fake();
+
+        $result = app(OpenMeteoWeatherService::class)->weatherForIntent([
+            'query' => 'What is the weather in Orlando at 17:65 today?',
+            'domain' => 'weather',
+            'intent' => 'weather_forecast',
+            'location' => 'Orlando',
+        ], 'America/New_York');
+
+        $this->assertFalse(data_get($result, 'ok'));
+        $this->assertSame('weather_hourly_forecast', data_get($result, 'kind'));
+        $this->assertSame('weather_hourly_datetime_invalid', data_get($result, 'error_code'));
+        $this->assertStringContainsString('specific time', (string) data_get($result, 'message'));
+        Http::assertNothingSent();
+    }
+
+    public function test_hourly_weather_relative_date_label_uses_the_request_display_timezone(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-11 00:30:00', 'UTC'));
+        Http::fake(function ($request) {
+            if (str_starts_with($request->url(), 'https://geocoding-api.open-meteo.com/v1/search')) {
+                return Http::response([
+                    'results' => [[
+                        'name' => 'Los Angeles',
+                        'latitude' => 34.0522,
+                        'longitude' => -118.2437,
+                        'admin1' => 'California',
+                        'country_code' => 'US',
+                    ]],
+                ]);
+            }
+
+            return Http::response([
+                'timezone' => 'America/Los_Angeles',
+                'hourly' => [
+                    'time' => ['2026-07-10T17:00'],
+                    'temperature_2m' => [78.0],
+                    'weather_code' => [0],
+                    'precipitation_probability' => [0],
+                    'wind_speed_10m' => [6.0],
+                ],
+            ]);
+        });
+
+        $result = app(OpenMeteoWeatherService::class)->hourlyForecast(
+            'Los Angeles',
+            '2026-07-10',
+            '17:00',
+            ['timezone' => 'America/Los_Angeles'],
+        );
+
+        $this->assertTrue(data_get($result, 'ok'), json_encode($result, JSON_PRETTY_PRINT));
+        $this->assertStringContainsString('5 PM today', (string) data_get($result, 'text'));
+
+        Carbon::setTestNow();
+    }
+
+    public function test_hourly_weather_labels_nearest_hour_without_claiming_an_exact_half_hour(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-10 12:30:00', 'America/New_York'));
+
+        Http::fake(function ($request) {
+            if (str_starts_with($request->url(), 'https://geocoding-api.open-meteo.com/v1/search')) {
+                return Http::response([
+                    'results' => [[
+                        'name' => 'Orlando',
+                        'latitude' => 28.5383,
+                        'longitude' => -81.3792,
+                        'admin1' => 'Florida',
+                        'country_code' => 'US',
+                    ]],
+                ]);
+            }
+
+            return Http::response([
+                'timezone' => 'America/New_York',
+                'hourly' => [
+                    'time' => ['2026-07-10T17:00', '2026-07-10T18:00'],
+                    'temperature_2m' => [86.6, 85.2],
+                    'weather_code' => [2, 80],
+                    'precipitation_probability' => [35, 45],
+                    'wind_speed_10m' => [8.4, 9.8],
+                ],
+            ]);
+        });
+
+        $result = app(OpenMeteoWeatherService::class)->weatherForIntent([
+            'query' => 'What is the weather in Orlando at five thirty p.m. today?',
+            'domain' => 'weather',
+            'intent' => 'weather_forecast',
+        ], 'America/New_York', ['timezone' => 'America/New_York']);
+
+        $this->assertTrue(data_get($result, 'ok'), json_encode($result, JSON_PRETTY_PRINT));
+        $this->assertSame('17:30', data_get($result, 'weather.requested_time'));
+        $this->assertSame('17:00', data_get($result, 'weather.matched_time'));
+        $this->assertFalse(data_get($result, 'weather.is_exact_time'));
+        $this->assertStringContainsString('Around 5:30 PM today', (string) data_get($result, 'text'));
+        $this->assertStringContainsString('nearest hourly forecast (5 PM)', (string) data_get($result, 'text'));
+
+        Carbon::setTestNow();
+    }
+
+    public function test_external_lookup_routes_specific_time_weather_to_open_meteo_hourly_forecast(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-10 12:30:00', 'America/New_York'));
+
+        Http::fake(function ($request) {
+            if (str_starts_with($request->url(), 'https://geocoding-api.open-meteo.com/v1/search')) {
+                $this->assertStringContainsString('name=Orlando', urldecode($request->url()));
+                $this->assertStringNotContainsString('5+p.m', urldecode($request->url()));
+
+                return Http::response([
+                    'results' => [[
+                        'id' => 4167147,
+                        'name' => 'Orlando',
+                        'latitude' => 28.5383,
+                        'longitude' => -81.3792,
+                        'admin1' => 'Florida',
+                        'country_code' => 'US',
+                    ]],
+                ], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://api.open-meteo.com/v1/forecast')) {
+                $payload = $request->data();
+                $this->assertSame('2026-07-10', data_get($payload, 'start_date'));
+                $this->assertSame('2026-07-10', data_get($payload, 'end_date'));
+                $this->assertSame('auto', data_get($payload, 'timezone'));
+                $this->assertSame(
+                    'temperature_2m,apparent_temperature,relative_humidity_2m,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m',
+                    data_get($payload, 'hourly')
+                );
+                $this->assertNull(data_get($payload, 'current'));
+                $this->assertNull(data_get($payload, 'daily'));
+
+                return Http::response([
+                    'timezone' => 'America/New_York',
+                    'hourly' => [
+                        'time' => ['2026-07-10T16:00', '2026-07-10T17:00', '2026-07-10T18:00'],
+                        'temperature_2m' => [88.1, 86.6, 85.2],
+                        'apparent_temperature' => [93.2, 91.1, 89.3],
+                        'relative_humidity_2m' => [68, 70, 72],
+                        'precipitation_probability' => [25, 35, 45],
+                        'precipitation' => [0, 0.02, 0.08],
+                        'weather_code' => [1, 2, 80],
+                        'cloud_cover' => [30, 48, 70],
+                        'wind_speed_10m' => [7.1, 8.4, 9.8],
+                        'wind_direction_10m' => [100, 110, 120],
+                        'wind_gusts_10m' => [12.2, 14.1, 16.3],
+                    ],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'Unexpected request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('tool-weather-hourly@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => "Okay, and what's the weather in Orlando at 5 p.m. today?",
+            'metadata' => ['client_context' => ['timezone' => 'America/New_York']],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath(
+                'data.assistant_message.content',
+                'At 5 PM today in Orlando, Florida, US, expect 87°F and partly cloudy, with a 35% chance of precipitation and winds around 8 mph.'
+            );
+
+        $lookupResult = app(LiveLookupService::class)->lookup(ConversationSession::findOrFail($sessionId), [
+            'query' => "Okay, and what's the weather in Orlando at 5 p.m. today?",
+            'domain' => 'weather',
+            'intent' => 'weather_forecast',
+            'location' => 'Orlando',
+            'date' => '2026-07-10',
+            'time' => '17:00',
+        ]);
+        $this->assertSame('weather_hourly_forecast', data_get($lookupResult, 'kind'));
+        $this->assertSame('2026-07-10', data_get($lookupResult, 'date'));
+        $this->assertSame('17:00', data_get($lookupResult, 'time'));
+        $this->assertSame('2026-07-10T17:00', data_get($lookupResult, 'weather.time'));
+        $this->assertSame(87.0, data_get($lookupResult, 'weather.temperature_f'));
+        $this->assertSame(35.0, data_get($lookupResult, 'weather.precipitation_probability_percent'));
+        $this->assertSame('partly cloudy', data_get($lookupResult, 'weather.description'));
+
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
+        Http::assertSentCount(2);
+        Carbon::setTestNow();
+    }
+
+    public function test_structured_weather_provider_failure_does_not_fall_through_to_generic_search(): void
+    {
+        config()->set('services.hermes_runtime.tavily_api_key', 'tavily-test-key');
+
+        Http::fake(function ($request) {
+            if (str_starts_with($request->url(), 'https://geocoding-api.open-meteo.com/v1/search')) {
+                return Http::response(['reason' => 'provider unavailable'], 503);
+            }
+
+            return Http::response(['error' => 'Unexpected fallback request '.$request->url()], 500);
+        });
+
+        $token = $this->apiToken('tool-weather-safe-failure@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+        $result = app(LiveLookupService::class)->lookup(ConversationSession::findOrFail($sessionId), [
+            'query' => 'current weather in Orlando',
+            'domain' => 'weather',
+            'intent' => 'current_weather',
+            'location' => 'Orlando',
+        ]);
+
+        $this->assertFalse(data_get($result, 'ok'));
+        $this->assertSame('open_meteo', data_get($result, 'provider'));
+        $this->assertSame('weather_geocode_failed', data_get($result, 'error_code'));
+        $this->assertSame('I couldn’t retrieve the live weather just now. Please try again in a moment.', data_get($result, 'message'));
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.tavily.com/search');
+        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/responses');
+        Http::assertSentCount(1);
     }
 
     public function test_external_lookup_routes_structured_weather_forecast_to_open_meteo(): void

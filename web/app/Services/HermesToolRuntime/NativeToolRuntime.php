@@ -93,7 +93,12 @@ trait NativeToolRuntime
         }
 
         try {
-            $events = $this->executeActionEnvelopeAtomically($session, $action, $workItem);
+            $events = $this->executeActionEnvelopeAtomically(
+                $session,
+                $action,
+                $workItem,
+                (int) data_get($userMessage->metadata, 'assistant_run_id', 0),
+            );
         } catch (\Throwable $exception) {
             $event = $this->recordEvent($session, 'assistant.action.failed', $this->payloadWithWorkItem([
                 'action_type' => $actionType,

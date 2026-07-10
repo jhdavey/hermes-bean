@@ -31,6 +31,11 @@ class AssistantRunController extends Controller
             'metadata' => ['nullable', 'array'],
             'source' => ['nullable', 'string', 'max:50'],
         ]);
+        validator($data['metadata'] ?? [], [
+            'client_request_id' => ['nullable', 'string', 'max:120'],
+            'supersedes_client_request_id' => ['nullable', 'string', 'max:120'],
+        ])->validate();
+        $data['metadata'] = $this->runs->sanitizeClientMetadata($data['metadata'] ?? []);
         $source = (string) ($data['source'] ?? data_get($data, 'metadata.source', 'http'));
         $clientRequestId = trim((string) data_get($data, 'metadata.client_request_id', ''));
         if ($clientRequestId !== '') {
@@ -104,13 +109,15 @@ class AssistantRunController extends Controller
                     );
                 }
 
+                $run = $queued['run']->refresh();
+
                 return response()->json(['data' => [
-                    'status' => 'queued',
+                    'status' => $run->status,
                     'session' => $ownedSession->refresh(),
-                    'run' => $queued['run']->refresh(),
+                    'run' => $run,
                     'user_message' => $queued['user_message'],
                     'events' => $queued['events'] ?? [$queued['event']],
-                ]], 202);
+                ]], $this->runResponseStatus($run));
             }
         }
 
@@ -119,7 +126,36 @@ class AssistantRunController extends Controller
         $metadata['bean_intent'] = $intentRoute;
         $metadata['bean_intent_lane'] = $intentRoute['lane'];
 
-        if (! $this->intentRouter->shouldQueue($intentRoute)) {
+        $supersedesClientRequestId = trim((string) data_get($metadata, 'supersedes_client_request_id', ''));
+        if ($supersedesClientRequestId !== '') {
+            try {
+                $queued = $this->runs->queueSupersedingRun(
+                    $ownedSession,
+                    $supersedesClientRequestId,
+                    $data['content'],
+                    $metadata,
+                    $source,
+                );
+            } catch (\DomainException $exception) {
+                return response()->json([
+                    'message' => $exception->getMessage(),
+                    'code' => 'assistant_run_supersession_conflict',
+                ], 409);
+            }
+
+            $run = $queued['run']->load(['session', 'userMessage', 'assistantMessage']);
+
+            return response()->json(['data' => [
+                ...$this->runResponsePayload($run, $ownedSession),
+                'events' => $queued['events'] ?? [$queued['event']],
+                'intent' => $intentRoute,
+            ]], $this->runResponseStatus($run));
+        }
+
+        // Realtime voice corrections need a run-scoped cancellation token even for an
+        // otherwise fast response. Direct/status voice replies never enter this endpoint.
+        $voiceRequest = (bool) data_get($metadata, 'voice_request', false);
+        if (! $voiceRequest && ! $this->intentRouter->shouldQueue($intentRoute)) {
             $userMessage = $this->findOrCreateQueuedFallbackUserMessage(
                 $ownedSession->refresh(),
                 $data['content'],
@@ -184,14 +220,16 @@ class AssistantRunController extends Controller
             );
         }
 
+        $run = $queued['run']->refresh();
+
         return response()->json(['data' => [
-            'status' => 'queued',
+            'status' => $run->status,
             'session' => $ownedSession->refresh(),
-            'run' => $queued['run']->refresh(),
+            'run' => $run,
             'user_message' => $queued['user_message'],
             'events' => $queued['events'] ?? [$queued['event']],
             'intent' => $intentRoute,
-        ]], 202);
+        ]], $this->runResponseStatus($run));
     }
 
     public function lookup(Request $request, string $session): JsonResponse

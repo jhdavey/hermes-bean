@@ -3,8 +3,10 @@
 namespace App\Services;
 
 use App\Models\ActivityEvent;
+use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
+use App\Models\MemoryEvent;
 use App\Models\User;
 use App\Services\HermesToolRuntime\CrudPlannerRuntime;
 use App\Services\HermesToolRuntime\NativeToolRuntime;
@@ -68,20 +70,106 @@ class HermesToolRuntimeService implements HermesRuntimeService
         return $session->refresh();
     }
 
-    public function cancelSession(ConversationSession $session): ConversationSession
+    public function cancelSession(ConversationSession $session, ?string $clientRequestId = null): ConversationSession
     {
-        if (in_array($session->status, ['running', 'cancelling'], true)) {
-            $session->update(['status' => 'cancelling', 'last_activity_at' => now()]);
+        return DB::transaction(function () use ($session, $clientRequestId): ConversationSession {
+            $lockedSession = ConversationSession::query()
+                ->lockForUpdate()
+                ->findOrFail($session->id);
+            $clientRequestId = trim((string) $clientRequestId);
+            $cancellationCandidates = AssistantRun::query()
+                ->where('conversation_session_id', $lockedSession->id)
+                ->whereIn('status', ['queued', 'running', 'failed'])
+                ->lockForUpdate()
+                ->get();
+            $runs = $cancellationCandidates->filter(
+                fn (AssistantRun $run): bool => in_array($run->status, ['queued', 'running'], true)
+                    || ($run->status === 'failed'
+                        && $run->assistant_message_id === null
+                        && ($clientRequestId !== ''
+                            ? trim((string) data_get($run->metadata, 'client_request_id', '')) === $clientRequestId
+                            : $this->runHasUnlinkedTaggedAssistant($run)))
+            );
+            $hadRunningRun = $runs->contains(
+                fn (AssistantRun $run): bool => $run->status === 'running'
+            );
 
-            $this->recordEvent($session, 'runtime.cancel_requested');
-        }
+            foreach ($runs as $run) {
+                $metadata = is_array($run->metadata) ? $run->metadata : [];
+                $run->update([
+                    'status' => 'cancelled',
+                    'cancelled_at' => $run->cancelled_at ?? now(),
+                    'completed_at' => $run->completed_at ?? now(),
+                    'metadata' => array_merge($metadata, [
+                        'cancellation_requested_at' => now()->toIso8601String(),
+                        'cancellation_source' => 'session',
+                    ]),
+                ]);
+                $this->deleteRunOrphanAssistants($run);
+            }
 
-        return $session->refresh();
+            if ($runs->isNotEmpty() || $clientRequestId !== '' || in_array($lockedSession->status, ['queued', 'running', 'cancelling'], true)) {
+                $mustSignalSynchronousRuntime = in_array($lockedSession->status, ['running', 'cancelling'], true);
+                $shouldRemainCancelling = $hadRunningRun || $mustSignalSynchronousRuntime;
+                $sessionMetadata = is_array($lockedSession->metadata) ? $lockedSession->metadata : [];
+                if ($clientRequestId !== '') {
+                    $cancelledRequestIds = collect((array) ($sessionMetadata['cancelled_client_request_ids'] ?? []))
+                        ->map(fn (mixed $id): string => trim((string) $id))
+                        ->filter()
+                        ->push($clientRequestId)
+                        ->unique()
+                        ->take(-50)
+                        ->values()
+                        ->all();
+                    $sessionMetadata['cancelled_client_request_ids'] = $cancelledRequestIds;
+                }
+                $lockedSession->update([
+                    'status' => $shouldRemainCancelling ? 'cancelling' : 'active',
+                    'metadata' => $sessionMetadata ?: null,
+                    'last_activity_at' => now(),
+                ]);
+
+                $this->recordEvent($lockedSession, 'runtime.cancel_requested', [
+                    'run_ids' => $runs->pluck('id')->all(),
+                    'client_request_id' => $clientRequestId !== '' ? $clientRequestId : null,
+                ]);
+            }
+
+            return $lockedSession->refresh();
+        }, 3);
     }
 
     public function progressEvents(ConversationSession $session): Collection
     {
         return $session->activityEvents()->orderBy('id')->get();
+    }
+
+    private function deleteRunOrphanAssistants(AssistantRun $run): void
+    {
+        $assistantIds = ConversationMessage::query()
+            ->where('conversation_session_id', $run->conversation_session_id)
+            ->where('role', 'assistant')
+            ->where('metadata->assistant_run_id', $run->id)
+            ->pluck('id');
+        if ($assistantIds->isEmpty()) {
+            return;
+        }
+
+        MemoryEvent::query()->whereIn('assistant_message_id', $assistantIds)->delete();
+        ConversationMessage::query()->whereIn('id', $assistantIds)->delete();
+    }
+
+    private function runHasUnlinkedTaggedAssistant(AssistantRun $run): bool
+    {
+        if ($run->assistant_message_id !== null) {
+            return false;
+        }
+
+        return ConversationMessage::query()
+            ->where('conversation_session_id', $run->conversation_session_id)
+            ->where('role', 'assistant')
+            ->where('metadata->assistant_run_id', $run->id)
+            ->exists();
     }
 
     public function sendMessage(ConversationSession $session, string $content, array $metadata = []): array
@@ -293,7 +381,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
         try {
             for ($turn = 0; $turn < 3; $turn++) {
-                if ($this->isCancellationRequested($session)) {
+                if ($this->isCancellationRequested($session, $userMessage)) {
                     return $this->toolRuntimeCancelled($session, $userMessage, collect([$received])->concat($preludeEvents)->push($started));
                 }
 
@@ -380,7 +468,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 );
 
                 foreach ($toolCalls as $toolCall) {
-                    if ($this->isCancellationRequested($session)) {
+                    if ($this->isCancellationRequested($session, $userMessage)) {
                         return $this->toolRuntimeCancelled($session, $userMessage, collect([$received])->concat($preludeEvents)->push($started)->concat($domainEvents));
                     }
 
@@ -429,7 +517,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     $finalResponseDurationMs = 0;
                 } else {
                     try {
-                        if ($this->isCancellationRequested($session)) {
+                        if ($this->isCancellationRequested($session, $userMessage)) {
                             return $this->toolRuntimeCancelled($session, $userMessage, collect([$received])->concat($preludeEvents)->push($started)->concat($domainEvents));
                         }
 
@@ -483,7 +571,12 @@ class HermesToolRuntimeService implements HermesRuntimeService
 
         $assistantContent = $this->assistantSafeResponseContent($assistantContent);
 
+        if ($this->isCancellationRequested($session, $userMessage)) {
+            return $this->toolRuntimeCancelled($session, $userMessage, collect([$received])->concat($preludeEvents)->push($started)->concat($domainEvents));
+        }
+
         $result = DB::transaction(function () use ($session, $userMessage, $received, $preludeEvents, $started, $modelRoute, $prompt, $responses, $domainEvents, $assistantContent, $finalResponse, $toolMode, $runtimeStartedAt, $contextBuildMs, $modelCallDurationsMs, $toolExecutionDurationsMs, $finalResponseDurationMs, $actions): array {
+            $this->lockRunForAssistantPersistence($session, $userMessage);
             $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
                 'message_id' => $userMessage->id,
                 'response_count' => count($responses),
@@ -507,6 +600,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'role' => 'assistant',
                 'content' => $assistantContent,
                 'metadata' => [
+                    ...$this->assistantRunMetadata($userMessage),
                     'runtime' => 'tools',
                     'provider' => config('services.hermes_runtime.default_provider'),
                     'model' => $modelRoute['model'],
@@ -542,7 +636,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         });
 
         $assistantMessage = $result['assistant_message'] ?? null;
-        if ($assistantMessage instanceof ConversationMessage) {
+        if ($assistantMessage instanceof ConversationMessage && ! data_get($userMessage->metadata, 'defer_memory_candidate', false)) {
             $this->memoryService->recordTurnCandidate($session->refresh(), $userMessage, $assistantMessage);
         }
 
@@ -583,7 +677,12 @@ class HermesToolRuntimeService implements HermesRuntimeService
             ]],
         ]];
 
+        if ($this->isCancellationRequested($session, $userMessage)) {
+            return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started]));
+        }
+
         $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $modelRoute, $prompt, $responses, $assistantContent, $runtimeStartedAt, $contextBuildMs, $toolExecutionMs, $toolMode): array {
+            $this->lockRunForAssistantPersistence($session, $userMessage);
             $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
                 'message_id' => $userMessage->id,
                 'response_count' => 1,
@@ -608,6 +707,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'role' => 'assistant',
                 'content' => $assistantContent,
                 'metadata' => [
+                    ...$this->assistantRunMetadata($userMessage),
                     'runtime' => 'tools',
                     'provider' => config('services.hermes_runtime.default_provider'),
                     'model' => $modelRoute['model'],
@@ -644,7 +744,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         });
 
         $assistantMessage = $result['assistant_message'] ?? null;
-        if ($assistantMessage instanceof ConversationMessage) {
+        if ($assistantMessage instanceof ConversationMessage && ! data_get($userMessage->metadata, 'defer_memory_candidate', false)) {
             $this->memoryService->recordTurnCandidate($session->refresh(), $userMessage, $assistantMessage);
         }
 
@@ -717,7 +817,12 @@ class HermesToolRuntimeService implements HermesRuntimeService
             $assistantContent = 'I’m here.';
         }
 
+        if ($this->isCancellationRequested($session, $userMessage)) {
+            return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $routed, $started]));
+        }
+
         $result = DB::transaction(function () use ($session, $userMessage, $received, $routed, $started, $modelRoute, $prompt, $response, $assistantContent, $runtimeStartedAt, $modelCallStartedAt): array {
+            $this->lockRunForAssistantPersistence($session, $userMessage);
             $completed = $this->recordEvent($session, 'runtime.fast_response_completed', [
                 'message_id' => $userMessage->id,
                 'finish_reason' => data_get($response, 'choices.0.finish_reason'),
@@ -732,6 +837,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'role' => 'assistant',
                 'content' => $assistantContent,
                 'metadata' => [
+                    ...$this->assistantRunMetadata($userMessage),
                     'runtime' => 'fast_no_tools',
                     'provider' => config('services.hermes_runtime.default_provider'),
                     'model' => $modelRoute['model'],
@@ -769,7 +875,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         });
 
         $assistantMessage = $result['assistant_message'] ?? null;
-        if ($assistantMessage instanceof ConversationMessage) {
+        if ($assistantMessage instanceof ConversationMessage && ! data_get($userMessage->metadata, 'defer_memory_candidate', false)) {
             $this->memoryService->recordTurnCandidate($session->refresh(), $userMessage, $assistantMessage);
         }
 
@@ -802,7 +908,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'role' => 'system',
                 'content' => trim(
                     "You are Bean, the user's built-in HeyBean personal assistant. Reply naturally and briefly. ".
-                    "This lane has no tools and no live app or web access, so do not claim to have changed, checked, created, updated, deleted, synced, or looked up anything. ".
+                    'This lane has no tools and no live app or web access, so do not claim to have changed, checked, created, updated, deleted, synced, or looked up anything. '.
                     "If the user asks for app work, external lookup, or deeper work, say you'll take care of it in one short sentence. ".
                     ($style !== '' ? "Bean style: {$style}" : '')
                 ),
@@ -880,7 +986,12 @@ class HermesToolRuntimeService implements HermesRuntimeService
             ]],
         ]];
 
+        if ($this->isCancellationRequested($session, $userMessage)) {
+            return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started]));
+        }
+
         $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $modelRoute, $prompt, $responses, $assistantContent, $runtimeStartedAt, $contextBuildMs, $toolExecutionMs, $toolMode, $provider, $toolOutput): array {
+            $this->lockRunForAssistantPersistence($session, $userMessage);
             $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
                 'message_id' => $userMessage->id,
                 'response_count' => 1,
@@ -907,6 +1018,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'role' => 'assistant',
                 'content' => $assistantContent,
                 'metadata' => [
+                    ...$this->assistantRunMetadata($userMessage),
                     'runtime' => 'tools',
                     'provider' => config('services.hermes_runtime.default_provider'),
                     'model' => $modelRoute['model'],
@@ -944,7 +1056,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         });
 
         $assistantMessage = $result['assistant_message'] ?? null;
-        if ($assistantMessage instanceof ConversationMessage) {
+        if ($assistantMessage instanceof ConversationMessage && ! data_get($userMessage->metadata, 'defer_memory_candidate', false)) {
             $this->memoryService->recordTurnCandidate($session->refresh(), $userMessage, $assistantMessage);
         }
 

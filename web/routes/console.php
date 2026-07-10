@@ -1,7 +1,9 @@
 <?php
 
 use App\Models\User;
+use App\Services\AgentProfileService;
 use App\Services\PlanHistoryService;
+use App\Services\WorkspaceService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
@@ -45,8 +47,8 @@ Artisan::command('admin:user {email} {--password=} {--name=Hey Bean Admin}', fun
         ],
     );
 
-    app(\App\Services\AgentProfileService::class)->ensureForUser($user);
-    app(\App\Services\WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+    app(AgentProfileService::class)->ensureForUser($user);
+    app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
 
     $this->info("Admin user ready: {$user->email}");
 
@@ -74,3 +76,4 @@ Artisan::command('admin:grant {email}', function (string $email): int {
 Schedule::command('plan-history:prune')->daily();
 Schedule::command('calendar-events:materialize-recurring')->daily();
 Schedule::command('reminders:send-due-notifications')->everyMinute();
+Schedule::command('voice-turns:reconcile-abandoned')->everyMinute()->withoutOverlapping(2);

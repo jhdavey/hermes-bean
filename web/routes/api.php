@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\AdminLiveLookupController;
 use App\Http\Controllers\Api\AdminPlanLimitController;
 use App\Http\Controllers\Api\AdminSettingsController;
 use App\Http\Controllers\Api\AdminUsageController;
+use App\Http\Controllers\Api\AdminVoiceQualityController;
 use App\Http\Controllers\Api\AppleCalendarController;
 use App\Http\Controllers\Api\AssistantRunController;
 use App\Http\Controllers\Api\AssistantVoiceController;
@@ -168,6 +169,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
             Route::get('/usage/summary', [AdminUsageController::class, 'summary']);
             Route::get('/usage/logs', [AdminUsageController::class, 'logs']);
             Route::get('/usage/alerts', [AdminUsageController::class, 'alerts']);
+            Route::get('/voice-quality', [AdminVoiceQualityController::class, 'index']);
             Route::patch('/issue-reports/{issueReport}', [IssueReportController::class, 'update']);
         });
     });

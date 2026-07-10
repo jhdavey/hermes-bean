@@ -114,7 +114,11 @@ class ConversationSessionController extends Controller
     public function cancel(Request $request, string $session): JsonResponse
     {
         $ownedSession = ConversationSession::where('user_id', $request->user()->id)->findOrFail($session);
+        $data = $request->validate([
+            'client_request_id' => ['nullable', 'string', 'max:120'],
+        ]);
+        $clientRequestId = trim((string) ($data['client_request_id'] ?? '')) ?: null;
 
-        return response()->json(['data' => $this->runtime->cancelSession($ownedSession)], 202);
+        return response()->json(['data' => $this->runtime->cancelSession($ownedSession, $clientRequestId)], 202);
     }
 }

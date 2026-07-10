@@ -94,9 +94,10 @@ class LiveLookupService
                     return $result;
                 }
 
-                if (($result['error_code'] ?? null) === 'weather_location_missing') {
-                    return $result;
-                }
+                // A recognized structured weather request must not fall through to a
+                // generic search provider. Search results can be about a different
+                // place or time and are less trustworthy than a clear provider error.
+                return $result;
             }
         }
 
@@ -133,7 +134,7 @@ class LiveLookupService
                 'configured' => true,
                 'mode' => 'Direct API',
                 'timeout_ms' => (int) ((float) config('services.hermes_runtime.weather_lookup_timeout', 6) * 1000),
-                'notes' => 'Used for current weather and forecast-style requests before web search.',
+                'notes' => 'Used for current weather plus hourly and daily forecasts. Recognized weather failures stay scoped and never fall through to unrelated web results.',
             ],
             [
                 'key' => 'google_places',

@@ -4,6 +4,7 @@ namespace App\Services\HermesToolRuntime;
 
 use App\Models\ActivityEvent;
 use App\Models\AgentProfile;
+use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Models\User;
@@ -605,7 +606,12 @@ PROMPT;
 
     private function toolRuntimeFailed(ConversationSession $session, ConversationMessage $userMessage, Collection $events, string $message, array $context): array
     {
+        if ($this->isCancellationRequested($session, $userMessage)) {
+            return $this->toolRuntimeCancelled($session, $userMessage, $events);
+        }
+
         return DB::transaction(function () use ($session, $userMessage, $events, $message, $context): array {
+            $this->lockRunForAssistantPersistence($session, $userMessage);
             $failed = $this->recordEvent($session, 'runtime.tool_model_failed', [
                 'message_id' => $userMessage->id,
                 'reason' => $message,
@@ -618,6 +624,7 @@ PROMPT;
                 'role' => 'assistant',
                 'content' => $this->assistantSafeResponseContent($message),
                 'metadata' => [
+                    ...$this->assistantRunMetadata($userMessage),
                     'runtime' => 'tools',
                     'provider' => config('services.hermes_runtime.default_provider'),
                     'failure' => $context,
@@ -643,7 +650,12 @@ PROMPT;
 
     private function toolRuntimeBlocked(ConversationSession $session, ConversationMessage $userMessage, Collection $events, string $message, array $context): array
     {
+        if ($this->isCancellationRequested($session, $userMessage)) {
+            return $this->toolRuntimeCancelled($session, $userMessage, $events);
+        }
+
         return DB::transaction(function () use ($session, $userMessage, $events, $message, $context): array {
+            $this->lockRunForAssistantPersistence($session, $userMessage);
             $blocked = $this->recordEvent($session, 'runtime.usage_blocked', [
                 'message_id' => $userMessage->id,
                 'reason' => $message,
@@ -656,6 +668,7 @@ PROMPT;
                 'role' => 'assistant',
                 'content' => $message,
                 'metadata' => [
+                    ...$this->assistantRunMetadata($userMessage),
                     'runtime' => 'tools',
                     'provider' => config('services.hermes_runtime.default_provider'),
                     'blocked' => $context,
@@ -682,29 +695,80 @@ PROMPT;
     private function toolRuntimeCancelled(ConversationSession $session, ConversationMessage $userMessage, Collection $events): array
     {
         return DB::transaction(function () use ($session, $userMessage, $events): array {
+            $lockedSession = ConversationSession::query()->lockForUpdate()->findOrFail($session->id);
             $cancelled = $this->recordEvent($session, 'runtime.message_cancelled', [
                 'message_id' => $userMessage->id,
             ], 'hermes.tools', 'cancelled');
 
-            $session->update(['status' => 'active', 'last_activity_at' => now()]);
+            $assistantRunId = (int) data_get($userMessage->metadata, 'assistant_run_id', 0);
+            $nextStatus = 'active';
+            if ($assistantRunId > 0) {
+                $activeStatuses = AssistantRun::query()
+                    ->where('conversation_session_id', $lockedSession->id)
+                    ->where('id', '!=', $assistantRunId)
+                    ->whereIn('status', ['queued', 'running'])
+                    ->pluck('status');
+                $nextStatus = $activeStatuses->contains('running')
+                    ? 'running'
+                    : ($activeStatuses->contains('queued') ? 'queued' : 'active');
+            }
+            $lockedSession->update(['status' => $nextStatus, 'last_activity_at' => now()]);
 
             return [
                 'status' => 'cancelled',
-                'session' => $session->refresh(),
+                'session' => $lockedSession->refresh(),
                 'user_message' => $userMessage,
                 'assistant_message' => null,
                 'events' => $events->push($cancelled),
                 'blocker' => null,
             ];
-        });
+        }, 3);
     }
 
-    private function isCancellationRequested(ConversationSession $session): bool
+    private function isCancellationRequested(ConversationSession $session, ?ConversationMessage $userMessage = null): bool
     {
+        $assistantRunId = (int) data_get($userMessage?->metadata, 'assistant_run_id', 0);
+        if ($assistantRunId > 0) {
+            return AssistantRun::query()
+                ->whereKey($assistantRunId)
+                ->where('conversation_session_id', $session->id)
+                ->where('status', 'cancelled')
+                ->exists();
+        }
+
         return ConversationSession::query()
             ->whereKey($session->id)
             ->where('status', 'cancelling')
             ->exists();
+    }
+
+    private function assistantRunMetadata(ConversationMessage $userMessage): array
+    {
+        $assistantRunId = (int) data_get($userMessage->metadata, 'assistant_run_id', 0);
+
+        return $assistantRunId > 0 ? ['assistant_run_id' => $assistantRunId] : [];
+    }
+
+    private function lockRunForAssistantPersistence(ConversationSession $session, ConversationMessage $userMessage): void
+    {
+        $lockedSession = ConversationSession::query()->lockForUpdate()->findOrFail($session->id);
+        $assistantRunId = (int) data_get($userMessage->metadata, 'assistant_run_id', 0);
+        if ($assistantRunId > 0) {
+            $lockedRun = AssistantRun::query()
+                ->whereKey($assistantRunId)
+                ->where('conversation_session_id', $lockedSession->id)
+                ->lockForUpdate()
+                ->first();
+            if (! $lockedRun instanceof AssistantRun || $lockedRun->status !== 'running') {
+                throw new \RuntimeException('Assistant run was cancelled before response persistence.');
+            }
+
+            return;
+        }
+
+        if ($lockedSession->status === 'cancelling') {
+            throw new \RuntimeException('Assistant request was cancelled before response persistence.');
+        }
     }
 
     /**
@@ -905,14 +969,21 @@ PROMPT;
         }
 
         $timezone = $this->sessionDisplayTimezone($session);
-        $date = null;
-        $intent = 'current_weather';
-        if (preg_match('/\b(tomorrow|forecast)\b/u', $text)) {
-            $intent = 'weather_forecast';
-            $date = str_contains($text, 'tomorrow')
-                ? now($this->validTimezone($timezone) ? $timezone : config('app.timezone'))->addDay()->toDateString()
-                : null;
+        $weatherNow = now($this->validTimezone($timezone) ? $timezone : config('app.timezone'));
+        $time = $this->directWeatherTime($content);
+        if ($time === null && $this->weatherHasExplicitTime($content)) {
+            return null;
         }
+        $date = $this->directWeatherDate($content, $timezone, $weatherNow, $time);
+        if ($time === null && $date === null && preg_match('/\b(?:later|morning|afternoon|evening)\b|\bin\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)(?!\s+\d{1,2})\b/iu', $text)) {
+            return null;
+        }
+        $date ??= $time !== null ? $weatherNow->toDateString() : null;
+        $intent = $time !== null
+            || preg_match('/\b(forecast|tomorrow)\b/u', $text) === 1
+            || ($date !== null && $date !== $weatherNow->toDateString())
+            ? 'weather_forecast'
+            : 'current_weather';
 
         return array_filter([
             'query' => $content,
@@ -920,20 +991,24 @@ PROMPT;
             'intent' => $intent,
             'location' => $location,
             'date' => $date,
+            'time' => $time,
         ], fn (mixed $value): bool => $value !== null && $value !== '');
     }
 
     private function directWeatherLocation(string $content): string
     {
+        $contentWithoutTemporalClauses = $this->weatherTextWithoutTemporalClauses($content);
         $patterns = [
-            '/\b(?:weather|forecast|temperature|temp|rain|raining|storm|storming|snow|snowing|humidity|wind|windy|cloudy|sunny)\b.*?\b(?:in|for|near|at)\s+(.+?)(?:\s+(?:right now|currently|now|today|tonight|tomorrow|this morning|this afternoon|this evening))?\s*[?.!]*$/iu',
-            '/\b(?:in|for|near|at)\s+(.+?)(?:\s+(?:right now|currently|now|today|tonight|tomorrow|this morning|this afternoon|this evening))?\s*[?.!]*$/iu',
+            '/\b(?:weather|forecast|temperature|temp|rain|raining|storm|storming|snow|snowing|humidity|wind|windy|cloudy|sunny)\b.*?\b(?:in|near|at)\s+(.+?)\s*[?.!]*$/iu',
+            '/\b(?:weather|forecast|temperature|temp|rain|raining|storm|storming|snow|snowing|humidity|wind|windy|cloudy|sunny)\b.*?\bfor\s+(.+?)\s*[?.!]*$/iu',
+            '/\b(?:in|near|at)\s+(.+?)\s*[?.!]*$/iu',
         ];
 
         foreach ($patterns as $pattern) {
-            if (preg_match($pattern, $content, $match)) {
+            if (preg_match($pattern, $contentWithoutTemporalClauses, $match)) {
                 $candidate = trim((string) ($match[1] ?? ''));
                 $candidate = preg_replace('/\b(right now|currently|now|today|tonight|tomorrow|this morning|this afternoon|this evening)\b/iu', '', $candidate) ?? $candidate;
+                $candidate = preg_replace('/\s+\b(?:at|around|by)\s+(?:\d{1,2}(?::[0-5]\d)?\s*[ap]\.?\s*m\.?|(?:[01]?\d|2[0-3]):[0-5]\d|noon|midnight)\s*.*$/iu', '', $candidate) ?? $candidate;
                 $candidate = preg_replace('/,?\s+\b(?:and|then|so)\b\s+(?:tell|suggest|recommend|advise|share|give|let|check|see|explain)\b.*$/iu', '', $candidate) ?? $candidate;
                 $candidate = preg_replace('/^\s*(?:in|for|near|at)\s+/iu', '', $candidate) ?? $candidate;
                 $candidate = trim($candidate, " \t\n\r\0\x0B,.?!'\"");
@@ -944,6 +1019,181 @@ PROMPT;
         }
 
         return '';
+    }
+
+    private function weatherTextWithoutTemporalClauses(string $content): string
+    {
+        $time = '(?:\d{1,2}(?::[0-5]\d)?\s*[ap]\.?\s*m\.?|(?:[01]?\d|2[0-3]):[0-5]\d|(?:[01]\d|2[0-3])[0-5]\d|noon|midnight)';
+        $spokenHour = '(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)';
+        $spokenMinute = '(?:oh\s+five|ten|fifteen|twenty|twenty[ -]five|thirty|forty|forty[ -]five|fifty|fifty[ -]five)';
+        $content = preg_replace('/\b(?:at|around|by)\s+'.$time.'\b/iu', ' ', $content) ?? $content;
+        $content = preg_replace('/\b(?:at|around|by)\s+(?:half\s+past\s+'.$spokenHour.'|'.$spokenHour.'(?:\s+'.$spokenMinute.')?)\s*[ap]\.?\s*m\.?/iu', ' ', $content) ?? $content;
+        $content = preg_replace('/\b(?:at|around|by)\s+(?:\d{1,2}|'.$spokenHour.')(?:\s+o[\'’]?\s*clock)?\s+(?:(?:this|in\s+the)\s+)?(?:morning|afternoon|evening|tonight)\b/iu', ' ', $content) ?? $content;
+        $content = preg_replace('/\b(?:right now|currently|now|today|tonight|tomorrow|this morning|this afternoon|this evening|later(?:\s+in)?\s+the\s+(?:morning|afternoon|evening))\b/iu', ' ', $content) ?? $content;
+        $content = preg_replace('/\b(?:on\s+)?(?:(?:this|next)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/iu', ' ', $content) ?? $content;
+        $content = preg_replace('/\b(?:on\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?\b/iu', ' ', $content) ?? $content;
+        $content = preg_replace('/\bin\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+\d{4})?\b/iu', ' ', $content) ?? $content;
+        $content = preg_replace('/\b\d{4}-\d{2}-\d{2}\b/u', ' ', $content) ?? $content;
+
+        return str($content)->squish()->toString();
+    }
+
+    private function directWeatherTime(string $content): ?string
+    {
+        if (preg_match(
+            '/\b(?:at|around|by)\s+((?:\d{1,2}(?::[0-5]\d)?\s*[ap]\.?\s*m\.?)|(?:(?:[01]?\d|2[0-3]):[0-5]\d)|(?:(?:[01]\d|2[0-3])[0-5]\d)|noon|midnight)(?=\s|[?.!,]|$)/iu',
+            $content,
+            $match
+        ) !== 1) {
+            return $this->directSpokenWeatherTime($content)
+                ?? $this->directDayPartWeatherTime($content);
+        }
+
+        $value = mb_strtolower(trim((string) ($match[1] ?? '')));
+        $value = preg_replace('/[.\s]+/u', '', $value) ?? $value;
+        if ($value === 'noon') {
+            return '12:00';
+        }
+        if ($value === 'midnight') {
+            return '00:00';
+        }
+        if (preg_match('/^(\d{1,2})(?::([0-5]\d))?([ap])m$/u', $value, $parts) === 1) {
+            $hour = (int) $parts[1];
+            if ($hour < 1 || $hour > 12) {
+                return null;
+            }
+
+            $hour = $hour % 12 + ($parts[3] === 'p' ? 12 : 0);
+
+            return sprintf('%02d:%02d', $hour, (int) ($parts[2] ?? 0));
+        }
+        if (preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/u', $value, $parts) === 1) {
+            return sprintf('%02d:%02d', (int) $parts[1], (int) $parts[2]);
+        }
+        if (preg_match('/^([01]\d|2[0-3])([0-5]\d)$/u', $value, $parts) === 1) {
+            return sprintf('%02d:%02d', (int) $parts[1], (int) $parts[2]);
+        }
+
+        return null;
+    }
+
+    private function directDayPartWeatherTime(string $content): ?string
+    {
+        $hours = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+        if (preg_match(
+            '/\b(?:at|around|by)\s+(\d{1,2}|'.implode('|', $hours).')(?:\s+o[\'’]?\s*clock)?\s+(?:(?:this|in\s+the)\s+)?(morning|afternoon|evening|tonight)\b/iu',
+            $content,
+            $match,
+        ) !== 1) {
+            return null;
+        }
+
+        $hourText = mb_strtolower((string) $match[1]);
+        $hour = ctype_digit($hourText)
+            ? (int) $hourText
+            : ((int) (array_search($hourText, $hours, true) ?: 0)) + 1;
+        if ($hour < 1 || $hour > 12) {
+            return null;
+        }
+
+        $dayPart = mb_strtolower((string) $match[2]);
+        if ($dayPart === 'tonight') {
+            $hour = match (true) {
+                $hour === 12 => 0,
+                $hour < 5 => $hour,
+                default => $hour + 12,
+            };
+        } else {
+            $hour = $hour % 12 + ($dayPart === 'morning' ? 0 : 12);
+        }
+
+        return sprintf('%02d:00', $hour);
+    }
+
+    private function weatherHasExplicitTime(string $content): bool
+    {
+        return preg_match(
+            '/\b(?:at|around|by)\s+(?:(?:[01]\d|2[0-3])[0-5]\d|\d{1,2}(?::\d{1,2})?(?:\s*[ap]\.?\s*m\.?)?|\d{1,2}(?:\s+o[\'’]?\s*clock)|half\s+past|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?=\s+(?:[ap]\.?\s*m\.?|today|tomorrow|this|in\s+the|morning|afternoon|evening|tonight|o[\'’]?\s*clock)))\b/iu',
+            $content,
+        ) === 1;
+    }
+
+    private function directSpokenWeatherTime(string $content): ?string
+    {
+        $hours = 'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve';
+        $minutes = 'oh\s+five|ten|fifteen|twenty|twenty[ -]five|thirty|forty|forty[ -]five|fifty|fifty[ -]five';
+        if (preg_match(
+            '/\b(?:at|around|by)\s+(?:(half)\s+past\s+)?('.$hours.')(?:\s+('.$minutes.'))?\s*([ap])\.?\s*m\.?(?=\s|[?.!,]|$)/iu',
+            $content,
+            $match,
+        ) !== 1) {
+            return null;
+        }
+
+        $hourValues = array_flip(['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']);
+        $hour = ((int) ($hourValues[mb_strtolower((string) $match[2])] ?? -1)) + 1;
+        if ($hour < 1 || $hour > 12) {
+            return null;
+        }
+
+        $minuteText = str_replace(['-', ' '], '', mb_strtolower((string) ($match[3] ?? '')));
+        $minuteValues = [
+            '' => 0, 'ohfive' => 5, 'ten' => 10, 'fifteen' => 15, 'twenty' => 20,
+            'twentyfive' => 25, 'thirty' => 30, 'forty' => 40, 'fortyfive' => 45,
+            'fifty' => 50, 'fiftyfive' => 55,
+        ];
+        $minute = ($match[1] ?? '') !== '' ? 30 : ($minuteValues[$minuteText] ?? null);
+        if ($minute === null) {
+            return null;
+        }
+
+        $hour = $hour % 12 + (mb_strtolower((string) $match[4]) === 'p' ? 12 : 0);
+
+        return sprintf('%02d:%02d', $hour, $minute);
+    }
+
+    private function directWeatherDate(string $content, string $timezone, Carbon $now, ?string $time = null): ?string
+    {
+        $text = mb_strtolower($content);
+        if (preg_match('/\btomorrow\b/u', $text)) {
+            return $now->copy()->addDay()->toDateString();
+        }
+        if (preg_match('/\btonight\b/u', $text)) {
+            $hour = $time !== null ? (int) str($time)->before(':')->toString() : null;
+
+            return $hour !== null && $hour < 5
+                ? $now->copy()->addDay()->toDateString()
+                : $now->toDateString();
+        }
+        if (preg_match('/\btoday\b/u', $text)) {
+            return $now->toDateString();
+        }
+        if (preg_match('/\b(\d{4}-\d{2}-\d{2})\b/u', $text, $match)) {
+            return (string) $match[1];
+        }
+
+        $datePhrase = null;
+        $monthDayWithoutYear = false;
+        if (preg_match('/\b(?:(?:this|next)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/iu', $content, $match)) {
+            $datePhrase = (string) $match[0];
+        } elseif (preg_match('/\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?\b/iu', $content, $match)) {
+            $datePhrase = preg_replace('/(\d{1,2})(?:st|nd|rd|th)\b/iu', '$1', (string) $match[0]);
+            $monthDayWithoutYear = preg_match('/\b\d{4}\b/', $datePhrase) !== 1;
+        }
+        if ($datePhrase === null) {
+            return null;
+        }
+
+        try {
+            $date = Carbon::parse($datePhrase, $this->validTimezone($timezone) ? $timezone : config('app.timezone'));
+            if ($monthDayWithoutYear && $date->lt($now->copy()->startOfDay())) {
+                $date->addYear();
+            }
+
+            return $date->toDateString();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**

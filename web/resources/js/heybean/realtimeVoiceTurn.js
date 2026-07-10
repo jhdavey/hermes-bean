@@ -2,14 +2,63 @@ export function realtimeFollowUpExpiry() {
     return Number.POSITIVE_INFINITY;
 }
 
-export function realtimeNeedsAppRuntime(command, { appConversationActive = false } = {}) {
-    if (appConversationActive) return true;
+export function realtimePauseAcknowledgement() {
+    return 'Okay, I’ll pause here.';
+}
+
+export function realtimeMicrophoneConstraints() {
+    return {
+        audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+        },
+    };
+}
+
+export function isStrictRealtimeWakePhrase(text) {
+    return /^\s*hey[\s,.-]*bean\b/i.test(String(text || ''));
+}
+
+export function stripRealtimeLocalWakePrefix(text) {
+    return String(text || '')
+        .replace(/^\s*(?:(?:hey|they)[\s,.-]+(?:bean|ben|bin|bing|being|beane|beam)|habe(?:en|ing))\b[\s,.:;!?-]*/i, '')
+        .trim();
+}
+
+export function realtimeNeedsAppRuntime(command, { appConversationActive = false, backendSyncRequired = false } = {}) {
+    if (appConversationActive || backendSyncRequired) return true;
     const normalized = String(command || '')
         .toLowerCase()
         .replace(/[^a-z0-9\s]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
-    return /\b(task|tasks|todo|todos|to do|remind\w*|note|notes|calendar|event|events|schedul\w*|appointment|appointments|dashboard|approval|approvals|weather|forecast|temperature|email|message|text|contact|contacts|account|profile|workspace|list|show|find|search|lookup|look up|create|add|make|update|change|edit|delete|remove|complete|finish|mark|move|reschedul\w*|cancel)\b/.test(normalized);
+    const timelessDirectIntent = [
+        /^(?:hi|hello|hey|good (?:morning|afternoon|evening))(?: bean)?$/,
+        /^(?:how are you|how s it going|what s up)(?: bean)?$/,
+        /^(?:(?:please )?(?:tell|give) me (?:a |another )?(?:short )?joke|make me laugh|say something funny)(?: please)?$/,
+    ].some((pattern) => pattern.test(normalized));
+
+    // Direct responses cannot use tools, so anything not explicitly proven safe
+    // must fail closed to the app runtime. A keyword denylist misses paraphrases
+    // such as "Will I need an umbrella?" and "What should I wear outside?".
+    return !timelessDirectIntent;
+}
+
+export function isRealtimeVoiceStopCommand(text) {
+    let normalized = String(text || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!normalized || /\b(?:don t|do not|never) stop\b/.test(normalized)) return false;
+    normalized = normalized
+        .replace(/^hey (?:bean|ben|bin|bing|being|beane|beam)\s+/, '')
+        .replace(/^(?:okay|ok)\s+/, '');
+    const bean = '(?:bean|ben|bin|bing|being|beane|beam)';
+    const stop = '(?:stop(?: listening| talking)?|cancel|nevermind|never mind|that s all|that is all|all done|we re good|were good|i m good|im good|goodbye|bye|shut up)';
+    const gratitude = '(?:thanks|thank you|thx|no thanks|no thank you)';
+    return new RegExp(`^(?:please )?(?:${bean} )?(?:${stop}|${gratitude})(?: (?:please|now|${bean}))?$`).test(normalized);
 }
 
 export function isVoiceFillerOnly(text) {
@@ -30,10 +79,6 @@ export function extractRealtimeResponseTranscript(response) {
         .trim();
 }
 
-export function canQueueRealtimeFollowUp({ content, wakeActivated, followUpActive, turnActive }) {
-    return Boolean(String(content || '').trim()) && Boolean(wakeActivated || followUpActive || turnActive);
-}
-
 export function shouldDeferAssistantMessage(message, content, shouldStayOutOfChat) {
     const normalizedContent = String(content || '').trim();
     if (!message || !normalizedContent) return false;
@@ -41,14 +86,163 @@ export function shouldDeferAssistantMessage(message, content, shouldStayOutOfCha
     return typeof shouldStayOutOfChat !== 'function' || !shouldStayOutOfChat(candidate);
 }
 
-export function buildRealtimeResponseEvent(instructions) {
+export function buildRealtimeResponseEvent(instructions, { clientResponseId = '' } = {}) {
+    const response = {
+        instructions: String(instructions || '').trim(),
+        tool_choice: 'none',
+    };
+    if (clientResponseId) {
+        response.metadata = { heybean_response_id: String(clientResponseId) };
+    }
     return {
         type: 'response.create',
-        response: {
-            instructions: String(instructions || '').trim(),
-            tool_choice: 'none',
-        },
+        response,
     };
+}
+
+export function buildRealtimePlaybackCancellationEvents() {
+    return [
+        { type: 'response.cancel' },
+        { type: 'output_audio_buffer.clear' },
+    ];
+}
+
+export function buildRealtimeTargetedResponseCancellationEvent(responseId) {
+    const normalizedResponseId = String(responseId || '').trim();
+    if (!normalizedResponseId) return null;
+    return {
+        type: 'response.cancel',
+        response_id: normalizedResponseId,
+    };
+}
+
+export function buildRealtimeConversationItemDeleteEvent(itemId) {
+    return {
+        type: 'conversation.item.delete',
+        item_id: String(itemId || '').trim(),
+    };
+}
+
+export function isCompletedRealtimeResponse(response) {
+    return String(response?.status || '').toLowerCase() === 'completed';
+}
+
+export const REALTIME_CONVERSATION_STATES = Object.freeze({
+    WAKE_ONLY: 'wake_only',
+    ACTIVE: 'active',
+});
+
+export class RealtimeConversationController {
+    constructor({ maxTranscriptIds = 2_048 } = {}) {
+        this.state = REALTIME_CONVERSATION_STATES.WAKE_ONLY;
+        this.epoch = 0;
+        this.maxTranscriptIds = Math.max(1, Number(maxTranscriptIds) || 2_048);
+        this.transcriptIds = new Set();
+        this.transcriptOrigins = new Map();
+    }
+
+    capture() {
+        return this.epoch;
+    }
+
+    snapshot() {
+        return Object.freeze({ state: this.state, epoch: this.epoch });
+    }
+
+    isActive() {
+        return this.state === REALTIME_CONVERSATION_STATES.ACTIVE;
+    }
+
+    isCurrent(epoch) {
+        return epoch === this.epoch;
+    }
+
+    canContinue(epoch) {
+        return this.isActive() && this.isCurrent(epoch);
+    }
+
+    activate() {
+        if (!this.isActive()) {
+            this.state = REALTIME_CONVERSATION_STATES.ACTIVE;
+            this.epoch += 1;
+        }
+        return this.capture();
+    }
+
+    activateFromLocalWake() {
+        const activated = !this.isActive();
+        this.activate();
+        return this.#admission(true, activated, 'local_wake');
+    }
+
+    stop() {
+        this.state = REALTIME_CONVERSATION_STATES.WAKE_ONLY;
+        this.epoch += 1;
+        return this.capture();
+    }
+
+    noteTranscriptOrigin(id) {
+        const key = String(id || '').trim();
+        if (!key || this.transcriptOrigins.has(key)) return;
+        this.transcriptOrigins.set(key, this.snapshot());
+        if (this.transcriptOrigins.size > this.maxTranscriptIds) {
+            this.transcriptOrigins.delete(this.transcriptOrigins.keys().next().value);
+        }
+    }
+
+    supersedeTranscript({ content } = {}) {
+        const transcript = String(content || '').trim();
+        if (!transcript) return this.#admission(false, false, 'empty');
+        if (!this.isActive()) return this.#admission(false, false, 'wake_required');
+        this.epoch += 1;
+        return this.#admission(true, false, 'superseded');
+    }
+
+    resumeTranscript({ content, epoch } = {}) {
+        const transcript = String(content || '').trim();
+        if (!transcript) return this.#admission(false, false, 'empty');
+        if (!this.canContinue(epoch)) return this.#admission(false, false, 'stale');
+        return this.#admission(true, false, 'resumed');
+    }
+
+    admitTranscript({ id = '', content, heardWakeWord = false } = {}) {
+        const transcript = String(content || '').trim();
+        if (!transcript) return this.#admission(false, false, 'empty');
+        if (!this.#claimTranscript(id)) return this.#admission(false, false, 'duplicate');
+
+        const origin = this.transcriptOrigins.get(String(id || '').trim());
+        const originatedInCurrentActiveEpoch = this.isActive()
+            && (!origin || (origin.state === REALTIME_CONVERSATION_STATES.ACTIVE && origin.epoch === this.epoch));
+        let activated = false;
+        if (!originatedInCurrentActiveEpoch) {
+            if (!heardWakeWord) return this.#admission(false, false, 'wake_required');
+            this.activate();
+            activated = true;
+        }
+
+        return this.#admission(true, activated, 'accepted');
+    }
+
+    #admission(accepted, activated, reason) {
+        return Object.freeze({
+            accepted,
+            activated,
+            reason,
+            state: this.state,
+            epoch: this.epoch,
+        });
+    }
+
+    #claimTranscript(id) {
+        const key = String(id || '').trim();
+        if (!key) return true;
+        if (this.transcriptIds.has(key)) return false;
+        this.transcriptIds.add(key);
+        if (this.transcriptIds.size > this.maxTranscriptIds) {
+            this.transcriptIds.delete(this.transcriptIds.values().next().value);
+        }
+        return true;
+    }
 }
 
 export class RealtimeCallDeduper {
@@ -79,21 +273,128 @@ export class RealtimeCallDeduper {
     }
 }
 
-export class RealtimeResponseLifecycle {
+export class RealtimeTurnPersistenceQueue {
     constructor() {
-        this.active = null;
+        this.chains = new Map();
     }
 
-    begin(purpose = 'speech') {
-        this.cancel();
+    enqueue(clientTurnId, task) {
+        const key = String(clientTurnId || '').trim();
+        if (!key || typeof task !== 'function') {
+            return Promise.reject(new Error('A client turn id and persistence task are required.'));
+        }
+        const previous = this.chains.get(key) || Promise.resolve();
+        const operation = previous
+            .catch(() => null)
+            .then(() => task());
+        this.chains.set(key, operation);
+        operation.finally(() => {
+            if (this.chains.get(key) === operation) this.chains.delete(key);
+        }).catch(() => {});
+        return operation;
+    }
+}
+
+export function stageOptimisticUserTurn(messages, {
+    content,
+    clientRequestId,
+    supersedesClientRequestId = '',
+    localId,
+} = {}) {
+    const current = Array.isArray(messages) ? messages : [];
+    const requestId = String(clientRequestId || '').trim();
+    const supersededRequestId = String(supersedesClientRequestId || '').trim();
+    const optimisticMessage = {
+        id: String(localId || `local-${Date.now()}`),
+        role: 'user',
+        content: String(content || ''),
+        metadata: {
+            client_request_id: requestId,
+            ...(supersededRequestId ? { supersedes_client_request_id: supersededRequestId } : {}),
+        },
+    };
+    let supersededIndex = -1;
+    if (supersededRequestId) {
+        for (let index = current.length - 1; index >= 0; index -= 1) {
+            const message = current[index];
+            if (message?.role === 'user'
+                && String(message?.metadata?.client_request_id || '') === supersededRequestId) {
+                supersededIndex = index;
+                break;
+            }
+        }
+    }
+
+    const next = [...current];
+    if (supersededIndex >= 0) {
+        const [supersededMessage] = next.splice(supersededIndex, 1, optimisticMessage);
+        return {
+            messages: next,
+            optimisticMessage,
+            superseded: { index: supersededIndex, message: supersededMessage },
+        };
+    }
+
+    next.push(optimisticMessage);
+    return { messages: next, optimisticMessage, superseded: null };
+}
+
+export function restoreSupersededUserTurn(messages, clientRequestId, superseded) {
+    const current = Array.isArray(messages) ? messages : [];
+    if (!superseded?.message) return current;
+    const supersededId = String(superseded.message.id || '');
+    if (supersededId && current.some((message) => String(message?.id || '') === supersededId)) {
+        return current;
+    }
+
+    const requestId = String(clientRequestId || '').trim();
+    const correctionIndex = current.findIndex((message) => message?.role === 'user'
+        && String(message?.metadata?.client_request_id || '') === requestId);
+    const insertionIndex = correctionIndex >= 0
+        ? correctionIndex
+        : Math.max(0, Math.min(Number(superseded.index) || 0, current.length));
+    const next = [...current];
+    next.splice(insertionIndex, 0, superseded.message);
+    return next;
+}
+
+export class RealtimeResponseLifecycle {
+    constructor(clock = () => Date.now(), timers = {}) {
+        this.clock = clock;
+        this.setTimeout = timers.setTimeout || globalThis.setTimeout?.bind(globalThis);
+        this.clearTimeout = timers.clearTimeout || globalThis.clearTimeout?.bind(globalThis);
+        this.active = null;
+        this.closedResponseIds = new Set();
+        this.requestSequence = 0;
+    }
+
+    begin(purpose = 'speech', options = {}) {
+        this.cancel('superseded');
         return new Promise((resolve) => {
             this.active = {
                 purpose,
+                clientResponseId: `heybean-response-${++this.requestSequence}`,
                 transcript: '',
                 responseId: '',
                 audioStarted: false,
+                audioStopped: false,
+                responseDone: false,
+                startedAtMs: this.clock(),
+                audioStartedAtMs: null,
+                timeoutId: null,
+                onTimeout: typeof options.onTimeout === 'function' ? options.onTimeout : null,
                 resolve,
             };
+            const timeoutMs = Math.max(0, Number(options.timeoutMs) || 0);
+            if (timeoutMs > 0 && this.setTimeout) {
+                const clientResponseId = this.active.clientResponseId;
+                this.active.timeoutId = this.setTimeout(() => {
+                    if (this.active?.clientResponseId !== clientResponseId) return;
+                    const onTimeout = this.active.onTimeout;
+                    this.cancel('timed_out');
+                    onTimeout?.();
+                }, timeoutMs);
+            }
         });
     }
 
@@ -101,24 +402,36 @@ export class RealtimeResponseLifecycle {
         return Boolean(this.active);
     }
 
-    bindResponse(responseId) {
-        return this.#claimResponse(responseId);
+    currentClientResponseId() {
+        return this.active?.clientResponseId || '';
+    }
+
+    bindResponse(responseId, clientResponseId) {
+        if (!this.active || String(clientResponseId || '') !== this.active.clientResponseId) return false;
+        return this.#claimResponse(responseId, true);
+    }
+
+    acceptsResponse(responseId) {
+        return this.#claimResponse(responseId, false);
     }
 
     markAudioStarted(responseId) {
-        if (!this.#claimResponse(responseId)) return false;
+        if (!this.#claimResponse(responseId, false)) return false;
         this.active.audioStarted = true;
+        this.active.audioStartedAtMs ??= this.clock();
         return true;
     }
 
     markResponseDone(responseId) {
-        if (!this.#claimResponse(responseId)) return null;
-        return this.active.audioStarted ? null : this.finish(responseId);
+        if (!this.#claimResponse(responseId, false)) return null;
+        this.active.responseDone = true;
+        return this.active.audioStarted && !this.active.audioStopped ? null : this.finish(responseId);
     }
 
     markAudioStopped(responseId) {
-        if (!this.#claimResponse(responseId)) return null;
-        return this.finish(responseId);
+        if (!this.#claimResponse(responseId, false)) return null;
+        this.active.audioStopped = true;
+        return this.active.responseDone ? this.finish(responseId) : null;
     }
 
     captureTranscript(transcript) {
@@ -133,32 +446,67 @@ export class RealtimeResponseLifecycle {
         if (completedResponseId && completedResponseId !== this.active.responseId) return null;
         const current = this.active;
         this.active = null;
+        this.#clearResponseTimeout(current);
+        this.#closeResponse(current.responseId);
+        const finishedAtMs = this.clock();
         const result = {
             purpose: current.purpose,
             transcript: current.transcript,
             cancelled: false,
+            reason: 'completed',
+            startedAtMs: current.startedAtMs,
+            audioStartedAtMs: current.audioStartedAtMs,
+            audioStartLatencyMs: current.audioStartedAtMs === null ? null : Math.max(0, current.audioStartedAtMs - current.startedAtMs),
+            responseDurationMs: Math.max(0, finishedAtMs - current.startedAtMs),
         };
         current.resolve(result);
         return result;
     }
 
-    #claimResponse(responseId) {
+    #claimResponse(responseId, allowBind) {
         if (!this.active) return false;
         const id = String(responseId || '');
-        if (!id) return true;
+        if (!id) return false;
+        if (this.closedResponseIds.has(id)) return false;
         if (this.active.responseId && this.active.responseId !== id) return false;
+        if (!this.active.responseId && !allowBind) return false;
         this.active.responseId = id;
         return true;
     }
 
-    cancel() {
-        if (!this.active) return;
+    #closeResponse(responseId) {
+        const id = String(responseId || '').trim();
+        if (!id) return;
+        this.closedResponseIds.add(id);
+        if (this.closedResponseIds.size > 100) {
+            this.closedResponseIds.delete(this.closedResponseIds.values().next().value);
+        }
+    }
+
+    #clearResponseTimeout(response) {
+        if (response?.timeoutId !== null && this.clearTimeout) {
+            this.clearTimeout(response.timeoutId);
+        }
+    }
+
+    cancel(reason = 'cancelled') {
+        if (!this.active) return null;
         const active = this.active;
         this.active = null;
-        active.resolve({
+        this.#clearResponseTimeout(active);
+        this.#closeResponse(active.responseId);
+        const finishedAtMs = this.clock();
+        const result = {
             purpose: active.purpose,
             transcript: active.transcript,
             cancelled: true,
-        });
+            reason: String(reason || 'cancelled'),
+            startedAtMs: active.startedAtMs,
+            audioStartedAtMs: active.audioStartedAtMs,
+            audioStartLatencyMs: active.audioStartedAtMs === null ? null : Math.max(0, active.audioStartedAtMs - active.startedAtMs),
+            responseDurationMs: Math.max(0, finishedAtMs - active.startedAtMs),
+        };
+        active.resolve(result);
+        return result;
     }
 }

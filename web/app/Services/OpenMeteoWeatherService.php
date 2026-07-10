@@ -22,6 +22,9 @@ class OpenMeteoWeatherService
             ?? ''
         ));
         if ($locationQuery === '') {
+            $locationQuery = $this->weatherLocationQuery((string) ($arguments['query'] ?? ''), '');
+        }
+        if ($locationQuery === '') {
             return [
                 'ok' => false,
                 'tool' => 'external_lookup',
@@ -37,8 +40,21 @@ class OpenMeteoWeatherService
             ?? $arguments['weather_intent']
             ?? ''
         )));
-        $targetDate = $this->structuredWeatherDate($arguments, $timezone);
+        $targetTime = $this->structuredWeatherTime($arguments);
+        $targetDate = $this->structuredWeatherDate($arguments, $timezone, $targetTime);
         $today = $this->weatherNow($timezone)->toDateString();
+        if ($targetTime === null && $this->structuredWeatherTimePresent($arguments)) {
+            return $this->openMeteoFailureResult('weather_hourly_datetime_invalid', 'weather_hourly_forecast');
+        }
+        if ($targetTime !== null) {
+            return $this->hourlyForecast($locationQuery, $targetDate ?? $today, $targetTime, [
+                ...$logContext,
+                'query' => $arguments['query'] ?? null,
+                'structured_weather_intent' => true,
+                'timezone' => $timezone,
+            ]);
+        }
+
         $wantsForecast = str_contains($intent, 'forecast')
             || $targetDate !== null && $targetDate !== $today;
 
@@ -54,6 +70,7 @@ class OpenMeteoWeatherService
             ...$logContext,
             'query' => $arguments['query'] ?? null,
             'structured_weather_intent' => true,
+            'timezone' => $timezone,
         ]);
     }
 
@@ -200,6 +217,172 @@ class OpenMeteoWeatherService
             ]);
 
             return $this->openMeteoFailureResult('weather_lookup_timeout');
+        }
+    }
+
+    public function hourlyForecast(string $locationQuery, string $date, string $time, array $logContext = []): array
+    {
+        $locationQuery = $this->cleanWeatherLocation($locationQuery);
+        if ($locationQuery === '') {
+            return [
+                'ok' => false,
+                'tool' => 'external_lookup',
+                'provider' => 'open_meteo',
+                'kind' => 'weather_hourly_forecast',
+                'error_code' => 'weather_location_missing',
+                'message' => 'I need a location to check the hourly weather.',
+            ];
+        }
+
+        $date = $this->normalizeForecastDate($date, (string) ($logContext['timezone'] ?? ''));
+        $time = $this->normalizeWeatherTime($time);
+        if ($date === null || $time === null) {
+            return $this->openMeteoFailureResult('weather_hourly_datetime_invalid', 'weather_hourly_forecast');
+        }
+
+        $useCache = ! app()->runningUnitTests();
+        $displayTimezone = $this->validTimezone((string) ($logContext['timezone'] ?? ''))
+            ? (string) $logContext['timezone']
+            : (string) config('app.timezone');
+        $displayDate = $this->weatherNow($displayTimezone)->toDateString();
+        $cacheKey = 'open_meteo_hourly_forecast:'.sha1(mb_strtolower($locationQuery.'|'.$date.'|'.$time.'|'.$displayTimezone.'|'.$displayDate));
+        if ($useCache) {
+            $cached = Cache::get($cacheKey);
+            if (is_array($cached)) {
+                return [
+                    ...$cached,
+                    'cached' => true,
+                ];
+            }
+        }
+
+        try {
+            $geocodeResult = $this->openMeteoGeocodePlace($locationQuery, $logContext);
+            if (($geocodeResult['error_code'] ?? null) !== null) {
+                return $this->openMeteoFailureResult((string) $geocodeResult['error_code'], 'weather_hourly_forecast');
+            }
+
+            $place = $geocodeResult['place'] ?? null;
+            if (! is_array($place)) {
+                return [
+                    'ok' => false,
+                    'tool' => 'external_lookup',
+                    'provider' => 'open_meteo',
+                    'kind' => 'weather_hourly_forecast',
+                    'error_code' => 'weather_location_not_found',
+                    'query' => $logContext['query'] ?? null,
+                    'location' => $locationQuery,
+                    'date' => $date,
+                    'time' => $time,
+                    'message' => "I couldn't find a weather location matching {$locationQuery}.",
+                ];
+            }
+
+            $forecast = Http::acceptJson()
+                ->connectTimeout((float) config('services.hermes_runtime.weather_lookup_connect_timeout', 3))
+                ->timeout((float) config('services.hermes_runtime.weather_lookup_timeout', 6))
+                ->get('https://api.open-meteo.com/v1/forecast', [
+                    'latitude' => $place['latitude'],
+                    'longitude' => $place['longitude'],
+                    'hourly' => 'temperature_2m,apparent_temperature,relative_humidity_2m,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m',
+                    'temperature_unit' => 'fahrenheit',
+                    'wind_speed_unit' => 'mph',
+                    'precipitation_unit' => 'inch',
+                    'timezone' => 'auto',
+                    'start_date' => $date,
+                    'end_date' => $date,
+                ]);
+
+            if (! $forecast->successful()) {
+                Log::warning('Open-Meteo hourly forecast failed.', [
+                    ...$logContext,
+                    'status' => $forecast->status(),
+                    'body' => mb_substr($forecast->body(), 0, 1000),
+                    'location_query' => $locationQuery,
+                    'date' => $date,
+                    'time' => $time,
+                    'latitude' => $place['latitude'],
+                    'longitude' => $place['longitude'],
+                ]);
+
+                return $this->openMeteoFailureResult('weather_hourly_forecast_failed', 'weather_hourly_forecast');
+            }
+
+            $decoded = $forecast->json();
+            if (! is_array($decoded)) {
+                return $this->openMeteoFailureResult('weather_hourly_forecast_non_json', 'weather_hourly_forecast');
+            }
+
+            $hourly = data_get($decoded, 'hourly');
+            if (! is_array($hourly)) {
+                return $this->openMeteoFailureResult('weather_hourly_forecast_missing', 'weather_hourly_forecast');
+            }
+
+            $hourlyIndex = $this->hourlyForecastIndex($hourly, $date, $time);
+            if ($hourlyIndex === null) {
+                return $this->openMeteoFailureResult('weather_hourly_time_missing', 'weather_hourly_forecast');
+            }
+
+            $placeName = $this->openMeteoPlaceName($place);
+            $matchedDateTime = (string) $this->hourlyValue($hourly, 'time', $hourlyIndex);
+            $matchedTime = str_contains($matchedDateTime, 'T')
+                ? (string) str($matchedDateTime)->after('T')->substr(0, 5)
+                : $time;
+            $text = $this->openMeteoHourlyForecastText($placeName, $date, $time, $matchedTime, $hourly, $hourlyIndex, $displayTimezone);
+            if ($text === '') {
+                return $this->openMeteoFailureResult('weather_hourly_forecast_empty', 'weather_hourly_forecast');
+            }
+
+            $weatherCode = $this->hourlyValue($hourly, 'weather_code', $hourlyIndex);
+            $result = [
+                'ok' => true,
+                'tool' => 'external_lookup',
+                'provider' => 'open_meteo',
+                'kind' => 'weather_hourly_forecast',
+                'query' => $logContext['query'] ?? $locationQuery,
+                'location' => $placeName,
+                'date' => $date,
+                'time' => $time,
+                'text' => $text,
+                'weather' => [
+                    'time' => $this->hourlyValue($hourly, 'time', $hourlyIndex),
+                    'requested_time' => $time,
+                    'matched_time' => $matchedTime,
+                    'is_exact_time' => $matchedTime === $time,
+                    'temperature_f' => $this->roundedWeatherValue($this->hourlyValue($hourly, 'temperature_2m', $hourlyIndex)),
+                    'apparent_temperature_f' => $this->roundedWeatherValue($this->hourlyValue($hourly, 'apparent_temperature', $hourlyIndex)),
+                    'relative_humidity_percent' => $this->roundedWeatherValue($this->hourlyValue($hourly, 'relative_humidity_2m', $hourlyIndex)),
+                    'precipitation_probability_percent' => $this->roundedWeatherValue($this->hourlyValue($hourly, 'precipitation_probability', $hourlyIndex)),
+                    'precipitation_inches' => $this->roundedWeatherValue($this->hourlyValue($hourly, 'precipitation', $hourlyIndex), 2),
+                    'weather_code' => $weatherCode,
+                    'description' => $this->openMeteoWeatherCodeDescription((int) ($weatherCode ?? -1)),
+                    'cloud_cover_percent' => $this->roundedWeatherValue($this->hourlyValue($hourly, 'cloud_cover', $hourlyIndex)),
+                    'wind_speed_mph' => $this->roundedWeatherValue($this->hourlyValue($hourly, 'wind_speed_10m', $hourlyIndex)),
+                    'wind_direction_degrees' => $this->roundedWeatherValue($this->hourlyValue($hourly, 'wind_direction_10m', $hourlyIndex)),
+                    'wind_gusts_mph' => $this->roundedWeatherValue($this->hourlyValue($hourly, 'wind_gusts_10m', $hourlyIndex)),
+                ],
+                'sources' => [[
+                    'title' => 'Open-Meteo Forecast API',
+                    'url' => 'https://open-meteo.com/',
+                ]],
+                'cached' => false,
+            ];
+
+            if ($useCache) {
+                Cache::put($cacheKey, $result, now()->addSeconds((int) config('services.hermes_runtime.weather_warm_cache_seconds', 300)));
+            }
+
+            return $result;
+        } catch (ConnectionException $exception) {
+            Log::warning('Open-Meteo hourly forecast transport failed.', [
+                ...$logContext,
+                'location_query' => $locationQuery,
+                'date' => $date,
+                'time' => $time,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            return $this->openMeteoFailureResult('weather_lookup_timeout', 'weather_hourly_forecast');
         }
     }
 
@@ -458,7 +641,7 @@ class OpenMeteoWeatherService
             || str_contains($intent, 'forecast');
     }
 
-    private function structuredWeatherDate(array $arguments, string $timezone): ?string
+    private function structuredWeatherDate(array $arguments, string $timezone, ?string $targetTime = null): ?string
     {
         $value = (string) (
             $arguments['date']
@@ -466,8 +649,162 @@ class OpenMeteoWeatherService
             ?? $arguments['forecast_date']
             ?? ''
         );
+        if (trim($value) === '') {
+            $query = mb_strtolower((string) ($arguments['query'] ?? ''));
+            $value = match (true) {
+                preg_match('/\btomorrow\b/u', $query) === 1 => 'tomorrow',
+                preg_match('/\btonight\b/u', $query) === 1 && $targetTime !== null && (int) str($targetTime)->before(':')->toString() < 5 => 'tomorrow',
+                preg_match('/\b(today|tonight)\b/u', $query) === 1 => 'today',
+                preg_match('/\b(\d{4}-\d{2}-\d{2})\b/u', $query, $match) === 1 => (string) $match[1],
+                preg_match('/\b(?:(?:this|next)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/u', $query, $match) === 1 => (string) $match[0],
+                preg_match('/\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?\b/u', $query, $match) === 1 => preg_replace('/(\d{1,2})(?:st|nd|rd|th)\b/u', '$1', (string) $match[0]),
+                default => '',
+            };
+        }
 
         return $this->normalizeForecastDate($value, $timezone);
+    }
+
+    private function structuredWeatherTime(array $arguments): ?string
+    {
+        $value = (string) (
+            $arguments['time']
+            ?? $arguments['target_time']
+            ?? $arguments['forecast_time']
+            ?? ''
+        );
+        if (trim($value) !== '') {
+            return $this->normalizeWeatherTime($value);
+        }
+
+        $query = (string) ($arguments['query'] ?? '');
+        if (preg_match(
+            '/\b(?:at|around|by)\s+((?:\d{1,2}(?::[0-5]\d)?\s*[ap]\.?\s*m\.?)|(?:(?:[01]?\d|2[0-3]):[0-5]\d)|(?:(?:[01]\d|2[0-3])[0-5]\d)|noon|midnight)(?=\s|[?.!,]|$)/iu',
+            $query,
+            $match
+        ) !== 1) {
+            return $this->spokenWeatherTime($query)
+                ?? $this->dayPartWeatherTime($query);
+        }
+
+        return $this->normalizeWeatherTime((string) ($match[1] ?? ''));
+    }
+
+    private function dayPartWeatherTime(string $value): ?string
+    {
+        $hours = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+        if (preg_match(
+            '/\b(?:at|around|by)\s+(\d{1,2}|'.implode('|', $hours).')(?:\s+o[\'’]?\s*clock)?\s+(?:(?:this|in\s+the)\s+)?(morning|afternoon|evening|tonight)\b/iu',
+            $value,
+            $match,
+        ) !== 1) {
+            return null;
+        }
+
+        $hourText = mb_strtolower((string) $match[1]);
+        $hour = ctype_digit($hourText)
+            ? (int) $hourText
+            : ((int) (array_search($hourText, $hours, true) ?: 0)) + 1;
+        if ($hour < 1 || $hour > 12) {
+            return null;
+        }
+
+        $dayPart = mb_strtolower((string) $match[2]);
+        if ($dayPart === 'tonight') {
+            $hour = match (true) {
+                $hour === 12 => 0,
+                $hour < 5 => $hour,
+                default => $hour + 12,
+            };
+        } else {
+            $hour = $hour % 12 + ($dayPart === 'morning' ? 0 : 12);
+        }
+
+        return sprintf('%02d:00', $hour);
+    }
+
+    private function structuredWeatherTimePresent(array $arguments): bool
+    {
+        foreach (['time', 'target_time', 'forecast_time'] as $key) {
+            if (array_key_exists($key, $arguments) && trim((string) $arguments[$key]) !== '') {
+                return true;
+            }
+        }
+
+        return preg_match(
+            '/\b(?:at|around|by)\s+(?:(?:[01]\d|2[0-3])[0-5]\d|\d{1,2}(?::\d{1,2})?(?:\s*[ap]\.?\s*m\.?)?|\d{1,2}(?:\s+o[\'’]?\s*clock)|half\s+past|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?=\s+(?:[ap]\.?\s*m\.?|today|tomorrow|this|in\s+the|morning|afternoon|evening|tonight|o[\'’]?\s*clock)))\b/iu',
+            (string) ($arguments['query'] ?? ''),
+        ) === 1;
+    }
+
+    private function normalizeWeatherTime(string $value): ?string
+    {
+        $value = mb_strtolower(trim($value));
+        $spokenTime = $this->spokenWeatherTime($value, false);
+        if ($spokenTime !== null) {
+            return $spokenTime;
+        }
+        $value = preg_replace('/[.\s]+/u', '', $value) ?? $value;
+        if ($value === 'noon') {
+            return '12:00';
+        }
+        if ($value === 'midnight') {
+            return '00:00';
+        }
+        if (preg_match('/^(\d{1,2})(?::([0-5]\d))?([ap])m$/u', $value, $parts) === 1) {
+            $hour = (int) $parts[1];
+            if ($hour < 1 || $hour > 12) {
+                return null;
+            }
+
+            $hour = $hour % 12 + ($parts[3] === 'p' ? 12 : 0);
+
+            return sprintf('%02d:%02d', $hour, (int) ($parts[2] ?? 0));
+        }
+        if (preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/u', $value, $parts) === 1) {
+            return sprintf('%02d:%02d', (int) $parts[1], (int) $parts[2]);
+        }
+        if (preg_match('/^([01]\d|2[0-3])([0-5]\d)$/u', $value, $parts) === 1) {
+            return sprintf('%02d:%02d', (int) $parts[1], (int) $parts[2]);
+        }
+
+        return null;
+    }
+
+    private function spokenWeatherTime(string $value, bool $requiresPreposition = true): ?string
+    {
+        $hours = 'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve';
+        $minutes = 'oh\s+five|ten|fifteen|twenty|twenty[ -]five|thirty|forty|forty[ -]five|fifty|fifty[ -]five';
+        $prefix = $requiresPreposition ? '\\b(?:at|around|by)\\s+' : '^';
+        $suffix = $requiresPreposition ? '(?=\\s|[?.!,]|$)' : '$';
+        if (preg_match(
+            '/'.$prefix.'(?:(half)\s+past\s+)?('.$hours.')(?:\s+('.$minutes.'))?\s*([ap])\.?\s*m\.?'.$suffix.'/iu',
+            trim($value),
+            $match,
+        ) !== 1) {
+            return null;
+        }
+
+        $hourValues = array_flip(['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']);
+        $hour = ((int) ($hourValues[mb_strtolower((string) $match[2])] ?? -1)) + 1;
+        if ($hour < 1 || $hour > 12) {
+            return null;
+        }
+
+        $minuteText = str_replace(['-', ' '], '', mb_strtolower((string) ($match[3] ?? '')));
+        $minuteValues = [
+            '' => 0, 'ohfive' => 5, 'ten' => 10, 'fifteen' => 15, 'twenty' => 20,
+            'twentyfive' => 25, 'thirty' => 30, 'forty' => 40, 'fortyfive' => 45,
+            'fifty' => 50, 'fiftyfive' => 55,
+        ];
+        $minute = ($match[1] ?? '') !== '' ? 30 : ($minuteValues[$minuteText] ?? null);
+        if ($minute === null) {
+            return null;
+        }
+
+        $hour = $hour % 12 + (mb_strtolower((string) $match[4]) === 'p' ? 12 : 0);
+
+        return sprintf('%02d:%02d', $hour, $minute);
     }
 
     private function normalizeForecastDate(string $value, string $timezone = ''): ?string
@@ -514,13 +851,14 @@ class OpenMeteoWeatherService
 
     private function weatherLocationQuery(string $query, string $location): string
     {
+        $queryWithoutTemporalClauses = $this->weatherTextWithoutTemporalClauses($query);
         $patterns = [
-            '/\b(?:in|for|at|near)\s+(.+?)(?:\s+(?:right now|currently|now|today|tonight|tomorrow|this morning|this afternoon|this evening))?\s*[?.!]*$/i',
-            '/\bweather\s+(.+?)(?:\s+(?:right now|currently|now|today|tonight|tomorrow))?\s*[?.!]*$/i',
+            '/\b(?:weather|forecast|temperature|temp|rain|raining|storm|storming|snow|snowing|humidity|wind|windy|cloudy|sunny)\b.*?\b(?:in|near|at)\s+(.+?)\s*[?.!]*$/iu',
+            '/\b(?:weather|forecast|temperature|temp|rain|raining|storm|storming|snow|snowing|humidity|wind|windy|cloudy|sunny)\b.*?\bfor\s+(.+?)\s*[?.!]*$/iu',
         ];
 
         foreach ($patterns as $pattern) {
-            if (preg_match($pattern, $query, $matches) === 1) {
+            if (preg_match($pattern, $queryWithoutTemporalClauses, $matches) === 1) {
                 $candidate = $this->cleanWeatherLocation((string) ($matches[1] ?? ''));
                 if ($candidate !== '') {
                     return $candidate;
@@ -531,10 +869,28 @@ class OpenMeteoWeatherService
         return $this->cleanWeatherLocation($location);
     }
 
+    private function weatherTextWithoutTemporalClauses(string $content): string
+    {
+        $time = '(?:\d{1,2}(?::[0-5]\d)?\s*[ap]\.?\s*m\.?|(?:[01]?\d|2[0-3]):[0-5]\d|(?:[01]\d|2[0-3])[0-5]\d|noon|midnight)';
+        $spokenHour = '(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)';
+        $spokenMinute = '(?:oh\s+five|ten|fifteen|twenty|twenty[ -]five|thirty|forty|forty[ -]five|fifty|fifty[ -]five)';
+        $content = preg_replace('/\b(?:at|around|by)\s+'.$time.'\b/iu', ' ', $content) ?? $content;
+        $content = preg_replace('/\b(?:at|around|by)\s+(?:half\s+past\s+'.$spokenHour.'|'.$spokenHour.'(?:\s+'.$spokenMinute.')?)\s*[ap]\.?\s*m\.?/iu', ' ', $content) ?? $content;
+        $content = preg_replace('/\b(?:at|around|by)\s+(?:\d{1,2}|'.$spokenHour.')(?:\s+o[\'’]?\s*clock)?\s+(?:(?:this|in\s+the)\s+)?(?:morning|afternoon|evening|tonight)\b/iu', ' ', $content) ?? $content;
+        $content = preg_replace('/\b(?:right now|currently|now|today|tonight|tomorrow|this morning|this afternoon|this evening|later(?:\s+in)?\s+the\s+(?:morning|afternoon|evening))\b/iu', ' ', $content) ?? $content;
+        $content = preg_replace('/\b(?:on\s+)?(?:(?:this|next)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/iu', ' ', $content) ?? $content;
+        $content = preg_replace('/\b(?:on\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?\b/iu', ' ', $content) ?? $content;
+        $content = preg_replace('/\bin\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+\d{4})?\b/iu', ' ', $content) ?? $content;
+        $content = preg_replace('/\b\d{4}-\d{2}-\d{2}\b/u', ' ', $content) ?? $content;
+
+        return str($content)->squish()->toString();
+    }
+
     private function cleanWeatherLocation(string $location): string
     {
         $location = trim(preg_replace('/\s+/', ' ', $location) ?: '');
         $location = preg_replace('/\b(right now|currently|now|today|tonight|tomorrow|this morning|this afternoon|this evening)\b/i', '', $location) ?: '';
+        $location = preg_replace('/\s+\b(?:at|around|by)\s+(?:\d{1,2}(?::[0-5]\d)?\s*[ap]\.?\s*m\.?|(?:[01]?\d|2[0-3]):[0-5]\d|noon|midnight)\s*.*$/iu', '', $location) ?: '';
         $location = trim($location, " \t\n\r\0\x0B,.?!'\"");
 
         return $location;
@@ -579,6 +935,48 @@ class OpenMeteoWeatherService
         }
 
         return implode(' ', $parts);
+    }
+
+    private function openMeteoHourlyForecastText(string $placeName, string $date, string $requestedTime, string $matchedTime, array $hourly, int $index, string $displayTimezone): string
+    {
+        $temperature = $this->roundedWeatherValue($this->hourlyValue($hourly, 'temperature_2m', $index));
+        if ($temperature === null) {
+            return '';
+        }
+
+        $weatherCode = $this->hourlyValue($hourly, 'weather_code', $index);
+        $description = $this->openMeteoWeatherCodeDescription((int) ($weatherCode ?? -1));
+        $requestedTimeLabel = Carbon::createFromFormat('H:i', $requestedTime)->format('g:i A');
+        $requestedTimeLabel = str_replace(':00 ', ' ', $requestedTimeLabel);
+        $matchedTimeLabel = Carbon::createFromFormat('H:i', $matchedTime)->format('g:i A');
+        $matchedTimeLabel = str_replace(':00 ', ' ', $matchedTimeLabel);
+        $dateValue = Carbon::parse($date, $displayTimezone);
+        $displayNow = $this->weatherNow($displayTimezone);
+        $today = $displayNow->toDateString();
+        $tomorrow = $displayNow->copy()->addDay()->toDateString();
+        $dateLabel = match (true) {
+            $dateValue->toDateString() === $today => 'today',
+            $dateValue->toDateString() === $tomorrow => 'tomorrow',
+            default => 'on '.$dateValue->format('M j'),
+        };
+        $details = [];
+        $precipitationChance = $this->roundedWeatherValue($this->hourlyValue($hourly, 'precipitation_probability', $index));
+        if ($precipitationChance !== null) {
+            $details[] = "a {$precipitationChance}% chance of precipitation";
+        }
+        $windSpeed = $this->roundedWeatherValue($this->hourlyValue($hourly, 'wind_speed_10m', $index));
+        if ($windSpeed !== null) {
+            $details[] = "winds around {$windSpeed} mph";
+        }
+
+        $text = $requestedTime === $matchedTime
+            ? "At {$requestedTimeLabel} {$dateLabel} in {$placeName}, expect {$temperature}°F and {$description}"
+            : "Around {$requestedTimeLabel} {$dateLabel} in {$placeName}, the nearest hourly forecast ({$matchedTimeLabel}) is {$temperature}°F and {$description}";
+        if ($details !== []) {
+            $text .= ', with '.implode(' and ', $details);
+        }
+
+        return $text.'.';
     }
 
     private function openMeteoDailyForecastText(string $placeName, string $date, array $daily): string
@@ -631,6 +1029,58 @@ class OpenMeteoWeatherService
         }
 
         return $value;
+    }
+
+    private function hourlyForecastIndex(array $hourly, string $date, string $time): ?int
+    {
+        $times = data_get($hourly, 'time');
+        if (! is_array($times) || $times === []) {
+            return null;
+        }
+
+        $target = $date.'T'.$time;
+        $exact = array_search($target, $times, true);
+        if ($exact !== false) {
+            return (int) $exact;
+        }
+
+        try {
+            // Open-Meteo's hourly values are local wall-clock strings without offsets.
+            // Compare both sides in the same neutral timezone so the app/test timezone
+            // cannot shift a requested half hour by several hours.
+            $targetAt = Carbon::createFromFormat('Y-m-d H:i', $date.' '.$time, 'UTC');
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $closestIndex = null;
+        $closestMinutes = null;
+        foreach ($times as $index => $candidate) {
+            if (! is_string($candidate) || ! str_starts_with($candidate, $date.'T')) {
+                continue;
+            }
+
+            try {
+                $candidateAt = Carbon::createFromFormat('Y-m-d\TH:i', $candidate, 'UTC');
+            } catch (\Throwable) {
+                continue;
+            }
+
+            $minutes = abs($candidateAt->diffInMinutes($targetAt, false));
+            if ($closestMinutes === null || $minutes < $closestMinutes) {
+                $closestMinutes = $minutes;
+                $closestIndex = (int) $index;
+            }
+        }
+
+        return $closestMinutes !== null && $closestMinutes <= 60 ? $closestIndex : null;
+    }
+
+    private function hourlyValue(array $hourly, string $key, int $index): mixed
+    {
+        $values = data_get($hourly, $key);
+
+        return is_array($values) ? ($values[$index] ?? null) : null;
     }
 
     private function openMeteoPlaceName(array $place): string
@@ -696,7 +1146,9 @@ class OpenMeteoWeatherService
             'provider' => 'open_meteo',
             'kind' => $kind,
             'error_code' => $errorCode,
-            'message' => 'I’m checking live weather now. I’ll ask for a city or date if I need one more detail.',
+            'message' => $errorCode === 'weather_hourly_datetime_invalid'
+                ? 'I couldn’t interpret the requested weather time. Try a specific time such as “5 PM.”'
+                : 'I couldn’t retrieve the live weather just now. Please try again in a moment.',
         ];
     }
 

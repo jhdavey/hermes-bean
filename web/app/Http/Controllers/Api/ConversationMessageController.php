@@ -8,9 +8,9 @@ use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Services\AssistantRunService;
 use App\Services\HermesRuntimeService;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -30,7 +30,7 @@ class ConversationMessageController extends Controller
             'metadata' => ['nullable', 'array'],
         ]);
 
-        $metadata = $data['metadata'] ?? [];
+        $metadata = $this->runs->sanitizeClientMetadata($data['metadata'] ?? []);
         if ($this->shouldQueueWithoutDirectRuntime($metadata)) {
             return $this->queueFirstMessageResponse($ownedSession, $data['content'], $metadata, 'flutter_direct');
         }
@@ -50,9 +50,11 @@ class ConversationMessageController extends Controller
         }
 
         try {
+            $queued = $this->queuedResponse($ownedSession->refresh(), $userMessage, $metadata, 'direct_fallback');
+
             return response()->json(
-                ['data' => $this->queuedResponse($ownedSession->refresh(), $userMessage, $metadata, 'direct_fallback')],
-                202
+                ['data' => $queued],
+                $this->queuedResponseStatus($queued)
             );
         } catch (Throwable $exception) {
             return $this->bridgeQueuedResponseFailure($ownedSession->refresh(), $userMessage, $exception, 'direct_fallback');
@@ -71,7 +73,7 @@ class ConversationMessageController extends Controller
             'metadata' => ['nullable', 'array'],
         ]);
 
-        $metadata = $data['metadata'] ?? [];
+        $metadata = $this->runs->sanitizeClientMetadata($data['metadata'] ?? []);
         $metadata['edited_from_message_id'] = $ownedMessage->id;
 
         if ($this->shouldQueueWithoutDirectRuntime($metadata)) {
@@ -93,9 +95,11 @@ class ConversationMessageController extends Controller
 
         if ($this->shouldQueueWithoutDirectRuntime($metadata)) {
             try {
+                $queued = $this->queuedResponse($ownedSession->refresh(), $userMessage, $metadata, 'flutter_branch');
+
                 return response()->json(
-                    ['data' => $this->queuedResponse($ownedSession->refresh(), $userMessage, $metadata, 'flutter_branch')],
-                    202
+                    ['data' => $queued],
+                    $this->queuedResponseStatus($queued)
                 );
             } catch (Throwable $exception) {
                 return $this->bridgeQueuedResponseFailure($ownedSession->refresh(), $userMessage, $exception, 'flutter_branch');
@@ -116,9 +120,11 @@ class ConversationMessageController extends Controller
         }
 
         try {
+            $queued = $this->queuedResponse($ownedSession->refresh(), $userMessage, $metadata, 'branch_fallback');
+
             return response()->json(
-                ['data' => $this->queuedResponse($ownedSession->refresh(), $userMessage, $metadata, 'branch_fallback')],
-                202
+                ['data' => $queued],
+                $this->queuedResponseStatus($queued)
             );
         } catch (Throwable $exception) {
             return $this->bridgeQueuedResponseFailure($ownedSession->refresh(), $userMessage, $exception, 'branch_fallback');
@@ -152,9 +158,11 @@ class ConversationMessageController extends Controller
         $userMessage = $this->createUserMessage($session, $content, $metadata);
 
         try {
+            $queued = $this->queuedResponse($session->refresh(), $userMessage, $metadata, $fallbackSource);
+
             return response()->json(
-                ['data' => $this->queuedResponse($session->refresh(), $userMessage, $metadata, $fallbackSource)],
-                202
+                ['data' => $queued],
+                $this->queuedResponseStatus($queued)
             );
         } catch (Throwable $exception) {
             return $this->bridgeQueuedResponseFailure($session->refresh(), $userMessage, $exception, $fallbackSource);
@@ -224,9 +232,11 @@ class ConversationMessageController extends Controller
         }
 
         try {
+            $queued = $this->queuedResponse($session->refresh(), $existingUserMessage, $metadata, 'flutter_existing_message');
+
             return response()->json(
-                ['data' => $this->queuedResponse($session->refresh(), $existingUserMessage, $metadata, 'flutter_existing_message')],
-                202
+                ['data' => $queued],
+                $this->queuedResponseStatus($queued)
             );
         } catch (Throwable $exception) {
             return $this->bridgeQueuedResponseFailure($session->refresh(), $existingUserMessage, $exception, 'flutter_existing_message');
@@ -249,16 +259,24 @@ class ConversationMessageController extends Controller
     ): array {
         $source = (string) data_get($metadata, 'source', $fallbackSource);
         $queued = $this->runs->queueExistingMessage($session, $userMessage, $metadata, $source);
+        $run = $queued['run']->refresh();
 
         return [
-            'status' => 'queued',
+            'status' => $run->status,
             'session' => $session->refresh(),
-            'run' => $queued['run']->refresh(),
+            'run' => $run,
             'user_message' => $queued['user_message'],
             'assistant_message' => null,
             'events' => $queued['events'] ?? [$queued['event']],
             'blocker' => null,
         ];
+    }
+
+    private function queuedResponseStatus(array $response): int
+    {
+        $status = (string) data_get($response, 'run.status', data_get($response, 'status', 'queued'));
+
+        return in_array($status, ['completed', 'failed', 'cancelled'], true) ? 200 : 202;
     }
 
     private function bridgeQueuedResponseFailure(

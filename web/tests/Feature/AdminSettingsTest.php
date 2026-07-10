@@ -236,12 +236,14 @@ SH);
             ->assertJsonPath('data.providers.1.key', 'google_places')
             ->assertJsonPath('data.providers.1.connected', true)
             ->assertJsonPath('data.providers.1.usage.requests', 1)
-            ->assertJsonPath('data.providers.2.key', 'tavily_search')
+            ->assertJsonPath('data.providers.2.key', 'osm_places')
             ->assertJsonPath('data.providers.2.connected', true)
-            ->assertJsonPath('data.providers.2.usage.avg_latency_ms', 420)
-            ->assertJsonPath('data.providers.3.key', 'openai_web_search')
+            ->assertJsonPath('data.providers.3.key', 'tavily_search')
             ->assertJsonPath('data.providers.3.connected', true)
-            ->assertJsonPath('data.providers.3.usage.failed', 1);
+            ->assertJsonPath('data.providers.3.usage.avg_latency_ms', 420)
+            ->assertJsonPath('data.providers.4.key', 'openai_web_search')
+            ->assertJsonPath('data.providers.4.connected', true)
+            ->assertJsonPath('data.providers.4.usage.failed', 1);
     }
 
     private function settingsPayload(array $models = [], array $usageLimits = [], bool $apply = false, array $killSwitches = []): array

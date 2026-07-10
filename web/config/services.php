@@ -95,6 +95,7 @@ return [
         'realtime_vad_threshold' => (float) env('OPENAI_REALTIME_VAD_THRESHOLD', 0.5),
         'realtime_vad_prefix_padding_ms' => (int) env('OPENAI_REALTIME_VAD_PREFIX_PADDING_MS', 300),
         'realtime_vad_silence_duration_ms' => (int) env('OPENAI_REALTIME_VAD_SILENCE_DURATION_MS', 650),
+        'realtime_turn_abandon_after_seconds' => (int) env('OPENAI_REALTIME_TURN_ABANDON_AFTER_SECONDS', 120),
     ],
 
     'firebase' => [

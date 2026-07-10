@@ -88,7 +88,9 @@ class VoiceChatFeatureTest extends TestCase
                 && data_get($payload, 'session.audio.input.turn_detection.create_response') === false
                 && data_get($payload, 'session.audio.input.turn_detection.interrupt_response') === true
                 && collect(data_get($payload, 'session.tools', []))->contains(fn (array $tool): bool => $tool['name'] === 'send_bean_request')
-                && str_contains((string) data_get($payload, 'session.instructions'), 'Hey Bean');
+                && str_contains((string) data_get($payload, 'session.instructions'), 'Hey Bean')
+                && str_contains((string) data_get($payload, 'session.instructions'), 'remain wake-only')
+                && str_contains((string) data_get($payload, 'session.instructions'), 'current external information');
         });
     }
 
@@ -141,5 +143,158 @@ class VoiceChatFeatureTest extends TestCase
             'content' => 'Today is Wednesday.',
         ]);
         $this->assertSame(2, ConversationMessage::where('conversation_session_id', $sessionId)->count());
+    }
+
+    public function test_realtime_turn_persistence_is_atomic_and_idempotent_for_a_client_turn(): void
+    {
+        $token = $this->apiToken('voice-turn-idempotent@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+        $payload = [
+            'session_id' => $sessionId,
+            'user_text' => 'Hey Bean, give me a short greeting.',
+            'assistant_text' => 'Good morning!',
+            'metadata' => [
+                'client_request_id' => 'web-realtime-stable-turn-1',
+                'voice_quality' => [
+                    'schema_version' => 1,
+                    'route' => 'direct',
+                    'transcript_to_audio_start_ms' => 640,
+                ],
+            ],
+        ];
+
+        $first = $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.user_message.client_turn_id', 'web-realtime-stable-turn-1')
+            ->assertJsonPath('data.assistant_message.client_turn_id', 'web-realtime-stable-turn-1')
+            ->assertJsonPath('data.assistant_message.metadata.voice_quality.route', 'direct')
+            ->assertJsonPath('data.assistant_message.metadata.voice_quality.transcript_to_audio_start_ms', 640);
+
+        $second = $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', $payload)
+            ->assertOk();
+
+        $this->assertSame($first->json('data.user_message.id'), $second->json('data.user_message.id'));
+        $this->assertSame($first->json('data.assistant_message.id'), $second->json('data.assistant_message.id'));
+        $this->assertSame(2, ConversationMessage::where('conversation_session_id', $sessionId)->count());
+        $this->assertDatabaseCount('conversation_messages', 2);
+    }
+
+    public function test_realtime_turn_persists_acceptance_and_terminal_interruption_without_an_assistant_message(): void
+    {
+        $token = $this->apiToken('voice-turn-interrupted@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+        $base = [
+            'session_id' => $sessionId,
+            'user_text' => 'Tell me a short story.',
+            'metadata' => [
+                'client_turn_id' => 'web-realtime-interrupted-1',
+                'voice_quality' => [
+                    'schema_version' => 1,
+                    'route' => 'direct',
+                ],
+            ],
+        ];
+
+        $accepted = $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
+            ...$base,
+            'outcome' => 'accepted',
+        ])->assertCreated()
+            ->assertJsonPath('data.outcome', 'accepted')
+            ->assertJsonPath('data.assistant_message', null)
+            ->assertJsonPath('data.user_message.metadata.voice_turn_outcome.status', 'accepted');
+
+        $interrupted = $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
+            ...$base,
+            'outcome' => 'interrupted',
+            'failure_reason' => 'barge_in',
+            'metadata' => [
+                ...$base['metadata'],
+                'voice_quality' => [
+                    'schema_version' => 1,
+                    'route' => 'direct',
+                    'response_duration_ms' => 310,
+                ],
+            ],
+        ])->assertOk()
+            ->assertJsonPath('data.outcome', 'interrupted')
+            ->assertJsonPath('data.assistant_message', null)
+            ->assertJsonPath('data.user_message.metadata.voice_turn_outcome.status', 'interrupted')
+            ->assertJsonPath('data.user_message.metadata.voice_turn_outcome.reason', 'barge_in');
+
+        $this->assertSame($accepted->json('data.user_message.id'), $interrupted->json('data.user_message.id'));
+        $this->assertDatabaseCount('conversation_messages', 1);
+        $this->assertDatabaseMissing('conversation_messages', [
+            'conversation_session_id' => $sessionId,
+            'role' => 'assistant',
+        ]);
+
+        // A late provider completion cannot turn an already interrupted response into a
+        // completed durable assistant answer.
+        $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
+            ...$base,
+            'outcome' => 'completed',
+            'assistant_text' => 'This answer arrived too late.',
+            'metadata' => [
+                ...$base['metadata'],
+                'voice_quality' => [
+                    'schema_version' => 1,
+                    'route' => 'direct',
+                    'response_duration_ms' => 999,
+                ],
+            ],
+        ])->assertOk()
+            ->assertJsonPath('data.outcome', 'interrupted')
+            ->assertJsonPath('data.assistant_message', null)
+            ->assertJsonPath('data.user_message.metadata.voice_quality.response_duration_ms', 310)
+            ->assertJsonPath('data.user_message.metadata.voice_turn_outcome.reason', 'barge_in');
+        $this->assertDatabaseCount('conversation_messages', 1);
+    }
+
+    public function test_realtime_turn_attaches_assistant_text_only_after_completed_playback(): void
+    {
+        $token = $this->apiToken('voice-turn-completed-lifecycle@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+        $base = [
+            'session_id' => $sessionId,
+            'user_text' => 'Give me a short greeting.',
+            'metadata' => [
+                'client_turn_id' => 'web-realtime-completed-1',
+                'voice_quality' => [
+                    'schema_version' => 1,
+                    'route' => 'status',
+                ],
+            ],
+        ];
+
+        $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
+            ...$base,
+            'outcome' => 'accepted',
+        ])->assertCreated();
+
+        $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
+            ...$base,
+            'outcome' => 'completed',
+            'assistant_text' => 'Good morning!',
+            'metadata' => [
+                ...$base['metadata'],
+                'voice_quality' => [
+                    'schema_version' => 1,
+                    'route' => 'status',
+                    'transcript_to_audio_start_ms' => 620,
+                ],
+            ],
+        ])->assertCreated()
+            ->assertJsonPath('data.outcome', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Good morning!')
+            ->assertJsonPath('data.assistant_message.metadata.voice_turn_outcome.status', 'completed')
+            ->assertJsonPath('data.user_message.metadata.voice_quality.transcript_to_audio_start_ms', 620);
+
+        $this->assertDatabaseCount('conversation_messages', 2);
     }
 }

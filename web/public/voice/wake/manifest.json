@@ -1,0 +1,50 @@
+{
+  "version": 2,
+  "detector": "local-streaming-asr-prefix",
+  "worker": "/voice/wake/wake-worker.js",
+  "workerType": "classic",
+  "audioWorklet": "/voice/wake/gate-processor.js",
+  "processorName": "hey-bean-gate",
+  "sampleRate": 16000,
+  "audioBatchSamples": 1600,
+  "maxWorkerChunkSamples": 3200,
+  "providerPreRollMs": 320,
+  "keywordAlias": "HEY_BEAN",
+  "acceptedWakePrefixes": [
+    "HEY BEAN",
+    "THEY BEAN",
+    "HEY BEING",
+    "THEY BEING",
+    "HABEEN",
+    "HABEING"
+  ],
+  "modelQuantization": {
+    "encoder": "int8",
+    "decoder": "float32",
+    "joiner": "int8"
+  },
+  "threading": "single",
+  "requiresCrossOriginIsolation": false,
+  "vendorAssets": [
+    {
+      "path": "/voice/wake/runtime.js",
+      "bytes": 91539,
+      "sha256": "d4c59b90bf085cc7035b0b9b5b086592c6b544e7beb4b3d860a67f05ce2e4450"
+    },
+    {
+      "path": "/voice/wake/runtime.wasm",
+      "bytes": 11550234,
+      "sha256": "0a7a589046020193de8006fea792248fc5cd3e6dc614fbc231c97bcdec69d31d"
+    },
+    {
+      "path": "/voice/wake/model.data",
+      "bytes": 6041767,
+      "sha256": "d7ef840d9c1673a51f115b9031bb93a4eae24de26febb3309a7cb463ac28ec7b"
+    },
+    {
+      "path": "/voice/wake/asr-api.js",
+      "bytes": 49519,
+      "sha256": "c71a9817c2dd3ab69fd1967a81260428650890980d11d97cfa8e00d551e34f2b"
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 namespace App\Services\HermesToolRuntime;
 
 use App\Models\ActivityEvent;
+use App\Models\AssistantRun;
 use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
@@ -75,14 +76,19 @@ trait CrudPlannerRuntime
         $failedWorkItems = [];
 
         foreach ($actions as $index => $action) {
-            if ($this->isCancellationRequested($session)) {
+            if ($this->isCancellationRequested($session, $userMessage)) {
                 return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started])->concat($domainEvents));
             }
 
             $workItem = is_array($plannedWork[$index] ?? null) ? $plannedWork[$index] : null;
             $action = $this->correlatePlannerAction($action, $createdCalendarEventsByKey, $lastCreatedCalendarEventId);
             $toolStartedAt = microtime(true);
-            [$executed, $events, $toolOutput] = $this->executePlannerAction($session, $action, $workItem);
+            [$executed, $events, $toolOutput] = $this->executePlannerAction(
+                $session,
+                $action,
+                $workItem,
+                (int) data_get($userMessage->metadata, 'assistant_run_id', 0),
+            );
             $toolExecutionDurationsMs[] = $this->elapsedMs($toolStartedAt);
             $domainEvents = $domainEvents->concat($events);
             $executedActions = array_merge($executedActions, $executed);
@@ -123,7 +129,12 @@ trait CrudPlannerRuntime
         $toolMode = 'app_crud';
         $plannerUsed = true;
 
+        if ($this->isCancellationRequested($session, $userMessage)) {
+            return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $started])->concat($domainEvents));
+        }
+
         $result = DB::transaction(function () use ($session, $userMessage, $received, $started, $plannerRoute, $prompt, $responses, $domainEvents, $assistantContent, $finalResponse, $toolMode, $runtimeStartedAt, $contextBuildMs, $modelCallDurationsMs, $toolExecutionDurationsMs, $finalResponseDurationMs, $executedActions, $plannerUsed, $plannerSource, $allWritesSucceeded): array {
+            $this->lockRunForAssistantPersistence($session, $userMessage);
             $completed = $this->recordEvent($session, 'runtime.tool_model_completed', [
                 'message_id' => $userMessage->id,
                 'response_count' => count($responses),
@@ -150,6 +161,7 @@ trait CrudPlannerRuntime
                 'role' => 'assistant',
                 'content' => $assistantContent,
                 'metadata' => [
+                    ...$this->assistantRunMetadata($userMessage),
                     'runtime' => 'tools',
                     'provider' => config('services.hermes_runtime.default_provider'),
                     'model' => $plannerRoute['model'],
@@ -187,7 +199,7 @@ trait CrudPlannerRuntime
         });
 
         $assistantMessage = $result['assistant_message'] ?? null;
-        if ($assistantMessage instanceof ConversationMessage) {
+        if ($assistantMessage instanceof ConversationMessage && ! data_get($userMessage->metadata, 'defer_memory_candidate', false)) {
             $this->memoryService->recordTurnCandidate($session->refresh(), $userMessage, $assistantMessage);
         }
 
@@ -942,6 +954,7 @@ PROMPT;
 
             if (preg_match('/^\s*(?:[-*•]|\d+[\).])\s*(.+)$/u', $clean, $match)) {
                 $this->pushShoppingListItem($items, (string) ($match[1] ?? ''));
+
                 continue;
             }
 
@@ -2564,15 +2577,19 @@ PROMPT;
         return $action;
     }
 
-    private function executePlannerAction(ConversationSession $session, array $action, ?array $workItem): array
+    private function executePlannerAction(ConversationSession $session, array $action, ?array $workItem, int $assistantRunId = 0): array
     {
         $this->recordEvent($session, 'runtime.planner_action_started', $this->payloadWithWorkItem([
             'action_type' => (string) ($action['type'] ?? ''),
         ], $workItem), 'hermes.planner', 'started');
 
         try {
-            $events = $this->executeActionEnvelopeAtomically($session, $action, $workItem);
+            $events = $this->executeActionEnvelopeAtomically($session, $action, $workItem, $assistantRunId);
         } catch (\Throwable $exception) {
+            $actionFailure = $this->recordEvent($session, 'assistant.action.failed', $this->payloadWithWorkItem([
+                'action_type' => (string) ($action['type'] ?? ''),
+                'reason' => $exception->getMessage(),
+            ], $workItem), 'structured_action', 'failed');
             $event = $this->recordEvent($session, 'runtime.planner_action_failed', $this->payloadWithWorkItem([
                 'action_type' => (string) ($action['type'] ?? ''),
                 'reason' => $exception->getMessage(),
@@ -2584,16 +2601,16 @@ PROMPT;
                 'exception' => $exception->getMessage(),
             ]);
 
-            return [[$action], collect([$event]), [
+            return [[$action], collect([$actionFailure, $event]), [
                 'ok' => false,
                 'action_type' => (string) ($action['type'] ?? ''),
                 'message' => $exception->getMessage(),
-                'events' => [[
-                    'event_type' => $event->event_type,
-                    'tool_name' => $event->tool_name,
-                    'status' => $event->status,
-                    'payload' => $event->payload,
-                ]],
+                'events' => collect([$actionFailure, $event])->map(fn (ActivityEvent $failureEvent): array => [
+                    'event_type' => $failureEvent->event_type,
+                    'tool_name' => $failureEvent->tool_name,
+                    'status' => $failureEvent->status,
+                    'payload' => $failureEvent->payload,
+                ])->all(),
             ]];
         }
 
@@ -2617,17 +2634,43 @@ PROMPT;
         ]];
     }
 
-    private function executeActionEnvelopeAtomically(ConversationSession $session, array $action, ?array $workItem): Collection
+    private function executeActionEnvelopeAtomically(ConversationSession $session, array $action, ?array $workItem, int $assistantRunId = 0): Collection
     {
-        $events = $this->actionService->applyEnvelope($session, ['actions' => [$action]]);
+        return DB::transaction(function () use ($session, $action, $workItem, $assistantRunId): Collection {
+            $lockedSession = ConversationSession::query()->lockForUpdate()->findOrFail($session->id);
+            if ($assistantRunId > 0) {
+                $lockedRun = AssistantRun::query()
+                    ->whereKey($assistantRunId)
+                    ->where('conversation_session_id', $lockedSession->id)
+                    ->lockForUpdate()
+                    ->first();
+                if (! $lockedRun instanceof AssistantRun || $lockedRun->status !== 'running') {
+                    throw new \RuntimeException('Assistant run was cancelled before action execution.');
+                }
+            } elseif ($lockedSession->status === 'cancelling') {
+                throw new \RuntimeException('Assistant request was cancelled before action execution.');
+            }
 
-        if ($workItem !== null) {
-            $events = $events
-                ->map(fn (ActivityEvent $event): ActivityEvent => $this->attachWorkItemToEvent($event, $workItem))
-                ->values();
-        }
+            $events = $this->actionService->applyEnvelope($lockedSession, ['actions' => [$action]]);
+            $failedEvent = $events->first(fn (mixed $event): bool => $event instanceof ActivityEvent && $event->status === 'failed');
+            if ($failedEvent instanceof ActivityEvent) {
+                $reason = trim((string) (
+                    data_get($failedEvent->payload, 'reason')
+                    ?: data_get($failedEvent->payload, 'message')
+                    ?: 'Structured action failed.'
+                ));
 
-        return $events;
+                throw new \RuntimeException($reason);
+            }
+
+            if ($workItem !== null) {
+                $events = $events
+                    ->map(fn (ActivityEvent $event): ActivityEvent => $this->attachWorkItemToEvent($event, $workItem))
+                    ->values();
+            }
+
+            return $events;
+        }, 3);
     }
 
     private function createdCalendarEventIdFromEvents(Collection $events): ?int
