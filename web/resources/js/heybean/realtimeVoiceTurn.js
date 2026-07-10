@@ -59,6 +59,7 @@ export class RealtimeResponseLifecycle {
                 purpose,
                 transcript: '',
                 responseId: '',
+                audioStarted: false,
                 resolve,
             };
         });
@@ -69,9 +70,23 @@ export class RealtimeResponseLifecycle {
     }
 
     bindResponse(responseId) {
-        if (!this.active) return false;
-        this.active.responseId = String(responseId || '');
+        return this.#claimResponse(responseId);
+    }
+
+    markAudioStarted(responseId) {
+        if (!this.#claimResponse(responseId)) return false;
+        this.active.audioStarted = true;
         return true;
+    }
+
+    markResponseDone(responseId) {
+        if (!this.#claimResponse(responseId)) return null;
+        return this.active.audioStarted ? null : this.finish(responseId);
+    }
+
+    markAudioStopped(responseId) {
+        if (!this.#claimResponse(responseId)) return null;
+        return this.finish(responseId);
     }
 
     captureTranscript(transcript) {
@@ -93,6 +108,15 @@ export class RealtimeResponseLifecycle {
         };
         current.resolve(result);
         return result;
+    }
+
+    #claimResponse(responseId) {
+        if (!this.active) return false;
+        const id = String(responseId || '');
+        if (!id) return true;
+        if (this.active.responseId && this.active.responseId !== id) return false;
+        this.active.responseId = id;
+        return true;
     }
 
     cancel() {

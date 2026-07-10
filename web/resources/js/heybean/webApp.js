@@ -9400,6 +9400,22 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
 
+        if (payload.type === 'output_audio_buffer.started') {
+            realtimeResponseActive = true;
+            realtimeResponseLifecycle.markAudioStarted(payload.response_id);
+            return;
+        }
+
+        if (payload.type === 'output_audio_buffer.stopped') {
+            const trackedResponseActive = realtimeResponseLifecycle.isActive();
+            const completedResponse = realtimeResponseLifecycle.markAudioStopped(payload.response_id);
+            if (!trackedResponseActive || !completedResponse) return;
+            realtimeResponseActive = false;
+            realtimeIgnoreInputUntil = Date.now() + 400;
+            realtimeSuppressNextAssistantTranscript = false;
+            return;
+        }
+
         if (payload.type === 'input_audio_buffer.speech_started') {
             if (Date.now() < realtimeIgnoreInputUntil || realtimeLaravelTurnInFlight) return;
             stopBeanVoicePlayback();
@@ -9451,7 +9467,7 @@ export function mountHeyBeanWebApp(mount) {
 
         if (payload.type === 'response.done') {
             const trackedResponseActive = realtimeResponseLifecycle.isActive();
-            const completedResponse = realtimeResponseLifecycle.finish(payload.response?.id);
+            const completedResponse = realtimeResponseLifecycle.markResponseDone(payload.response?.id);
             if (trackedResponseActive && !completedResponse) return;
             realtimeResponseActive = false;
             realtimeIgnoreInputUntil = Date.now() + 1200;
@@ -9576,7 +9592,7 @@ export function mountHeyBeanWebApp(mount) {
             render();
         } finally {
             realtimeLaravelTurnInFlight = false;
-            realtimeTurnGuardUntil = Date.now() + 5000;
+            realtimeTurnGuardUntil = Date.now() + 400;
         }
     }
 

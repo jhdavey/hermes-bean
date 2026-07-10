@@ -68,7 +68,7 @@ test('a stale cancelled response cannot complete the next spoken response', asyn
     assert.deepEqual(await next, { purpose: 'second', transcript: 'Second answer', cancelled: false });
 });
 
-test('a spoken response does not complete until the realtime response finishes', async () => {
+test('a spoken response completes only after its audio buffer finishes playing', async () => {
     const lifecycle = new RealtimeResponseLifecycle();
     let completed = false;
     const completion = lifecycle.begin('final').then((result) => {
@@ -76,11 +76,14 @@ test('a spoken response does not complete until the realtime response finishes',
         return result;
     });
 
+    lifecycle.bindResponse('response-voice');
+    lifecycle.markAudioStarted('response-voice');
     lifecycle.captureTranscript('You have two events today.');
+    lifecycle.markResponseDone('response-voice');
     await Promise.resolve();
     assert.equal(completed, false);
 
-    lifecycle.finish();
+    lifecycle.markAudioStopped('response-voice');
     assert.deepEqual(await completion, {
         purpose: 'final',
         transcript: 'You have two events today.',
