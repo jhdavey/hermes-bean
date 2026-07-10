@@ -343,9 +343,8 @@
     max-width: 100%;
     overflow: hidden;
     display: grid;
-    grid-template-columns: 36px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     align-items: start;
-    column-gap: 5px;
     border: 1px solid var(--hb-month-event-border, rgba(var(--hb-accent-rgb), .13));
     border-radius: 7px;
     background: var(--hb-month-event-bg, rgba(var(--hb-accent-rgb), .055));
@@ -385,9 +384,8 @@
 .hb-month-event {
     min-width: 0;
     display: grid;
-    grid-template-columns: 36px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     align-items: start;
-    column-gap: 5px;
     border: 1px solid var(--hb-month-event-border, rgba(var(--hb-accent-rgb), .13));
     border-radius: 7px;
     background: var(--hb-month-event-bg, rgba(var(--hb-accent-rgb), .055));
@@ -401,27 +399,6 @@
     border-color: var(--hb-month-event-color, rgba(var(--hb-accent-rgb), .22));
     background: var(--hb-month-event-bg-hover, rgba(var(--hb-accent-rgb), .085));
     color: var(--hb-accent-strong);
-}
-
-.hb-month-event-time {
-    min-width: 0;
-    display: grid;
-    gap: 1px;
-    color: color-mix(in srgb, var(--hb-muted) 78%, transparent);
-    font-size: 9.5px;
-    font-weight: 450;
-    line-height: 1.1;
-    padding-top: 0;
-    text-align: left;
-    white-space: nowrap;
-}
-
-.hb-month-event-time-empty {
-    min-height: 1px;
-}
-
-.hb-month-event-time-row {
-    display: block;
 }
 
 .hb-month-event-body {

@@ -5148,11 +5148,10 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function monthMultiDayEventMarkup(event, day) {
-        const time = multiDayEventDayTime(event, day, { compact: true, showEndTime: false });
         const color = itemColor(event);
         return `
             <button class="hb-month-all-day-event hb-month-multi-day-event" type="button" data-edit-event="${event.id}" style="--hb-month-event-color:${escapeAttr(color)};--hb-month-event-bg:${escapeAttr(hexAlpha(color, .14))};--hb-month-event-bg-hover:${escapeAttr(hexAlpha(color, .20))};--hb-month-event-border:${escapeAttr(hexAlpha(color, .26))}">
-                ${monthEventInfoMarkup(event, time)}
+                ${monthEventInfoMarkup(event)}
             </button>`;
     }
 
@@ -5160,24 +5159,17 @@ export function mountHeyBeanWebApp(mount) {
         const color = itemColor(event);
         return `
             <button class="hb-month-event" type="button" data-edit-event="${event.id}" style="--hb-month-event-color:${escapeAttr(color)};--hb-month-event-bg:${escapeAttr(hexAlpha(color, .14))};--hb-month-event-bg-hover:${escapeAttr(hexAlpha(color, .20))};--hb-month-event-border:${escapeAttr(hexAlpha(color, .26))}">
-                ${monthEventInfoMarkup(event, monthEventTime(event))}
+                ${monthEventInfoMarkup(event)}
             </button>`;
     }
 
-    function monthEventInfoMarkup(event, time = '') {
+    function monthEventInfoMarkup(event) {
         return `
-            ${monthEventTimeStackMarkup(time)}
             <span class="hb-month-event-body">
                 <span class="hb-month-event-main">
                     <span class="hb-month-event-title">${escapeHtml(eventTitleText(event))}</span>
                 </span>
             </span>`;
-    }
-
-    function monthEventTimeStackMarkup(time = '') {
-        const label = String(time || '').trim();
-        if (!label) return '<span class="hb-month-event-time hb-month-event-time-empty" aria-hidden="true"></span>';
-        return `<span class="hb-month-event-time" aria-label="${escapeAttr(label)}"><span class="hb-month-event-time-row">${escapeHtml(label)}</span></span>`;
     }
 
     function monthSwitcherMarkup(selected) {
@@ -11303,10 +11295,6 @@ export function mountHeyBeanWebApp(mount) {
         if (eventAllDay(event)) return 'All day';
         const start = event.starts_at || event.startsAt;
         return start ? formatCompactMeridiemTime(start) : 'All day';
-    }
-
-    function monthEventTime(event) {
-        return monthEventStartTime(event);
     }
 
     function eventEndTime(event) {
