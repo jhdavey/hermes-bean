@@ -245,6 +245,39 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(3);
     }
 
+    public function test_current_local_time_and_date_bypass_models_and_use_client_clock(): void
+    {
+        Http::fake();
+        $token = $this->apiToken('tool-local-clock@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+        $metadata = [
+            'source' => 'web',
+            'client_context' => [
+                'current_local_time' => '2026-07-11T10:50:00-04:00',
+                'timezone' => 'America/New_York',
+            ],
+        ];
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'What time is it?',
+            'metadata' => $metadata,
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'It’s 10:50 a.m.')
+            ->assertJsonFragment(['event_type' => 'runtime.local_temporal_response_completed']);
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => "What's today's date?",
+            'metadata' => $metadata,
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Today is Saturday, July 11th.');
+
+        Http::assertNothingSent();
+    }
+
     public function test_post_action_conversational_acknowledgements_use_fast_no_tools_lane(): void
     {
         Http::fakeSequence()

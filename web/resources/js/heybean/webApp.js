@@ -32,6 +32,7 @@ import {
     isVoiceFillerOnly,
     naturalizeRealtimeSpeechText,
     realtimeMicrophoneConstraints,
+    realtimeLocalTemporalAnswer,
     realtimeNeedsAppRuntime,
     realtimePauseAcknowledgement,
     realtimeWorkStatusAnswer,
@@ -9408,6 +9409,8 @@ export function mountHeyBeanWebApp(mount) {
 
     function realtimeVoiceStatusAnswer(text) {
         const normalized = normalizedVoiceCommand(stripVoiceWakeWords(text));
+        const temporalAnswer = realtimeLocalTemporalAnswer(normalized);
+        if (temporalAnswer) return temporalAnswer;
         if (/^(can you hear me|do you hear me|are you listening|can you listen|is the mic working|can you hear my voice)$/.test(normalized)) {
             return 'Yes — I can hear you. What would you like me to help with?';
         }

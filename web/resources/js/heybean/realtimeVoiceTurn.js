@@ -72,6 +72,38 @@ function realtimeTimeLabel(hoursText, minutesText) {
         : `${twelveHour}:${String(minutes).padStart(2, '0')} ${period}`;
 }
 
+export function realtimeLocalTemporalAnswer(text, { now = new Date() } = {}) {
+    const normalized = String(text || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const reference = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
+    if (/^(?:what(?: is| s) the time|what time is it|tell me the time|current time|time please)$/.test(normalized)) {
+        const hours = reference.getHours();
+        const minutes = reference.getMinutes();
+        let spokenTime = realtimeTimeLabel(hours, minutes);
+        if (minutes === 0 && ![0, 12].includes(hours)) spokenTime = `${hours % 12} o’clock`;
+        if (minutes === 0 && hours === 0) spokenTime = 'twelve a.m.';
+        if (minutes === 0 && hours === 12) spokenTime = 'twelve p.m.';
+        return `It’s ${spokenTime}${spokenTime.endsWith('.') ? '' : '.'}`;
+    }
+    if (/^(?:what year is it|what(?: is| s) the current year)$/.test(normalized)) {
+        return `It’s ${reference.getFullYear()}.`;
+    }
+    if (/^(?:what(?: is| s) (?:today s|the current) date|what(?: is| s) the date today|what date is it|what day is it|what day is today|what(?: is| s) today)$/.test(normalized)) {
+        const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(reference);
+        const month = new Intl.DateTimeFormat('en-US', { month: 'long' }).format(reference);
+        const day = reference.getDate();
+        const modulo100 = day % 100;
+        const suffix = modulo100 >= 11 && modulo100 <= 13
+            ? 'th'
+            : ({ 1: 'st', 2: 'nd', 3: 'rd' }[day % 10] || 'th');
+        return `Today is ${weekday}, ${month} ${day}${suffix}.`;
+    }
+    return '';
+}
+
 export function naturalizeRealtimeSpeechText(text, { now = new Date() } = {}) {
     const reference = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
     let output = String(text || '');
@@ -84,7 +116,7 @@ export function naturalizeRealtimeSpeechText(text, { now = new Date() } = {}) {
         (_, date) => realtimeDateLabel(date, reference),
     );
     output = output.replace(
-        /\b([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?\b/g,
+        /\b([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?\b(?!\s*(?:a\.?m\.?|p\.?m\.?))/gi,
         (_, hours, minutes) => realtimeTimeLabel(hours, minutes),
     );
     output = output

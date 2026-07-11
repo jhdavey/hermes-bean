@@ -27,6 +27,7 @@ import {
     naturalizeRealtimeSpeechText,
     realtimeFollowUpExpiry,
     realtimeMicrophoneConstraints,
+    realtimeLocalTemporalAnswer,
     realtimeNeedsAppRuntime,
     realtimePauseAcknowledgement,
     realtimeWorkStatusAnswer,
@@ -115,6 +116,15 @@ test('voice output humanizes canonical dates, times, and timezone identifiers', 
         naturalizeRealtimeSpeechText('That is 18:30 (America/New_York).', { now }),
         'That is 6:30 p.m.',
     );
+    assert.equal(naturalizeRealtimeSpeechText('It’s 10:50 a.m.', { now }), 'It’s 10:50 a.m.');
+});
+
+test('local time and date questions are answered directly from the device clock', () => {
+    const now = new Date(2026, 6, 11, 10, 50, 0);
+    assert.equal(realtimeLocalTemporalAnswer('What time is it?', { now }), 'It’s 10:50 a.m.');
+    assert.equal(realtimeLocalTemporalAnswer("What's today's date?", { now }), 'Today is Saturday, July 11th.');
+    assert.equal(realtimeLocalTemporalAnswer('What year is it?', { now }), 'It’s 2026.');
+    assert.equal(realtimeLocalTemporalAnswer('What time is it in Orlando?', { now }), '');
 });
 
 test('accepted and terminal persistence for one client turn is serialized', async () => {

@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\HermesToolRuntime\CrudPlannerRuntime;
 use App\Services\HermesToolRuntime\NativeToolRuntime;
 use App\Services\HermesToolRuntime\RuntimeSupport;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -218,6 +219,18 @@ class HermesToolRuntimeService implements HermesRuntimeService
             ...$intentRoute,
         ], 'hermes.router', 'completed');
 
+        $localTemporalAnswer = $this->localTemporalAnswer($userMessage);
+        if ($localTemporalAnswer !== null) {
+            return $this->sendLocalTemporalResponse(
+                $session,
+                $userMessage,
+                $received,
+                $routed,
+                $localTemporalAnswer,
+                $runtimeStartedAt,
+            );
+        }
+
         if (($intentRoute['runtime'] ?? '') === 'fast_no_tools') {
             try {
                 return $this->sendFastNoToolsResponse($session, $userMessage, $received, $routed, $intentRoute, $runtimeStartedAt);
@@ -250,6 +263,101 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
 
         return $this->sendMessageWithTools($session, $userMessage, $received, $modelRoute, $prompt, collect([$routed]), $intentRoute);
+    }
+
+    private function localTemporalAnswer(ConversationMessage $message): ?string
+    {
+        $normalized = trim(preg_replace('/\s+/u', ' ', preg_replace('/[^a-z0-9\s]+/u', ' ', mb_strtolower((string) $message->content))) ?: '');
+        $timeQuestion = preg_match('/^(?:what(?: is| s) the time|what time is it|tell me the time|current time|time please)$/', $normalized) === 1;
+        $dateQuestion = preg_match('/^(?:what(?: is| s) (?:today s|the current) date|what(?: is| s) the date today|what date is it|what day is it|what day is today|what(?: is| s) today)$/', $normalized) === 1;
+        $yearQuestion = preg_match('/^(?:what year is it|what(?: is| s) the current year)$/', $normalized) === 1;
+        if (! $timeQuestion && ! $dateQuestion && ! $yearQuestion) {
+            return null;
+        }
+
+        $context = data_get($message->metadata ?? [], 'client_context', []);
+        $currentLocalTime = is_array($context) ? data_get($context, 'current_local_time') : null;
+        try {
+            $localNow = is_string($currentLocalTime) && trim($currentLocalTime) !== ''
+                ? CarbonImmutable::parse($currentLocalTime)
+                : CarbonImmutable::now();
+        } catch (\Throwable) {
+            $localNow = CarbonImmutable::now();
+        }
+
+        if ($timeQuestion) {
+            $hour = (int) $localNow->format('G');
+            $minute = (int) $localNow->format('i');
+            if ($minute === 0 && $hour === 0) {
+                $spokenTime = 'twelve a.m.';
+            } elseif ($minute === 0 && $hour === 12) {
+                $spokenTime = 'twelve p.m.';
+            } elseif ($minute === 0) {
+                $spokenTime = ($hour % 12).' o’clock';
+            } else {
+                $spokenTime = str_replace([' am', ' pm'], [' a.m.', ' p.m.'], $localNow->format('g:i a'));
+            }
+
+            return "It’s {$spokenTime}".(str_ends_with($spokenTime, '.') ? '' : '.');
+        }
+        if ($yearQuestion) {
+            return 'It’s '.$localNow->format('Y').'.';
+        }
+
+        return 'Today is '.$localNow->format('l, F jS').'.';
+    }
+
+    private function sendLocalTemporalResponse(
+        ConversationSession $session,
+        ConversationMessage $userMessage,
+        ActivityEvent $received,
+        ActivityEvent $routed,
+        string $assistantContent,
+        float $runtimeStartedAt,
+    ): array {
+        $started = $this->recordEvent($session, 'runtime.local_temporal_response_started', [
+            'message_id' => $userMessage->id,
+        ], 'hermes.client_clock', 'started');
+        $session->update(['status' => 'running', 'last_activity_at' => now()]);
+
+        if ($this->isCancellationRequested($session, $userMessage)) {
+            return $this->toolRuntimeCancelled($session, $userMessage, collect([$received, $routed, $started]));
+        }
+
+        return DB::transaction(function () use ($session, $userMessage, $received, $routed, $started, $assistantContent, $runtimeStartedAt): array {
+            $this->lockRunForAssistantPersistence($session, $userMessage);
+            $completed = $this->recordEvent($session, 'runtime.local_temporal_response_completed', [
+                'message_id' => $userMessage->id,
+                'duration_ms' => $this->elapsedMs($runtimeStartedAt),
+            ], 'hermes.client_clock', 'succeeded');
+            $assistantMessage = ConversationMessage::create([
+                'user_id' => $session->user_id,
+                'conversation_session_id' => $session->id,
+                'role' => 'assistant',
+                'content' => $assistantContent,
+                'metadata' => [
+                    ...$this->assistantRunMetadata($userMessage),
+                    'runtime' => 'local_temporal',
+                    'provider' => 'client_clock',
+                ],
+            ]);
+            $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
+                'message_id' => $assistantMessage->id,
+                'lane' => 'local_temporal',
+                'first_response_ms' => $this->elapsedMs($runtimeStartedAt),
+            ]);
+            $session->update(['status' => 'active', 'last_activity_at' => now()]);
+
+            return [
+                'status' => 'completed',
+                'session' => $session->refresh(),
+                'user_message' => $userMessage,
+                'assistant_message' => $assistantMessage,
+                'events' => collect([$received, $routed, $started, $completed, $messageCompleted]),
+                'usage' => null,
+                'blocker' => null,
+            ];
+        });
     }
 
     private function sendMessageWithTools(
