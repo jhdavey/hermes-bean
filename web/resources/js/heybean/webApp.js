@@ -230,8 +230,6 @@ export function mountHeyBeanWebApp(mount) {
     let realtimeLaravelTurnInFlight = false;
     let realtimeSuppressNextAssistantTranscript = false;
     let realtimeResponseActive = false;
-    let realtimeLastCommandKey = '';
-    let realtimeLastCommandAt = 0;
     let realtimeTurnGuardUntil = 0;
     let realtimeIgnoreInputUntil = 0;
     let realtimeQueuedFollowUp = null;
@@ -9632,8 +9630,8 @@ export function mountHeyBeanWebApp(mount) {
         // REST voice filler removed; realtime audio provides immediate acknowledgement/turn state.
     }
 
-    async function playBeanVoiceResponse(text) {
-        return speakRealtimeBeanText(text);
+    async function playBeanVoiceResponse(text, options = {}) {
+        return speakRealtimeBeanText(text, options);
     }
 
     async function speakRealtimeInstructions(instructions, options = {}) {
@@ -9667,10 +9665,13 @@ export function mountHeyBeanWebApp(mount) {
         return completion;
     }
 
-    async function speakRealtimeBeanText(text) {
+    async function speakRealtimeBeanText(text, options = {}) {
         const content = naturalizeRealtimeSpeechText(text);
         if (!content || !realtimeDataChannel || realtimeDataChannel.readyState !== 'open') return null;
-        return speakRealtimeInstructions(`Speak this HeyBean answer exactly and do not add any extra facts or tasks:\n\n${content}`, { purpose: 'final' });
+        return speakRealtimeInstructions(
+            `Speak this HeyBean answer exactly and do not add any extra facts or tasks:\n\n${content}`,
+            { purpose: 'final', ...options },
+        );
     }
 
     function realtimeInstructionsUpdate() {
@@ -10278,14 +10279,6 @@ export function mountHeyBeanWebApp(mount) {
                 reason: isBareRealtimeWakePhrase(text) ? 'wake_only' : 'empty_command',
             };
         }
-        const commandKey = normalizedVoiceCommand(command);
-        if (commandKey && realtimeLastCommandKey === commandKey && now - realtimeLastCommandAt < 8000) {
-            armRealtimeFollowUpWindow();
-            return;
-        }
-        realtimeLastCommandKey = commandKey;
-        realtimeLastCommandAt = now;
-
         const turnEpoch = admission.epoch;
         const voiceStatusAnswer = realtimeVoiceStatusAnswer(command);
         if (voiceStatusAnswer) {
@@ -10297,7 +10290,7 @@ export function mountHeyBeanWebApp(mount) {
             state.messages.push({ id: `realtime-user-${Date.now()}`, role: 'user', content: command, metadata: { realtime_voice_status: true, client_turn_id: clientTurnId, voice_turn_outcome: { status: 'accepted' } } });
             persistRealtimeTurn(command, '', clientTurnId, admissionQuality, { outcome: 'accepted' }).catch(() => {});
             render();
-            const spokenStatus = await playBeanVoiceResponse(voiceStatusAnswer);
+            const spokenStatus = await playBeanVoiceResponse(voiceStatusAnswer, { timeoutMs: 8000 });
             if (!spokenStatus || !realtimeTurnCanContinue(turnEpoch) || spokenStatus.cancelled) {
                 const outcome = realtimeVoiceTerminalOutcome(spokenStatus, realtimeTurnCanContinue(turnEpoch));
                 markRealtimeUserTurnOutcome(clientTurnId, outcome);
@@ -10825,8 +10818,6 @@ export function mountHeyBeanWebApp(mount) {
         realtimeSuppressNextAssistantTranscript = false;
         if (options.stopPlayback !== false) stopBeanVoicePlayback({ teardown: false, reason: options.reason || 'stopped' });
         realtimeResponseActive = false;
-        realtimeLastCommandKey = '';
-        realtimeLastCommandAt = 0;
         realtimeTurnGuardUntil = Date.now() + (options.guardMs ?? 1200);
         realtimeIgnoreInputUntil = Date.now() + (options.guardMs ?? 1200);
         realtimeToolCalls.clear();
@@ -10873,8 +10864,6 @@ export function mountHeyBeanWebApp(mount) {
         realtimeLaravelTurnInFlight = false;
         realtimeSuppressNextAssistantTranscript = false;
         realtimeResponseActive = false;
-        realtimeLastCommandKey = '';
-        realtimeLastCommandAt = 0;
         realtimeTurnGuardUntil = 0;
         realtimeIgnoreInputUntil = 0;
         realtimeToolCalls.clear();

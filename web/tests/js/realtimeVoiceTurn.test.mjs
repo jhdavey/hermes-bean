@@ -124,8 +124,14 @@ test('local time and date questions are answered directly from the device clock'
     const now = new Date(2026, 6, 11, 10, 50, 0);
     assert.equal(realtimeLocalTemporalAnswer('What time is it?', { now }), 'It’s 10:50 a.m.');
     assert.equal(realtimeLocalTemporalAnswer("What's today's date?", { now }), 'Today is Saturday, July 11th.');
+    assert.equal(realtimeLocalTemporalAnswer("What's the date?", { now }), 'Today is Saturday, July 11th.');
+    assert.equal(realtimeLocalTemporalAnswer('Can you tell me the date?', { now }), 'Today is Saturday, July 11th.');
+    assert.equal(realtimeLocalTemporalAnswer('Tell me what day it is, please', { now }), 'Today is Saturday, July 11th.');
+    assert.equal(realtimeLocalTemporalAnswer('Hey Bean, what is the current date?', { now }), 'Today is Saturday, July 11th.');
+    assert.equal(realtimeLocalTemporalAnswer('Could you tell me the current time?', { now }), 'It’s 10:50 a.m.');
     assert.equal(realtimeLocalTemporalAnswer('What year is it?', { now }), 'It’s 2026.');
     assert.equal(realtimeLocalTemporalAnswer('What time is it in Orlando?', { now }), '');
+    assert.equal(realtimeLocalTemporalAnswer('What date is my appointment?', { now }), '');
 });
 
 test('accepted and terminal persistence for one client turn is serialized', async () => {

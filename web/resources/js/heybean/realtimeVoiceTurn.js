@@ -77,9 +77,17 @@ export function realtimeLocalTemporalAnswer(text, { now = new Date() } = {}) {
         .toLowerCase()
         .replace(/[^a-z0-9\s]+/g, ' ')
         .replace(/\s+/g, ' ')
-        .trim();
+        .trim()
+        .replace(/^(?:(?:hey )?bean|okay|ok|so|please)\s+/, '')
+        .replace(/\s+(?:please|thanks|thank you)$/, '');
     const reference = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
-    if (/^(?:what(?: is| s) the time|what time is it|tell me the time|current time|time please)$/.test(normalized)) {
+    const timeQuestion = [
+        /^(?:what(?: is| s)?|tell me|give me) (?:the (?:current )?|our |local |current )?time(?: (?:is it|right now|now))?$/,
+        /^(?:can|could|would) you (?:please )?tell me (?:the (?:current )?|our |local |current )?time$/,
+        /^do you know what time it is$/,
+        /^(?:time|local time|current time)(?: now)?$/,
+    ].some((pattern) => pattern.test(normalized));
+    if (timeQuestion) {
         const hours = reference.getHours();
         const minutes = reference.getMinutes();
         let spokenTime = realtimeTimeLabel(hours, minutes);
@@ -88,10 +96,21 @@ export function realtimeLocalTemporalAnswer(text, { now = new Date() } = {}) {
         if (minutes === 0 && hours === 12) spokenTime = 'twelve p.m.';
         return `It’s ${spokenTime}${spokenTime.endsWith('.') ? '' : '.'}`;
     }
-    if (/^(?:what year is it|what(?: is| s) the current year)$/.test(normalized)) {
+    if (/^(?:what year is it|what(?: is| s) the current year|(?:tell|give) me the (?:current )?year|(?:current )?year)$/.test(normalized)) {
         return `It’s ${reference.getFullYear()}.`;
     }
-    if (/^(?:what(?: is| s) (?:today s|the current) date|what(?: is| s) the date today|what date is it|what day is it|what day is today|what(?: is| s) today)$/.test(normalized)) {
+    const dateQuestion = [
+        /^(?:what(?: is| s) )?(?:today s |the |the current |current )?(?:date|day)(?: is it| is today| today)?$/,
+        /^what (?:date|day) is it$/,
+        /^what day (?:are we|is today|is it|are we on)$/,
+        /^what(?: is| s) today$/,
+        /^(?:tell|give) me (?:today s |the |the current |current )?(?:date|day)$/,
+        /^tell me what (?:date|day) it is$/,
+        /^(?:can|could|would) you (?:please )?tell me (?:today s |the |the current |current )?(?:date|day)$/,
+        /^do you know what (?:date|day) it is$/,
+        /^(?:today s |current )?(?:date|day)$/,
+    ].some((pattern) => pattern.test(normalized));
+    if (dateQuestion) {
         const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(reference);
         const month = new Intl.DateTimeFormat('en-US', { month: 'long' }).format(reference);
         const day = reference.getDate();

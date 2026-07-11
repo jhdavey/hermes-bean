@@ -268,9 +268,26 @@ class HermesToolRuntimeService implements HermesRuntimeService
     private function localTemporalAnswer(ConversationMessage $message): ?string
     {
         $normalized = trim(preg_replace('/\s+/u', ' ', preg_replace('/[^a-z0-9\s]+/u', ' ', mb_strtolower((string) $message->content))) ?: '');
-        $timeQuestion = preg_match('/^(?:what(?: is| s) the time|what time is it|tell me the time|current time|time please)$/', $normalized) === 1;
-        $dateQuestion = preg_match('/^(?:what(?: is| s) (?:today s|the current) date|what(?: is| s) the date today|what date is it|what day is it|what day is today|what(?: is| s) today)$/', $normalized) === 1;
-        $yearQuestion = preg_match('/^(?:what year is it|what(?: is| s) the current year)$/', $normalized) === 1;
+        $normalized = preg_replace('/^(?:(?:hey )?bean|okay|ok|so|please)\s+/u', '', $normalized) ?? $normalized;
+        $normalized = preg_replace('/\s+(?:please|thanks|thank you)$/u', '', $normalized) ?? $normalized;
+        $timeQuestion = $this->matchesAny($normalized, [
+            '/^(?:what(?: is| s)?|tell me|give me) (?:the (?:current )?|our |local |current )?time(?: (?:is it|right now|now))?$/',
+            '/^(?:can|could|would) you (?:please )?tell me (?:the (?:current )?|our |local |current )?time$/',
+            '/^do you know what time it is$/',
+            '/^(?:time|local time|current time)(?: now)?$/',
+        ]);
+        $dateQuestion = $this->matchesAny($normalized, [
+            '/^(?:what(?: is| s) )?(?:today s |the |the current |current )?(?:date|day)(?: is it| is today| today)?$/',
+            '/^what (?:date|day) is it$/',
+            '/^what day (?:are we|is today|is it|are we on)$/',
+            '/^what(?: is| s) today$/',
+            '/^(?:tell|give) me (?:today s |the |the current |current )?(?:date|day)$/',
+            '/^tell me what (?:date|day) it is$/',
+            '/^(?:can|could|would) you (?:please )?tell me (?:today s |the |the current |current )?(?:date|day)$/',
+            '/^do you know what (?:date|day) it is$/',
+            '/^(?:today s |current )?(?:date|day)$/',
+        ]);
+        $yearQuestion = preg_match('/^(?:what year is it|what(?: is| s) the current year|(?:tell|give) me the (?:current )?year|(?:current )?year)$/', $normalized) === 1;
         if (! $timeQuestion && ! $dateQuestion && ! $yearQuestion) {
             return null;
         }
@@ -305,6 +322,18 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
 
         return 'Today is '.$localNow->format('l, F jS').'.';
+    }
+
+    /** @param array<int, string> $patterns */
+    private function matchesAny(string $value, array $patterns): bool
+    {
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $value) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function sendLocalTemporalResponse(

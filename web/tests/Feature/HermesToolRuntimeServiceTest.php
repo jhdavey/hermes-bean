@@ -275,6 +275,15 @@ class HermesToolRuntimeServiceTest extends TestCase
             ->assertJsonPath('data.status', 'completed')
             ->assertJsonPath('data.assistant_message.content', 'Today is Saturday, July 11th.');
 
+        foreach (["What's the date?", 'Can you tell me the date?', 'Hey Bean, what is the current date?'] as $variant) {
+            $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+                'content' => $variant,
+                'metadata' => $metadata,
+            ])->assertCreated()
+                ->assertJsonPath('data.status', 'completed')
+                ->assertJsonPath('data.assistant_message.content', 'Today is Saturday, July 11th.');
+        }
+
         Http::assertNothingSent();
     }
 
