@@ -26,6 +26,7 @@ test('orchestration protocol matches the packaged same-origin worker and worklet
     assert.match(worker, /message\.type === 'reset'/);
     assert.match(worker, /message\.type === 'close'/);
     assert.match(worker, /type:\s*'detected'/);
+    assert.match(worker, /warmRecognizer\(\)/);
 });
 
 test('the packaged worker accepts observed Hey Bean acoustics without broad homophone wakes', async () => {
@@ -383,6 +384,35 @@ test('only a ready current-generation detection opens the gate and reset rejects
         { generation: firstGeneration, keyword: '', variant: '', result: null },
         { generation: secondGeneration, keyword: '', variant: '', result: null },
     ]);
+});
+
+test('startup readiness requires one successfully decoded live microphone chunk', async () => {
+    const harness = createHarness();
+    await harness.gate.start(harness.rawStream);
+    const worker = harness.workers[0];
+    const worklet = harness.worklets[0];
+    const generation = harness.gate.currentGeneration();
+
+    worker.emit({ type: 'ready', generation });
+    assert.equal(harness.gate.isReady(), false);
+
+    worklet.port.emit({ type: 'audio', samples: new ArrayBuffer(16) });
+    const audioMessage = worker.messages.find(({ message }) => message.type === 'audio')?.message;
+    assert.ok(audioMessage);
+    worker.emit({
+        type: 'ack',
+        generation,
+        sequence: audioMessage.sequence,
+        accepted: false,
+        reason: 'decode_pending',
+    });
+    assert.equal(harness.gate.isReady(), false);
+
+    worklet.port.emit({ type: 'audio', samples: new ArrayBuffer(16) });
+    const acceptedMessage = worker.messages.filter(({ message }) => message.type === 'audio').at(-1).message;
+    worker.emit({ type: 'ack', generation, sequence: acceptedMessage.sequence, accepted: true });
+    assert.equal(harness.gate.isReady(), true);
+    assert.equal(harness.gate.state, 'armed');
 });
 
 test('PCM transfer is bounded until matching worker acknowledgements release capacity', async () => {

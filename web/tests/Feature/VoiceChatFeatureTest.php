@@ -87,6 +87,7 @@ class VoiceChatFeatureTest extends TestCase
                 && data_get($payload, 'session.audio.input.transcription.language') === 'en'
                 && str_contains((string) data_get($payload, 'session.audio.input.transcription.prompt'), 'background noise')
                 && data_get($payload, 'session.audio.input.turn_detection.type') === 'server_vad'
+                && data_get($payload, 'session.audio.input.turn_detection.silence_duration_ms') === 1200
                 && data_get($payload, 'session.audio.input.turn_detection.create_response') === false
                 && data_get($payload, 'session.audio.input.turn_detection.interrupt_response') === false
                 && collect(data_get($payload, 'session.tools', []))->contains(fn (array $tool): bool => $tool['name'] === 'send_bean_request')

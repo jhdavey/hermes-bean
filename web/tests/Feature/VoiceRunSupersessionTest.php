@@ -284,6 +284,15 @@ class VoiceRunSupersessionTest extends TestCase
         Queue::assertPushed(ProcessAssistantRun::class, 2);
     }
 
+    public function test_session_overlap_wait_cannot_exhaust_a_queued_run_on_its_first_release(): void
+    {
+        $job = new ProcessAssistantRun(999999);
+
+        $this->assertGreaterThanOrEqual(90, $job->tries);
+        $this->assertSame(1, $job->maxExceptions);
+        $this->assertCount(1, $job->middleware());
+    }
+
     public function test_run_specific_cancel_does_not_cancel_another_run_or_rewrite_completed_redelivery(): void
     {
         Http::fake([

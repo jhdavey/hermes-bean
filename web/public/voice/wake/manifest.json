@@ -1,7 +1,7 @@
 {
-  "version": 3,
+  "version": 4,
   "detector": "local-streaming-asr-prefix",
-  "worker": "/voice/wake/wake-worker.js?v=3",
+  "worker": "/voice/wake/wake-worker.js?v=4",
   "workerType": "classic",
   "audioWorklet": "/voice/wake/gate-processor.js",
   "processorName": "hey-bean-gate",

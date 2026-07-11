@@ -23,6 +23,7 @@ import {
     isCompletedRealtimeResponse,
     isBareRealtimeWakePhrase,
     isExplicitRealtimeWorkInterruption,
+    isIncompleteRealtimeCommand,
     isLikelyNonEnglishRealtimeTranscript,
     isRealtimeVoiceStopCommand,
     isRealtimeDuplicateCallConflict,
@@ -31,6 +32,7 @@ import {
     isQueueableRealtimeWorkFollowUp,
     isVoiceFillerOnly,
     naturalizeRealtimeSpeechText,
+    joinRealtimeUtteranceContinuation,
     realtimeMicrophoneConstraints,
     realtimeLocalTemporalAnswer,
     realtimeNeedsAppRuntime,
@@ -234,6 +236,8 @@ export function mountHeyBeanWebApp(mount) {
     let realtimeVoiceActivityDecayTimer = 0;
     let realtimeWakeCommandTimer = 0;
     let realtimeTranscriptCompletionTimer = 0;
+    let realtimeUtteranceContinuationTimer = 0;
+    let realtimePendingUtterance = '';
     let realtimeVoiceActivityLevel = 0;
     const realtimePotentialBargeInItems = new Set();
     let chatAnnouncementTimer = 0;
@@ -3630,11 +3634,13 @@ export function mountHeyBeanWebApp(mount) {
 
     function beanWorkItemMarkup(item, progressLabel = '') {
         const done = beanWorkItemDone(item);
+        const status = String(item?.status || '').toLowerCase();
+        const statusLabel = status === 'queued' ? 'Queued' : '';
         return `
             <li class="hb-bean-work-item ${done ? 'hb-bean-work-item-done' : ''}" data-bean-work-id="${escapeAttr(item.id || '')}">
                 <span class="hb-bean-work-checkbox" data-bean-work-checkbox aria-hidden="true">${done ? icons.checkCircle : ''}</span>
                 <span data-bean-work-label>${escapeHtml(item.label || 'Bean work item')}</span>
-                ${progressLabel ? `<span class="hb-bean-work-progress">${escapeHtml(progressLabel)}</span>` : ''}
+                ${statusLabel ? `<span class="hb-bean-work-queue-status">${escapeHtml(statusLabel)}</span>` : progressLabel ? `<span class="hb-bean-work-progress">${escapeHtml(progressLabel)}</span>` : ''}
             </li>`;
     }
 
@@ -3706,6 +3712,8 @@ export function mountHeyBeanWebApp(mount) {
             ...(Number.isFinite(Number(options.order)) ? { order: Number(options.order) } : {}),
             ...(options.source ? { source: options.source } : {}),
             ...(options.resolvedByEvent ? { resolvedByEvent: true } : {}),
+            ...(options.clientRequestId ? { clientRequestId: options.clientRequestId } : {}),
+            ...(options.voiceQueueId ? { voiceQueueId: options.voiceQueueId } : {}),
         };
         if (existingIndex >= 0) {
             state.beanWorkItems = state.beanWorkItems.map((item, index) => {
@@ -3765,10 +3773,15 @@ export function mountHeyBeanWebApp(mount) {
         if (label) upsertBeanWorkItem(id, label, 'completed');
     }
 
-    function completeActiveBeanWorkItems() {
+    function completeActiveBeanWorkItems(clientRequestId = '') {
         if (!state.beanWorkItems.length) return;
-        state.beanWorkItems = state.beanWorkItems.map((item) => beanWorkItemDone(item) ? item : { ...item, status: 'completed' });
-        scheduleBeanWorkStatusClear();
+        const requestId = String(clientRequestId || '').trim();
+        state.beanWorkItems = state.beanWorkItems.map((item) => {
+            if (beanWorkItemDone(item)) return item;
+            if (requestId && item.clientRequestId && item.clientRequestId !== requestId) return item;
+            return { ...item, status: 'completed' };
+        });
+        if (state.beanWorkItems.every((item) => beanWorkItemDone(item))) scheduleBeanWorkStatusClear();
         refreshBeanStatusTag();
     }
 
@@ -3788,6 +3801,10 @@ export function mountHeyBeanWebApp(mount) {
             beanWorkStatusClearTimer = 0;
             if (state.busy) {
                 scheduleBeanWorkStatusClear(delayMs);
+                return;
+            }
+            if (state.beanWorkItems.some((item) => !beanWorkItemDone(item))) {
+                beanWorkStatusHoldUntil = 0;
                 return;
             }
             beanWorkStatusHoldUntil = 0;
@@ -5614,13 +5631,11 @@ export function mountHeyBeanWebApp(mount) {
         const user = message.role === 'user';
         const content = user ? (message.content || '') : safeAssistantDisplayContent(conversationalMessageContent(message.content || ''));
         const canEdit = user && !chatHasActiveTurn() && !String(message.id || '').startsWith('local-');
-        const queued = user && message.metadata?.client_queue_status === 'queued';
         return `
             <article class="hb-message ${user ? 'hb-message-user' : ''}" ${user ? `data-message-id="${escapeAttr(message.id || '')}"` : ''}>
                 <div class="hb-message-line">
                     ${message.progress ? '<span class="hb-spinner" style="width:13px;height:13px;border-width:2px"></span>' : ''}
                     <span class="hb-message-speaker ${user ? 'hb-message-speaker-user' : 'hb-message-speaker-bean'}">${user ? 'You' : 'Bean'}</span><span class="hb-message-separator"> - </span><span class="hb-message-body">${escapeHtml(content)}</span>
-                    ${queued ? '<span class="hb-message-queue-status">Queued</span>' : ''}
                     ${user ? `<span class="hb-message-actions-inline">
                         <button class="hb-message-icon-action" type="button" data-copy-message="${escapeAttr(message.id || '')}" aria-label="Copy message" title="Copy">${icons.copy || icons.notes}</button>
                         ${canEdit ? `<button class="hb-message-icon-action" type="button" data-edit-message="${escapeAttr(message.id || '')}" aria-label="Edit message" title="Edit">${icons.edit}</button>` : ''}
@@ -9507,6 +9522,7 @@ export function mountHeyBeanWebApp(mount) {
         const clearedIds = new Set(cleared.filter((item) => !item.durable).map((item) => item.id));
         if (clearedIds.size) {
             state.messages = state.messages.filter((message) => !clearedIds.has(message?.metadata?.voice_queue_id));
+            state.beanWorkItems = state.beanWorkItems.filter((item) => !clearedIds.has(item?.voiceQueueId));
         }
         scheduleChatQueueDrain();
     }
@@ -9618,6 +9634,34 @@ export function mountHeyBeanWebApp(mount) {
         }
     }
 
+    function showDurableQueuedWork(queued, result) {
+        const planned = normalizeList(result?.intent?.work_plan).filter((item) => item?.label);
+        const label = String(planned[0]?.label || queued.transcript);
+        const id = `queued-${queued.clientRequestId}`;
+        const existing = state.beanWorkItems.find((item) => item.id === id);
+        upsertBeanWorkItem(id, label, existing?.status || 'queued', {
+            source: 'queued_voice',
+            order: existing?.order ?? state.beanWorkItems.length,
+            clientRequestId: queued.clientRequestId,
+            voiceQueueId: queued.id,
+        });
+        queued.workDockIds = [id];
+    }
+
+    function updateDurableQueuedWorkStatus(queued, status) {
+        const normalizedStatus = String(status || '').toLowerCase();
+        normalizeList(queued.workDockIds).forEach((id) => {
+            const item = state.beanWorkItems.find((candidate) => candidate.id === id);
+            if (!item) return;
+            upsertBeanWorkItem(id, item.label, normalizedStatus, {
+                source: item.source || 'queued_voice',
+                order: item.order,
+                clientRequestId: queued.clientRequestId,
+                voiceQueueId: queued.id,
+            });
+        });
+    }
+
     async function resumeDurableQueuedRealtimeFollowUp(queued) {
         if (queued.deliveryActive || !state.session?.id) return;
         queued.deliveryActive = true;
@@ -9628,11 +9672,16 @@ export function mountHeyBeanWebApp(mount) {
             );
             const status = String(result?.status || '').toLowerCase();
             if (['queued', 'running', 'processing'].includes(status)) {
+                updateDurableQueuedWorkStatus(queued, status === 'queued' ? 'queued' : 'running');
                 state.chatRunState = realtimeWorkingStatus(queued.transcript);
                 return;
             }
 
             voiceOrchestrator.dequeue();
+            updateDurableQueuedWorkStatus(
+                queued,
+                ['failed', 'cancelled'].includes(status) ? status : 'completed',
+            );
             state.messages.forEach((message) => {
                 if (message?.metadata?.voice_queue_id !== queued.id) return;
                 message.metadata = { ...(message.metadata || {}), client_queue_status: 'completed' };
@@ -9689,6 +9738,7 @@ export function mountHeyBeanWebApp(mount) {
                 client_turn_id: clientTurnId,
             },
         });
+        showDurableQueuedWork(queued, null);
         queued.readyPromise = persistQueuedRealtimeFollowUp(
             queued,
             content,
@@ -9697,6 +9747,7 @@ export function mountHeyBeanWebApp(mount) {
             if (!voiceOrchestrator.queue.some((item) => item.id === queued.id)) return result;
             queued.durable = true;
             queued.runId = result?.run?.id || null;
+            showDurableQueuedWork(queued, result);
             const index = state.messages.findIndex((message) => message?.metadata?.voice_queue_id === queued.id);
             if (index >= 0 && result?.user_message) {
                 state.messages[index] = {
@@ -9862,6 +9913,33 @@ export function mountHeyBeanWebApp(mount) {
         realtimeWakeCommandTimer = 0;
         window.clearTimeout(realtimeTranscriptCompletionTimer);
         realtimeTranscriptCompletionTimer = 0;
+        window.clearTimeout(realtimeUtteranceContinuationTimer);
+        realtimeUtteranceContinuationTimer = 0;
+        realtimePendingUtterance = '';
+    }
+
+    function holdIncompleteRealtimeUtterance(text) {
+        realtimePendingUtterance = String(text || '').trim();
+        window.clearTimeout(realtimeUtteranceContinuationTimer);
+        realtimeUtteranceContinuationTimer = window.setTimeout(() => {
+            realtimeUtteranceContinuationTimer = 0;
+            if (!realtimePendingUtterance) return;
+            realtimePendingUtterance = '';
+            recoverMissedRealtimeCommand('What would you like me to create?');
+        }, 5000);
+        state.chatRunState = 'Listening for the rest…';
+        updateVoiceWakeDraft(realtimePendingUtterance);
+        render();
+    }
+
+    function consumeRealtimeUtteranceContinuation(text) {
+        const continuation = String(text || '').trim();
+        if (!realtimePendingUtterance) return continuation;
+        const combined = joinRealtimeUtteranceContinuation(realtimePendingUtterance, continuation);
+        realtimePendingUtterance = '';
+        window.clearTimeout(realtimeUtteranceContinuationTimer);
+        realtimeUtteranceContinuationTimer = 0;
+        return combined;
     }
 
     function clearRealtimeMediaRecoveryTimers() {
@@ -10316,11 +10394,11 @@ export function mountHeyBeanWebApp(mount) {
             window.clearTimeout(realtimeTranscriptCompletionTimer);
             realtimeTranscriptCompletionTimer = 0;
             const transcriptId = payload.item_id || payload.item?.id || '';
-            const transcript = realtimeInputTranscripts.complete({
+            const transcript = consumeRealtimeUtteranceContinuation(realtimeInputTranscripts.complete({
                 itemId: transcriptId,
                 contentIndex: payload.content_index,
                 transcript: payload.transcript,
-            });
+            }));
             const potentialBargeIn = realtimePotentialBargeInItems.delete(transcriptId);
             updateRealtimeVoiceActivity(0, { decay: false });
             if (potentialBargeIn && !isIntentionalRealtimeInterruption(transcript)) {
@@ -10513,6 +10591,12 @@ export function mountHeyBeanWebApp(mount) {
                 accepted: false,
                 reason: isBareRealtimeWakePhrase(text) ? 'wake_only' : 'empty_command',
             };
+        }
+        if (isIncompleteRealtimeCommand(command)) {
+            voiceOrchestrator.settleTranscript('continuation_pending');
+            holdIncompleteRealtimeUtterance(text);
+            armRealtimeFollowUpWindow();
+            return { accepted: false, reason: 'continuation_pending' };
         }
         const turnEpoch = admission.epoch;
         const voiceStatusAnswer = realtimeVoiceStatusAnswer(command);
@@ -11538,7 +11622,7 @@ export function mountHeyBeanWebApp(mount) {
                 const assistantContent = safeAssistantDisplayContent(conversationalMessageContent(assistant.content || ''));
                 assistant.content = assistantContent;
                 state.chatRunState = 'Ready';
-                completeActiveBeanWorkItems();
+                completeActiveBeanWorkItems(requestKey);
                 refreshOnly(false).catch(() => {});
                 return { result: { status: 'completed', session: state.session, user_message: messages[userIndex], assistant_message: assistant, events: [] }, assistantContent };
             }
@@ -11585,7 +11669,7 @@ export function mountHeyBeanWebApp(mount) {
                 }
                 pushVisibleAssistantMessage(assistant, assistantContent);
                 state.chatRunState = lookup.status === 'blocked' ? 'Blocked' : 'Ready';
-                if (lookup.status === 'completed') completeActiveBeanWorkItems();
+                if (lookup.status === 'completed') completeActiveBeanWorkItems(requestKey);
                 refreshOnly(false).catch(() => {});
                 return { result: lookup, assistantContent };
             }

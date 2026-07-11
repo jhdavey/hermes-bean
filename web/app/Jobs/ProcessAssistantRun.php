@@ -20,7 +20,13 @@ class ProcessAssistantRun implements ShouldQueue
 {
     use Queueable;
 
-    public int $tries = 1;
+    // WithoutOverlapping releases a later run while an earlier run in the same
+    // conversation owns the lock. Those releases consume attempts, so this must
+    // cover the full lock lifetime rather than treating a normal queue wait as a
+    // terminal one-attempt failure.
+    public int $tries = 120;
+
+    public int $maxExceptions = 1;
 
     public int $timeout = 180;
 

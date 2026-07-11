@@ -16,12 +16,14 @@ import {
     isCompletedRealtimeResponse,
     isBareRealtimeWakePhrase,
     isExplicitRealtimeWorkInterruption,
+    isIncompleteRealtimeCommand,
     isLikelyNonEnglishRealtimeTranscript,
     isRealtimeVoiceStopCommand,
     isRealtimeDuplicateCallConflict,
     isStrictRealtimeWakePhrase,
     isIntentionalRealtimeInterruption,
     isQueueableRealtimeWorkFollowUp,
+    joinRealtimeUtteranceContinuation,
     isVoiceFillerOnly,
     naturalizeRealtimeSpeechText,
     realtimeMicrophoneConstraints,
@@ -293,6 +295,17 @@ test('additive requests queue behind active work without treating background spe
     assert.equal(isQueueableRealtimeWorkFollowUp('Remind me at five.'), true);
     assert.equal(isQueueableRealtimeWorkFollowUp('Dinner is ready.'), false);
     assert.equal(isQueueableRealtimeWorkFollowUp('Um, yeah.'), false);
+});
+
+test('incomplete action fragments wait for the next utterance instead of starting work', () => {
+    assert.equal(isIncompleteRealtimeCommand('Hey Bean, can you create...'), true);
+    assert.equal(isIncompleteRealtimeCommand('Create a meal plan as a note for'), true);
+    assert.equal(isIncompleteRealtimeCommand('Create a meal plan as a note for next week.'), false);
+    assert.equal(isIncompleteRealtimeCommand('What time is it?'), false);
+    assert.equal(
+        joinRealtimeUtteranceContinuation('Hey Bean, can you create', 'create a meal plan for next week'),
+        'Hey Bean, can you create a meal plan for next week',
+    );
 });
 
 test('non-Latin recognition artifacts are rejected from the US English voice session', () => {

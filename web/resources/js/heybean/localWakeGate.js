@@ -1,5 +1,5 @@
 export const LOCAL_WAKE_GATE_PROCESSOR_URL = '/voice/wake/gate-processor.js';
-export const LOCAL_WAKE_WORKER_URL = '/voice/wake/wake-worker.js?v=3';
+export const LOCAL_WAKE_WORKER_URL = '/voice/wake/wake-worker.js?v=4';
 export const LOCAL_WAKE_GATE_PROCESSOR_NAME = 'hey-bean-gate';
 
 export class LocalWakeGateError extends Error {
@@ -48,6 +48,7 @@ export class LocalWakeGate {
         this.state = 'idle';
         this.generation = 0;
         this.workerReady = false;
+        this.audioFlowReady = false;
         this.gateOpen = false;
         this.nextPcmSequence = 1;
         this.inFlightPcm = new Set();
@@ -66,7 +67,7 @@ export class LocalWakeGate {
     }
 
     isReady() {
-        return this.workerReady;
+        return this.workerReady && this.audioFlowReady;
     }
 
     currentGeneration() {
@@ -91,6 +92,8 @@ export class LocalWakeGate {
         const generation = this.generation + 1;
         this.generation = generation;
         this.state = 'starting';
+        this.workerReady = false;
+        this.audioFlowReady = false;
 
         try {
             this.#assertSupported(rawStream);
@@ -156,7 +159,7 @@ export class LocalWakeGate {
                     code: 'audio_context_closed',
                 });
             }
-            this.state = this.workerReady ? 'armed' : 'listening';
+            this.state = this.isReady() ? 'armed' : 'listening';
 
             return Object.freeze({
                 stream: this.derivedStream,
@@ -175,6 +178,7 @@ export class LocalWakeGate {
                 this.generation += 1;
                 this.state = 'failed';
                 this.workerReady = false;
+                this.audioFlowReady = false;
                 this.inFlightPcm.clear();
                 await this.#teardown();
                 this.#reportError(error);
@@ -193,7 +197,7 @@ export class LocalWakeGate {
         }
 
         if (this.state === 'open') {
-            this.state = this.workerReady ? 'armed' : 'listening';
+            this.state = this.isReady() ? 'armed' : 'listening';
         }
 
         return true;
@@ -206,6 +210,7 @@ export class LocalWakeGate {
         const generation = this.generation + 1;
         this.generation = generation;
         this.workerReady = false;
+        this.audioFlowReady = false;
         this.inFlightPcm.clear();
         this.state = 'listening';
 
@@ -230,6 +235,7 @@ export class LocalWakeGate {
 
         this.generation += 1;
         this.workerReady = false;
+        this.audioFlowReady = false;
         this.inFlightPcm.clear();
         this.state = 'stopping';
 
@@ -337,6 +343,10 @@ export class LocalWakeGate {
 
         if (data.type === 'ack') {
             this.inFlightPcm.delete(Number(data.sequence));
+            if (data.accepted === true) {
+                this.audioFlowReady = true;
+                if (this.workerReady && !this.gateOpen) this.state = 'armed';
+            }
             return;
         }
         if (data.type === 'error') {
@@ -347,7 +357,9 @@ export class LocalWakeGate {
         }
         if (data.type === 'ready') {
             this.workerReady = true;
-            if (!this.gateOpen && this.state !== 'starting') this.state = 'armed';
+            if (!this.gateOpen && this.state !== 'starting') {
+                this.state = this.audioFlowReady ? 'armed' : 'listening';
+            }
             return;
         }
         if (data.type !== 'detected' || !this.workerReady || this.gateOpen) return;
@@ -407,6 +419,7 @@ export class LocalWakeGate {
         const closeError = this.#forceClosed(generation);
         this.generation += 1;
         this.workerReady = false;
+        this.audioFlowReady = false;
         this.inFlightPcm.clear();
         this.state = 'failed';
         void this.#teardown();

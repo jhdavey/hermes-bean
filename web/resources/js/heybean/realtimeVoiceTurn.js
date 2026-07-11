@@ -308,6 +308,39 @@ export function isQueueableRealtimeWorkFollowUp(text) {
     ].some((pattern) => pattern.test(normalized));
 }
 
+export function isIncompleteRealtimeCommand(text) {
+    const normalized = String(text || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^hey (?:bean|ben|bin|bing|being|beane|beam)\s*/, '');
+    if (!normalized) return true;
+
+    if (/\b(?:for|with|to|at|on|by|from|about|called|titled|named|containing|saying|that says|and|or)$/.test(normalized)) {
+        return true;
+    }
+
+    return /^(?:(?:can|could|would|will) you (?:please )?)?(?:create|add|make|set|schedule|write|delete|remove|update|change)(?: (?:a|an|the|my))?$/.test(normalized);
+}
+
+export function joinRealtimeUtteranceContinuation(first, continuation) {
+    const left = String(first || '').trim();
+    let right = String(continuation || '').trim()
+        .replace(/^hey[\s,.-]*(?:bean|ben|bin|bing|being|beane|beam)\b[\s,.:;!?-]*/i, '')
+        .trim();
+    if (!left) return right;
+    if (!right) return left;
+
+    const lastWord = left.match(/([a-z0-9]+)[^a-z0-9]*$/i)?.[1]?.toLowerCase();
+    const firstWord = right.match(/^([^a-z0-9]*)([a-z0-9]+)/i)?.[2]?.toLowerCase();
+    if (lastWord && firstWord && lastWord === firstWord) {
+        right = right.replace(new RegExp(`^[^a-z0-9]*${firstWord}\\b[\\s,.:;!?-]*`, 'i'), '');
+    }
+
+    return `${left} ${right}`.replace(/\s+/g, ' ').trim();
+}
+
 export function extractRealtimeResponseTranscript(response) {
     return (Array.isArray(response?.output) ? response.output : [])
         .flatMap((item) => Array.isArray(item?.content) ? item.content : [])

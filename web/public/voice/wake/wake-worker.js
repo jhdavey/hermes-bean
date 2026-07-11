@@ -100,6 +100,7 @@ async function initialize() {
             maxActivePaths: 4,
             enableEndpoint: 0,
         });
+        warmRecognizer();
         replaceRecognitionStream();
 
         ready = true;
@@ -107,6 +108,29 @@ async function initialize() {
         postMessage({ type: 'ready', generation: currentGeneration });
     } catch (error) {
         fail('initialization_failed', error);
+    }
+}
+
+function warmRecognizer() {
+    const warmStream = recognizer.createStream();
+    if (!warmStream?.handle) throw new Error('The local speech warm-up stream could not be created.');
+
+    try {
+        // Pay the Wasm/model cold-start cost before the application is told the
+        // detector is ready. Otherwise the first live wake phrase can arrive
+        // while the initial encoder/decoder invocation is still compiling.
+        warmStream.acceptWaveform(TARGET_SAMPLE_RATE, new Float32Array(6400));
+        let decodeCount = 0;
+        while (recognizer.isReady(warmStream)) {
+            if (decodeCount >= MAX_DECODES_PER_MESSAGE * 2) {
+                throw new Error('The wake detector warm-up exceeded its decode limit.');
+            }
+            recognizer.decode(warmStream);
+            decodeCount += 1;
+        }
+        recognizer.getResult(warmStream);
+    } finally {
+        warmStream.free();
     }
 }
 
