@@ -84,11 +84,14 @@ class VoiceChatFeatureTest extends TestCase
                 && data_get($payload, 'session.type') === 'realtime'
                 && data_get($payload, 'session.model') === 'gpt-realtime-test'
                 && data_get($payload, 'session.audio.output.voice') === 'shimmer'
+                && data_get($payload, 'session.audio.input.transcription.language') === 'en'
+                && str_contains((string) data_get($payload, 'session.audio.input.transcription.prompt'), 'US English')
                 && data_get($payload, 'session.audio.input.turn_detection.type') === 'server_vad'
                 && data_get($payload, 'session.audio.input.turn_detection.create_response') === false
                 && data_get($payload, 'session.audio.input.turn_detection.interrupt_response') === true
                 && collect(data_get($payload, 'session.tools', []))->contains(fn (array $tool): bool => $tool['name'] === 'send_bean_request')
                 && str_contains((string) data_get($payload, 'session.instructions'), 'Hey Bean')
+                && str_contains((string) data_get($payload, 'session.instructions'), 'US English')
                 && str_contains((string) data_get($payload, 'session.instructions'), 'remain wake-only')
                 && str_contains((string) data_get($payload, 'session.instructions'), 'current external information');
         });

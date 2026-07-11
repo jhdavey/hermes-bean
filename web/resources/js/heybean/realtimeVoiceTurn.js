@@ -20,6 +20,13 @@ export function isStrictRealtimeWakePhrase(text) {
     return /^\s*hey[\s,.-]*bean\b/i.test(String(text || ''));
 }
 
+export function isLikelyNonEnglishRealtimeTranscript(text) {
+    const letters = String(text || '').match(/\p{L}/gu) || [];
+    if (!letters.length) return false;
+    const latinLetters = letters.filter((letter) => /\p{Script=Latin}/u.test(letter));
+    return latinLetters.length / letters.length < 0.65;
+}
+
 export function stripRealtimeLocalWakePrefix(text) {
     return String(text || '')
         .replace(/^\s*(?:(?:hey|they|he)[\s,.-]+(?:bean|ben|bin|bing|being|beane|beam)|habe(?:en|ing))\b[\s,.:;!?-]*/i, '')
@@ -106,6 +113,35 @@ export function isVoiceFillerOnly(text) {
         .replace(/\s+/g, ' ')
         .trim();
     return /^(um+|uh+|erm+|hmm+|mm+|ah+|okay um|ok um)$/.test(normalized);
+}
+
+export function realtimeWorkStatusAnswer(text, { isWorking = false } = {}) {
+    const normalized = String(text || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const asksForStatus = [
+        /^(?:are you|is bean|you) still (?:working(?: on .+)?|doing that|on it)$/,
+        /^(?:is|are) (?:that|it|the request|the task) still (?:running|working|going|in progress)$/,
+        /^(?:what(?: is| s)? the status|status update|any update|how(?: is| s) (?:that|it) going)$/,
+        /^(?:are you (?:done|almost done)|did you finish|is it done|is it ready|have you finished)(?: yet)?$/,
+        /^(?:what(?: is| s) taking so long|when will (?:that|it) be done)$/,
+    ].some((pattern) => pattern.test(normalized));
+    if (!asksForStatus) return '';
+    return isWorking
+        ? 'Yes — I’m still working on it. I’ll tell you as soon as it finishes.'
+        : 'No — I’m not currently working on a request.';
+}
+
+export function isExplicitRealtimeWorkInterruption(text, { heardWakeWord = false } = {}) {
+    if (heardWakeWord) return true;
+    const normalized = String(text || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return /^(?:actually\b|wait bean\b|bean\b|instead\b|change (?:that|it)\b|make that\b|i meant\b)/.test(normalized);
 }
 
 export function extractRealtimeResponseTranscript(response) {
@@ -226,6 +262,11 @@ export class RealtimeConversationController {
     stop() {
         this.state = REALTIME_CONVERSATION_STATES.WAKE_ONLY;
         this.epoch += 1;
+        return this.capture();
+    }
+
+    sleep() {
+        this.state = REALTIME_CONVERSATION_STATES.WAKE_ONLY;
         return this.capture();
     }
 

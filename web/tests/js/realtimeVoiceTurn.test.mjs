@@ -17,6 +17,8 @@ import {
     cancelRealtimeTurnWithoutBlockingReplacement,
     extractRealtimeResponseTranscript,
     isCompletedRealtimeResponse,
+    isExplicitRealtimeWorkInterruption,
+    isLikelyNonEnglishRealtimeTranscript,
     isRealtimeVoiceStopCommand,
     isStrictRealtimeWakePhrase,
     isVoiceFillerOnly,
@@ -24,6 +26,7 @@ import {
     realtimeMicrophoneConstraints,
     realtimeNeedsAppRuntime,
     realtimePauseAcknowledgement,
+    realtimeWorkStatusAnswer,
     shouldDeferAssistantMessage,
     stripRealtimeLocalWakePrefix,
 } from '../../resources/js/heybean/realtimeVoiceTurn.js';
@@ -192,6 +195,38 @@ test('only narrow timeless conversation intents enter the tool-less lane', () =>
 test('filler-only recognition is not submitted as a user turn', () => {
     assert.equal(isVoiceFillerOnly('um...'), true);
     assert.equal(isVoiceFillerOnly('uh, I thought they were Saturday'), false);
+});
+
+test('work status questions report actual run state without inventing progress', () => {
+    assert.equal(
+        realtimeWorkStatusAnswer('Are you still working on it?', { isWorking: true }),
+        'Yes — I’m still working on it. I’ll tell you as soon as it finishes.',
+    );
+    assert.equal(
+        realtimeWorkStatusAnswer('Did you finish yet?', { isWorking: false }),
+        'No — I’m not currently working on a request.',
+    );
+    assert.equal(
+        realtimeWorkStatusAnswer('Are you still working on the weather request?', { isWorking: true }),
+        'Yes — I’m still working on it. I’ll tell you as soon as it finishes.',
+    );
+    assert.equal(realtimeWorkStatusAnswer('What is the weather?', { isWorking: true }), '');
+});
+
+test('background work is superseded only by an explicit correction or fresh wake', () => {
+    assert.equal(isExplicitRealtimeWorkInterruption('Dinner is ready.'), false);
+    assert.equal(isExplicitRealtimeWorkInterruption('Only the Friday forecast.'), false);
+    assert.equal(isExplicitRealtimeWorkInterruption('Actually, use Tampa instead.'), true);
+    assert.equal(isExplicitRealtimeWorkInterruption('Change that to tomorrow.'), true);
+    assert.equal(isExplicitRealtimeWorkInterruption('New request.', { heardWakeWord: true }), true);
+});
+
+test('non-Latin recognition artifacts are rejected from the US English voice session', () => {
+    assert.equal(isLikelyNonEnglishRealtimeTranscript('Take care.'), false);
+    assert.equal(isLikelyNonEnglishRealtimeTranscript("Schedule José's appointment."), false);
+    assert.equal(isLikelyNonEnglishRealtimeTranscript('ありがとうございます。'), true);
+    assert.equal(isLikelyNonEnglishRealtimeTranscript('알겠습니다'), true);
+    assert.equal(isLikelyNonEnglishRealtimeTranscript('个'), true);
 });
 
 test('completed realtime output supplies assistant text when transcript events are missing', () => {
@@ -453,6 +488,17 @@ test('barge-in cancellation cannot block the replacement on a hung old request',
 
 test('an activated voice conversation stays open until explicit reset', () => {
     assert.equal(realtimeFollowUpExpiry(1_000), Number.POSITIVE_INFINITY);
+});
+
+test('natural follow-up sleep requires a new wake word without invalidating pending work', () => {
+    const conversation = new RealtimeConversationController();
+    const active = conversation.activateFromLocalWake();
+
+    assert.equal(conversation.sleep(), active.epoch);
+    assert.equal(conversation.isActive(), false);
+    assert.equal(conversation.isCurrent(active.epoch), true);
+    assert.equal(conversation.admitTranscript({ id: 'ambient', content: 'Dinner is ready.' }).reason, 'wake_required');
+    assert.equal(conversation.admitTranscript({ id: 'wake-again', content: 'Hey Bean, status', heardWakeWord: true }).accepted, true);
 });
 
 test('an unbound cancelled generation rejects its late response.created event', async () => {

@@ -23,12 +23,15 @@ import {
     cancelRealtimeTurnWithoutBlockingReplacement,
     extractRealtimeResponseTranscript,
     isCompletedRealtimeResponse,
+    isExplicitRealtimeWorkInterruption,
+    isLikelyNonEnglishRealtimeTranscript,
     isRealtimeVoiceStopCommand,
     isStrictRealtimeWakePhrase,
     isVoiceFillerOnly,
     realtimeMicrophoneConstraints,
     realtimeNeedsAppRuntime,
     realtimePauseAcknowledgement,
+    realtimeWorkStatusAnswer,
     shouldDeferAssistantMessage,
     stripRealtimeLocalWakePrefix,
 } from './realtimeVoiceTurn.js';
@@ -227,6 +230,7 @@ export function mountHeyBeanWebApp(mount) {
     let realtimeIgnoreInputUntil = 0;
     let realtimeQueuedFollowUp = null;
     let realtimeQueuedFollowUpTimer = 0;
+    let realtimeFollowUpTimer = 0;
     let realtimeToolCalls = new Map();
     let realtimeDisconnectedTimer = 0;
     let realtimeMicrophoneMuteTimer = 0;
@@ -243,6 +247,8 @@ export function mountHeyBeanWebApp(mount) {
     const realtimeTurnPersistenceQueue = new RealtimeTurnPersistenceQueue();
     const realtimeMediaRecoveryGraceMs = 5000;
     const realtimeResponseTimeoutMs = 20000;
+    const realtimeFollowUpWindowMs = 10000;
+    const beanWorkPollMaxAttempts = 180;
     const realtimeTurnSessionIds = new Map();
     let realtimePersistenceSessionCreation = null;
     const chatAnnouncementRegion = persistentChatAnnouncementRegion();
@@ -4120,7 +4126,7 @@ export function mountHeyBeanWebApp(mount) {
                         const recoveredAssistant = recovered.result?.assistant_message || null;
                         if (shouldPlayVoiceResponse
                             && recovered.assistantContent
-                            && realtimeTurnCanContinue(voiceConversationEpoch)) {
+                            && realtimeVoiceDeliveryCanContinue(voiceConversationEpoch)) {
                             removeDeferredAssistantMessage(recoveredAssistant);
                             state.chatRunState = 'Bean is speaking…';
                             render();
@@ -4136,6 +4142,8 @@ export function mountHeyBeanWebApp(mount) {
                             if (realtimeTurnCanContinue(voiceConversationEpoch) && !spoken?.cancelled && state.voiceWakeListening) {
                                 setVoiceFollowUpWindow();
                                 state.chatRunState = 'Listening for follow-up…';
+                            } else if (realtimeVoiceDeliveryCanContinue(voiceConversationEpoch)) {
+                                state.chatRunState = 'Listening for “Hey Bean”…';
                             } else {
                                 state.chatRunState = 'Ready';
                             }
@@ -4161,7 +4169,7 @@ export function mountHeyBeanWebApp(mount) {
                 render();
             } catch (_) {}
             if (token !== beanWorkEventPollToken) return;
-            if ((clientRequestId || beanWorkStatusActive() || attempt < 3) && attempt < 50) {
+            if ((clientRequestId || beanWorkStatusActive() || attempt < 3) && attempt < beanWorkPollMaxAttempts) {
                 const delay = clientRequestId || beanWorkStatusActive() ? 350 : 900;
                 beanWorkEventPollTimer = window.setTimeout(() => poll(attempt + 1), delay);
             } else if (clientRequestId && activeChatRequestId && activeChatClientRequestId === clientRequestId) {
@@ -4169,6 +4177,13 @@ export function mountHeyBeanWebApp(mount) {
                 activeChatRequestId = 0;
                 activeChatClientRequestId = '';
                 activeChatSupersessionEligible = false;
+                state.error = 'Bean’s request did not reach a final response. Please try again.';
+                if (shouldPlayVoiceResponse && realtimeVoiceDeliveryCanContinue(voiceConversationEpoch)) {
+                    state.chatRunState = 'Bean is speaking…';
+                    render();
+                    await playBeanVoiceResponse('I’m sorry — that request did not finish. Please try again.');
+                }
+                state.chatRunState = state.voiceWakeListening ? 'Listening for “Hey Bean”…' : 'Failed';
                 render();
                 scheduleChatQueueDrain();
             }
@@ -9392,14 +9407,16 @@ export function mountHeyBeanWebApp(mount) {
         if (/^(can you hear me|do you hear me|are you listening|can you listen|is the mic working|can you hear my voice)$/.test(normalized)) {
             return 'Yes — I can hear you. What would you like me to help with?';
         }
-        return '';
+        return realtimeWorkStatusAnswer(normalized, {
+            isWorking: realtimeLaravelTurnInFlight || chatHasActiveTurn(),
+        });
     }
 
     function realtimeDirectAnswerInstructions(command) {
         const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'the user\'s local timezone';
         const now = new Date();
         return [
-            'You are Bean in a live voice conversation. Answer the user directly, warmly, and very briefly.',
+            'You are Bean in a live voice conversation. Always answer in US English, directly, warmly, and very briefly.',
             'This is a simple conversational question that does not need HeyBean app data, private workspace data, actions, or external lookups.',
             `User local time context: ${now.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' })} (${timezone}).`,
             'If the user asks for date or time, use that local time context. Do not say you cannot hear audio; this is an active voice session.',
@@ -9409,7 +9426,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function realtimeWorkingAckInstructions(command) {
         return [
-            'You are Bean in a live voice conversation. Give one short, natural acknowledgement that you heard the user and are working on it.',
+            'You are Bean in a live voice conversation. Respond only in US English. Give one short, natural acknowledgement that you heard the user and are working on it.',
             'Vary the wording like a real person. Do not use a canned phrase. Do not answer the request yet. Do not mention tools, Laravel, OpenAI, or systems.',
             'Keep it under 12 words.',
             `User request: ${command}`,
@@ -9427,6 +9444,46 @@ export function mountHeyBeanWebApp(mount) {
 
     function realtimeTurnCanContinue(epoch) {
         return realtimeConversation.canContinue(epoch);
+    }
+
+    function realtimeVoiceDeliveryCanContinue(epoch) {
+        return realtimeConversation.isCurrent(epoch)
+            && state.voiceWakeListening
+            && realtimeVoiceActive;
+    }
+
+    function clearRealtimeFollowUpWindow() {
+        window.clearTimeout(realtimeFollowUpTimer);
+        realtimeFollowUpTimer = 0;
+    }
+
+    function sleepRealtimeConversationAfterFollowUp() {
+        clearRealtimeFollowUpWindow();
+        if (!realtimeConversation.isActive()) return;
+        if (realtimeResponseActive) {
+            armRealtimeFollowUpWindow();
+            return;
+        }
+        realtimeLocalWakeGate?.resetAfterTurn();
+        clearRealtimeVoiceInputFeedback();
+        realtimeConversation.sleep();
+        realtimeAppConversationActive = false;
+        realtimeLocalWakePending = false;
+        realtimePendingTranscript = '';
+        updateVoiceWakeDraft('');
+        state.chatRunState = state.busy
+            ? 'Working — say “Hey Bean” for status…'
+            : 'Listening for “Hey Bean”…';
+        render();
+    }
+
+    function armRealtimeFollowUpWindow() {
+        clearRealtimeFollowUpWindow();
+        if (!state.voiceWakeListening || !realtimeConversation.isActive()) return;
+        realtimeFollowUpTimer = window.setTimeout(
+            sleepRealtimeConversationAfterFollowUp,
+            realtimeFollowUpWindowMs,
+        );
     }
 
     function setRealtimeListeningStatus() {
@@ -9521,6 +9578,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function setRealtimeFollowUpWindow() {
         realtimeConversation.activate();
+        armRealtimeFollowUpWindow();
     }
 
     function realtimeSend(event) {
@@ -9609,9 +9667,20 @@ export function mountHeyBeanWebApp(mount) {
             type: 'session.update',
             session: {
                 type: 'realtime',
-                instructions: 'You are Bean inside a HeyBean realtime voice session. A local client gate prevents dormant microphone audio from reaching this session; every user transcript you receive was released after a local Hey Bean activation or during its active follow-up window. The app, not the model, owns wake, stop, cancellation, and persistence state. Never treat your own speech, partial transcripts, or recognition artifacts as requests. Keep answers concise and naturally speakable. Use send_bean_request for HeyBean app data, task/reminder/note/calendar/memory mutations, current external information, approvals, or longer-running work.',
+                instructions: 'You are Bean inside a HeyBean realtime voice session. Always understand and respond only in US English. Never switch languages or mirror a transcript in another language. If speech seems garbled or non-English, ask in English for the user to repeat it. A local client gate prevents dormant microphone audio from reaching this session; every user transcript you receive was released after a local Hey Bean activation or during its active follow-up window. The app, not the model, owns wake, stop, cancellation, and persistence state. Never treat your own speech, partial transcripts, or recognition artifacts as requests. Keep answers concise and naturally speakable. Use send_bean_request for HeyBean app data, task/reminder/note/calendar/memory mutations, current external information, approvals, or longer-running work.',
             },
         };
+    }
+
+    function captureRealtimeEnglishAssistantTranscript(text) {
+        const transcript = String(text || '').trim();
+        if (!transcript) return false;
+        if (isLikelyNonEnglishRealtimeTranscript(transcript)) {
+            state.error = 'Bean generated a response in another language. Please try again.';
+            return false;
+        }
+        realtimeResponseLifecycle.captureTranscript(transcript);
+        return true;
     }
 
     async function openRealtimeSession() {
@@ -9690,6 +9759,7 @@ export function mountHeyBeanWebApp(mount) {
         realtimePendingTranscript = '';
         updateVoiceWakeDraft('');
         state.chatRunState = 'Listening…';
+        armRealtimeFollowUpWindow();
         render();
     }
 
@@ -9951,9 +10021,11 @@ export function mountHeyBeanWebApp(mount) {
                 contentIndex: payload.content_index,
                 delta: payload.delta,
             });
-            if (draft) {
+            if (draft && !isLikelyNonEnglishRealtimeTranscript(draft)) {
                 updateVoiceWakeDraft(draft);
                 state.chatRunState = 'Listening…';
+            } else if (draft) {
+                updateVoiceWakeDraft('');
             }
             return;
         }
@@ -9968,7 +10040,7 @@ export function mountHeyBeanWebApp(mount) {
             updateRealtimeVoiceActivity(0, { decay: false });
             handleRealtimeUserTranscript(transcript, { transcriptId })
                 .then((admission) => {
-                    if (admission?.reason === 'wake_required' && transcriptId) {
+                    if (['wake_required', 'non_english_transcript', 'unaddressed_during_work'].includes(admission?.reason) && transcriptId) {
                         realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
                     }
                 })
@@ -10007,7 +10079,7 @@ export function mountHeyBeanWebApp(mount) {
         if (payload.type === 'response.audio_transcript.done' || payload.type === 'response.output_text.done') {
             if (!realtimeResponseLifecycle.acceptsResponse(payload.response_id)) return;
             const text = String(payload.transcript || payload.text || realtimeAssistantDraft || '').trim();
-            realtimeResponseLifecycle.captureTranscript(text);
+            captureRealtimeEnglishAssistantTranscript(text);
             realtimeAssistantDraft = '';
             return;
         }
@@ -10045,7 +10117,7 @@ export function mountHeyBeanWebApp(mount) {
                 render();
                 return;
             }
-            realtimeResponseLifecycle.captureTranscript(extractRealtimeResponseTranscript(payload.response));
+            captureRealtimeEnglishAssistantTranscript(extractRealtimeResponseTranscript(payload.response));
             const completedResponse = realtimeResponseLifecycle.markResponseDone(payload.response?.id);
             if (!completedResponse) return;
             realtimeResponseActive = false;
@@ -10080,6 +10152,14 @@ export function mountHeyBeanWebApp(mount) {
     async function handleRealtimeUserTranscript(transcript, options = {}) {
         const text = String(transcript || '').trim();
         if (!text) return { accepted: false, reason: 'empty' };
+        if (isLikelyNonEnglishRealtimeTranscript(text)) {
+            realtimePendingTranscript = '';
+            updateVoiceWakeDraft('');
+            state.error = 'Bean heard that as another language. Please repeat in English.';
+            setRealtimeListeningStatus();
+            render();
+            return { accepted: false, reason: 'non_english_transcript' };
+        }
         const transcriptCompletedAtMs = Number(options.transcriptCompletedAtMs) || Date.now();
         const heardStrictWakeWord = isStrictRealtimeWakePhrase(text);
         const recognizedWakeWord = realtimeConversation.isActive()
@@ -10091,6 +10171,7 @@ export function mountHeyBeanWebApp(mount) {
             heardWakeWord: heardStrictWakeWord,
         });
         if (!admission.accepted || !realtimeConversation.canContinue(admission.epoch)) return admission;
+        clearRealtimeFollowUpWindow();
         const locallyActivated = realtimeLocalWakePending;
         realtimeLocalWakePending = false;
         if (voiceStopCommand(text)) {
@@ -10101,6 +10182,7 @@ export function mountHeyBeanWebApp(mount) {
             realtimePendingTranscript = '';
             updateVoiceWakeDraft('');
             setRealtimeListeningStatus();
+            armRealtimeFollowUpWindow();
             render();
             return;
         }
@@ -10117,38 +10199,15 @@ export function mountHeyBeanWebApp(mount) {
         ).trim();
         if (!command) {
             state.chatRunState = 'Listening…';
+            armRealtimeFollowUpWindow();
             render();
             return;
         }
-        if (now < realtimeIgnoreInputUntil || realtimeResponseActive || realtimeLaravelTurnInFlight || now < realtimeTurnGuardUntil || chatHasActiveTurn()) {
-            let queuedAdmission = admission;
-            let supersedesClientRequestId = String(options.supersedesClientRequestId || '').trim();
-            if (realtimeLaravelTurnInFlight || chatHasActiveTurn()) {
-                const canSupersedeActiveRequest = activeChatSupersessionEligible && activeChatClientRequestId !== '';
-                supersedesClientRequestId = canSupersedeActiveRequest
-                    ? activeChatClientRequestId
-                    : supersedesClientRequestId;
-                queuedAdmission = realtimeConversation.supersedeTranscript({ content: text });
-                realtimeLaravelTurnInFlight = false;
-                realtimeTurnGuardUntil = Date.now() + 400;
-                if (canSupersedeActiveRequest) {
-                    cancelRealtimeTurnWithoutBlockingReplacement(
-                        () => cancelBeanTurn(null, { drainQueue: false }),
-                    );
-                } else {
-                    stopBeanVoicePlayback({ reason: 'superseded' });
-                }
-            }
-            queueRealtimeFollowUpTranscript(text, {
-                admission: queuedAdmission,
-                transcriptCompletedAtMs,
-                supersedesClientRequestId,
-            });
+        const commandKey = normalizedVoiceCommand(command);
+        if (commandKey && realtimeLastCommandKey === commandKey && now - realtimeLastCommandAt < 8000) {
+            armRealtimeFollowUpWindow();
             return;
         }
-
-        const commandKey = normalizedVoiceCommand(command);
-        if (commandKey && realtimeLastCommandKey === commandKey && now - realtimeLastCommandAt < 8000) return;
         realtimeLastCommandKey = commandKey;
         realtimeLastCommandAt = now;
 
@@ -10192,6 +10251,42 @@ export function mountHeyBeanWebApp(mount) {
                 state.chatRunState = 'Listening for follow-up…';
             }
             render();
+            return;
+        }
+
+        if (now < realtimeIgnoreInputUntil || realtimeResponseActive || realtimeLaravelTurnInFlight || now < realtimeTurnGuardUntil || chatHasActiveTurn()) {
+            if ((realtimeLaravelTurnInFlight || chatHasActiveTurn())
+                && !isExplicitRealtimeWorkInterruption(command, { heardWakeWord: heardStrictWakeWord || locallyActivated })) {
+                realtimePendingTranscript = '';
+                updateVoiceWakeDraft('');
+                armRealtimeFollowUpWindow();
+                state.chatRunState = realtimeWorkingStatus(command);
+                render();
+                return { accepted: false, reason: 'unaddressed_during_work' };
+            }
+            let queuedAdmission = admission;
+            let supersedesClientRequestId = String(options.supersedesClientRequestId || '').trim();
+            if (realtimeLaravelTurnInFlight || chatHasActiveTurn()) {
+                const canSupersedeActiveRequest = activeChatSupersessionEligible && activeChatClientRequestId !== '';
+                supersedesClientRequestId = canSupersedeActiveRequest
+                    ? activeChatClientRequestId
+                    : supersedesClientRequestId;
+                queuedAdmission = realtimeConversation.supersedeTranscript({ content: text });
+                realtimeLaravelTurnInFlight = false;
+                realtimeTurnGuardUntil = Date.now() + 400;
+                if (canSupersedeActiveRequest) {
+                    cancelRealtimeTurnWithoutBlockingReplacement(
+                        () => cancelBeanTurn(null, { drainQueue: false }),
+                    );
+                } else {
+                    stopBeanVoicePlayback({ reason: 'superseded' });
+                }
+            }
+            queueRealtimeFollowUpTranscript(text, {
+                admission: queuedAdmission,
+                transcriptCompletedAtMs,
+                supersedesClientRequestId,
+            });
             return;
         }
 
@@ -10275,13 +10370,15 @@ export function mountHeyBeanWebApp(mount) {
             state.chatRunState = realtimeWorkingStatus(command);
             render();
             await acknowledgement;
+            armRealtimeFollowUpWindow();
             const requestOutcome = await request;
             if (requestOutcome.error) {
-                if (realtimeTurnCanContinue(turnEpoch)) throw requestOutcome.error;
+                if (realtimeConversation.isCurrent(turnEpoch)) throw requestOutcome.error;
                 return;
             }
             const result = requestOutcome.result;
             if (result?.assistantContent) {
+                const followUpWasActive = realtimeTurnCanContinue(turnEpoch);
                 const resultSessionId = String(
                     result.result?.session?.id
                     || result.assistantMessage?.conversation_session_id
@@ -10290,7 +10387,7 @@ export function mountHeyBeanWebApp(mount) {
                 const resultContextIsCurrent = () => String(currentWorkspaceId() || '') === backendRequestWorkspaceId
                     && (!resultSessionId || String(state.session?.id || '') === resultSessionId);
                 if (!resultContextIsCurrent()) return;
-                if (!realtimeTurnCanContinue(turnEpoch)) {
+                if (!realtimeVoiceDeliveryCanContinue(turnEpoch)) {
                     revealDeferredAssistantMessage(result.assistantMessage, result.assistantContent);
                     state.chatRunState = 'Ready';
                     render();
@@ -10300,22 +10397,30 @@ export function mountHeyBeanWebApp(mount) {
                 render();
                 const spoken = await playBeanVoiceResponse(result.assistantContent);
                 if (!resultContextIsCurrent()) return;
-                if (!realtimeTurnCanContinue(turnEpoch) || spoken?.cancelled) {
+                if (!realtimeVoiceDeliveryCanContinue(turnEpoch) || spoken?.cancelled) {
                     revealDeferredAssistantMessage(result.assistantMessage, result.assistantContent);
                     state.chatRunState = 'Ready';
                     render();
                     return;
                 }
                 revealDeferredAssistantMessage(result.assistantMessage, result.assistantContent);
-                if (state.voiceWakeListening) {
+                if (followUpWasActive && state.voiceWakeListening) {
                     setRealtimeFollowUpWindow();
                     state.chatRunState = 'Listening for follow-up…';
+                } else if (state.voiceWakeListening) {
+                    state.chatRunState = 'Listening for “Hey Bean”…';
                 }
                 render();
             }
         } catch (error) {
-            if (realtimeTurnCanContinue(turnEpoch)) {
+            if (realtimeConversation.isCurrent(turnEpoch)) {
                 state.error = friendlyError(error, 'send realtime voice request');
+                if (realtimeVoiceDeliveryCanContinue(turnEpoch)) {
+                    state.chatRunState = 'Bean is speaking…';
+                    render();
+                    await playBeanVoiceResponse('I’m sorry — I could not finish that request. Please try again.');
+                }
+                state.chatRunState = state.voiceWakeListening ? 'Listening for “Hey Bean”…' : 'Failed';
                 render();
             }
         } finally {
@@ -10592,7 +10697,7 @@ export function mountHeyBeanWebApp(mount) {
             outputIsDurable = Boolean(result?.assistantContent);
             resultSessionId = String(result?.result?.session?.id || assistantMessage?.conversation_session_id || '');
             if (!resultContextIsCurrent()) return;
-            if (!realtimeTurnCanContinue(turnEpoch)) {
+            if (!realtimeVoiceDeliveryCanContinue(turnEpoch)) {
                 if (outputIsDurable) {
                     revealDeferredAssistantMessage(assistantMessage, result.assistantContent);
                     state.chatRunState = 'Ready';
@@ -10613,16 +10718,18 @@ export function mountHeyBeanWebApp(mount) {
         }
         const spoken = await playBeanVoiceResponse(output);
         if (!resultContextIsCurrent()) return;
-        if (!realtimeTurnCanContinue(turnEpoch) || spoken?.cancelled) {
+        if (!realtimeVoiceDeliveryCanContinue(turnEpoch) || spoken?.cancelled) {
             if (outputIsDurable) revealDeferredAssistantMessage(assistantMessage, output);
             state.chatRunState = 'Ready';
             render();
             return;
         }
         revealDeferredAssistantMessage(assistantMessage, output);
-        if (state.voiceWakeListening) {
+        if (realtimeTurnCanContinue(turnEpoch) && state.voiceWakeListening) {
             setRealtimeFollowUpWindow();
             state.chatRunState = 'Listening for follow-up…';
+        } else if (state.voiceWakeListening) {
+            state.chatRunState = 'Listening for “Hey Bean”…';
         }
         render();
     }
@@ -10633,6 +10740,7 @@ export function mountHeyBeanWebApp(mount) {
         realtimeLocalWakeGate?.resetAfterTurn();
         clearRealtimeVoiceInputFeedback();
         const conversationEpoch = realtimeConversation.stop();
+        clearRealtimeFollowUpWindow();
         clearQueuedRealtimeFollowUp();
         realtimeAppConversationActive = false;
         realtimeLocalWakePending = false;
@@ -10680,6 +10788,7 @@ export function mountHeyBeanWebApp(mount) {
             realtimeBackendSyncRequired = true;
         }
         realtimeConversation.stop();
+        clearRealtimeFollowUpWindow();
         clearQueuedRealtimeFollowUp();
         realtimeAppConversationActive = false;
         realtimeLocalWakePending = false;
