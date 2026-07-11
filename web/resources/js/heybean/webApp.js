@@ -29,6 +29,7 @@ import {
     isRealtimeVoiceStopCommand,
     isRealtimeDuplicateCallConflict,
     isStrictRealtimeWakePhrase,
+    isIntentionalRealtimeInterruption,
     isVoiceFillerOnly,
     naturalizeRealtimeSpeechText,
     realtimeMicrophoneConstraints,
@@ -241,6 +242,7 @@ export function mountHeyBeanWebApp(mount) {
     let realtimeMicrophoneMuteTimer = 0;
     let realtimeVoiceActivityDecayTimer = 0;
     let realtimeVoiceActivityLevel = 0;
+    const realtimePotentialBargeInItems = new Set();
     let chatAnnouncementTimer = 0;
     let chatAnnouncementSessionId = null;
     let chatAnnouncementSeenKeys = new Set();
@@ -10034,9 +10036,7 @@ export function mountHeyBeanWebApp(mount) {
             }
             updateRealtimeVoiceActivity(Math.max(realtimeVoiceActivityLevel, 0.72));
             if (realtimeResponseActive) {
-                stopBeanVoicePlayback({ reason: 'interrupted' });
-                realtimeIgnoreInputUntil = 0;
-                state.chatRunState = 'Listening…';
+                if (transcriptId) realtimePotentialBargeInItems.add(transcriptId);
                 render();
                 return;
             }
@@ -10071,11 +10071,17 @@ export function mountHeyBeanWebApp(mount) {
                 contentIndex: payload.content_index,
                 delta: payload.delta,
             });
+            const potentialBargeIn = realtimePotentialBargeInItems.has(transcriptId);
+            if (potentialBargeIn && realtimeResponseActive && isIntentionalRealtimeInterruption(draft)) {
+                realtimePotentialBargeInItems.delete(transcriptId);
+                stopBeanVoicePlayback({ reason: 'interrupted' });
+                realtimeIgnoreInputUntil = 0;
+            }
             if (draft
                 && shouldDisplayRealtimeTranscriptDraft(draft)
                 && !isLikelyNonEnglishRealtimeTranscript(draft)) {
                 updateVoiceWakeDraft(draft);
-                state.chatRunState = 'Listening…';
+                if (!potentialBargeIn || !realtimeResponseActive) state.chatRunState = 'Listening…';
             } else if (draft) {
                 updateVoiceWakeDraft('');
             }
@@ -10089,7 +10095,18 @@ export function mountHeyBeanWebApp(mount) {
                 contentIndex: payload.content_index,
                 transcript: payload.transcript,
             });
+            const potentialBargeIn = realtimePotentialBargeInItems.delete(transcriptId);
             updateRealtimeVoiceActivity(0, { decay: false });
+            if (potentialBargeIn && !isIntentionalRealtimeInterruption(transcript)) {
+                updateVoiceWakeDraft('');
+                if (transcriptId) realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
+                render();
+                return;
+            }
+            if (potentialBargeIn && realtimeResponseActive) {
+                stopBeanVoicePlayback({ reason: 'interrupted' });
+                realtimeIgnoreInputUntil = 0;
+            }
             handleRealtimeUserTranscript(transcript, { transcriptId })
                 .then((admission) => {
                     if (['wake_required', 'wake_only', 'non_english_transcript', 'unaddressed_during_work'].includes(admission?.reason) && transcriptId) {
@@ -10104,6 +10121,7 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         if (payload.type === 'conversation.item.input_audio_transcription.failed') {
+            realtimePotentialBargeInItems.delete(payload.item_id || payload.item?.id || '');
             realtimeInputTranscripts.discard({
                 itemId: payload.item_id || payload.item?.id || '',
                 contentIndex: payload.content_index,
@@ -10812,6 +10830,7 @@ export function mountHeyBeanWebApp(mount) {
         realtimeTurnGuardUntil = Date.now() + (options.guardMs ?? 1200);
         realtimeIgnoreInputUntil = Date.now() + (options.guardMs ?? 1200);
         realtimeToolCalls.clear();
+        realtimePotentialBargeInItems.clear();
         realtimeResponseLifecycle.cancel(options.reason || 'stopped');
         updateVoiceWakeDraft('');
         if (state.voiceWakeListening || realtimeVoiceActive) {
@@ -10859,6 +10878,7 @@ export function mountHeyBeanWebApp(mount) {
         realtimeTurnGuardUntil = 0;
         realtimeIgnoreInputUntil = 0;
         realtimeToolCalls.clear();
+        realtimePotentialBargeInItems.clear();
         realtimeCallDeduper.reset();
         realtimeResponseLifecycle.cancel(options.reason || 'voice_stopped');
         realtimeVoiceActive = false;

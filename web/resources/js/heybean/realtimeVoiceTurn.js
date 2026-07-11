@@ -224,7 +224,26 @@ export function isVoiceFillerOnly(text) {
         .replace(/[^a-z\s]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
-    return /^(um+|uh+|erm+|hmm+|mm+|ah+|okay um|ok um)$/.test(normalized);
+    return /^(?:um+|uh+|erm+|hmm+|mm+|ah+)(?: (?:yeah|yes|okay|ok|right))?$/.test(normalized);
+}
+
+export function isIntentionalRealtimeInterruption(text) {
+    const content = String(text || '').trim();
+    if (!content || isVoiceFillerOnly(content)) return false;
+    if (isStrictRealtimeWakePhrase(content) || isRealtimeVoiceStopCommand(content)) return true;
+
+    const normalized = content
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (/^(?:yeah|yep|yes|okay|ok|right|sure|uh huh|mm hmm|mhm|got it)$/.test(normalized)) return false;
+    if (/^(?:no|wait|actually|instead|correction)$/.test(normalized)) return true;
+
+    const meaningfulWords = normalized
+        .split(' ')
+        .filter((word) => word && !/^(?:um+|uh+|erm+|hmm+|mm+|ah+)$/.test(word));
+    return meaningfulWords.length >= 2;
 }
 
 export function realtimeWorkStatusAnswer(text, { isWorking = false } = {}) {

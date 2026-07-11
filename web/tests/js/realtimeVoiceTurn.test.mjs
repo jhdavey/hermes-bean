@@ -23,6 +23,7 @@ import {
     isRealtimeVoiceStopCommand,
     isRealtimeDuplicateCallConflict,
     isStrictRealtimeWakePhrase,
+    isIntentionalRealtimeInterruption,
     isVoiceFillerOnly,
     naturalizeRealtimeSpeechText,
     realtimeFollowUpExpiry,
@@ -232,7 +233,18 @@ test('only narrow timeless conversation intents enter the tool-less lane', () =>
 
 test('filler-only recognition is not submitted as a user turn', () => {
     assert.equal(isVoiceFillerOnly('um...'), true);
+    assert.equal(isVoiceFillerOnly('Um, yeah.'), true);
+    assert.equal(isVoiceFillerOnly('yes'), false);
     assert.equal(isVoiceFillerOnly('uh, I thought they were Saturday'), false);
+});
+
+test('barge-in waits for meaningful speech instead of background acknowledgements', () => {
+    assert.equal(isIntentionalRealtimeInterruption('Um, yeah.'), false);
+    assert.equal(isIntentionalRealtimeInterruption('okay'), false);
+    assert.equal(isIntentionalRealtimeInterruption('what'), false);
+    assert.equal(isIntentionalRealtimeInterruption("what's today's date"), true);
+    assert.equal(isIntentionalRealtimeInterruption('Actually'), true);
+    assert.equal(isIntentionalRealtimeInterruption('Hey Bean, stop'), true);
 });
 
 test('work status questions report actual run state without inventing progress', () => {

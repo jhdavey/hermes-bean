@@ -92,7 +92,9 @@ class OpenAiVoiceService
                                 'prefix_padding_ms' => (int) config('services.openai.realtime_vad_prefix_padding_ms', 300),
                                 'silence_duration_ms' => (int) config('services.openai.realtime_vad_silence_duration_ms', 650),
                                 'create_response' => false,
-                                'interrupt_response' => true,
+                                // Background VAD hits must not cut Bean off before the
+                                // client can validate the completed transcript.
+                                'interrupt_response' => false,
                             ],
                         ],
                         'output' => [
