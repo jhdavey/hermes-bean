@@ -380,6 +380,7 @@ class AssistantRunController extends Controller
             'flutter',
             'flutter_routed_chat',
             'web_queued_chat',
+            'web_queued_voice',
             'web_routed_chat',
             'production_smoke',
         ], true);

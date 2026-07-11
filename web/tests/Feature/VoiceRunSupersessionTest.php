@@ -230,6 +230,60 @@ class VoiceRunSupersessionTest extends TestCase
         Queue::assertPushed(ProcessAssistantRun::class, 1);
     }
 
+    public function test_additive_voice_request_is_durable_while_the_previous_run_is_still_working(): void
+    {
+        $token = $this->apiToken('voice-durable-follow-up@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+        $first = $this->queueVoiceRun(
+            $token,
+            $sessionId,
+            'Delete my 8 p.m. reminder.',
+            'voice-delete-reminder',
+        )->assertAccepted()->json('data.run');
+
+        $payload = [
+            'content' => 'Create a note titled Universal.',
+            'source' => 'web_queued_voice',
+            'metadata' => [
+                ...$this->voiceMetadata('voice-create-note'),
+                'source' => 'web_queued_voice',
+                'queued_during_active_work' => true,
+                'queued_after_client_request_id' => 'voice-delete-reminder',
+                'voice_queue_id' => 'voice-queued-2',
+            ],
+        ];
+        $followUp = $this->withToken($token)
+            ->postJson("/api/assistant/sessions/{$sessionId}/runs", $payload)
+            ->assertAccepted()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.run.source', 'web_queued_voice')
+            ->assertJsonPath('data.run.metadata.client_request_id', 'voice-create-note')
+            ->assertJsonPath('data.run.metadata.queued_after_client_request_id', 'voice-delete-reminder')
+            ->assertJsonPath('data.user_message.content', 'Create a note titled Universal.')
+            ->json('data');
+
+        $this->assertNotSame($first['id'], $followUp['run']['id']);
+        $this->assertDatabaseHas('conversation_messages', [
+            'id' => $followUp['user_message']['id'],
+            'conversation_session_id' => $sessionId,
+            'role' => 'user',
+            'content' => 'Create a note titled Universal.',
+        ]);
+        $this->assertDatabaseCount('assistant_runs', 2);
+        Queue::assertPushed(ProcessAssistantRun::class, 2);
+
+        // Reload/retry uses the stable request id and returns the same durable run.
+        $this->withToken($token)
+            ->postJson("/api/assistant/sessions/{$sessionId}/runs", $payload)
+            ->assertAccepted()
+            ->assertJsonPath('data.run.id', $followUp['run']['id'])
+            ->assertJsonPath('data.user_message.id', $followUp['user_message']['id']);
+        $this->assertDatabaseCount('assistant_runs', 2);
+        Queue::assertPushed(ProcessAssistantRun::class, 2);
+    }
+
     public function test_run_specific_cancel_does_not_cancel_another_run_or_rewrite_completed_redelivery(): void
     {
         Http::fake([

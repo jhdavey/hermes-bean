@@ -9504,7 +9504,7 @@ export function mountHeyBeanWebApp(mount) {
         window.clearTimeout(realtimeQueuedFollowUpTimer);
         realtimeQueuedFollowUpTimer = 0;
         const cleared = voiceOrchestrator.clearQueue('cleared');
-        const clearedIds = new Set(cleared.map((item) => item.id));
+        const clearedIds = new Set(cleared.filter((item) => !item.durable).map((item) => item.id));
         if (clearedIds.size) {
             state.messages = state.messages.filter((message) => !clearedIds.has(message?.metadata?.voice_queue_id));
         }
@@ -9536,6 +9536,18 @@ export function mountHeyBeanWebApp(mount) {
                 scheduleQueuedRealtimeFollowUp();
                 return;
             }
+            if (nextQueued.durable) {
+                resumeDurableQueuedRealtimeFollowUp(nextQueued).catch((error) => {
+                    nextQueued.deliveryAttempts = Number(nextQueued.deliveryAttempts || 0) + 1;
+                    if (nextQueued.deliveryAttempts >= 3) {
+                        voiceOrchestrator.dequeue();
+                        state.error = friendlyError(error, 'finish queued voice request');
+                    }
+                    render();
+                    scheduleQueuedRealtimeFollowUp();
+                });
+                return;
+            }
             if (!realtimeConversation.canContinue(nextQueued.admission.epoch)) {
                 voiceOrchestrator.dequeue();
                 scheduleQueuedRealtimeFollowUp();
@@ -9555,6 +9567,7 @@ export function mountHeyBeanWebApp(mount) {
                 admission: resumedAdmission,
                 transcriptCompletedAtMs: queued.transcriptCompletedAtMs,
                 supersedesClientRequestId: queued.supersedesClientRequestId,
+                clientRequestId: queued.clientRequestId,
             }).catch((error) => {
                 state.error = friendlyError(error, 'send realtime follow-up');
                 render();
@@ -9564,20 +9577,105 @@ export function mountHeyBeanWebApp(mount) {
         }, waitMs);
     }
 
+    async function persistQueuedRealtimeFollowUp(queued, content, transcriptCompletedAtMs) {
+        if (!state.session?.id) throw new Error('Bean has no active conversation to queue this request in.');
+        const metadata = webChatMetadata({
+            source: 'web_queued_voice',
+            client_request_id: queued.clientRequestId,
+            client_turn_id: queued.clientTurnId,
+            voice_request: true,
+            queued_during_active_work: true,
+            ...(!queued.supersedesClientRequestId && activeChatClientRequestId
+                ? { queued_after_client_request_id: String(activeChatClientRequestId).trim() }
+                : {}),
+            ...(queued.supersedesClientRequestId
+                ? { supersedes_client_request_id: queued.supersedesClientRequestId }
+                : {}),
+            requested_response_voice: state.user?.active_workspace_agent_profile?.settings?.voice?.voice
+                || state.user?.activeWorkspaceAgentProfile?.settings?.voice?.voice
+                || 'alloy',
+            voice_quality: realtimeVoiceQualityMetrics('queued_tool', transcriptCompletedAtMs, null),
+            voice_orchestration: realtimeOrchestrationMetadata(),
+            voice_queue_id: queued.id,
+        });
+        const path = `/assistant/sessions/${state.session.id}/runs`;
+        try {
+            return await api(path, {
+                method: 'POST',
+                body: { content, source: 'web_queued_voice', metadata },
+                timeoutMs: 15000,
+            });
+        } catch (error) {
+            // The POST may have committed before the connection failed. The stable id
+            // makes this lookup/retry safe and prevents a duplicate mutating action.
+            try {
+                return await api(`${path}/lookup?client_request_id=${encodeURIComponent(queued.clientRequestId)}`, {
+                    timeoutMs: 5000,
+                });
+            } catch (_) {
+                throw error;
+            }
+        }
+    }
+
+    async function resumeDurableQueuedRealtimeFollowUp(queued) {
+        if (queued.deliveryActive || !state.session?.id) return;
+        queued.deliveryActive = true;
+        try {
+            const result = await api(
+                `/assistant/sessions/${state.session.id}/runs/lookup?client_request_id=${encodeURIComponent(queued.clientRequestId)}`,
+                { timeoutMs: 5000 },
+            );
+            const status = String(result?.status || '').toLowerCase();
+            if (['queued', 'running', 'processing'].includes(status)) {
+                state.chatRunState = realtimeWorkingStatus(queued.transcript);
+                return;
+            }
+
+            voiceOrchestrator.dequeue();
+            state.messages.forEach((message) => {
+                if (message?.metadata?.voice_queue_id !== queued.id) return;
+                message.metadata = { ...(message.metadata || {}), client_queue_status: 'completed' };
+            });
+            if (result?.assistant_message) {
+                const assistantContent = safeAssistantDisplayContent(
+                    conversationalMessageContent(result.assistant_message.content || ''),
+                );
+                revealDeferredAssistantMessage(result.assistant_message, assistantContent);
+                if (assistantContent && realtimeVoiceDeliveryCanContinue(queued.admission.epoch)) {
+                    state.chatRunState = 'Bean is speaking…';
+                    render();
+                    await playBeanVoiceResponse(assistantContent);
+                }
+            } else if (!['completed', 'cancelled'].includes(status)) {
+                throw new Error('Bean could not finish the queued request.');
+            }
+            state.chatRunState = state.voiceWakeListening ? 'Listening for follow-up…' : 'Ready';
+            if (state.voiceWakeListening) setRealtimeFollowUpWindow();
+        } finally {
+            queued.deliveryActive = false;
+            scheduleQueuedRealtimeFollowUp();
+            render();
+        }
+    }
+
     function queueRealtimeFollowUpTranscript(text, options = {}) {
         const content = String(text || '').trim();
         const admission = options.admission;
         if (!content || !admission?.accepted || !realtimeConversation.canContinue(admission.epoch)) return;
         const supersedesClientRequestId = String(options.supersedesClientRequestId || '').trim();
-        const readyPromise = options.ready || null;
+        const clientRequestId = String(options.clientRequestId || '').trim() || `web-queued-voice-${newRealtimeClientTurnId()}`;
+        const clientTurnId = newRealtimeClientTurnId();
         const queued = voiceOrchestrator.enqueue({
             transcript: content,
             epoch: admission.epoch,
             admission,
             transcriptCompletedAtMs: Number(options.transcriptCompletedAtMs) || Date.now(),
             supersedesClientRequestId,
-            readyPromise,
-            ready: !readyPromise,
+            clientRequestId,
+            clientTurnId,
+            ready: false,
+            durable: false,
         });
         if (!queued) return;
         state.messages.push({
@@ -9587,18 +9685,40 @@ export function mountHeyBeanWebApp(mount) {
             metadata: {
                 voice_queue_id: queued.id,
                 client_queue_status: 'queued',
+                client_request_id: clientRequestId,
+                client_turn_id: clientTurnId,
             },
         });
-        if (readyPromise) {
-            Promise.resolve(readyPromise).finally(() => {
-                if (!voiceOrchestrator.queue.some((item) => item.id === queued.id)) return;
-                queued.ready = true;
-                queued.readyPromise = null;
-                scheduleQueuedRealtimeFollowUp();
-            });
-            return;
-        }
-        scheduleQueuedRealtimeFollowUp();
+        queued.readyPromise = persistQueuedRealtimeFollowUp(
+            queued,
+            content,
+            Number(options.transcriptCompletedAtMs) || Date.now(),
+        ).then((result) => {
+            if (!voiceOrchestrator.queue.some((item) => item.id === queued.id)) return result;
+            queued.durable = true;
+            queued.runId = result?.run?.id || null;
+            const index = state.messages.findIndex((message) => message?.metadata?.voice_queue_id === queued.id);
+            if (index >= 0 && result?.user_message) {
+                state.messages[index] = {
+                    ...result.user_message,
+                    metadata: {
+                        ...(result.user_message.metadata || {}),
+                        voice_queue_id: queued.id,
+                        client_queue_status: 'queued',
+                    },
+                };
+            }
+            return result;
+        }).catch((error) => {
+            queued.persistenceError = error;
+            state.error = 'I heard that request, but could not save it yet. Bean will retry it.';
+        }).finally(() => {
+            if (!voiceOrchestrator.queue.some((item) => item.id === queued.id)) return;
+            queued.ready = true;
+            queued.readyPromise = null;
+            render();
+            scheduleQueuedRealtimeFollowUp();
+        });
         return queued;
     }
 
@@ -10445,7 +10565,7 @@ export function mountHeyBeanWebApp(mount) {
             if (workIsActive && isQueueableRealtimeWorkFollowUp(command)) {
                 voiceOrchestrator.pendingTranscript = '';
                 updateVoiceWakeDraft('');
-                queueRealtimeFollowUpTranscript(text, {
+                queueRealtimeFollowUpTranscript(command, {
                     admission,
                     transcriptCompletedAtMs,
                 });
@@ -10482,7 +10602,7 @@ export function mountHeyBeanWebApp(mount) {
                     stopBeanVoicePlayback({ reason: 'superseded' });
                 }
             }
-            queueRealtimeFollowUpTranscript(text, {
+            queueRealtimeFollowUpTranscript(command, {
                 admission: queuedAdmission,
                 transcriptCompletedAtMs,
                 supersedesClientRequestId,
@@ -10567,6 +10687,7 @@ export function mountHeyBeanWebApp(mount) {
         const request = sendChatContent(command, {
             voiceRequest: true,
             deferAssistantMessage: true,
+            clientRequestId: options.clientRequestId,
             supersedesClientRequestId: options.supersedesClientRequestId,
             voiceQuality: realtimeVoiceQualityMetrics('tool', transcriptCompletedAtMs, null, { requestStartedAtMs }),
         })
