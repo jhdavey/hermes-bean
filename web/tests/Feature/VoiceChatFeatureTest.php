@@ -301,4 +301,22 @@ class VoiceChatFeatureTest extends TestCase
 
         $this->assertDatabaseCount('conversation_messages', 2);
     }
+
+    public function test_realtime_orchestrator_diagnostics_are_accepted_without_creating_chat_messages(): void
+    {
+        $token = $this->apiToken('voice-orchestrator-events@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/realtime/events', [
+            'reason' => 'missed_command',
+            'events' => [[
+                'event' => 'wake.detected',
+                'generation' => 4,
+                'epoch' => 2,
+                'turnId' => null,
+            ]],
+        ])->assertOk()
+            ->assertJsonPath('data.accepted', true);
+
+        $this->assertDatabaseCount('conversation_messages', 0);
+    }
 }

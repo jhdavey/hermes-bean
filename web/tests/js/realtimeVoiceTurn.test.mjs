@@ -2,11 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-    REALTIME_CONVERSATION_STATES,
     RealtimeCallDeduper,
-    RealtimeConversationController,
     RealtimeInputTranscriptBuffer,
-    RealtimeResponseLifecycle,
     RealtimeTurnPersistenceQueue,
     restoreSupersededUserTurn,
     stageOptimisticUserTurn,
@@ -27,7 +24,6 @@ import {
     isQueueableRealtimeWorkFollowUp,
     isVoiceFillerOnly,
     naturalizeRealtimeSpeechText,
-    realtimeFollowUpExpiry,
     realtimeMicrophoneConstraints,
     realtimeLocalTemporalAnswer,
     realtimeNeedsAppRuntime,
@@ -37,6 +33,22 @@ import {
     shouldDisplayRealtimeTranscriptDraft,
     stripRealtimeLocalWakePrefix,
 } from '../../resources/js/heybean/realtimeVoiceTurn.js';
+import { VoiceOrchestrator } from '../../resources/js/heybean/voiceOrchestrator.js';
+
+const REALTIME_CONVERSATION_STATES = Object.freeze({ WAKE_ONLY: 'wake_only', ACTIVE: 'active' });
+class RealtimeConversationController extends VoiceOrchestrator {
+    constructor() {
+        super();
+        this.connected(this.start());
+    }
+
+    snapshot() {
+        return { ...super.snapshot(), state: this.isActive() ? 'active' : 'wake_only' };
+    }
+}
+function RealtimeResponseLifecycle(clock = () => Date.now(), timers = {}) {
+    return new VoiceOrchestrator({ clock, timers }).responses;
+}
 
 globalThis.window ??= { matchMedia: () => null };
 const {
@@ -69,16 +81,12 @@ test('response requests carry lifecycle correlation metadata', () => {
     });
 });
 
-test('repeated transcript items and function calls are claimed once', () => {
+test('repeated function calls are claimed once', () => {
     const deduper = new RealtimeCallDeduper();
-
-    assert.equal(deduper.claimTranscript('input-1'), true);
-    assert.equal(deduper.claimTranscript('input-1'), false);
     assert.equal(deduper.claimToolCall('call-1'), true);
     assert.equal(deduper.claimToolCall('call-1'), false);
 
     deduper.reset();
-    assert.equal(deduper.claimTranscript('input-1'), true);
     assert.equal(deduper.claimToolCall('call-1'), true);
 });
 
@@ -556,10 +564,6 @@ test('barge-in cancellation cannot block the replacement on a hung old request',
 
     settleOldRequest();
     await oldRequest;
-});
-
-test('an activated voice conversation stays open until explicit reset', () => {
-    assert.equal(realtimeFollowUpExpiry(1_000), Number.POSITIVE_INFINITY);
 });
 
 test('natural follow-up sleep requires a new wake word without invalidating pending work', () => {

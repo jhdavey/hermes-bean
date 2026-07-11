@@ -11,6 +11,7 @@ use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class AssistantVoiceController extends Controller
@@ -79,6 +80,23 @@ class AssistantVoiceController extends Controller
             'approved' => true,
             'route' => 'assistant_runs',
         ]]);
+    }
+
+    public function realtimeEvents(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:120'],
+            'events' => ['required', 'array', 'max:50'],
+            'events.*' => ['array'],
+        ]);
+
+        Log::info('Bean voice orchestrator diagnostic.', [
+            'user_id' => $request->user()->id,
+            'reason' => $data['reason'],
+            'events' => $data['events'],
+        ]);
+
+        return response()->json(['data' => ['accepted' => true]]);
     }
 
     public function realtimeTurn(Request $request): JsonResponse

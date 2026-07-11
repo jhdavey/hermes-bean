@@ -5,7 +5,7 @@
     "scripts": {
         "build": "vite build",
         "dev": "vite",
-        "test:voice": "node --test tests/js/realtimeVoiceTurn.test.mjs tests/js/localWakeGate.test.mjs"
+        "test:voice": "node --test tests/js/voiceOrchestrator.test.mjs tests/js/realtimeVoiceTurn.test.mjs tests/js/localWakeGate.test.mjs"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",
