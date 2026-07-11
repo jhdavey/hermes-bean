@@ -40,7 +40,7 @@ export class LocalWakeGate {
         const requestedInFlightPcm = Math.floor(Number(options.maxInFlightPcm));
         this.maxInFlightPcm = Number.isFinite(requestedInFlightPcm) && requestedInFlightPcm > 0
             ? Math.min(requestedInFlightPcm, 32)
-            : 4;
+            : 12;
         this.onDetected = typeof options.onDetected === 'function' ? options.onDetected : () => {};
         this.onActivity = typeof options.onActivity === 'function' ? options.onActivity : () => {};
         this.onError = typeof options.onError === 'function' ? options.onError : () => {};

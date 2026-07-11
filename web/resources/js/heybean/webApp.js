@@ -240,6 +240,8 @@ export function mountHeyBeanWebApp(mount) {
     let realtimeDisconnectedTimer = 0;
     let realtimeMicrophoneMuteTimer = 0;
     let realtimeVoiceActivityDecayTimer = 0;
+    let realtimeWakeCommandTimer = 0;
+    let realtimeTranscriptCompletionTimer = 0;
     let realtimeVoiceActivityLevel = 0;
     const realtimePotentialBargeInItems = new Set();
     let chatAnnouncementTimer = 0;
@@ -9723,9 +9725,54 @@ export function mountHeyBeanWebApp(mount) {
         realtimeMicrophoneMuteTimer = 0;
     }
 
+    function clearRealtimeSpeechRecoveryTimers() {
+        window.clearTimeout(realtimeWakeCommandTimer);
+        realtimeWakeCommandTimer = 0;
+        window.clearTimeout(realtimeTranscriptCompletionTimer);
+        realtimeTranscriptCompletionTimer = 0;
+    }
+
     function clearRealtimeMediaRecoveryTimers() {
         clearRealtimeDisconnectedTimer();
         clearRealtimeMicrophoneMuteTimer();
+        clearRealtimeSpeechRecoveryTimers();
+    }
+
+    function recoverMissedRealtimeCommand(message) {
+        if (!state.voiceWakeListening || !realtimeVoiceActive || !realtimeConversation.isActive()) return;
+        realtimeLocalWakePending = false;
+        realtimePendingTranscript = '';
+        updateVoiceWakeDraft('');
+        state.chatRunState = 'Listening…';
+        render();
+        if (realtimeResponseActive || realtimeLaravelTurnInFlight || chatHasActiveTurn()) {
+            armRealtimeFollowUpWindow();
+            return;
+        }
+        const recoveryEpoch = realtimeConversation.capture();
+        playBeanVoiceResponse(message, { timeoutMs: 8000 }).finally(() => {
+            if (!realtimeConversation.isCurrent(recoveryEpoch) || !state.voiceWakeListening) return;
+            setRealtimeFollowUpWindow();
+            state.chatRunState = 'Listening for follow-up…';
+            render();
+        });
+    }
+
+    function armRealtimeWakeCommandWatchdog() {
+        window.clearTimeout(realtimeWakeCommandTimer);
+        realtimeWakeCommandTimer = window.setTimeout(() => {
+            realtimeWakeCommandTimer = 0;
+            if (!realtimeLocalWakePending) return;
+            recoverMissedRealtimeCommand('I heard Hey Bean, but missed the request. Please say it again.');
+        }, 5000);
+    }
+
+    function armRealtimeTranscriptCompletionWatchdog() {
+        window.clearTimeout(realtimeTranscriptCompletionTimer);
+        realtimeTranscriptCompletionTimer = window.setTimeout(() => {
+            realtimeTranscriptCompletionTimer = 0;
+            recoverMissedRealtimeCommand('I heard you, but could not finish transcribing that. Please say it again.');
+        }, 8000);
     }
 
     function scheduleRealtimeDisconnectedTeardown(peerConnection, connectionIsCurrent) {
@@ -9775,6 +9822,7 @@ export function mountHeyBeanWebApp(mount) {
         updateVoiceWakeDraft('');
         state.chatRunState = 'Listening…';
         armRealtimeFollowUpWindow();
+        armRealtimeWakeCommandWatchdog();
         render();
     }
 
@@ -10032,6 +10080,9 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         if (payload.type === 'input_audio_buffer.speech_started') {
+            window.clearTimeout(realtimeWakeCommandTimer);
+            realtimeWakeCommandTimer = 0;
+            armRealtimeTranscriptCompletionWatchdog();
             const transcriptId = payload.item_id || payload.item?.id || '';
             realtimeConversation.noteTranscriptOrigin(transcriptId);
             if (realtimeConversation.isActive()) {
@@ -10093,6 +10144,8 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         if (payload.type === 'conversation.item.input_audio_transcription.completed') {
+            window.clearTimeout(realtimeTranscriptCompletionTimer);
+            realtimeTranscriptCompletionTimer = 0;
             const transcriptId = payload.item_id || payload.item?.id || '';
             const transcript = realtimeInputTranscripts.complete({
                 itemId: transcriptId,
@@ -10125,6 +10178,8 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         if (payload.type === 'conversation.item.input_audio_transcription.failed') {
+            window.clearTimeout(realtimeTranscriptCompletionTimer);
+            realtimeTranscriptCompletionTimer = 0;
             realtimePotentialBargeInItems.delete(payload.item_id || payload.item?.id || '');
             realtimeInputTranscripts.discard({
                 itemId: payload.item_id || payload.item?.id || '',
@@ -10133,8 +10188,7 @@ export function mountHeyBeanWebApp(mount) {
             updateRealtimeVoiceActivity(0, { decay: false });
             if (realtimeConversation.isActive()) {
                 state.error = payload.error?.message || payload.item?.error?.message || 'Bean could not understand that audio. Please try again.';
-                setRealtimeListeningStatus();
-                render();
+                recoverMissedRealtimeCommand('I could not understand that. Please say it again.');
             }
             return;
         }
@@ -10821,6 +10875,7 @@ export function mountHeyBeanWebApp(mount) {
         // Close the provider-bound microphone path before any asynchronous
         // cancellation, persistence, or acknowledgement work begins.
         realtimeLocalWakeGate?.resetAfterTurn();
+        clearRealtimeSpeechRecoveryTimers();
         clearRealtimeVoiceInputFeedback();
         const conversationEpoch = realtimeConversation.stop();
         clearRealtimeFollowUpWindow();

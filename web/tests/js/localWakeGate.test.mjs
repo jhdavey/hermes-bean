@@ -414,6 +414,23 @@ test('PCM transfer is bounded until matching worker acknowledgements release cap
     assert.deepEqual(pcmMessages()[2].transfer, [buffers[2]]);
 });
 
+test('the production wake queue preserves over one second of decode backpressure', async () => {
+    const harness = createHarness({ maxInFlightPcm: null });
+    await harness.gate.start(harness.rawStream);
+    const worker = harness.workers[0];
+    const worklet = harness.worklets[0];
+    const generation = harness.gate.currentGeneration();
+    worker.emit({ type: 'ready', generation });
+
+    for (let index = 0; index < 13; index += 1) {
+        worklet.port.emit({ type: 'audio', samples: new ArrayBuffer(16) });
+    }
+
+    const pcmMessages = worker.messages.filter(({ message }) => message.type === 'audio');
+    assert.equal(pcmMessages.length, 12);
+    assert.equal(harness.gate.pendingPcmChunks(), 12);
+});
+
 test('current-generation microphone activity is normalized for presentation only', async () => {
     const harness = createHarness();
     await harness.gate.start(harness.rawStream);
