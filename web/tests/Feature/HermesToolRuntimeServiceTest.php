@@ -245,6 +245,30 @@ class HermesToolRuntimeServiceTest extends TestCase
         Http::assertSentCount(3);
     }
 
+    public function test_fast_no_tools_timeout_retries_without_escalating_to_agent_tools(): void
+    {
+        $attempts = 0;
+        Http::fake(function () use (&$attempts) {
+            $attempts++;
+            throw new ConnectionException('cURL error 28: Operation timed out with 0 bytes received');
+        });
+        $token = $this->apiToken('tool-fast-terminal-recovery@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+            'content' => 'What can you help me manage in HeyBean?',
+            'metadata' => ['source' => 'web'],
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.metadata.provider', 'terminal_recovery')
+            ->assertJsonFragment(['event_type' => 'runtime.fast_response_failed_terminal']);
+
+        $this->assertSame(2, $attempts);
+        $this->assertDatabaseMissing('activity_events', ['event_type' => 'runtime.tool_loop_started']);
+    }
+
     public function test_current_local_time_and_date_bypass_models_and_use_client_clock(): void
     {
         Http::fake();

@@ -235,18 +235,46 @@ class HermesToolRuntimeService implements HermesRuntimeService
             try {
                 return $this->sendFastNoToolsResponse($session, $userMessage, $received, $routed, $intentRoute, $runtimeStartedAt);
             } catch (\Throwable $exception) {
-                Log::warning('Bean fast no-tools lane fell back to agent runtime.', [
+                Log::warning('Bean fast no-tools lane is retrying without agent escalation.', [
                     'session_id' => $session->id,
                     'message_id' => $userMessage->id,
                     'lane' => $intentRoute['lane'] ?? null,
                     'exception' => $exception->getMessage(),
                 ]);
-                $this->recordEvent($session, 'runtime.fast_response_fallback', [
+                $this->recordEvent($session, 'runtime.fast_response_retrying', [
                     'message_id' => $userMessage->id,
                     'lane' => $intentRoute['lane'] ?? null,
                     'reason' => $exception->getMessage(),
                     'duration_ms' => $this->elapsedMs($runtimeStartedAt),
                 ], 'hermes.fast_chat', 'failed');
+                try {
+                    return $this->sendFastNoToolsResponse(
+                        $session,
+                        $userMessage,
+                        $received,
+                        $routed,
+                        $intentRoute,
+                        $runtimeStartedAt,
+                        max(8.0, (float) config('services.hermes_runtime.fast_chat_recovery_timeout', 8)),
+                        2,
+                    );
+                } catch (\Throwable $retryException) {
+                    Log::error('Bean fast no-tools lane exhausted its retry.', [
+                        'session_id' => $session->id,
+                        'message_id' => $userMessage->id,
+                        'lane' => $intentRoute['lane'] ?? null,
+                        'exception' => $retryException->getMessage(),
+                    ]);
+
+                    return $this->sendFastNoToolsFailureResponse(
+                        $session,
+                        $userMessage,
+                        $received,
+                        $routed,
+                        $runtimeStartedAt,
+                        $retryException,
+                    );
+                }
             }
         }
 
@@ -888,13 +916,61 @@ class HermesToolRuntimeService implements HermesRuntimeService
         return $result;
     }
 
+    private function sendFastNoToolsFailureResponse(
+        ConversationSession $session,
+        ConversationMessage $userMessage,
+        ActivityEvent $received,
+        ActivityEvent $routed,
+        float $runtimeStartedAt,
+        \Throwable $exception,
+    ): array {
+        return DB::transaction(function () use ($session, $userMessage, $received, $routed, $runtimeStartedAt, $exception): array {
+            $this->lockRunForAssistantPersistence($session, $userMessage);
+            $failed = $this->recordEvent($session, 'runtime.fast_response_failed_terminal', [
+                'message_id' => $userMessage->id,
+                'reason' => mb_substr($exception->getMessage(), 0, 500),
+                'duration_ms' => $this->elapsedMs($runtimeStartedAt),
+            ], 'hermes.fast_chat', 'failed');
+            $assistantMessage = ConversationMessage::create([
+                'user_id' => $session->user_id,
+                'conversation_session_id' => $session->id,
+                'role' => 'assistant',
+                'content' => 'I’m sorry — I couldn’t finish that response. Please try again.',
+                'metadata' => [
+                    ...$this->assistantRunMetadata($userMessage),
+                    'runtime' => 'fast_no_tools',
+                    'provider' => 'terminal_recovery',
+                    'failure_reason' => 'provider_timeout',
+                ],
+            ]);
+            $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
+                'message_id' => $assistantMessage->id,
+                'lane' => 'fast_no_tools_terminal_recovery',
+                'first_response_ms' => $this->elapsedMs($runtimeStartedAt),
+            ]);
+            $session->update(['status' => 'active', 'last_activity_at' => now()]);
+
+            return [
+                'status' => 'completed',
+                'session' => $session->refresh(),
+                'user_message' => $userMessage,
+                'assistant_message' => $assistantMessage,
+                'events' => collect([$received, $routed, $failed, $messageCompleted]),
+                'usage' => null,
+                'blocker' => null,
+            ];
+        });
+    }
+
     private function sendFastNoToolsResponse(
         ConversationSession $session,
         ConversationMessage $userMessage,
         ActivityEvent $received,
         ActivityEvent $routed,
         array $intentRoute,
-        float $runtimeStartedAt
+        float $runtimeStartedAt,
+        ?float $timeoutSeconds = null,
+        int $attempt = 1,
     ): array {
         $model = trim((string) config('services.hermes_runtime.fast_chat_model', ''));
         $model = $model !== '' ? $model : (string) config('services.hermes_runtime.crud_planner_model', 'gpt-5-nano');
@@ -943,10 +1019,17 @@ class HermesToolRuntimeService implements HermesRuntimeService
             'model' => $model,
             'model_route' => $modelRoute,
             'history_message_count' => max(0, count($messages) - 3),
+            'attempt' => $attempt,
         ], 'hermes.fast_chat', 'started');
         $session->update(['status' => 'running', 'last_activity_at' => now()]);
 
-        $response = $this->chatCompletion($modelRoute, $messages, false, 'none', (float) config('services.hermes_runtime.fast_chat_timeout', 2.5));
+        $response = $this->chatCompletion(
+            $modelRoute,
+            $messages,
+            false,
+            'none',
+            $timeoutSeconds ?? max(5.0, (float) config('services.hermes_runtime.fast_chat_timeout', 6)),
+        );
         $assistantContent = $this->assistantSafeResponseContent(
             $this->normalizedAssistantContent(data_get($response, 'choices.0.message.content', ''))
         );

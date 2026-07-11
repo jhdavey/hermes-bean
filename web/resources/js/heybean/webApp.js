@@ -9959,6 +9959,18 @@ export function mountHeyBeanWebApp(mount) {
 
         realtimeDataChannel = peerConnection.createDataChannel('oai-events');
         const dataChannel = realtimeDataChannel;
+        let dataChannelReady = false;
+        let mediaReady = false;
+        let resolveTransportReady;
+        let rejectTransportReady;
+        const transportReady = new Promise((resolve, reject) => {
+            resolveTransportReady = resolve;
+            rejectTransportReady = reject;
+        });
+        transportReady.catch(() => {});
+        const markTransportReady = () => {
+            if (dataChannelReady && mediaReady) resolveTransportReady();
+        };
         const connectionIsCurrent = () => connectionGeneration === realtimeConnectionGeneration
             && realtimeDataChannel === dataChannel
             && realtimePeerConnection === peerConnection
@@ -9974,17 +9986,19 @@ export function mountHeyBeanWebApp(mount) {
         });
         dataChannel.addEventListener('open', () => {
             if (!connectionIsCurrent()) return;
+            dataChannelReady = true;
             realtimeSend(realtimeInstructionsUpdate());
-            state.chatRunState = 'Listening for “Hey Bean”…';
-            render();
+            markTransportReady();
         });
         dataChannel.addEventListener('message', (event) => {
             if (connectionIsCurrent()) handleRealtimeEvent(event);
         });
         dataChannel.addEventListener('close', () => {
+            rejectTransportReady(new Error('Realtime voice data channel closed before it became ready.'));
             if (connectionIsCurrent()) handleRealtimeConnectionLoss('Bean voice disconnected. Tap the Bean button to reconnect.');
         });
         dataChannel.addEventListener('error', () => {
+            rejectTransportReady(new Error('Realtime voice data channel failed before it became ready.'));
             if (connectionIsCurrent()) handleRealtimeConnectionLoss('Bean voice hit a connection problem. Tap the Bean button to reconnect.');
         });
         peerConnection.addEventListener('connectionstatechange', () => {
@@ -9994,10 +10008,13 @@ export function mountHeyBeanWebApp(mount) {
                 return;
             }
             if (peerConnection.connectionState === 'connected') {
+                mediaReady = true;
+                markTransportReady();
                 clearRealtimeDisconnectedTimer();
                 return;
             }
             if (['failed', 'closed'].includes(peerConnection.connectionState)) {
+                rejectTransportReady(new Error('Realtime voice media failed before it became ready.'));
                 clearRealtimeDisconnectedTimer();
                 handleRealtimeConnectionLoss('Bean voice disconnected. Tap the Bean button to reconnect.');
             }
@@ -10042,6 +10059,21 @@ export function mountHeyBeanWebApp(mount) {
         }
         if (!connectionIsCurrent()) throw new Error('Realtime voice connection was superseded.');
         await peerConnection.setRemoteDescription({ type: 'answer', sdp: await sdpResponse.text() });
+        let transportTimer = null;
+        try {
+            await Promise.race([
+                transportReady,
+                new Promise((_, reject) => {
+                    transportTimer = window.setTimeout(
+                        () => reject(new Error('Realtime voice transport took too long to become ready.')),
+                        10000,
+                    );
+                }),
+            ]);
+        } finally {
+            if (transportTimer !== null) window.clearTimeout(transportTimer);
+        }
+        if (!connectionIsCurrent()) throw new Error('Realtime voice connection was superseded.');
     }
 
     function handleRealtimeConnectionLoss(message) {
@@ -10526,7 +10558,10 @@ export function mountHeyBeanWebApp(mount) {
         state.chatDraft = '';
         state.messages = state.messages.filter((message) => !message?.metadata?.realtime_draft);
         render();
-        const acknowledgement = speakRealtimeInstructions(realtimeWorkingAckInstructions(command), { purpose: 'acknowledgement' });
+        const acknowledgement = speakRealtimeInstructions(realtimeWorkingAckInstructions(command), {
+            purpose: 'acknowledgement',
+            timeoutMs: 5000,
+        });
         const requestStartedAtMs = Date.now();
         const backendRequestWorkspaceId = String(currentWorkspaceId() || '');
         const request = sendChatContent(command, {
@@ -10540,7 +10575,7 @@ export function mountHeyBeanWebApp(mount) {
         try {
             state.chatRunState = realtimeWorkingStatus(command);
             render();
-            await acknowledgement;
+            await Promise.race([acknowledgement, request]);
             armRealtimeFollowUpWindow();
             const requestOutcome = await request;
             if (requestOutcome.error) {
