@@ -337,6 +337,99 @@ class VoiceChatFeatureTest extends TestCase
         }
     }
 
+    public function test_evening_weather_voice_read_uses_open_meteo_without_the_agent_queue(): void
+    {
+        Queue::fake();
+        Carbon::setTestNow(Carbon::parse('2026-07-11 17:55:00', 'UTC'));
+        Http::fake(function ($request) {
+            if (str_starts_with($request->url(), 'https://geocoding-api.open-meteo.com/v1/search')) {
+                $this->assertStringContainsString('name=Universal%20Studios', $request->url());
+
+                return Http::response(['results' => [[
+                    'name' => 'Universal Studios',
+                    'latitude' => 28.4743,
+                    'longitude' => -81.4678,
+                    'admin1' => 'Florida',
+                    'country_code' => 'US',
+                ]]]);
+            }
+
+            return Http::response([
+                'timezone' => 'America/New_York',
+                'hourly' => [
+                    'time' => ['2026-07-11T18:00'],
+                    'temperature_2m' => [84.0],
+                    'apparent_temperature' => [89.0],
+                    'relative_humidity_2m' => [72],
+                    'precipitation_probability' => [35],
+                    'precipitation' => [0.01],
+                    'weather_code' => [2],
+                    'cloud_cover' => [48],
+                    'wind_speed_10m' => [8.0],
+                    'wind_direction_10m' => [110],
+                    'wind_gusts_10m' => [14.0],
+                ],
+            ]);
+        });
+
+        try {
+            $token = $this->apiToken('voice-fast-weather@example.com');
+            $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+                ->assertCreated()
+                ->json('data.id');
+            $turn = 'voice-fast-weather-turn';
+            $metadata = [
+                'client_turn_id' => $turn,
+                'client_request_id' => $turn,
+                'client_timezone' => 'America/New_York',
+                'voice_request' => true,
+            ];
+            $content = "What's the weather gonna be like at Universal Studios this evening?";
+            $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
+                'session_id' => $sessionId,
+                'user_text' => $content,
+                'outcome' => 'accepted',
+                'metadata' => $metadata,
+            ])->assertCreated();
+
+            $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+                'content' => $content,
+                'source' => 'web_routed_chat',
+                'metadata' => $metadata,
+            ])->assertOk()
+                ->assertJsonPath('data.status', 'completed')
+                ->assertJsonPath(
+                    'data.assistant_message.content',
+                    'At 6 PM today in Universal Studios, Florida, US, expect 84°F and partly cloudy, with a 35% chance of precipitation and winds around 8 mph.',
+                );
+
+            Queue::assertNothingPushed();
+
+            $followUpTurn = 'voice-fast-weather-follow-up';
+            $followUpMetadata = [...$metadata, 'client_turn_id' => $followUpTurn, 'client_request_id' => $followUpTurn];
+            $followUp = 'Did you get the weather forecast for later?';
+            $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
+                'session_id' => $sessionId,
+                'user_text' => $followUp,
+                'outcome' => 'accepted',
+                'metadata' => $followUpMetadata,
+            ])->assertCreated();
+            $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+                'content' => $followUp,
+                'source' => 'web_routed_chat',
+                'metadata' => $followUpMetadata,
+            ])->assertOk()
+                ->assertJsonPath('data.status', 'completed')
+                ->assertJsonPath(
+                    'data.assistant_message.content',
+                    'At 6 PM today in Universal Studios, Florida, US, expect 84°F and partly cloudy, with a 35% chance of precipitation and winds around 8 mph.',
+                );
+            Queue::assertNothingPushed();
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_realtime_turn_persists_acceptance_and_terminal_interruption_without_an_assistant_message(): void
     {
         $token = $this->apiToken('voice-turn-interrupted@example.com');

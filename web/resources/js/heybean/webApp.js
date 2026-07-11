@@ -10812,6 +10812,7 @@ export function mountHeyBeanWebApp(mount) {
             });
             return result;
         });
+        let requestSettled = false;
         const request = durableAdmission.then(() => sendChatContent(command, {
             voiceRequest: true,
             deferAssistantMessage: true,
@@ -10821,17 +10822,26 @@ export function mountHeyBeanWebApp(mount) {
             userAlreadyStaged: true,
         }))
             .then((result) => ({ result, error: null }))
-            .catch((error) => ({ result: null, error }));
+            .catch((error) => ({ result: null, error }))
+            .then((outcome) => {
+                requestSettled = true;
+                return outcome;
+            });
         // sendChatContent stages and renders the accepted user message before
         // any audio acknowledgement can play, so the turn never appears to
         // vanish from chat. The acknowledgement text is deterministic and
         // cannot improvise a follow-up question.
         const acknowledgement = durableAdmission
-            .then(() => speakRealtimeBeanText(realtimeWorkingAcknowledgement(command), {
-                purpose: 'acknowledgement',
-                timeoutMs: 5000,
-            }))
+            .then(async () => {
+                await new Promise((resolve) => window.setTimeout(resolve, 250));
+                if (requestSettled) return { skipped: true };
+                return speakRealtimeBeanText(realtimeWorkingAcknowledgement(command), {
+                    purpose: 'acknowledgement',
+                    timeoutMs: 5000,
+                });
+            })
             .then((spoken) => {
+                if (spoken?.skipped) return spoken;
                 const audioLatencyMs = Number(spoken?.audioStartedAtMs)
                     ? Math.max(0, spoken.audioStartedAtMs - transcriptCompletedAtMs)
                     : null;
@@ -10864,6 +10874,10 @@ export function mountHeyBeanWebApp(mount) {
             }
             const result = requestOutcome.result;
             if (result?.assistantContent) {
+                // Never start final speech while an acknowledgement is still
+                // playing; fast results skip the delayed acknowledgement, and
+                // slower results finish it before final delivery.
+                await acknowledgement.catch(() => null);
                 const followUpWasActive = realtimeTurnCanContinue(turnEpoch);
                 const resultSessionId = String(
                     result.result?.session?.id

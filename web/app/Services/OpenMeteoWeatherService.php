@@ -10,6 +10,45 @@ use Illuminate\Support\Facades\Log;
 
 class OpenMeteoWeatherService
 {
+    public function locationForQuery(string $query): string
+    {
+        return $this->weatherLocationQuery($query, '');
+    }
+
+    public function forecastForQuery(string $query, string $timezone = '', array $logContext = []): ?array
+    {
+        if (! $this->looksLikeWeatherLookup($query, '')) {
+            return null;
+        }
+
+        $arguments = [
+            'query' => $query,
+            'domain' => 'weather',
+            'intent' => 'current_weather',
+        ];
+        $targetTime = $this->structuredWeatherTime($arguments);
+        if ($targetTime === null) {
+            $targetTime = match (true) {
+                preg_match('/\b(?:this|later(?:\s+in\s+the)?)\s+morning\b/iu', $query) === 1 => '09:00',
+                preg_match('/\b(?:this|later(?:\s+in\s+the)?)\s+afternoon\b/iu', $query) === 1 => '15:00',
+                preg_match('/\b(?:this|later(?:\s+in\s+the)?)\s+evening\b/iu', $query) === 1 => '18:00',
+                preg_match('/\btonight\b/iu', $query) === 1 => '20:00',
+                default => null,
+            };
+        }
+        $targetDate = $this->structuredWeatherDate($arguments, $timezone, $targetTime);
+        if ($targetTime !== null) {
+            $arguments['time'] = $targetTime;
+            $arguments['date'] = $targetDate ?? $this->weatherNow($timezone)->toDateString();
+            $arguments['intent'] = 'weather_forecast';
+        } elseif ($targetDate !== null) {
+            $arguments['date'] = $targetDate;
+            $arguments['intent'] = 'weather_forecast';
+        }
+
+        return $this->weatherForIntent($arguments, $timezone, $logContext);
+    }
+
     public function weatherForIntent(array $arguments, string $timezone = '', array $logContext = []): ?array
     {
         if (! $this->structuredWeatherIntentPresent($arguments)) {
@@ -528,6 +567,15 @@ class OpenMeteoWeatherService
 
     private function openMeteoGeocodePlace(string $locationQuery, array $logContext = []): array
     {
+        $useCache = ! app()->runningUnitTests();
+        $cacheKey = 'open_meteo_geocode:'.sha1(mb_strtolower($locationQuery));
+        if ($useCache) {
+            $cached = Cache::get($cacheKey);
+            if (is_array($cached)) {
+                return $cached;
+            }
+        }
+
         $parsed = $this->parseWeatherLocationForGeocoding($locationQuery);
         $query = [
             'name' => $parsed['name'],
@@ -559,6 +607,7 @@ class OpenMeteoWeatherService
             ->filter(fn (mixed $place): bool => is_array($place) && is_numeric($place['latitude'] ?? null) && is_numeric($place['longitude'] ?? null));
 
         $region = $parsed['region'];
+        $place = null;
         if ($region !== null) {
             $filtered = $results->first(function (mixed $place) use ($region): bool {
                 if (! is_array($place)) {
@@ -571,13 +620,17 @@ class OpenMeteoWeatherService
             });
 
             if (is_array($filtered)) {
-                return ['place' => $filtered, 'error_code' => null];
+                $place = $filtered;
             }
         }
 
-        $place = $results->first();
+        $place ??= $results->first();
+        $result = ['place' => is_array($place) ? $place : null, 'error_code' => null];
+        if ($useCache) {
+            Cache::put($cacheKey, $result, now()->addHours(is_array($place) ? 24 : 1));
+        }
 
-        return ['place' => is_array($place) ? $place : null, 'error_code' => null];
+        return $result;
     }
 
     private function parseWeatherLocationForGeocoding(string $location): array

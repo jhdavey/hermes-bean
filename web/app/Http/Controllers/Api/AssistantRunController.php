@@ -10,6 +10,7 @@ use App\Models\ConversationSession;
 use App\Services\AssistantRunService;
 use App\Services\BeanIntentRouter;
 use App\Services\FastCalendarReadService;
+use App\Services\FastWeatherReadService;
 use App\Services\HermesRuntimeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,6 +24,7 @@ class AssistantRunController extends Controller
         private readonly HermesRuntimeService $runtime,
         private readonly BeanIntentRouter $intentRouter,
         private readonly FastCalendarReadService $fastCalendarReads,
+        private readonly FastWeatherReadService $fastWeatherReads,
     ) {}
 
     public function store(Request $request, string $session): JsonResponse
@@ -45,13 +47,11 @@ class AssistantRunController extends Controller
             $existingRun = $this->existingClientRequestRun($ownedSession, $clientRequestId);
 
             if ($existingRun instanceof AssistantRun) {
-                if (($intentRoute['lane'] ?? null) === BeanIntentRouter::NEEDS_APP_READ
+                if (in_array(($intentRoute['lane'] ?? null), [BeanIntentRouter::NEEDS_APP_READ, BeanIntentRouter::NEEDS_EXTERNAL_LOOKUP], true)
                     && $existingRun->userMessage instanceof ConversationMessage) {
-                    $fastAnswer = $this->fastCalendarReads->resolve(
-                        $ownedSession,
-                        $data['content'],
-                        $data['metadata'] ?? [],
-                    );
+                    $fastAnswer = ($intentRoute['lane'] ?? null) === BeanIntentRouter::NEEDS_APP_READ
+                        ? $this->fastCalendarReads->resolve($ownedSession, $data['content'], $data['metadata'] ?? [])
+                        : $this->fastWeatherReads->resolve($ownedSession, $data['content'], $data['metadata'] ?? []);
                     if ($fastAnswer !== null) {
                         $completed = $this->runs->completeExistingMessageImmediately(
                             $ownedSession,
@@ -95,12 +95,10 @@ class AssistantRunController extends Controller
                 ->first();
 
             if ($existingUserMessage instanceof ConversationMessage) {
-                if (($intentRoute['lane'] ?? null) === BeanIntentRouter::NEEDS_APP_READ) {
-                    $fastAnswer = $this->fastCalendarReads->resolve(
-                        $ownedSession,
-                        $data['content'],
-                        $data['metadata'] ?? [],
-                    );
+                if (in_array(($intentRoute['lane'] ?? null), [BeanIntentRouter::NEEDS_APP_READ, BeanIntentRouter::NEEDS_EXTERNAL_LOOKUP], true)) {
+                    $fastAnswer = ($intentRoute['lane'] ?? null) === BeanIntentRouter::NEEDS_APP_READ
+                        ? $this->fastCalendarReads->resolve($ownedSession, $data['content'], $data['metadata'] ?? [])
+                        : $this->fastWeatherReads->resolve($ownedSession, $data['content'], $data['metadata'] ?? []);
                     if ($fastAnswer !== null) {
                         $completed = $this->runs->completeExistingMessageImmediately(
                             $ownedSession,
@@ -315,13 +313,12 @@ class AssistantRunController extends Controller
 
         if ($existingRun instanceof AssistantRun) {
             $intentRoute = $this->intentRouter->route($existingRun->input);
-            if (($intentRoute['lane'] ?? null) === BeanIntentRouter::NEEDS_APP_READ
+            if (in_array(($intentRoute['lane'] ?? null), [BeanIntentRouter::NEEDS_APP_READ, BeanIntentRouter::NEEDS_EXTERNAL_LOOKUP], true)
                 && $existingRun->userMessage instanceof ConversationMessage) {
-                $fastAnswer = $this->fastCalendarReads->resolve(
-                    $ownedSession,
-                    $existingRun->input,
-                    is_array($existingRun->metadata) ? $existingRun->metadata : [],
-                );
+                $runMetadata = is_array($existingRun->metadata) ? $existingRun->metadata : [];
+                $fastAnswer = ($intentRoute['lane'] ?? null) === BeanIntentRouter::NEEDS_APP_READ
+                    ? $this->fastCalendarReads->resolve($ownedSession, $existingRun->input, $runMetadata)
+                    : $this->fastWeatherReads->resolve($ownedSession, $existingRun->input, $runMetadata);
                 if ($fastAnswer !== null) {
                     $completed = $this->runs->completeExistingMessageImmediately(
                         $ownedSession,
