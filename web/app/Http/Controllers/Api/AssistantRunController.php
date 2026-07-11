@@ -9,6 +9,7 @@ use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Services\AssistantRunService;
 use App\Services\BeanIntentRouter;
+use App\Services\FastCalendarReadService;
 use App\Services\HermesRuntimeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,6 +22,7 @@ class AssistantRunController extends Controller
         private readonly AssistantRunService $runs,
         private readonly HermesRuntimeService $runtime,
         private readonly BeanIntentRouter $intentRouter,
+        private readonly FastCalendarReadService $fastCalendarReads,
     ) {}
 
     public function store(Request $request, string $session): JsonResponse
@@ -38,10 +40,43 @@ class AssistantRunController extends Controller
         $data['metadata'] = $this->runs->sanitizeClientMetadata($data['metadata'] ?? []);
         $source = (string) ($data['source'] ?? data_get($data, 'metadata.source', 'http'));
         $clientRequestId = trim((string) data_get($data, 'metadata.client_request_id', ''));
+        $intentRoute = $this->intentRouter->route($data['content']);
         if ($clientRequestId !== '') {
             $existingRun = $this->existingClientRequestRun($ownedSession, $clientRequestId);
 
             if ($existingRun instanceof AssistantRun) {
+                if (($intentRoute['lane'] ?? null) === BeanIntentRouter::NEEDS_APP_READ
+                    && $existingRun->userMessage instanceof ConversationMessage) {
+                    $fastAnswer = $this->fastCalendarReads->resolve(
+                        $ownedSession,
+                        $data['content'],
+                        $data['metadata'] ?? [],
+                    );
+                    if ($fastAnswer !== null) {
+                        $completed = $this->runs->completeExistingMessageImmediately(
+                            $ownedSession,
+                            $existingRun->userMessage,
+                            $fastAnswer,
+                            [
+                                ...($data['metadata'] ?? []),
+                                'bean_intent' => $intentRoute,
+                                'bean_intent_lane' => $intentRoute['lane'],
+                            ],
+                            $source,
+                        );
+
+                        return response()->json(['data' => [
+                            'status' => $completed['run']->status,
+                            'session' => $ownedSession->refresh(),
+                            'run' => $completed['run'],
+                            'user_message' => $completed['user_message'],
+                            'assistant_message' => $completed['assistant_message'],
+                            'events' => $completed['events'],
+                            'intent' => $intentRoute,
+                        ]], $this->runResponseStatus($completed['run']));
+                    }
+                }
+
                 $existingRun = $this->runs->prepareRunForBackgroundResponse($existingRun)
                     ->load(['session', 'userMessage', 'assistantMessage']);
 
@@ -60,6 +95,37 @@ class AssistantRunController extends Controller
                 ->first();
 
             if ($existingUserMessage instanceof ConversationMessage) {
+                if (($intentRoute['lane'] ?? null) === BeanIntentRouter::NEEDS_APP_READ) {
+                    $fastAnswer = $this->fastCalendarReads->resolve(
+                        $ownedSession,
+                        $data['content'],
+                        $data['metadata'] ?? [],
+                    );
+                    if ($fastAnswer !== null) {
+                        $completed = $this->runs->completeExistingMessageImmediately(
+                            $ownedSession,
+                            $existingUserMessage,
+                            $fastAnswer,
+                            [
+                                ...($data['metadata'] ?? []),
+                                'bean_intent' => $intentRoute,
+                                'bean_intent_lane' => $intentRoute['lane'],
+                            ],
+                            $source,
+                        );
+
+                        return response()->json(['data' => [
+                            'status' => 'completed',
+                            'session' => $ownedSession->refresh(),
+                            'run' => $completed['run'],
+                            'user_message' => $completed['user_message'],
+                            'assistant_message' => $completed['assistant_message'],
+                            'events' => $completed['events'],
+                            'intent' => $intentRoute,
+                        ]], 200);
+                    }
+                }
+
                 $assistantMessage = ConversationMessage::query()
                     ->where('user_id', $ownedSession->user_id)
                     ->where('conversation_session_id', $ownedSession->id)
@@ -122,7 +188,6 @@ class AssistantRunController extends Controller
         }
 
         $metadata = $data['metadata'] ?? [];
-        $intentRoute = $this->intentRouter->route($data['content']);
         $metadata['bean_intent'] = $intentRoute;
         $metadata['bean_intent_lane'] = $intentRoute['lane'];
 
@@ -249,6 +314,34 @@ class AssistantRunController extends Controller
             ->first();
 
         if ($existingRun instanceof AssistantRun) {
+            $intentRoute = $this->intentRouter->route($existingRun->input);
+            if (($intentRoute['lane'] ?? null) === BeanIntentRouter::NEEDS_APP_READ
+                && $existingRun->userMessage instanceof ConversationMessage) {
+                $fastAnswer = $this->fastCalendarReads->resolve(
+                    $ownedSession,
+                    $existingRun->input,
+                    is_array($existingRun->metadata) ? $existingRun->metadata : [],
+                );
+                if ($fastAnswer !== null) {
+                    $completed = $this->runs->completeExistingMessageImmediately(
+                        $ownedSession,
+                        $existingRun->userMessage,
+                        $fastAnswer,
+                        [
+                            ...(is_array($existingRun->metadata) ? $existingRun->metadata : []),
+                            'bean_intent' => $intentRoute,
+                            'bean_intent_lane' => $intentRoute['lane'],
+                        ],
+                        $existingRun->source,
+                    );
+
+                    return response()->json(
+                        ['data' => $this->runResponsePayload($completed['run']->load(['session', 'userMessage', 'assistantMessage']), $ownedSession)],
+                        200,
+                    );
+                }
+            }
+
             $existingRun = $this->runs->prepareRunForBackgroundResponse($existingRun)
                 ->load(['session', 'userMessage', 'assistantMessage']);
 

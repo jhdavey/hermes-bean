@@ -298,6 +298,114 @@ class AssistantRunService
     }
 
     /**
+     * Complete a bounded deterministic read without waiting for the agent queue.
+     * The completed run keeps the same idempotency, audit, and reload contract as
+     * queued voice work.
+     *
+     * @return array{run:AssistantRun,user_message:ConversationMessage,assistant_message:ConversationMessage,event:ActivityEvent,events:array<int, ActivityEvent>}
+     */
+    public function completeExistingMessageImmediately(
+        ConversationSession $session,
+        ConversationMessage $userMessage,
+        string $assistantContent,
+        array $metadata = [],
+        string $source = 'http',
+    ): array {
+        $existingMetadata = is_array($userMessage->metadata) ? $userMessage->metadata : [];
+        $trustedLifecycle = filled($userMessage->client_turn_id)
+            && (bool) data_get($existingMetadata, 'voice_request', false)
+            && (string) data_get($existingMetadata, 'source', '') === 'openai_realtime_voice'
+            ? array_intersect_key($existingMetadata, array_flip(['voice_turn_sequence', 'voice_turn_outcome']))
+            : [];
+        $metadata = $this->voiceTurnMetadataForState(array_merge(
+            $this->sanitizeClientMetadata($existingMetadata),
+            $trustedLifecycle,
+            $this->sanitizeClientMetadata($metadata),
+        ), 'completed');
+
+        return DB::transaction(function () use ($session, $userMessage, $assistantContent, $metadata, $source): array {
+            $lockedSession = ConversationSession::query()
+                ->whereKey($session->id)
+                ->where('user_id', $session->user_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+            $existing = $this->existingRunForClientRequest($lockedSession, $metadata);
+            if ($existing instanceof AssistantRun) {
+                $existing = AssistantRun::query()->lockForUpdate()->findOrFail($existing->id);
+                if (! in_array($existing->status, ['queued', 'running', 'failed'], true)
+                    || $existing->assistant_message_id !== null
+                    || $this->runHasCompletedMutatingWork($existing)) {
+                    $replayed = $this->replayedQueueResult($existing->load('assistantMessage'));
+
+                    return [
+                        ...$replayed,
+                        'assistant_message' => $existing->assistantMessage,
+                    ];
+                }
+            }
+
+            $userMessage->update(['metadata' => $metadata]);
+            $run = $existing ?? AssistantRun::create([
+                'user_id' => $lockedSession->user_id,
+                'workspace_id' => $lockedSession->workspace_id,
+                'conversation_session_id' => $lockedSession->id,
+                'user_message_id' => $userMessage->id,
+                'source' => $source,
+                'status' => 'completed',
+                'input' => $userMessage->content,
+                'metadata' => $metadata,
+                'started_at' => now(),
+                'completed_at' => now(),
+            ]);
+            $assistantMessage = ConversationMessage::create([
+                'user_id' => $lockedSession->user_id,
+                'conversation_session_id' => $lockedSession->id,
+                'client_turn_id' => $userMessage->client_turn_id,
+                'role' => 'assistant',
+                'content' => $assistantContent,
+                'metadata' => [
+                    'assistant_run_id' => $run->id,
+                    'runtime' => 'deterministic_app_read',
+                    'client_request_id' => data_get($metadata, 'client_request_id'),
+                    'voice_request' => (bool) data_get($metadata, 'voice_request', false),
+                ],
+            ]);
+            $run->update([
+                'status' => 'completed',
+                'assistant_message_id' => $assistantMessage->id,
+                'metadata' => $metadata,
+                'error' => null,
+                'result' => [
+                    'status' => 'completed',
+                    'assistant_message_id' => $assistantMessage->id,
+                    'deterministic_app_read' => true,
+                ],
+                'started_at' => $run->started_at ?? now(),
+                'completed_at' => now(),
+            ]);
+            $lockedSession->update([
+                'status' => $this->activeRunSessionStatus($lockedSession->id, $run->id),
+                'last_activity_at' => now(),
+            ]);
+            $event = $this->recordEvent($run, 'runtime.run_completed', [
+                'run_id' => $run->id,
+                'message_id' => $userMessage->id,
+                'assistant_message_id' => $assistantMessage->id,
+                'deterministic_app_read' => true,
+                'run_duration_ms' => 0,
+            ], 'hermes.fast_app_read', 'succeeded');
+
+            return [
+                'run' => $run->refresh(),
+                'user_message' => $userMessage->refresh(),
+                'assistant_message' => $assistantMessage,
+                'event' => $event,
+                'events' => [$event],
+            ];
+        }, 3);
+    }
+
+    /**
      * Replace an uncommitted request with a corrected request while retaining one durable
      * user message. The predecessor input remains on its cancelled run for auditability.
      *

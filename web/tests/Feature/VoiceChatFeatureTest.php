@@ -3,9 +3,13 @@
 namespace Tests\Feature;
 
 use App\Models\AgentProfile;
+use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
+use App\Models\ConversationSession;
 use App\Models\User;
+use App\Services\AssistantRunService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -248,6 +252,89 @@ class VoiceChatFeatureTest extends TestCase
         $this->assertSame($partial->json('data.user_message.id'), $queued->json('data.user_message.id'));
         $this->assertDatabaseCount('conversation_messages', 1);
         $this->assertDatabaseCount('assistant_runs', 1);
+    }
+
+    public function test_tomorrow_calendar_voice_read_completes_immediately_without_the_agent_queue(): void
+    {
+        Queue::fake();
+        Carbon::setTestNow(Carbon::parse('2026-07-11 17:41:00', 'UTC'));
+        try {
+            $token = $this->apiToken('voice-fast-calendar@example.com');
+            $user = User::where('email', 'voice-fast-calendar@example.com')->firstOrFail();
+            $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+                ->assertCreated()
+                ->json('data.id');
+            CalendarEvent::create([
+                'user_id' => $user->id,
+                'workspace_id' => $user->default_workspace_id,
+                'title' => 'Meal prep',
+                'starts_at' => Carbon::parse('2026-07-12 16:00:00', 'America/New_York')->utc(),
+                'ends_at' => Carbon::parse('2026-07-12 17:00:00', 'America/New_York')->utc(),
+                'status' => 'scheduled',
+            ]);
+            $turn = 'voice-fast-calendar-turn';
+            $metadata = [
+                'client_turn_id' => $turn,
+                'client_request_id' => $turn,
+                'client_timezone' => 'America/New_York',
+                'voice_request' => true,
+            ];
+
+            $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
+                'session_id' => $sessionId,
+                'user_text' => "What's on my calendar for tomorrow?",
+                'outcome' => 'accepted',
+                'metadata' => $metadata,
+            ])->assertCreated();
+
+            $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+                'content' => "What's on my calendar for tomorrow?",
+                'source' => 'web_routed_chat',
+                'metadata' => $metadata,
+            ])->assertOk()
+                ->assertJsonPath('data.status', 'completed')
+                ->assertJsonPath('data.user_message.metadata.voice_turn_state', 'completed')
+                ->assertJsonPath('data.assistant_message.content', 'Tomorrow, you have “Meal prep” at 4 p.m.');
+
+            $this->assertSame($turn, $response->json('data.assistant_message.client_turn_id'));
+            $this->assertDatabaseCount('assistant_runs', 1);
+            $this->assertDatabaseCount('conversation_messages', 2);
+            Queue::assertNothingPushed();
+
+            $recoveryTurn = 'voice-fast-calendar-recovery';
+            $recoveryMetadata = [...$metadata, 'client_turn_id' => $recoveryTurn, 'client_request_id' => $recoveryTurn];
+            $recoveryMessageId = $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
+                'session_id' => $sessionId,
+                'user_text' => "What's next on my calendar?",
+                'outcome' => 'accepted',
+                'metadata' => $recoveryMetadata,
+            ])->assertCreated()->json('data.user_message.id');
+            $queued = app(AssistantRunService::class)->queueExistingMessage(
+                ConversationSession::findOrFail($sessionId),
+                ConversationMessage::findOrFail($recoveryMessageId),
+                $recoveryMetadata,
+                'web_routed_chat',
+            );
+            $this->assertSame('queued', $queued['run']->status);
+
+            $this->withToken($token)->getJson(
+                "/api/assistant/sessions/{$sessionId}/runs/lookup?client_request_id={$recoveryTurn}",
+            )->assertOk()
+                ->assertJsonPath('data.run.id', $queued['run']->id)
+                ->assertJsonPath('data.status', 'completed')
+                ->assertJsonPath('data.assistant_message.content', 'Next is “Meal prep” tomorrow at 4 p.m.');
+
+            $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+                'content' => "What's next on my calendar?",
+                'source' => 'web_routed_chat',
+                'metadata' => $recoveryMetadata,
+            ])->assertOk()
+                ->assertJsonPath('data.run.id', $queued['run']->id)
+                ->assertJsonPath('data.status', 'completed')
+                ->assertJsonPath('data.assistant_message.content', 'Next is “Meal prep” tomorrow at 4 p.m.');
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_realtime_turn_persists_acceptance_and_terminal_interruption_without_an_assistant_message(): void

@@ -282,6 +282,13 @@ export function realtimeWorkStatusAnswer(text, { isWorking = false } = {}) {
 
 export function realtimeWorkingAcknowledgement(text) {
     const normalized = String(text || '').toLowerCase();
+    const readRequest = /^(?:what|when|where|which|who|how|do i|am i|is|are|show|list|check|find|look up|tell me)\b/.test(normalized)
+        || /\b(?:what(?:'s| is) (?:on|next)|on my calendar|on the calendar|do i have|anything scheduled)\b/.test(normalized);
+    if (readRequest && /\b(?:calendar|agenda|schedule|event|appointment)\b/.test(normalized)) return 'Let me check your calendar.';
+    if (readRequest && /\b(?:weather|forecast)\b/.test(normalized)) return 'Let me check the weather.';
+    if (readRequest && /\b(?:reminder|reminders)\b/.test(normalized)) return 'Let me check your reminders.';
+    if (readRequest && /\b(?:task|tasks|todo|to do)\b/.test(normalized)) return 'Let me check your tasks.';
+    if (readRequest && /\b(?:note|notes)\b/.test(normalized)) return 'Let me check your notes.';
     if (/\b(?:note|notes)\b/.test(normalized)) return 'Absolutely — I’ll create that note.';
     if (/\b(?:reminder|reminders)\b/.test(normalized)) return 'Absolutely — I’ll handle that reminder.';
     if (/\b(?:calendar|event|schedule|appointment)\b/.test(normalized)) return 'Absolutely — I’ll take care of that schedule.';

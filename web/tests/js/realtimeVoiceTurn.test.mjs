@@ -287,7 +287,8 @@ test('working acknowledgements are deterministic and never ask what to create', 
         'Absolutely — I’ll create that note.',
     );
     assert.equal(realtimeWorkingAcknowledgement('Set a reminder for four.'), 'Absolutely — I’ll handle that reminder.');
-    assert.equal(realtimeWorkingAcknowledgement('Look up the weather.'), 'Absolutely — I’m on it.');
+    assert.equal(realtimeWorkingAcknowledgement('Look up the weather.'), 'Let me check the weather.');
+    assert.equal(realtimeWorkingAcknowledgement("What's on my calendar for tomorrow?"), 'Let me check your calendar.');
     assert.equal(realtimeWorkingAcknowledgement('Create a note.').includes('?'), false);
 });
 
