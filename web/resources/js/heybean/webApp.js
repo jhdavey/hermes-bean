@@ -38,6 +38,7 @@ import {
     realtimeNeedsAppRuntime,
     realtimePauseAcknowledgement,
     realtimeWorkStatusAnswer,
+    realtimeWorkingAcknowledgement,
     shouldDeferAssistantMessage,
     shouldDisplayRealtimeTranscriptDraft,
     stripRealtimeLocalWakePrefix,
@@ -238,6 +239,7 @@ export function mountHeyBeanWebApp(mount) {
     let realtimeTranscriptCompletionTimer = 0;
     let realtimeUtteranceContinuationTimer = 0;
     let realtimePendingUtterance = '';
+    let realtimePendingTurnId = '';
     let realtimeVoiceActivityLevel = 0;
     const realtimePotentialBargeInItems = new Set();
     let chatAnnouncementTimer = 0;
@@ -253,6 +255,8 @@ export function mountHeyBeanWebApp(mount) {
     const realtimeMediaRecoveryGraceMs = 5000;
     const realtimeResponseTimeoutMs = 20000;
     const realtimeFollowUpWindowMs = 10000;
+    const realtimeDurableAdmissionTargetMs = 250;
+    const realtimeAcknowledgementAudioTargetMs = 800;
     const beanWorkPollMaxAttempts = 180;
     const realtimeTurnSessionIds = new Map();
     let realtimePersistenceSessionCreation = null;
@@ -5629,6 +5633,9 @@ export function mountHeyBeanWebApp(mount) {
 
     function messageMarkup(message, index = 0, messages = []) {
         const user = message.role === 'user';
+        if (user && ['capturing', 'awaiting_continuation'].includes(String(message?.metadata?.voice_turn_state || '').toLowerCase())) {
+            return '';
+        }
         const content = user ? (message.content || '') : safeAssistantDisplayContent(conversationalMessageContent(message.content || ''));
         const canEdit = user && !chatHasActiveTurn() && !String(message.id || '').startsWith('local-');
         return `
@@ -9444,15 +9451,6 @@ export function mountHeyBeanWebApp(mount) {
         ].join('\n');
     }
 
-    function realtimeWorkingAckInstructions(command) {
-        return [
-            'You are Bean in a live voice conversation. Respond only in US English. Give one short, natural acknowledgement that you heard the user and are working on it.',
-            'Vary the wording like a real person. Do not use a canned phrase. Do not answer the request yet. Do not mention tools, Laravel, OpenAI, or systems.',
-            'Keep it under 12 words.',
-            `User request: ${command}`,
-        ].join('\n');
-    }
-
     function realtimeWorkingStatus(command) {
         const normalized = normalizedVoiceCommand(command);
         if (/\b(calendar|event|schedule|appointment)\b/.test(normalized)) return 'Checking your calendar…';
@@ -9595,6 +9593,13 @@ export function mountHeyBeanWebApp(mount) {
 
     async function persistQueuedRealtimeFollowUp(queued, content, transcriptCompletedAtMs) {
         if (!state.session?.id) throw new Error('Bean has no active conversation to queue this request in.');
+        await persistRealtimeTurn(
+            content,
+            '',
+            queued.clientRequestId,
+            realtimeVoiceQualityMetrics('queued_tool', transcriptCompletedAtMs, null),
+            { outcome: 'accepted' },
+        );
         const metadata = webChatMetadata({
             source: 'web_queued_voice',
             client_request_id: queued.clientRequestId,
@@ -9714,7 +9719,7 @@ export function mountHeyBeanWebApp(mount) {
         if (!content || !admission?.accepted || !realtimeConversation.canContinue(admission.epoch)) return;
         const supersedesClientRequestId = String(options.supersedesClientRequestId || '').trim();
         const clientRequestId = String(options.clientRequestId || '').trim() || `web-queued-voice-${newRealtimeClientTurnId()}`;
-        const clientTurnId = newRealtimeClientTurnId();
+        const clientTurnId = clientRequestId;
         const queued = voiceOrchestrator.enqueue({
             transcript: content,
             epoch: admission.epoch,
@@ -9739,14 +9744,13 @@ export function mountHeyBeanWebApp(mount) {
             },
         });
         showDurableQueuedWork(queued, null);
-        queued.readyPromise = persistQueuedRealtimeFollowUp(
+        persistQueuedRealtimeFollowUp(
             queued,
             content,
             Number(options.transcriptCompletedAtMs) || Date.now(),
         ).then((result) => {
             if (!voiceOrchestrator.queue.some((item) => item.id === queued.id)) return result;
             queued.durable = true;
-            queued.runId = result?.run?.id || null;
             showDurableQueuedWork(queued, result);
             const index = state.messages.findIndex((message) => message?.metadata?.voice_queue_id === queued.id);
             if (index >= 0 && result?.user_message) {
@@ -9760,13 +9764,11 @@ export function mountHeyBeanWebApp(mount) {
                 };
             }
             return result;
-        }).catch((error) => {
-            queued.persistenceError = error;
+        }).catch(() => {
             state.error = 'I heard that request, but could not save it yet. Bean will retry it.';
         }).finally(() => {
             if (!voiceOrchestrator.queue.some((item) => item.id === queued.id)) return;
             queued.ready = true;
-            queued.readyPromise = null;
             render();
             scheduleQueuedRealtimeFollowUp();
         });
@@ -9916,15 +9918,18 @@ export function mountHeyBeanWebApp(mount) {
         window.clearTimeout(realtimeUtteranceContinuationTimer);
         realtimeUtteranceContinuationTimer = 0;
         realtimePendingUtterance = '';
+        realtimePendingTurnId = '';
     }
 
-    function holdIncompleteRealtimeUtterance(text) {
+    function holdIncompleteRealtimeUtterance(text, clientTurnId) {
         realtimePendingUtterance = String(text || '').trim();
+        realtimePendingTurnId = String(clientTurnId || '').trim();
         window.clearTimeout(realtimeUtteranceContinuationTimer);
         realtimeUtteranceContinuationTimer = window.setTimeout(() => {
             realtimeUtteranceContinuationTimer = 0;
             if (!realtimePendingUtterance) return;
             realtimePendingUtterance = '';
+            realtimePendingTurnId = '';
             recoverMissedRealtimeCommand('What would you like me to create?');
         }, 5000);
         state.chatRunState = 'Listening for the rest…';
@@ -10013,9 +10018,8 @@ export function mountHeyBeanWebApp(mount) {
     function handleLocalWakeDetected(gate, connectionGeneration) {
         if (!localWakeConnectionIsCurrent(gate, connectionGeneration)) return;
 
-        // A person can speak while the UI still says Starting. Do not open a
-        // provider path until the WebRTC transport is actually ready.
-        if (!realtimeVoiceActive && !state.voiceWakeListening) {
+        const wakeArrivedDuringStartup = state.voiceProcessing && !realtimeVoiceActive;
+        if (!wakeArrivedDuringStartup && !realtimeVoiceActive && !state.voiceWakeListening) {
             gate.resetAfterTurn();
             return;
         }
@@ -10031,6 +10035,9 @@ export function mountHeyBeanWebApp(mount) {
         voiceOrchestrator.ignoreInputUntil = 0;
         voiceOrchestrator.localWakePending = true;
         voiceOrchestrator.pendingTranscript = '';
+        if (wakeArrivedDuringStartup) {
+            voiceOrchestrator.record('wake.detected_during_startup');
+        }
         updateVoiceWakeDraft('');
         state.chatRunState = 'Listening…';
         armRealtimeFollowUpWindow();
@@ -10394,6 +10401,7 @@ export function mountHeyBeanWebApp(mount) {
             window.clearTimeout(realtimeTranscriptCompletionTimer);
             realtimeTranscriptCompletionTimer = 0;
             const transcriptId = payload.item_id || payload.item?.id || '';
+            const continuedClientTurnId = realtimePendingTurnId;
             const transcript = consumeRealtimeUtteranceContinuation(realtimeInputTranscripts.complete({
                 itemId: transcriptId,
                 contentIndex: payload.content_index,
@@ -10411,7 +10419,8 @@ export function mountHeyBeanWebApp(mount) {
                 stopBeanVoicePlayback({ reason: 'interrupted' });
                 voiceOrchestrator.ignoreInputUntil = 0;
             }
-            handleRealtimeUserTranscript(transcript, { transcriptId })
+            realtimePendingTurnId = '';
+            handleRealtimeUserTranscript(transcript, { transcriptId, clientTurnId: continuedClientTurnId })
                 .then((admission) => {
                     if (['wake_required', 'wake_only', 'non_english_transcript', 'unaddressed_during_work'].includes(admission?.reason) && transcriptId) {
                         realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
@@ -10593,8 +10602,16 @@ export function mountHeyBeanWebApp(mount) {
             };
         }
         if (isIncompleteRealtimeCommand(command)) {
+            const clientTurnId = String(options.clientTurnId || '').trim() || newRealtimeClientTurnId();
             voiceOrchestrator.settleTranscript('continuation_pending');
-            holdIncompleteRealtimeUtterance(text);
+            holdIncompleteRealtimeUtterance(text, clientTurnId);
+            persistRealtimeTurn(
+                text,
+                '',
+                clientTurnId,
+                realtimeVoiceQualityMetrics('continuation', transcriptCompletedAtMs, null),
+                { outcome: 'awaiting_continuation' },
+            ).catch(() => reportVoicePersistenceFailure(admission.epoch));
             armRealtimeFollowUpWindow();
             return { accepted: false, reason: 'continuation_pending' };
         }
@@ -10756,27 +10773,85 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         realtimeAppConversationActive = true;
+        const durableClientTurnId = String(options.clientTurnId || '').trim() || newRealtimeClientTurnId();
         voiceOrchestrator.turnGuardUntil = now + 20000;
         voiceOrchestrator.beginWork();
         state.chatRunState = realtimeWorkingStatus(command);
         state.chatDraft = '';
         state.messages = state.messages.filter((message) => !message?.metadata?.realtime_draft);
+        if (!state.messages.some((message) => String(message?.metadata?.client_request_id || '') === durableClientTurnId)) {
+            state.messages.push({
+                id: `local-durable-${durableClientTurnId}`,
+                role: 'user',
+                content: command,
+                metadata: {
+                    client_request_id: durableClientTurnId,
+                    client_turn_id: durableClientTurnId,
+                    voice_request: true,
+                    voice_turn_state: 'accepted',
+                },
+            });
+        }
         render();
-        const acknowledgement = speakRealtimeInstructions(realtimeWorkingAckInstructions(command), {
-            purpose: 'acknowledgement',
-            timeoutMs: 5000,
-        });
         const requestStartedAtMs = Date.now();
         const backendRequestWorkspaceId = String(currentWorkspaceId() || '');
-        const request = sendChatContent(command, {
+        let durableAdmissionAtMs = 0;
+        const durableAdmission = persistRealtimeTurn(
+            command,
+            '',
+            durableClientTurnId,
+            realtimeVoiceQualityMetrics('tool', transcriptCompletedAtMs, null, { requestStartedAtMs }),
+            { outcome: 'accepted' },
+        ).then((result) => {
+            durableAdmissionAtMs = Date.now();
+            const latencyMs = Math.max(0, durableAdmissionAtMs - transcriptCompletedAtMs);
+            voiceOrchestrator.record('latency.durable_admission', {
+                latencyMs,
+                targetMs: realtimeDurableAdmissionTargetMs,
+                withinTarget: latencyMs <= realtimeDurableAdmissionTargetMs,
+            });
+            return result;
+        });
+        const request = durableAdmission.then(() => sendChatContent(command, {
             voiceRequest: true,
             deferAssistantMessage: true,
-            clientRequestId: options.clientRequestId,
+            clientRequestId: durableClientTurnId,
             supersedesClientRequestId: options.supersedesClientRequestId,
             voiceQuality: realtimeVoiceQualityMetrics('tool', transcriptCompletedAtMs, null, { requestStartedAtMs }),
-        })
+            userAlreadyStaged: true,
+        }))
             .then((result) => ({ result, error: null }))
             .catch((error) => ({ result: null, error }));
+        // sendChatContent stages and renders the accepted user message before
+        // any audio acknowledgement can play, so the turn never appears to
+        // vanish from chat. The acknowledgement text is deterministic and
+        // cannot improvise a follow-up question.
+        const acknowledgement = durableAdmission
+            .then(() => speakRealtimeBeanText(realtimeWorkingAcknowledgement(command), {
+                purpose: 'acknowledgement',
+                timeoutMs: 5000,
+            }))
+            .then((spoken) => {
+                const audioLatencyMs = Number(spoken?.audioStartedAtMs)
+                    ? Math.max(0, spoken.audioStartedAtMs - transcriptCompletedAtMs)
+                    : null;
+                voiceOrchestrator.record('latency.acknowledgement_audio', {
+                    latencyMs: audioLatencyMs,
+                    targetMs: realtimeAcknowledgementAudioTargetMs,
+                    withinTarget: audioLatencyMs !== null && audioLatencyMs <= realtimeAcknowledgementAudioTargetMs,
+                });
+                persistRealtimeTurn(
+                    command,
+                    '',
+                    durableClientTurnId,
+                    realtimeVoiceQualityMetrics('tool', transcriptCompletedAtMs, spoken, {
+                        requestStartedAtMs,
+                        durableAdmissionAtMs,
+                    }),
+                    { outcome: 'accepted' },
+                ).catch(() => {});
+                return spoken;
+            });
         try {
             state.chatRunState = realtimeWorkingStatus(command);
             render();
@@ -10927,6 +11002,7 @@ export function mountHeyBeanWebApp(mount) {
         const responseStartedAtMs = Number(response?.startedAtMs) || null;
         const audioStartedAtMs = Number(response?.audioStartedAtMs) || null;
         const requestStartedAtMs = Number(extra.requestStartedAtMs) || null;
+        const durableAdmissionAtMs = Number(extra.durableAdmissionAtMs) || null;
         return {
             schema_version: 1,
             route,
@@ -10941,6 +11017,9 @@ export function mountHeyBeanWebApp(mount) {
             } : {}),
             ...(requestStartedAtMs !== null ? {
                 transcript_to_request_start_ms: Math.max(0, requestStartedAtMs - transcriptCompletedAtMs),
+            } : {}),
+            ...(durableAdmissionAtMs !== null ? {
+                transcript_to_durable_admission_ms: Math.max(0, durableAdmissionAtMs - transcriptCompletedAtMs),
             } : {}),
         };
     }
@@ -11011,6 +11090,14 @@ export function mountHeyBeanWebApp(mount) {
         return createdSession;
     }
 
+    function warmRealtimePersistenceSession() {
+        if (state.session?.id || realtimePersistenceSessionCreation) return;
+        const warmupId = `voice-warmup-${chatContextGeneration}`;
+        ensureRealtimePersistenceSession(warmupId)
+            .catch(() => {})
+            .finally(() => realtimeTurnSessionIds.delete(warmupId));
+    }
+
     async function persistRealtimeTurn(userText, assistantText, clientTurnId = newRealtimeClientTurnId(), voiceQuality = null, options = {}) {
         const outcome = String(options.outcome || (assistantText ? 'completed' : 'accepted')).trim().toLowerCase();
         try {
@@ -11022,7 +11109,9 @@ export function mountHeyBeanWebApp(mount) {
                 { ...options, outcome },
             ));
         } finally {
-            if (outcome !== 'accepted') realtimeTurnSessionIds.delete(clientTurnId);
+            if (['completed', 'cancelled', 'interrupted', 'failed', 'timed_out', 'superseded'].includes(outcome)) {
+                realtimeTurnSessionIds.delete(clientTurnId);
+            }
         }
     }
 
@@ -11070,7 +11159,9 @@ export function mountHeyBeanWebApp(mount) {
         // The optimistic accepted user turn is already visible. Do not let its slower
         // admission response erase a locally completed assistant while the serialized
         // terminal persistence request is waiting to run.
-        if (persisted.outcome === 'accepted') return persisted;
+        if (['capturing', 'awaiting_continuation', 'accepted', 'queued', 'running', 'speaking'].includes(persisted.outcome)) {
+            return persisted;
+        }
         if (persisted.user_message || persisted.assistant_message) {
             const optimisticIndex = state.messages.findIndex((message) => message?.metadata?.client_turn_id === clientTurnId);
             state.messages = state.messages.filter((message) => message?.metadata?.client_turn_id !== clientTurnId);
@@ -11133,7 +11224,16 @@ export function mountHeyBeanWebApp(mount) {
         const resultContextIsCurrent = () => String(currentWorkspaceId() || '') === toolCallWorkspaceId
             && (!resultSessionId || String(state.session?.id || '') === resultSessionId);
         if (request) {
-            const result = await sendChatContent(request, { voiceRequest: true, deferAssistantMessage: true, realtimeToolRequest: true });
+            const clientTurnId = newRealtimeClientTurnId();
+            await persistRealtimeTurn(request, '', clientTurnId, realtimeVoiceQualityMetrics('realtime_tool', Date.now(), null), {
+                outcome: 'accepted',
+            });
+            const result = await sendChatContent(request, {
+                voiceRequest: true,
+                deferAssistantMessage: true,
+                realtimeToolRequest: true,
+                clientRequestId: clientTurnId,
+            });
             output = result?.assistantContent || 'I sent that to HeyBean.';
             assistantMessage = result?.assistantMessage || null;
             outputIsDurable = Boolean(result?.assistantContent);
@@ -11289,6 +11389,9 @@ export function mountHeyBeanWebApp(mount) {
         state.voiceProcessing = true;
         state.chatRunState = 'Starting private “Hey Bean” detection…';
         render();
+        // Hide first-turn session setup behind microphone/WebRTC startup so the
+        // durability gate does not add perceptible latency after transcription.
+        warmRealtimePersistenceSession();
         try {
             await connectRealtimeVoice(connectionGeneration);
             if (connectionGeneration !== realtimeConnectionGeneration) return;
@@ -11296,8 +11399,14 @@ export function mountHeyBeanWebApp(mount) {
             state.voiceWakeListening = true;
             state.voiceProcessing = false;
             voiceOrchestrator.connected(connectionGeneration);
-            state.chatRunState = 'Listening for “Hey Bean”…';
-            updateVoiceWakeDraft('');
+            if (voiceOrchestrator.localWakePending || realtimeConversation.isActive()) {
+                state.chatRunState = 'Listening…';
+                armRealtimeFollowUpWindow();
+                armRealtimeWakeCommandWatchdog();
+            } else {
+                state.chatRunState = 'Listening for “Hey Bean”…';
+                updateVoiceWakeDraft('');
+            }
             render();
         } catch (error) {
             if (connectionGeneration !== realtimeConnectionGeneration) return;
@@ -11425,12 +11534,14 @@ export function mountHeyBeanWebApp(mount) {
             const editIndex = state.messages.findIndex((message) => String(message.id) === editingMessageId && message.role === 'user');
             if (editIndex >= 0) state.messages.splice(editIndex);
         }
-        const optimisticTurn = stageOptimisticUserTurn(state.messages, {
-            content,
-            clientRequestId,
-            supersedesClientRequestId,
-            localId: `local-${Date.now()}-${requestId}`,
-        });
+        const optimisticTurn = options.userAlreadyStaged
+            ? { messages: state.messages, superseded: [] }
+            : stageOptimisticUserTurn(state.messages, {
+                content,
+                clientRequestId,
+                supersedesClientRequestId,
+                localId: `local-${Date.now()}-${requestId}`,
+            });
         state.messages = optimisticTurn.messages;
         state.busy = true;
         state.chatDraft = '';
@@ -11854,11 +11965,53 @@ export function mountHeyBeanWebApp(mount) {
             state.chatRunState = 'Ready';
             state.activity = normalizeList(session.activity_events || session.events).length ? normalizeList(session.activity_events || session.events) : state.activity;
             if (!options.keepHistoryOpen) state.chatHistoryOpen = false;
+            resumeDurableVoiceWorkFromMessages(state.messages);
             render();
             scrollChatToBottom();
         } catch (_) {
             // A missing old session should not block the rest of the app.
         }
+    }
+
+    function resumeDurableVoiceWorkFromMessages(messages = []) {
+        const activeTurns = normalizeList(messages).filter((message) => {
+            if (message?.role !== 'user') return false;
+            return ['accepted', 'queued', 'running', 'speaking'].includes(String(
+                message?.metadata?.voice_turn_state
+                || message?.metadata?.voice_turn_outcome?.status
+                || '',
+            ).toLowerCase());
+        });
+        const active = activeTurns.at(-1) || null;
+        const clientRequestId = String(
+            active?.metadata?.client_request_id
+            || active?.metadata?.client_turn_id
+            || active?.client_turn_id
+            || '',
+        ).trim();
+        if (!active || !clientRequestId || !state.session?.id) return;
+
+        activeChatRequestId = ++chatRequestCounter;
+        activeChatClientRequestId = clientRequestId;
+        activeChatSupersessionEligible = true;
+        state.activeBeanWorkMessageId = Number(active.id || 0) || null;
+        state.busy = true;
+        state.chatRunState = 'Working…';
+        activeTurns.forEach((turn, index) => {
+            const turnRequestId = String(turn?.metadata?.client_request_id || turn?.metadata?.client_turn_id || turn?.client_turn_id || '').trim();
+            const turnState = String(turn?.metadata?.voice_turn_state || '').toLowerCase();
+            if (!turnRequestId) return;
+            upsertBeanWorkItem(`durable-${turnRequestId}`, turn.content || 'Voice request', turnState === 'running' ? 'running' : 'queued', {
+                source: 'durable_voice',
+                clientRequestId: turnRequestId,
+                order: Number(turn?.metadata?.voice_turn_sequence || index),
+            });
+        });
+        startBeanWorkEventPolling(state.session.id, {
+            clientRequestId,
+            content: active.content || '',
+            voiceRequest: state.voiceWakeListening,
+        });
     }
 
     async function refreshOnly(shouldRender = true, options = {}) {

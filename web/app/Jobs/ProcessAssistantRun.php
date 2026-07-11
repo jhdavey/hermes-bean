@@ -57,6 +57,12 @@ class ProcessAssistantRun implements ShouldQueue
             return;
         }
 
+        if ($this->hasEarlierActiveVoiceRun($run)) {
+            $this->release(1);
+
+            return;
+        }
+
         $supersedesRunId = (int) data_get($run->metadata, 'supersedes_run_id', 0);
         if ($supersedesRunId > 0) {
             $predecessor = AssistantRun::query()
@@ -88,6 +94,7 @@ class ProcessAssistantRun implements ShouldQueue
                 'status' => 'running',
                 'started_at' => $lockedRun->started_at ?? now(),
             ]);
+            $this->updateVoiceTurnState($lockedRun, 'running');
             $session->update([
                 'status' => 'running',
                 'last_activity_at' => now(),
@@ -150,6 +157,7 @@ class ProcessAssistantRun implements ShouldQueue
                     'cancelled_at' => $status === 'cancelled' ? now() : null,
                     'completed_at' => now(),
                 ]);
+                $this->updateVoiceTurnState($lockedRun, $status === 'completed' ? 'completed' : 'cancelled', terminal: true);
                 $session->update([
                     'status' => $this->sessionStatusForActiveRuns($session->id, $lockedRun->id),
                     'last_activity_at' => now(),
@@ -200,6 +208,7 @@ class ProcessAssistantRun implements ShouldQueue
                 'cancelled_at' => $lockedRun->cancelled_at ?? now(),
                 'completed_at' => $lockedRun->completed_at ?? now(),
             ]);
+            $this->updateVoiceTurnState($lockedRun, 'cancelled', terminal: true);
             $this->deleteOrphanAssistants($lockedRun);
             if ($session instanceof ConversationSession) {
                 $session->update([
@@ -248,6 +257,7 @@ class ProcessAssistantRun implements ShouldQueue
                 ]),
                 'completed_at' => now(),
             ]);
+            $this->updateVoiceTurnState($lockedRun, 'failed', terminal: true, reason: 'supersession_conflict');
             $session->update([
                 'status' => $this->sessionStatusForActiveRuns($session->id, $lockedRun->id),
                 'last_activity_at' => now(),
@@ -287,6 +297,7 @@ class ProcessAssistantRun implements ShouldQueue
                 'error' => $reason,
                 'completed_at' => now(),
             ]);
+            $this->updateVoiceTurnState($lockedRun, 'failed', terminal: true, reason: $reason);
             $session->update([
                 'status' => $this->sessionStatusForActiveRuns($session->id, $lockedRun->id),
                 'last_activity_at' => now(),
@@ -321,6 +332,47 @@ class ProcessAssistantRun implements ShouldQueue
         }
 
         return $statuses->contains('queued') ? 'queued' : 'active';
+    }
+
+    private function hasEarlierActiveVoiceRun(AssistantRun $run): bool
+    {
+        $sequence = (int) data_get($run->metadata, 'voice_turn_sequence', 0);
+        if ($sequence <= 0 || ! (bool) data_get($run->metadata, 'voice_request', false)) {
+            return false;
+        }
+
+        return AssistantRun::query()
+            ->where('conversation_session_id', $run->conversation_session_id)
+            ->where('id', '!=', $run->id)
+            ->whereIn('status', ['queued', 'running'])
+            ->get(['id', 'metadata'])
+            ->contains(fn (AssistantRun $candidate): bool => (bool) data_get($candidate->metadata, 'voice_request', false)
+                && (int) data_get($candidate->metadata, 'voice_turn_sequence', 0) > 0
+                && (int) data_get($candidate->metadata, 'voice_turn_sequence') < $sequence);
+    }
+
+    private function updateVoiceTurnState(
+        AssistantRun $run,
+        string $state,
+        bool $terminal = false,
+        ?string $reason = null,
+    ): void {
+        $message = ConversationMessage::query()->lockForUpdate()->find($run->user_message_id);
+        if (! $message instanceof ConversationMessage || ! (bool) data_get($message->metadata, 'voice_request', false)) {
+            return;
+        }
+
+        $metadata = is_array($message->metadata) ? $message->metadata : [];
+        $lifecycle = is_array(data_get($metadata, 'voice_turn_outcome')) ? data_get($metadata, 'voice_turn_outcome') : [];
+        $now = now()->toIso8601String();
+        $metadata['voice_turn_state'] = $state;
+        $metadata['voice_turn_outcome'] = array_merge($lifecycle, [
+            'status' => $state,
+            'updated_at' => $now,
+            ...($terminal ? ['terminal_at' => $lifecycle['terminal_at'] ?? $now] : []),
+            ...($reason ? ['reason' => $reason] : []),
+        ]);
+        $message->update(['metadata' => $metadata]);
     }
 
     private function deleteOrphanAssistants(AssistantRun $run, bool $preserveLinkedTerminalAssistant = false): void

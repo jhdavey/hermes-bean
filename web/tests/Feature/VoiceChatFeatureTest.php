@@ -7,6 +7,7 @@ use App\Models\ConversationMessage;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class VoiceChatFeatureTest extends TestCase
@@ -184,6 +185,69 @@ class VoiceChatFeatureTest extends TestCase
         $this->assertSame($first->json('data.assistant_message.id'), $second->json('data.assistant_message.id'));
         $this->assertSame(2, ConversationMessage::where('conversation_session_id', $sessionId)->count());
         $this->assertDatabaseCount('conversation_messages', 2);
+    }
+
+    public function test_voice_action_uses_one_durable_message_from_continuation_through_queue(): void
+    {
+        Queue::fake();
+        $token = $this->apiToken('voice-durable-state@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+        $base = [
+            'session_id' => $sessionId,
+            'metadata' => [
+                'client_turn_id' => 'durable-voice-turn-1',
+                'client_request_id' => 'durable-voice-turn-1',
+                'voice_request' => true,
+            ],
+        ];
+
+        $partial = $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
+            ...$base,
+            'user_text' => 'Hey Bean, can you create',
+            'outcome' => 'awaiting_continuation',
+        ])->assertCreated()
+            ->assertJsonPath('data.user_message.metadata.voice_turn_state', 'awaiting_continuation');
+
+        $accepted = $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
+            ...$base,
+            'user_text' => 'Hey Bean, can you create a three-meal dinner plan as a note?',
+            'outcome' => 'accepted',
+        ])->assertOk()
+            ->assertJsonPath('data.user_message.metadata.voice_turn_state', 'accepted')
+            ->assertJsonPath('data.user_message.content', 'Hey Bean, can you create a three-meal dinner plan as a note?');
+
+        $queued = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => 'Hey Bean, can you create a three-meal dinner plan as a note?',
+            'source' => 'web_routed_chat',
+            'metadata' => [
+                'client_turn_id' => 'durable-voice-turn-1',
+                'client_request_id' => 'durable-voice-turn-1',
+                'voice_request' => true,
+            ],
+        ])->assertAccepted()
+            ->assertJsonPath('data.user_message.metadata.voice_turn_state', 'queued');
+
+        // A slower acknowledgement-metrics write can arrive after the run is
+        // queued; it must enrich metadata without moving the lifecycle backward.
+        $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
+            ...$base,
+            'user_text' => 'Hey Bean, can you create a three-meal dinner plan as a note?',
+            'outcome' => 'accepted',
+            'metadata' => [
+                ...$base['metadata'],
+                'voice_quality' => ['transcript_to_audio_start_ms' => 540],
+            ],
+        ])->assertOk()
+            ->assertJsonPath('data.outcome', 'queued')
+            ->assertJsonPath('data.user_message.metadata.voice_turn_state', 'queued')
+            ->assertJsonPath('data.user_message.metadata.voice_quality.transcript_to_audio_start_ms', 540);
+
+        $this->assertSame($partial->json('data.user_message.id'), $accepted->json('data.user_message.id'));
+        $this->assertSame($partial->json('data.user_message.id'), $queued->json('data.user_message.id'));
+        $this->assertDatabaseCount('conversation_messages', 1);
+        $this->assertDatabaseCount('assistant_runs', 1);
     }
 
     public function test_realtime_turn_persists_acceptance_and_terminal_interruption_without_an_assistant_message(): void

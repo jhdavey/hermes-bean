@@ -27,6 +27,8 @@ class AssistantRunService
         'run_status',
         'response_status',
         'voice_turn_outcome',
+        'voice_turn_state',
+        'voice_turn_sequence',
         'started_at',
         'completed_at',
         'failed_at',
@@ -72,6 +74,7 @@ class AssistantRunService
     public function queueRun(ConversationSession $session, string $content, array $metadata = [], string $source = 'http'): array
     {
         $metadata = $this->sanitizeClientMetadata($metadata);
+        $metadata = $this->voiceTurnMetadataForState($metadata, 'queued');
 
         $queued = DB::transaction(function () use ($session, $content, $metadata, $source): array {
             $lockedSession = ConversationSession::query()
@@ -98,14 +101,15 @@ class AssistantRunService
                 );
             }
             $runMetadata = $cancelledBeforeQueue
-                ? array_merge($metadata, [
+                ? $this->voiceTurnMetadataForState(array_merge($metadata, [
                     'cancelled_before_queue' => true,
                     'cancelled_at' => now()->toIso8601String(),
-                ])
+                ]), 'cancelled')
                 : $metadata;
             $userMessage = ConversationMessage::create([
                 'user_id' => $lockedSession->user_id,
                 'conversation_session_id' => $lockedSession->id,
+                'client_turn_id' => trim((string) data_get($runMetadata, 'client_turn_id', '')) ?: null,
                 'role' => 'user',
                 'content' => $content,
                 'metadata' => $runMetadata ?: null,
@@ -186,9 +190,20 @@ class AssistantRunService
      */
     public function queueExistingMessage(ConversationSession $session, ConversationMessage $userMessage, array $metadata = [], string $source = 'http'): array
     {
-        $metadata = $this->sanitizeClientMetadata(
-            $metadata ?: (is_array($userMessage->metadata) ? $userMessage->metadata : [])
-        );
+        $existingMessageMetadata = is_array($userMessage->metadata) ? $userMessage->metadata : [];
+        $trustedDurableVoiceTurn = filled($userMessage->client_turn_id)
+            && (bool) data_get($existingMessageMetadata, 'voice_request', false)
+            && (string) data_get($existingMessageMetadata, 'source', '') === 'openai_realtime_voice';
+        $trustedLifecycle = $trustedDurableVoiceTurn ? array_intersect_key($existingMessageMetadata, array_flip([
+            'voice_turn_state',
+            'voice_turn_sequence',
+            'voice_turn_outcome',
+        ])) : [];
+        $metadata = $this->voiceTurnMetadataForState(array_merge(
+            $this->sanitizeClientMetadata($existingMessageMetadata),
+            $trustedLifecycle,
+            $this->sanitizeClientMetadata($metadata),
+        ), 'queued');
 
         $queued = DB::transaction(function () use ($session, $userMessage, $metadata, $source): array {
             $lockedSession = ConversationSession::query()
@@ -202,10 +217,10 @@ class AssistantRunService
             }
             $cancelledBeforeQueue = $this->clientRequestWasCancelled($lockedSession, $metadata);
             $runMetadata = $cancelledBeforeQueue
-                ? array_merge($metadata, [
+                ? $this->voiceTurnMetadataForState(array_merge($metadata, [
                     'cancelled_before_queue' => true,
                     'cancelled_at' => now()->toIso8601String(),
-                ])
+                ]), 'cancelled')
                 : $metadata;
             if (($userMessage->metadata ?: []) !== $runMetadata) {
                 $userMessage->update(['metadata' => $runMetadata ?: null]);
@@ -540,6 +555,7 @@ class AssistantRunService
                 'cancelled_at' => now(),
                 'completed_at' => now(),
             ]);
+            $this->updateVoiceTurnMessageState($lockedRun, 'cancelled', terminal: true);
             $this->deleteOrphanAssistantsForRun($lockedRun);
             if ($session instanceof ConversationSession) {
                 $session->update([
@@ -727,6 +743,7 @@ class AssistantRunService
                 ]),
                 'completed_at' => now(),
             ]);
+            $this->updateVoiceTurnMessageState($lockedRun, 'completed', terminal: true);
             $session->update([
                 'status' => $this->activeRunSessionStatus($session->id, $lockedRun->id),
                 'last_activity_at' => now(),
@@ -800,6 +817,7 @@ class AssistantRunService
                 'error' => $reason,
                 'completed_at' => now(),
             ]);
+            $this->updateVoiceTurnMessageState($lockedRun, 'failed', terminal: true, reason: $reason);
             $session->update([
                 'status' => $this->activeRunSessionStatus($session->id, $lockedRun->id),
                 'last_activity_at' => now(),
@@ -1236,6 +1254,7 @@ class AssistantRunService
                 ],
                 'completed_at' => now(),
             ]);
+            $this->updateVoiceTurnMessageState($lockedRun, 'completed', terminal: true);
             $session->update([
                 'status' => $this->activeRunSessionStatus($session->id, $lockedRun->id),
                 'last_activity_at' => now(),
@@ -1297,6 +1316,7 @@ class AssistantRunService
                     $retriedAtKey => now()->toIso8601String(),
                 ]),
             ]);
+            $this->updateVoiceTurnMessageState($lockedRun, 'queued');
             $session->update(['status' => 'queued', 'last_activity_at' => now()]);
             $this->recordEvent($lockedRun, $eventType, [
                 'run_id' => $lockedRun->id,
@@ -1319,6 +1339,54 @@ class AssistantRunService
             'status' => $status,
             'payload' => $payload ?: null,
         ]);
+    }
+
+    private function voiceTurnMetadataForState(array $metadata, string $state): array
+    {
+        if (! (bool) data_get($metadata, 'voice_request', false)) {
+            return $metadata;
+        }
+
+        $now = now()->toIso8601String();
+        $lifecycle = is_array(data_get($metadata, 'voice_turn_outcome'))
+            ? data_get($metadata, 'voice_turn_outcome')
+            : [];
+        $metadata['voice_turn_state'] = $state;
+        $metadata['voice_turn_sequence'] = (int) ($metadata['voice_turn_sequence'] ?? 0);
+        $metadata['voice_turn_outcome'] = array_merge($lifecycle, [
+            'status' => $state,
+            'accepted_at' => $lifecycle['accepted_at'] ?? $now,
+            'updated_at' => $now,
+            ...(in_array($state, ['completed', 'cancelled', 'interrupted', 'failed', 'timed_out', 'superseded'], true)
+                ? ['terminal_at' => $lifecycle['terminal_at'] ?? $now]
+                : []),
+        ]);
+
+        return $metadata;
+    }
+
+    private function updateVoiceTurnMessageState(
+        AssistantRun $run,
+        string $state,
+        bool $terminal = false,
+        ?string $reason = null,
+    ): void {
+        $message = ConversationMessage::query()->lockForUpdate()->find($run->user_message_id);
+        if (! $message instanceof ConversationMessage || ! (bool) data_get($message->metadata, 'voice_request', false)) {
+            return;
+        }
+
+        $metadata = is_array($message->metadata) ? $message->metadata : [];
+        $lifecycle = is_array(data_get($metadata, 'voice_turn_outcome')) ? data_get($metadata, 'voice_turn_outcome') : [];
+        $now = now()->toIso8601String();
+        $metadata['voice_turn_state'] = $state;
+        $metadata['voice_turn_outcome'] = array_merge($lifecycle, [
+            'status' => $state,
+            'updated_at' => $now,
+            ...($terminal ? ['terminal_at' => $lifecycle['terminal_at'] ?? $now] : []),
+            ...($reason ? ['reason' => $reason] : []),
+        ]);
+        $message->update(['metadata' => $metadata]);
     }
 
     private function dispatchRunAfterResponse(int $runId): void

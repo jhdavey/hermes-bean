@@ -31,6 +31,7 @@ import {
     realtimeNeedsAppRuntime,
     realtimePauseAcknowledgement,
     realtimeWorkStatusAnswer,
+    realtimeWorkingAcknowledgement,
     shouldDeferAssistantMessage,
     shouldDisplayRealtimeTranscriptDraft,
     stripRealtimeLocalWakePrefix,
@@ -278,6 +279,16 @@ test('work status questions report actual run state without inventing progress',
         'Yes — I’m still working on it. I’ll tell you as soon as it finishes.',
     );
     assert.equal(realtimeWorkStatusAnswer('What is the weather?', { isWorking: true }), '');
+});
+
+test('working acknowledgements are deterministic and never ask what to create', () => {
+    assert.equal(
+        realtimeWorkingAcknowledgement('Create a three-meal dinner plan and make it a note.'),
+        'Absolutely — I’ll create that note.',
+    );
+    assert.equal(realtimeWorkingAcknowledgement('Set a reminder for four.'), 'Absolutely — I’ll handle that reminder.');
+    assert.equal(realtimeWorkingAcknowledgement('Look up the weather.'), 'Absolutely — I’m on it.');
+    assert.equal(realtimeWorkingAcknowledgement('Create a note.').includes('?'), false);
 });
 
 test('background work is superseded only by an explicit correction or fresh wake', () => {

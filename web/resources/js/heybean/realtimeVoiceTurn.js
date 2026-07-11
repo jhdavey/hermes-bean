@@ -280,6 +280,15 @@ export function realtimeWorkStatusAnswer(text, { isWorking = false } = {}) {
         : 'No — I’m not currently working on a request.';
 }
 
+export function realtimeWorkingAcknowledgement(text) {
+    const normalized = String(text || '').toLowerCase();
+    if (/\b(?:note|notes)\b/.test(normalized)) return 'Absolutely — I’ll create that note.';
+    if (/\b(?:reminder|reminders)\b/.test(normalized)) return 'Absolutely — I’ll handle that reminder.';
+    if (/\b(?:calendar|event|schedule|appointment)\b/.test(normalized)) return 'Absolutely — I’ll take care of that schedule.';
+    if (/\b(?:task|todo|to do)\b/.test(normalized)) return 'Absolutely — I’ll handle that task.';
+    return 'Absolutely — I’m on it.';
+}
+
 export function isExplicitRealtimeWorkInterruption(text, { heardWakeWord = false } = {}) {
     if (heardWakeWord) return true;
     const normalized = String(text || '')

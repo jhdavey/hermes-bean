@@ -105,7 +105,7 @@ class AssistantVoiceController extends Controller
             'session_id' => ['required', 'integer', 'exists:conversation_sessions,id'],
             'user_text' => ['required', 'string', 'max:12000'],
             'assistant_text' => ['sometimes', 'nullable', 'string', 'max:12000'],
-            'outcome' => ['sometimes', 'string', 'in:accepted,completed,cancelled,interrupted,failed,timed_out,superseded'],
+            'outcome' => ['sometimes', 'string', 'in:capturing,awaiting_continuation,accepted,queued,running,speaking,completed,cancelled,interrupted,failed,timed_out,superseded'],
             'failure_reason' => ['sometimes', 'nullable', 'string', 'max:500'],
             'metadata' => ['sometimes', 'array'],
         ]);
@@ -176,6 +176,7 @@ class AssistantVoiceController extends Controller
                 ];
             }
 
+            ConversationSession::query()->whereKey($session->id)->lockForUpdate()->firstOrFail();
             $userMessage = ConversationMessage::firstOrCreate([
                 'conversation_session_id' => $session->id,
                 'client_turn_id' => $clientTurnId,
@@ -202,9 +203,22 @@ class AssistantVoiceController extends Controller
             $terminalOutcomes = ['completed', 'cancelled', 'interrupted', 'failed', 'timed_out', 'superseded', 'abandoned'];
             $terminalAlreadyRecorded = $assistantMessage instanceof ConversationMessage
                 || in_array($existingOutcome, $terminalOutcomes, true);
+            $stateRanks = [
+                'capturing' => 0,
+                'awaiting_continuation' => 1,
+                'accepted' => 2,
+                'queued' => 3,
+                'running' => 4,
+                'speaking' => 5,
+            ];
             $effectiveOutcome = $assistantMessage instanceof ConversationMessage
                 ? 'completed'
                 : ($terminalAlreadyRecorded ? $existingOutcome : $requestedOutcome);
+            if (! $terminalAlreadyRecorded
+                && ! in_array($requestedOutcome, $terminalOutcomes, true)
+                && ($stateRanks[$existingOutcome] ?? -1) > ($stateRanks[$requestedOutcome] ?? -1)) {
+                $effectiveOutcome = $existingOutcome;
+            }
 
             if (! $terminalAlreadyRecorded) {
                 $turnMetadata = $this->voiceTurnMetadata(
@@ -213,7 +227,12 @@ class AssistantVoiceController extends Controller
                     $effectiveOutcome,
                     $data['failure_reason'] ?? null,
                 );
-                $userMessage->update(['metadata' => $turnMetadata]);
+                $turnMetadata['voice_turn_sequence'] = (int) ($existingMetadata['voice_turn_sequence'] ?? $userMessage->id);
+                $turnMetadata['voice_turn_state'] = $effectiveOutcome;
+                $userMessage->update([
+                    'content' => trim($data['user_text']),
+                    'metadata' => $turnMetadata,
+                ]);
             } elseif ($assistantMessage instanceof ConversationMessage && $existingOutcome !== 'completed') {
                 // Repair an inconsistent legacy pair without allowing a late request to
                 // overwrite the first terminal turn's quality or lifecycle metadata.
@@ -259,12 +278,16 @@ class AssistantVoiceController extends Controller
         $currentLifecycle = is_array(data_get($existing, 'voice_turn_outcome'))
             ? data_get($existing, 'voice_turn_outcome')
             : [];
+        $terminalOutcomes = ['completed', 'cancelled', 'interrupted', 'failed', 'timed_out', 'superseded', 'abandoned'];
+        $acceptedStates = ['accepted', 'queued', 'running', 'speaking', ...$terminalOutcomes];
         $lifecycle = array_merge($currentLifecycle, [
             'status' => $outcome,
-            'accepted_at' => $currentLifecycle['accepted_at'] ?? $now,
             'updated_at' => $now,
         ]);
-        if ($outcome !== 'accepted') {
+        if (in_array($outcome, $acceptedStates, true)) {
+            $lifecycle['accepted_at'] = $currentLifecycle['accepted_at'] ?? $now;
+        }
+        if (in_array($outcome, $terminalOutcomes, true)) {
             $lifecycle['terminal_at'] = $currentLifecycle['terminal_at'] ?? $now;
         }
         if ($failureReason !== null && trim($failureReason) !== '') {

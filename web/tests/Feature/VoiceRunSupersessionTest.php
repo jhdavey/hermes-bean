@@ -293,6 +293,86 @@ class VoiceRunSupersessionTest extends TestCase
         $this->assertCount(1, $job->middleware());
     }
 
+    public function test_later_durable_voice_run_releases_until_earlier_sequence_is_terminal(): void
+    {
+        $token = $this->apiToken('voice-fifo-sequence@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+        $session = ConversationSession::findOrFail($sessionId);
+        $runs = app(AssistantRunService::class);
+        $firstMessage = ConversationMessage::create([
+            'user_id' => $session->user_id,
+            'conversation_session_id' => $session->id,
+            'client_turn_id' => 'voice-fifo-first',
+            'role' => 'user',
+            'content' => 'First voice action.',
+            'metadata' => [...$this->voiceMetadata('voice-fifo-first'), 'source' => 'openai_realtime_voice', 'voice_turn_sequence' => 10],
+        ]);
+        $secondMessage = ConversationMessage::create([
+            'user_id' => $session->user_id,
+            'conversation_session_id' => $session->id,
+            'client_turn_id' => 'voice-fifo-second',
+            'role' => 'user',
+            'content' => 'Second voice action.',
+            'metadata' => [...$this->voiceMetadata('voice-fifo-second'), 'source' => 'openai_realtime_voice', 'voice_turn_sequence' => 20],
+        ]);
+        $first = $runs->queueExistingMessage($session, $firstMessage, $this->voiceMetadata('voice-fifo-first'), 'web_queued_voice');
+        $second = $runs->queueExistingMessage($session->fresh(), $secondMessage, $this->voiceMetadata('voice-fifo-second'), 'web_queued_voice');
+        $runtime = Mockery::mock(HermesRuntimeService::class);
+        $runtime->shouldNotReceive('sendExistingMessage');
+        $job = (new ProcessAssistantRun($second['run']->id))->withFakeQueueInteractions();
+
+        $job->handle($runtime, $runs);
+
+        $job->assertReleased(1);
+        $this->assertSame('queued', AssistantRun::findOrFail($first['run']->id)->status);
+        $this->assertSame('queued', AssistantRun::findOrFail($second['run']->id)->status);
+    }
+
+    public function test_worker_drives_durable_voice_turn_from_queued_through_running_to_completed(): void
+    {
+        $token = $this->apiToken('voice-worker-lifecycle@example.com');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+        $session = ConversationSession::findOrFail($sessionId);
+        $message = ConversationMessage::create([
+            'user_id' => $session->user_id,
+            'conversation_session_id' => $session->id,
+            'client_turn_id' => 'voice-worker-state-1',
+            'role' => 'user',
+            'content' => 'Create the durable result.',
+            'metadata' => [
+                ...$this->voiceMetadata('voice-worker-state-1'),
+                'source' => 'openai_realtime_voice',
+                'voice_turn_sequence' => 1,
+                'voice_turn_state' => 'accepted',
+            ],
+        ]);
+        $runs = app(AssistantRunService::class);
+        $queued = $runs->queueExistingMessage($session, $message, $this->voiceMetadata('voice-worker-state-1'), 'web_routed_chat');
+        $runtime = Mockery::mock(HermesRuntimeService::class);
+        $runtime->shouldReceive('sendExistingMessage')->once()->andReturnUsing(function (ConversationSession $runtimeSession) use ($queued): array {
+            $this->assertSame('running', data_get(ConversationMessage::findOrFail($queued['user_message']->id)->metadata, 'voice_turn_state'));
+            $assistant = ConversationMessage::create([
+                'user_id' => $runtimeSession->user_id,
+                'conversation_session_id' => $runtimeSession->id,
+                'role' => 'assistant',
+                'content' => 'Durable result completed.',
+                'metadata' => ['assistant_run_id' => $queued['run']->id],
+            ]);
+
+            return ['status' => 'completed', 'assistant_message' => $assistant, 'events' => []];
+        });
+
+        (new ProcessAssistantRun($queued['run']->id))->handle($runtime, $runs);
+
+        $this->assertSame('completed', AssistantRun::findOrFail($queued['run']->id)->status);
+        $this->assertSame('completed', data_get($message->refresh()->metadata, 'voice_turn_state'));
+        $this->assertNotNull(data_get($message->metadata, 'voice_turn_outcome.terminal_at'));
+    }
+
     public function test_run_specific_cancel_does_not_cancel_another_run_or_rewrite_completed_redelivery(): void
     {
         Http::fake([
@@ -1367,10 +1447,12 @@ class VoiceRunSupersessionTest extends TestCase
         $run = AssistantRun::findOrFail($response->json('data.run.id'));
         $runMetadata = $run->metadata ?? [];
         $messageMetadata = $run->userMessage?->metadata ?? [];
-        foreach (array_keys($forgedKeys) as $key) {
+        foreach (array_diff(array_keys($forgedKeys), ['voice_turn_outcome']) as $key) {
             $this->assertArrayNotHasKey($key, $runMetadata, "Run metadata retained forged {$key}.");
             $this->assertArrayNotHasKey($key, $messageMetadata, "Message metadata retained forged {$key}.");
         }
+        $this->assertSame('queued', data_get($runMetadata, 'voice_turn_outcome.status'));
+        $this->assertSame('queued', data_get($messageMetadata, 'voice_turn_outcome.status'));
 
         $this->assertSame('queued', $run->status);
         Queue::assertPushed(ProcessAssistantRun::class, 1);
@@ -1406,10 +1488,12 @@ class VoiceRunSupersessionTest extends TestCase
             ->assertJsonPath('data.run.metadata.context.surface', 'silent-chat');
 
         $run = AssistantRun::findOrFail($response->json('data.run.id'));
-        foreach (['assistant_run_id', 'cancelled_before_queue', 'supersedes_run_id', 'background_response_retry_attempts', 'voice_turn_outcome', 'status'] as $key) {
+        foreach (['assistant_run_id', 'cancelled_before_queue', 'supersedes_run_id', 'background_response_retry_attempts', 'status'] as $key) {
             $this->assertArrayNotHasKey($key, $run->metadata ?? []);
             $this->assertArrayNotHasKey($key, $run->userMessage?->metadata ?? []);
         }
+        $this->assertSame('queued', data_get($run->metadata, 'voice_turn_outcome.status'));
+        $this->assertSame('queued', data_get($run->userMessage?->metadata, 'voice_turn_outcome.status'));
     }
 
     public function test_queued_branch_endpoint_preserves_server_branch_context_but_not_forged_run_state(): void

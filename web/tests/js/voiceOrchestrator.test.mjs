@@ -28,6 +28,18 @@ test('wake, transcript, backend, playback, and follow-up form one terminal lifec
     assert.equal(voice.snapshot().sessionState, VOICE_SESSION_STATES.WAKE_ONLY);
 });
 
+test('a wake admitted during connection startup survives the connected boundary', () => {
+    const voice = new VoiceOrchestrator();
+    const generation = voice.start();
+    const wake = voice.activateFromLocalWake();
+
+    assert.equal(wake.accepted, true);
+    assert.equal(voice.snapshot().sessionState, VOICE_SESSION_STATES.ACTIVE);
+    assert.equal(voice.connected(generation), true);
+    assert.equal(voice.snapshot().sessionState, VOICE_SESSION_STATES.ACTIVE);
+    assert.equal(voice.localWakePending, true);
+});
+
 test('additive work is FIFO and prevents conversation sleep until drained', () => {
     const voice = new VoiceOrchestrator();
     voice.connected(voice.start());

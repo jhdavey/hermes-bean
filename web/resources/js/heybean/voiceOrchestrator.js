@@ -237,7 +237,10 @@ export class VoiceOrchestrator {
 
     connected(generation = this.connectionGeneration) {
         if (generation !== this.connectionGeneration) return false;
-        this.sessionState = VOICE_SESSION_STATES.WAKE_ONLY;
+        // A local wake can arrive while the final WebRTC handshake is still
+        // finishing. Preserve that admitted turn instead of silently putting
+        // the conversation back to sleep at the connection boundary.
+        if (!this.isActive()) this.sessionState = VOICE_SESSION_STATES.WAKE_ONLY;
         this.transition(VOICE_TURN_PHASES.IDLE, 'session.connected');
         return true;
     }
