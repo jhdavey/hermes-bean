@@ -30,6 +30,7 @@ import {
     isRealtimeDuplicateCallConflict,
     isStrictRealtimeWakePhrase,
     isVoiceFillerOnly,
+    naturalizeRealtimeSpeechText,
     realtimeMicrophoneConstraints,
     realtimeNeedsAppRuntime,
     realtimePauseAcknowledgement,
@@ -9416,13 +9417,15 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function realtimeDirectAnswerInstructions(command) {
-        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'the user\'s local timezone';
         const now = new Date();
+        const localDate = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+        const localTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
         return [
             'You are Bean in a live voice conversation. Always answer in US English, directly, warmly, and very briefly.',
             'This is a simple conversational question that does not need HeyBean app data, private workspace data, actions, or external lookups.',
-            `User local time context: ${now.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' })} (${timezone}).`,
-            'If the user asks for date or time, use that local time context. Do not say you cannot hear audio; this is an active voice session.',
+            `Local calendar context: Today is ${localDate}. The local time is ${localTime}.`,
+            'Speak dates and times naturally: say today or tomorrow when useful, July 12th, 4 o’clock, or 4:30 p.m. Never read ISO timestamps, UTC offsets, IANA timezone identifiers, or 24-hour times unless the user explicitly asks for them.',
+            'If the user asks for date or time, use that local context. Do not say you cannot hear audio; this is an active voice session.',
             `User said: ${command}`,
         ].join('\n');
     }
@@ -9660,7 +9663,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     async function speakRealtimeBeanText(text) {
-        const content = String(text || '').trim();
+        const content = naturalizeRealtimeSpeechText(text);
         if (!content || !realtimeDataChannel || realtimeDataChannel.readyState !== 'open') return null;
         return speakRealtimeInstructions(`Speak this HeyBean answer exactly and do not add any extra facts or tasks:\n\n${content}`, { purpose: 'final' });
     }
@@ -9670,7 +9673,7 @@ export function mountHeyBeanWebApp(mount) {
             type: 'session.update',
             session: {
                 type: 'realtime',
-                instructions: 'You are Bean inside a HeyBean realtime voice session. Always understand and respond only in US English. Never switch languages or mirror a transcript in another language. If speech seems garbled or non-English, ask in English for the user to repeat it. A local client gate prevents dormant microphone audio from reaching this session; every user transcript you receive was released after a local Hey Bean activation or during its active follow-up window. The app, not the model, owns wake, stop, cancellation, and persistence state. Never treat your own speech, partial transcripts, or recognition artifacts as requests. Keep answers concise and naturally speakable. Use send_bean_request for HeyBean app data, task/reminder/note/calendar/memory mutations, current external information, approvals, or longer-running work.',
+                instructions: 'You are Bean inside a HeyBean realtime voice session. Always understand and respond only in US English. Never switch languages or mirror a transcript in another language. If speech seems garbled or non-English, ask in English for the user to repeat it. Speak dates and times like a person: use today or tomorrow when useful, month names with ordinal dates, and 12-hour times such as 4 o’clock, 4:30 p.m., or twelve p.m. Never speak ISO timestamps, UTC offsets, IANA timezone identifiers, or 24-hour clock values unless the user explicitly requests them. A local client gate prevents dormant microphone audio from reaching this session; every user transcript you receive was released after a local Hey Bean activation or during its active follow-up window. The app, not the model, owns wake, stop, cancellation, and persistence state. Never treat your own speech, partial transcripts, or recognition artifacts as requests. Keep answers concise and naturally speakable. Use send_bean_request for HeyBean app data, task/reminder/note/calendar/memory mutations, current external information, approvals, or longer-running work.',
             },
         };
     }

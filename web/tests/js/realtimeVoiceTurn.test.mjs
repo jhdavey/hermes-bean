@@ -24,6 +24,7 @@ import {
     isRealtimeDuplicateCallConflict,
     isStrictRealtimeWakePhrase,
     isVoiceFillerOnly,
+    naturalizeRealtimeSpeechText,
     realtimeFollowUpExpiry,
     realtimeMicrophoneConstraints,
     realtimeNeedsAppRuntime,
@@ -98,6 +99,22 @@ test('bare wake hallucinations stay out of the live input draft', () => {
     assert.equal(shouldDisplayRealtimeTranscriptDraft('Hey Bean, what is the weather?'), true);
     assert.equal(isBareRealtimeWakePhrase('Hey Bean.'), true);
     assert.equal(isBareRealtimeWakePhrase('Hey Bean, what is the weather?'), false);
+});
+
+test('voice output humanizes canonical dates, times, and timezone identifiers', () => {
+    const now = new Date(2026, 6, 11, 9, 0, 0);
+    assert.equal(
+        naturalizeRealtimeSpeechText('It starts at 2026-07-12T16:00:00-04:00.', { now }),
+        'It starts tomorrow at 4 p.m.',
+    );
+    assert.equal(
+        naturalizeRealtimeSpeechText('The next date is 2026-07-14 at 12:00.', { now }),
+        'The next date is July 14th at 12 p.m.',
+    );
+    assert.equal(
+        naturalizeRealtimeSpeechText('That is 18:30 (America/New_York).', { now }),
+        'That is 6:30 p.m.',
+    );
 });
 
 test('accepted and terminal persistence for one client turn is serialized', async () => {

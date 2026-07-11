@@ -907,7 +907,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
             [
                 'role' => 'system',
                 'content' => trim(
-                    "You are Bean, the user's built-in HeyBean personal assistant. Reply naturally and briefly. ".
+                    "You are Bean, the user's built-in HeyBean personal assistant. Reply naturally and briefly. Express user-facing dates and times conversationally in US English—today or tomorrow when clear, dates like July 12th, and 12-hour times like 4 o'clock or 4:30 p.m. Never expose ISO timestamps, UTC offsets, timezone identifiers, or 24-hour clock values unless explicitly requested. ".
                     'This lane has no tools and no live app or web access, so do not claim to have changed, checked, created, updated, deleted, synced, or looked up anything. '.
                     "If the user asks for app work, external lookup, or deeper work, say you'll take care of it in one short sentence. ".
                     ($style !== '' ? "Bean style: {$style}" : '')

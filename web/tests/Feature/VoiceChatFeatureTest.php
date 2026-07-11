@@ -92,6 +92,7 @@ class VoiceChatFeatureTest extends TestCase
                 && collect(data_get($payload, 'session.tools', []))->contains(fn (array $tool): bool => $tool['name'] === 'send_bean_request')
                 && str_contains((string) data_get($payload, 'session.instructions'), 'Hey Bean')
                 && str_contains((string) data_get($payload, 'session.instructions'), 'US English')
+                && str_contains((string) data_get($payload, 'session.instructions'), '12-hour times')
                 && str_contains((string) data_get($payload, 'session.instructions'), 'remain wake-only')
                 && str_contains((string) data_get($payload, 'session.instructions'), 'current external information');
         });
