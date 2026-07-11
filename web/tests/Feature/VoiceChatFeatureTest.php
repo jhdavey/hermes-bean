@@ -84,7 +84,6 @@ class VoiceChatFeatureTest extends TestCase
                 && data_get($payload, 'session.type') === 'realtime'
                 && data_get($payload, 'session.model') === 'gpt-realtime-test'
                 && data_get($payload, 'session.audio.output.voice') === 'shimmer'
-                && data_get($payload, 'session.audio.input.noise_reduction.type') === 'far_field'
                 && data_get($payload, 'session.audio.input.transcription.language') === 'en'
                 && str_contains((string) data_get($payload, 'session.audio.input.transcription.prompt'), 'background noise')
                 && data_get($payload, 'session.audio.input.turn_detection.type') === 'server_vad'

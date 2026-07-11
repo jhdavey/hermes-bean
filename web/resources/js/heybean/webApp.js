@@ -10247,7 +10247,7 @@ export function mountHeyBeanWebApp(mount) {
             realtimePendingTranscript = '';
             updateVoiceWakeDraft('');
             state.chatRunState = 'Listening…';
-            armRealtimeFollowUpWindow(locallyActivated ? realtimeFollowUpWindowMs : 2500);
+            armRealtimeFollowUpWindow(locallyActivated ? realtimeFollowUpWindowMs : 5000);
             render();
             return {
                 accepted: false,

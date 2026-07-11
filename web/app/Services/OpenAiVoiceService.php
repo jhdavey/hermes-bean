@@ -81,9 +81,6 @@ class OpenAiVoiceService
                     'instructions' => $instructions,
                     'audio' => [
                         'input' => [
-                            'noise_reduction' => [
-                                'type' => 'far_field',
-                            ],
                             'transcription' => [
                                 'model' => (string) config('services.openai.realtime_transcription_model', 'gpt-4o-mini-transcribe'),
                                 'language' => 'en',
