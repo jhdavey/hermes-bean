@@ -30,6 +30,7 @@ import {
     isRealtimeDuplicateCallConflict,
     isStrictRealtimeWakePhrase,
     isIntentionalRealtimeInterruption,
+    isQueueableRealtimeWorkFollowUp,
     isVoiceFillerOnly,
     naturalizeRealtimeSpeechText,
     realtimeMicrophoneConstraints,
@@ -9469,7 +9470,9 @@ export function mountHeyBeanWebApp(mount) {
     function sleepRealtimeConversationAfterFollowUp() {
         clearRealtimeFollowUpWindow();
         if (!realtimeConversation.isActive()) return;
-        if (realtimeResponseActive) {
+        // Never invalidate the epoch that owns queued speech or unfinished work.
+        // The queue drains only after these states settle.
+        if (realtimeQueuedFollowUp || realtimeTurnStillActive()) {
             armRealtimeFollowUpWindow();
             return;
         }
@@ -10323,7 +10326,19 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         if (now < realtimeIgnoreInputUntil || realtimeResponseActive || realtimeLaravelTurnInFlight || now < realtimeTurnGuardUntil || chatHasActiveTurn()) {
-            if ((realtimeLaravelTurnInFlight || chatHasActiveTurn())
+            const workIsActive = realtimeLaravelTurnInFlight || chatHasActiveTurn();
+            if (workIsActive && isQueueableRealtimeWorkFollowUp(command)) {
+                realtimePendingTranscript = '';
+                updateVoiceWakeDraft('');
+                queueRealtimeFollowUpTranscript(text, {
+                    admission,
+                    transcriptCompletedAtMs,
+                });
+                state.chatRunState = 'Queued your follow-up…';
+                render();
+                return { accepted: true, reason: 'queued_during_work' };
+            }
+            if (workIsActive
                 && !isExplicitRealtimeWorkInterruption(command, { heardWakeWord: heardStrictWakeWord || locallyActivated })) {
                 realtimePendingTranscript = '';
                 updateVoiceWakeDraft('');
@@ -10334,7 +10349,7 @@ export function mountHeyBeanWebApp(mount) {
             }
             let queuedAdmission = admission;
             let supersedesClientRequestId = String(options.supersedesClientRequestId || '').trim();
-            if (realtimeLaravelTurnInFlight || chatHasActiveTurn()) {
+            if (workIsActive) {
                 const canSupersedeActiveRequest = activeChatSupersessionEligible && activeChatClientRequestId !== '';
                 supersedesClientRequestId = canSupersedeActiveRequest
                     ? activeChatClientRequestId

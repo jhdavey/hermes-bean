@@ -24,6 +24,7 @@ import {
     isRealtimeDuplicateCallConflict,
     isStrictRealtimeWakePhrase,
     isIntentionalRealtimeInterruption,
+    isQueueableRealtimeWorkFollowUp,
     isVoiceFillerOnly,
     naturalizeRealtimeSpeechText,
     realtimeFollowUpExpiry,
@@ -275,6 +276,15 @@ test('background work is superseded only by an explicit correction or fresh wake
     assert.equal(isExplicitRealtimeWorkInterruption('Actually, use Tampa instead.'), true);
     assert.equal(isExplicitRealtimeWorkInterruption('Change that to tomorrow.'), true);
     assert.equal(isExplicitRealtimeWorkInterruption('New request.', { heardWakeWord: true }), true);
+});
+
+test('additive requests queue behind active work without treating background speech as work', () => {
+    assert.equal(isQueueableRealtimeWorkFollowUp('Also create a reminder for that.'), true);
+    assert.equal(isQueueableRealtimeWorkFollowUp('Can you also add that to my tasks?'), true);
+    assert.equal(isQueueableRealtimeWorkFollowUp('Hey Bean, after that check tomorrow.'), true);
+    assert.equal(isQueueableRealtimeWorkFollowUp('Remind me at five.'), true);
+    assert.equal(isQueueableRealtimeWorkFollowUp('Dinner is ready.'), false);
+    assert.equal(isQueueableRealtimeWorkFollowUp('Um, yeah.'), false);
 });
 
 test('non-Latin recognition artifacts are rejected from the US English voice session', () => {

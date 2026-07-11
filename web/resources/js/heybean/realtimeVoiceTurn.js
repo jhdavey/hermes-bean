@@ -294,6 +294,24 @@ export function isExplicitRealtimeWorkInterruption(text, { heardWakeWord = false
     return /^(?:actually\b|wait bean\b|bean\b|instead\b|change (?:that|it)\b|make that\b|i meant\b)/.test(normalized);
 }
 
+export function isQueueableRealtimeWorkFollowUp(text) {
+    const normalized = String(text || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^hey (?:bean|ben|bin|bing|being|beane|beam)\s+/, '');
+    if (!normalized || isVoiceFillerOnly(normalized)) return false;
+
+    return [
+        /^(?:also|and also|then|after that|next)\b/,
+        /^(?:can|could|would) you (?:please )?also\b/,
+        /^please also\b/,
+        /^(?:add|create|set|schedule|make|put)\b/,
+        /^remind me\b/,
+    ].some((pattern) => pattern.test(normalized));
+}
+
 export function extractRealtimeResponseTranscript(response) {
     return (Array.isArray(response?.output) ? response.output : [])
         .flatMap((item) => Array.isArray(item?.content) ? item.content : [])
