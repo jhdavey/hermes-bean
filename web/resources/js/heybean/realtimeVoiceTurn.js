@@ -211,6 +211,11 @@ export function isCompletedRealtimeResponse(response) {
     return String(response?.status || '').toLowerCase() === 'completed';
 }
 
+export function isRealtimeDuplicateCallConflict(status, detail = '') {
+    return Number(status) === 409
+        && /live session already exists|provided call_id/i.test(String(detail || ''));
+}
+
 export const REALTIME_CONVERSATION_STATES = Object.freeze({
     WAKE_ONLY: 'wake_only',
     ACTIVE: 'active',

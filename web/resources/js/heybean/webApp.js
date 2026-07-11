@@ -26,6 +26,7 @@ import {
     isExplicitRealtimeWorkInterruption,
     isLikelyNonEnglishRealtimeTranscript,
     isRealtimeVoiceStopCommand,
+    isRealtimeDuplicateCallConflict,
     isStrictRealtimeWakePhrase,
     isVoiceFillerOnly,
     realtimeMicrophoneConstraints,
@@ -9784,7 +9785,34 @@ export function mountHeyBeanWebApp(mount) {
         }
     }
 
-    async function connectRealtimeVoice(connectionGeneration) {
+    async function disposeRealtimeConnectionAttempt({
+        localWakeGate,
+        rawMicrophoneStream,
+        providerStream,
+        dataChannel,
+        peerConnection,
+        remoteAudio,
+    } = {}) {
+        if (realtimeLocalWakeGate === localWakeGate) realtimeLocalWakeGate = null;
+        if (realtimeRawMicrophoneStream === rawMicrophoneStream) realtimeRawMicrophoneStream = null;
+        if (realtimeProviderStream === providerStream) realtimeProviderStream = null;
+        if (realtimeDataChannel === dataChannel) realtimeDataChannel = null;
+        if (realtimePeerConnection === peerConnection) realtimePeerConnection = null;
+        if (realtimeRemoteAudio === remoteAudio) realtimeRemoteAudio = null;
+        realtimeSession = null;
+        try { dataChannel?.close?.(); } catch (_) {}
+        try { peerConnection?.close?.(); } catch (_) {}
+        rawMicrophoneStream?.getTracks?.().forEach((track) => track.stop());
+        providerStream?.getTracks?.().forEach((track) => track.stop());
+        try {
+            remoteAudio?.pause?.();
+            if (remoteAudio) remoteAudio.srcObject = null;
+        } catch (_) {}
+        try { await localWakeGate?.stop?.(); } catch (_) {}
+        clearRealtimeVoiceInputFeedback();
+    }
+
+    async function connectRealtimeVoice(connectionGeneration, duplicateCallRetry = 0) {
         if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
             throw new Error('Realtime voice needs microphone and WebRTC support in this browser.');
         }
@@ -9919,6 +9947,20 @@ export function mountHeyBeanWebApp(mount) {
                 detail = JSON.parse(errorBody)?.error?.message || '';
             } catch (_) {
                 detail = errorBody.trim().slice(0, 220);
+            }
+            if (duplicateCallRetry < 1 && isRealtimeDuplicateCallConflict(sdpResponse.status, detail)) {
+                await disposeRealtimeConnectionAttempt({
+                    localWakeGate,
+                    rawMicrophoneStream,
+                    providerStream: gatedAudio.stream,
+                    dataChannel,
+                    peerConnection,
+                    remoteAudio,
+                });
+                if (connectionGeneration !== realtimeConnectionGeneration) {
+                    throw new Error('Realtime voice connection was superseded.');
+                }
+                return connectRealtimeVoice(connectionGeneration, duplicateCallRetry + 1);
             }
             throw new Error(`Realtime voice connection failed (${sdpResponse.status})${detail ? `: ${detail}` : ''}.`);
         }

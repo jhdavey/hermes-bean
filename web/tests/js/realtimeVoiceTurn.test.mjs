@@ -20,6 +20,7 @@ import {
     isExplicitRealtimeWorkInterruption,
     isLikelyNonEnglishRealtimeTranscript,
     isRealtimeVoiceStopCommand,
+    isRealtimeDuplicateCallConflict,
     isStrictRealtimeWakePhrase,
     isVoiceFillerOnly,
     realtimeFollowUpExpiry,
@@ -439,6 +440,12 @@ test('only completed response.done payloads are successful', () => {
     assert.equal(isCompletedRealtimeResponse({ status: 'failed' }), false);
     assert.equal(isCompletedRealtimeResponse({ status: 'incomplete' }), false);
     assert.equal(isCompletedRealtimeResponse({}), false);
+});
+
+test('only the known duplicate live-call conflict is eligible for clean renegotiation', () => {
+    assert.equal(isRealtimeDuplicateCallConflict(409, 'A live session already exists for the provided call_id.'), true);
+    assert.equal(isRealtimeDuplicateCallConflict(409, 'Another conflict.'), false);
+    assert.equal(isRealtimeDuplicateCallConflict(401, 'A live session already exists for the provided call_id.'), false);
 });
 
 test('barge-in marks the interrupted speech response as cancelled', async () => {
