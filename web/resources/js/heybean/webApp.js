@@ -23,6 +23,7 @@ import {
     cancelRealtimeTurnWithoutBlockingReplacement,
     extractRealtimeResponseTranscript,
     isCompletedRealtimeResponse,
+    isBareRealtimeWakePhrase,
     isExplicitRealtimeWorkInterruption,
     isLikelyNonEnglishRealtimeTranscript,
     isRealtimeVoiceStopCommand,
@@ -34,6 +35,7 @@ import {
     realtimePauseAcknowledgement,
     realtimeWorkStatusAnswer,
     shouldDeferAssistantMessage,
+    shouldDisplayRealtimeTranscriptDraft,
     stripRealtimeLocalWakePrefix,
 } from './realtimeVoiceTurn.js';
 import { LocalWakeGate } from './localWakeGate.js';
@@ -9478,12 +9480,12 @@ export function mountHeyBeanWebApp(mount) {
         render();
     }
 
-    function armRealtimeFollowUpWindow() {
+    function armRealtimeFollowUpWindow(timeoutMs = realtimeFollowUpWindowMs) {
         clearRealtimeFollowUpWindow();
         if (!state.voiceWakeListening || !realtimeConversation.isActive()) return;
         realtimeFollowUpTimer = window.setTimeout(
             sleepRealtimeConversationAfterFollowUp,
-            realtimeFollowUpWindowMs,
+            Math.max(250, Number(timeoutMs) || realtimeFollowUpWindowMs),
         );
     }
 
@@ -10063,7 +10065,9 @@ export function mountHeyBeanWebApp(mount) {
                 contentIndex: payload.content_index,
                 delta: payload.delta,
             });
-            if (draft && !isLikelyNonEnglishRealtimeTranscript(draft)) {
+            if (draft
+                && shouldDisplayRealtimeTranscriptDraft(draft)
+                && !isLikelyNonEnglishRealtimeTranscript(draft)) {
                 updateVoiceWakeDraft(draft);
                 state.chatRunState = 'Listening…';
             } else if (draft) {
@@ -10082,7 +10086,7 @@ export function mountHeyBeanWebApp(mount) {
             updateRealtimeVoiceActivity(0, { decay: false });
             handleRealtimeUserTranscript(transcript, { transcriptId })
                 .then((admission) => {
-                    if (['wake_required', 'non_english_transcript', 'unaddressed_during_work'].includes(admission?.reason) && transcriptId) {
+                    if (['wake_required', 'wake_only', 'non_english_transcript', 'unaddressed_during_work'].includes(admission?.reason) && transcriptId) {
                         realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
                     }
                 })
@@ -10240,10 +10244,15 @@ export function mountHeyBeanWebApp(mount) {
                     : text
         ).trim();
         if (!command) {
+            realtimePendingTranscript = '';
+            updateVoiceWakeDraft('');
             state.chatRunState = 'Listening…';
-            armRealtimeFollowUpWindow();
+            armRealtimeFollowUpWindow(locallyActivated ? realtimeFollowUpWindowMs : 2500);
             render();
-            return;
+            return {
+                accepted: false,
+                reason: isBareRealtimeWakePhrase(text) ? 'wake_only' : 'empty_command',
+            };
         }
         const commandKey = normalizedVoiceCommand(command);
         if (commandKey && realtimeLastCommandKey === commandKey && now - realtimeLastCommandAt < 8000) {

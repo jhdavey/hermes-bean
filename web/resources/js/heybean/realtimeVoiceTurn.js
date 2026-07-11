@@ -20,6 +20,16 @@ export function isStrictRealtimeWakePhrase(text) {
     return /^\s*hey[\s,.-]*bean\b/i.test(String(text || ''));
 }
 
+export function isBareRealtimeWakePhrase(text) {
+    return /^\s*hey[\s,.-]*bean[\s.!?,-]*$/i.test(String(text || ''));
+}
+
+export function shouldDisplayRealtimeTranscriptDraft(text) {
+    const draft = String(text || '').trim();
+    if (!draft) return false;
+    return !/^h(?:e(?:y(?:[\s,.-]*b(?:e(?:a(?:n)?)?)?)?)?)?[\s.!?,-]*$/i.test(draft);
+}
+
 export function isLikelyNonEnglishRealtimeTranscript(text) {
     const letters = String(text || '').match(/\p{L}/gu) || [];
     if (!letters.length) return false;

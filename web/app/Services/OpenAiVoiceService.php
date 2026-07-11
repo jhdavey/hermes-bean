@@ -81,10 +81,13 @@ class OpenAiVoiceService
                     'instructions' => $instructions,
                     'audio' => [
                         'input' => [
+                            'noise_reduction' => [
+                                'type' => 'far_field',
+                            ],
                             'transcription' => [
                                 'model' => (string) config('services.openai.realtime_transcription_model', 'gpt-4o-mini-transcribe'),
                                 'language' => 'en',
-                                'prompt' => 'The user speaks US English. The wake phrase is "Hey Bean" and the assistant is named Bean. Transcribe only the English words that are spoken.',
+                                'prompt' => 'The user speaks US English. Transcribe only words actually spoken. Do not insert words for silence, music, or background noise. Product names may include Bean and HeyBean.',
                             ],
                             'turn_detection' => [
                                 'type' => 'server_vad',

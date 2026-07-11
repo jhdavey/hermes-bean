@@ -17,6 +17,7 @@ import {
     cancelRealtimeTurnWithoutBlockingReplacement,
     extractRealtimeResponseTranscript,
     isCompletedRealtimeResponse,
+    isBareRealtimeWakePhrase,
     isExplicitRealtimeWorkInterruption,
     isLikelyNonEnglishRealtimeTranscript,
     isRealtimeVoiceStopCommand,
@@ -29,6 +30,7 @@ import {
     realtimePauseAcknowledgement,
     realtimeWorkStatusAnswer,
     shouldDeferAssistantMessage,
+    shouldDisplayRealtimeTranscriptDraft,
     stripRealtimeLocalWakePrefix,
 } from '../../resources/js/heybean/realtimeVoiceTurn.js';
 
@@ -88,6 +90,14 @@ test('input transcript deltas stream into one draft and finalize per audio item'
     transcripts.append({ itemId: 'voice-3', delta: 'Discard me' });
     transcripts.discard({ itemId: 'voice-3' });
     assert.equal(transcripts.complete({ itemId: 'voice-3' }), '');
+});
+
+test('bare wake hallucinations stay out of the live input draft', () => {
+    assert.equal(shouldDisplayRealtimeTranscriptDraft('Hey'), false);
+    assert.equal(shouldDisplayRealtimeTranscriptDraft('Hey Bean.'), false);
+    assert.equal(shouldDisplayRealtimeTranscriptDraft('Hey Bean, what is the weather?'), true);
+    assert.equal(isBareRealtimeWakePhrase('Hey Bean.'), true);
+    assert.equal(isBareRealtimeWakePhrase('Hey Bean, what is the weather?'), false);
 });
 
 test('accepted and terminal persistence for one client turn is serialized', async () => {
