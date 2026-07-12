@@ -2,14 +2,25 @@
 
 namespace App\Jobs;
 
+use App\Enums\VoiceTurnLane;
+use App\Enums\VoiceTurnSideEffectStatus;
+use App\Enums\VoiceTurnState;
+use App\Exceptions\BrowserVoiceHandlerException;
+use App\Exceptions\VoiceTurnConflictException;
 use App\Models\ActivityEvent;
 use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Models\MemoryEvent;
+use App\Models\VoiceTurn;
 use App\Services\AssistantRunService;
 use App\Services\BeanMemoryService;
+use App\Services\FastCalendarReadService;
+use App\Services\FastDomainReadService;
+use App\Services\FastDomainWriteService;
+use App\Services\FastWeatherReadService;
 use App\Services\HermesRuntimeService;
+use App\Services\VoiceTurnLifecycleService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
@@ -37,11 +48,15 @@ class ProcessAssistantRun implements ShouldQueue
     public function middleware(): array
     {
         $run = AssistantRun::query()
-            ->select(['id', 'conversation_session_id'])
+            ->select(['id', 'workspace_id', 'conversation_session_id', 'voice_turn_id', 'resource_lock_key'])
             ->find($this->assistantRunId);
-        $lockKey = $run?->conversation_session_id
-            ? "assistant-session-{$run->conversation_session_id}"
-            : "assistant-run-{$this->assistantRunId}";
+        $lockKey = $run?->voice_turn_id
+            ? ($run->resource_lock_key
+                ? "browser-voice-resource-{$run->workspace_id}-{$run->resource_lock_key}"
+                : "browser-voice-run-{$this->assistantRunId}")
+            : ($run?->conversation_session_id
+                ? "assistant-session-{$run->conversation_session_id}"
+                : "assistant-run-{$this->assistantRunId}");
 
         return [
             (new WithoutOverlapping($lockKey))
@@ -50,15 +65,30 @@ class ProcessAssistantRun implements ShouldQueue
         ];
     }
 
-    public function handle(HermesRuntimeService $runtime, AssistantRunService $runs): void
-    {
+    public function handle(
+        HermesRuntimeService $runtime,
+        AssistantRunService $runs,
+        ?VoiceTurnLifecycleService $voiceTurns = null,
+        ?FastCalendarReadService $calendarReads = null,
+        ?FastWeatherReadService $weatherReads = null,
+        ?FastDomainReadService $domainReads = null,
+        ?FastDomainWriteService $domainWrites = null,
+    ): void {
         $run = AssistantRun::with('session', 'userMessage')->find($this->assistantRunId);
         if (! $run || ! $run->session || ! $run->userMessage) {
             return;
         }
 
-        if ($this->hasEarlierActiveVoiceRun($run)) {
-            $this->release(1);
+        if ($run->voice_turn_id !== null) {
+            $this->handleBrowserVoiceV2(
+                $run,
+                $runtime,
+                $voiceTurns ?? app(VoiceTurnLifecycleService::class),
+                $calendarReads ?? app(FastCalendarReadService::class),
+                $weatherReads ?? app(FastWeatherReadService::class),
+                $domainReads ?? app(FastDomainReadService::class),
+                $domainWrites ?? app(FastDomainWriteService::class),
+            );
 
             return;
         }
@@ -190,7 +220,445 @@ class ProcessAssistantRun implements ShouldQueue
             return;
         }
 
+        if ($run->voice_turn_id !== null) {
+            $this->markBrowserVoiceV2Failed($run, $exception, app(VoiceTurnLifecycleService::class));
+
+            return;
+        }
+
         $this->markFailed($run, $exception->getMessage());
+    }
+
+    private function handleBrowserVoiceV2(
+        AssistantRun $run,
+        HermesRuntimeService $runtime,
+        VoiceTurnLifecycleService $lifecycle,
+        FastCalendarReadService $calendarReads,
+        FastWeatherReadService $weatherReads,
+        FastDomainReadService $domainReads,
+        FastDomainWriteService $domainWrites,
+    ): void {
+        $turn = VoiceTurn::find($run->voice_turn_id);
+        if (! $turn instanceof VoiceTurn) {
+            return;
+        }
+        if ($run->status === 'cancelled' || $turn->state === VoiceTurnState::Canceled) {
+            return;
+        }
+
+        $started = $lifecycle->claimJobExecution($run);
+        if (! $started) {
+            $currentRun = $run->fresh();
+            $currentTurn = $turn->fresh();
+            if ($currentRun instanceof AssistantRun
+                && $currentTurn instanceof VoiceTurn
+                && $currentRun->status === 'queued'
+                && ! $currentTurn->state->isTerminal()) {
+                $this->job?->release(1);
+            }
+
+            return;
+        }
+
+        $provisional = null;
+        try {
+            $turn = $lifecycle->markProgress($turn, [
+                'run_id' => $run->id,
+                'label' => $run->label,
+            ], 'worker');
+            $runtimeUserMessage = $run->userMessage->refresh();
+            $runtimeUserMessage->setAttribute('metadata', [
+                ...(is_array($runtimeUserMessage->metadata) ? $runtimeUserMessage->metadata : []),
+                'assistant_run_id' => $run->id,
+                'defer_memory_candidate' => true,
+            ]);
+            $typedFinalText = $this->executeBrowserVoiceTypedHandler(
+                $run,
+                $turn,
+                $lifecycle,
+                $calendarReads,
+                $weatherReads,
+                $domainReads,
+                $domainWrites,
+            );
+            $runLane = $this->browserVoiceRunLane($run, $turn);
+            $runHandler = trim((string) ($run->handler ?: $turn->handler));
+            $typedHandler = in_array($runHandler, [
+                'app.calendar.read',
+                'app.reminder.read',
+                'app.task.read',
+                'app.note.read',
+                'external.weather',
+            ], true);
+            $typedHandler = $typedHandler || $runLane === VoiceTurnLane::AppWrite;
+            if ($typedHandler && $typedFinalText === null) {
+                throw new BrowserVoiceHandlerException(
+                    'direct_request_incomplete',
+                    "The persisted typed handler {$runHandler} could not resolve the required fields or one unambiguous target.",
+                    'I’m missing a required detail or a clear target for that change. Please tell me exactly which item and what to change.',
+                );
+            }
+            $result = $typedHandler
+                ? [
+                    'status' => 'completed',
+                    'assistant_message' => null,
+                    'events' => collect(),
+                ]
+                : $runtime->sendExistingMessage($run->session->refresh(), $runtimeUserMessage);
+            $provisional = $result['assistant_message'] ?? null;
+            $finalText = $typedHandler
+                ? trim((string) $typedFinalText)
+                : ($provisional instanceof ConversationMessage ? trim((string) $provisional->content) : '');
+            $runtimeStatus = $this->browserVoiceRuntimeStatus($result);
+            $runtimeCanceled = in_array($runtimeStatus, ['cancelled', 'canceled'], true);
+            $runtimeFailed = in_array($runtimeStatus, ['failed', 'blocked', 'error'], true);
+            if (! $runtimeCanceled && ! $runtimeFailed && $runHandler === 'agent.generate_note') {
+                $saved = $domainWrites->createGeneratedNote($turn, $run, $finalText);
+                if ($saved === null) {
+                    throw new BrowserVoiceHandlerException(
+                        'generated_note_not_committed',
+                        'The generated note did not cross the typed write receipt boundary.',
+                        'I drafted that, but I couldn’t save the note. Would you like me to try again?',
+                    );
+                }
+                $finalText = $saved;
+            }
+
+            $mayFinalize = DB::transaction(function () use ($run, $provisional): bool {
+                $lockedRun = AssistantRun::query()->whereKey($run->id)->lockForUpdate()->first();
+                if (! $lockedRun instanceof AssistantRun || $lockedRun->status !== 'running') {
+                    if ($provisional instanceof ConversationMessage) {
+                        $provisional->delete();
+                    }
+
+                    return false;
+                }
+
+                $lockedRun->update([
+                    'status' => 'finalizing',
+                    'last_progress_at' => now(),
+                ]);
+                if ($provisional instanceof ConversationMessage) {
+                    $provisional->delete();
+                }
+
+                return true;
+            }, 3);
+            if (! $mayFinalize) {
+                return;
+            }
+
+            if ($runtimeCanceled) {
+                $terminal = $lifecycle->finishJob(
+                    $run,
+                    'cancelled',
+                    metadata: [
+                        'run_id' => $run->id,
+                        'reason' => 'runtime_canceled',
+                        'event_ids' => collect($result['events'] ?? [])->pluck('id')->filter()->values()->all(),
+                    ],
+                );
+            } elseif ($runtimeFailed) {
+                $terminal = $lifecycle->finishJob(
+                    $run,
+                    'failed',
+                    failureCategory: 'runtime_'.$runtimeStatus,
+                    internalDetail: trim((string) data_get($result, 'blocker.reason'))
+                        ?: "The runtime returned {$runtimeStatus}.",
+                    userFacingFailure: $this->browserVoiceRuntimeFailureText($finalText),
+                    sideEffectStatus: $this->failureSideEffectStatus($turn, $run),
+                    metadata: [
+                        'run_id' => $run->id,
+                        'runtime_status' => $runtimeStatus,
+                        'event_ids' => collect($result['events'] ?? [])->pluck('id')->filter()->values()->all(),
+                    ],
+                );
+            } elseif ($finalText === '') {
+                $terminal = $lifecycle->finishJob(
+                    $run,
+                    'failed',
+                    failureCategory: 'empty_runtime_result',
+                    internalDetail: 'The runtime completed without a usable final response.',
+                    userFacingFailure: 'I couldn’t finish that request. Would you like me to try again?',
+                    sideEffectStatus: $this->failureSideEffectStatus($turn, $run),
+                    metadata: [
+                        'run_id' => $run->id,
+                        'event_ids' => collect($result['events'] ?? [])->pluck('id')->filter()->values()->all(),
+                    ],
+                );
+            } else {
+                $terminal = $lifecycle->finishJob(
+                    $run,
+                    'completed',
+                    finalText: $finalText,
+                    sideEffectStatus: $this->isReceiptBackedWriteRun($run, $turn)
+                        ? VoiceTurnSideEffectStatus::Committed
+                        : VoiceTurnSideEffectStatus::None,
+                    metadata: [
+                        'run_id' => $run->id,
+                        'event_ids' => collect($result['events'] ?? [])->pluck('id')->filter()->values()->all(),
+                    ],
+                );
+            }
+
+            if ($terminal->state === VoiceTurnState::Completed
+                && $terminal->finalAssistantMessage instanceof ConversationMessage
+                && $terminal->userMessage instanceof ConversationMessage) {
+                app(BeanMemoryService::class)->recordTurnCandidate(
+                    $run->session->refresh(),
+                    $terminal->userMessage,
+                    $terminal->finalAssistantMessage,
+                );
+            }
+        } catch (\Throwable $exception) {
+            if ($provisional instanceof ConversationMessage) {
+                $freshTurn = $turn->fresh();
+                if (! $freshTurn instanceof VoiceTurn
+                    || (int) $freshTurn->final_assistant_message_id !== (int) $provisional->id) {
+                    $provisional->delete();
+                }
+            }
+            if ($this->isReceiptBackedWriteRun($run, $turn)
+                && ($reconciled = $domainWrites->reconcile($turn->fresh(), $run->fresh())) !== null) {
+                try {
+                    $lifecycle->finishJob(
+                        $run,
+                        'completed',
+                        finalText: $reconciled,
+                        sideEffectStatus: VoiceTurnSideEffectStatus::Committed,
+                        metadata: ['reconciled_after_worker_exception' => true, 'run_id' => $run->id],
+                    );
+
+                    return;
+                } catch (VoiceTurnConflictException) {
+                    // A competing finalizer already recorded the authoritative outcome.
+                }
+            }
+            $this->markBrowserVoiceV2Failed($run, $exception, $lifecycle);
+        }
+    }
+
+    private function executeBrowserVoiceTypedHandler(
+        AssistantRun $run,
+        VoiceTurn $turn,
+        VoiceTurnLifecycleService $lifecycle,
+        FastCalendarReadService $calendarReads,
+        FastWeatherReadService $weatherReads,
+        FastDomainReadService $domainReads,
+        FastDomainWriteService $domainWrites,
+    ): ?string {
+        $lane = $this->browserVoiceRunLane($run, $turn);
+        $handler = trim((string) ($run->handler ?: $turn->handler));
+        $input = trim((string) ($run->input ?: $turn->transcript));
+        $typed = in_array($lane, [VoiceTurnLane::AppRead, VoiceTurnLane::AppWrite, VoiceTurnLane::External], true);
+        if (! $typed) {
+            return null;
+        }
+
+        $attempt = 0;
+        while (true) {
+            try {
+                return match ($handler) {
+                    'app.calendar.read' => $calendarReads->resolve($run->session->refresh(), $input, [
+                        'client_timezone' => data_get($turn->metadata, 'timezone'),
+                        'allow_prior_context' => data_get($turn->metadata, 'prior_context_authorized') === true,
+                        'prior_transcript' => data_get($turn->metadata, 'prior_transcript'),
+                    ]),
+                    'external.weather' => $weatherReads->resolve($run->session->refresh(), $input, [
+                        'client_timezone' => data_get($turn->metadata, 'timezone'),
+                        'location_context' => data_get($turn->metadata, 'location_context'),
+                        'allow_prior_context' => data_get($turn->metadata, 'prior_context_authorized') === true,
+                        'prior_transcript' => data_get($turn->metadata, 'prior_transcript'),
+                    ]),
+                    'app.reminder.read', 'app.task.read', 'app.note.read' => $domainReads->resolve(
+                        $run->session->refresh(),
+                        $handler,
+                        $input,
+                        ['client_timezone' => data_get($turn->metadata, 'timezone')],
+                    ),
+                    default => $lane === VoiceTurnLane::AppWrite
+                        ? $domainWrites->execute($turn, $run)
+                        : null,
+                };
+            } catch (\Throwable $exception) {
+                $retriable = in_array($lane, [VoiceTurnLane::AppRead, VoiceTurnLane::External], true)
+                    && (! $exception instanceof BrowserVoiceHandlerException || $exception->retriable)
+                    && $attempt === 0
+                    && (($run->hard_deadline_at ?? $turn->hard_deadline_at) === null
+                        || now()->diffInMilliseconds($run->hard_deadline_at ?? $turn->hard_deadline_at, false) >= ($lane === VoiceTurnLane::External ? 3500 : 250));
+                if (! $retriable) {
+                    throw $exception;
+                }
+
+                $attempt++;
+                $turn = $lifecycle->markRetryAttempt($turn->fresh(), [
+                    'run_id' => $run->id,
+                    'attempt' => $attempt,
+                    'exception_class' => $exception::class,
+                    'reason' => $exception->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    private function markBrowserVoiceV2Failed(
+        AssistantRun $run,
+        \Throwable $exception,
+        VoiceTurnLifecycleService $lifecycle,
+    ): void {
+        $run->refresh();
+        $turn = VoiceTurn::find($run->voice_turn_id);
+        if (! $turn instanceof VoiceTurn) {
+            return;
+        }
+        if ($turn->state->isTerminal()) {
+            $this->reconcileBrowserVoiceV2RunTerminal($run, $turn);
+
+            return;
+        }
+        if ($this->isReceiptBackedWriteRun($run, $turn)
+            && ($reconciled = app(FastDomainWriteService::class)->reconcile($turn, $run)) !== null) {
+            try {
+                $lifecycle->finishJob(
+                    $run,
+                    'completed',
+                    finalText: $reconciled,
+                    sideEffectStatus: VoiceTurnSideEffectStatus::Committed,
+                    metadata: ['reconciled_during_worker_failure' => true, 'run_id' => $run->id],
+                );
+
+                return;
+            } catch (VoiceTurnConflictException) {
+                return;
+            }
+        }
+
+        try {
+            $category = $exception instanceof BrowserVoiceHandlerException
+                ? $exception->category
+                : 'worker_failure';
+            $userFacing = $exception instanceof BrowserVoiceHandlerException
+                ? $exception->userFacingText
+                : 'I couldn’t finish that request. Would you like me to try again?';
+            $lifecycle->finishJob(
+                $run,
+                'failed',
+                failureCategory: $category,
+                internalDetail: $exception->getMessage(),
+                userFacingFailure: $userFacing,
+                sideEffectStatus: $this->failureSideEffectStatus($turn, $run),
+                metadata: ['run_id' => $run->id, 'exception_class' => $exception::class],
+            );
+        } catch (VoiceTurnConflictException) {
+            // Cancellation or another finalizer won the terminal compare-and-set.
+        }
+
+        Log::error('Browser Voice v2 run failed.', [
+            'run_id' => $run->id,
+            'voice_turn_id' => $turn->id,
+            'exception' => $exception->getMessage(),
+        ]);
+    }
+
+    private function failureSideEffectStatus(VoiceTurn $turn, ?AssistantRun $run = null): VoiceTurnSideEffectStatus
+    {
+        if ($run instanceof AssistantRun && ! $this->isReceiptBackedWriteRun($run, $turn)) {
+            return VoiceTurnSideEffectStatus::NotCommitted;
+        }
+        if (! $run instanceof AssistantRun && $turn->lane !== VoiceTurnLane::AppWrite) {
+            return VoiceTurnSideEffectStatus::NotCommitted;
+        }
+
+        return app(FastDomainWriteService::class)->reconcile($turn->fresh(), $run?->fresh()) !== null
+            ? VoiceTurnSideEffectStatus::Committed
+            : VoiceTurnSideEffectStatus::NotCommitted;
+    }
+
+    private function browserVoiceRunLane(AssistantRun $run, VoiceTurn $turn): VoiceTurnLane
+    {
+        return VoiceTurnLane::tryFrom((string) $run->lane) ?? $turn->lane;
+    }
+
+    /** @param array<string, mixed> $result */
+    private function browserVoiceRuntimeStatus(array $result): string
+    {
+        $status = mb_strtolower(trim((string) ($result['status'] ?? 'completed')));
+        if (in_array($status, ['cancelled', 'canceled', 'failed', 'blocked', 'error'], true)) {
+            return $status;
+        }
+
+        $events = collect($result['events'] ?? []);
+        if ($events->contains(fn (mixed $event): bool => in_array(
+            (string) data_get($event, 'event_type'),
+            ['runtime.fast_response_failed_terminal', 'runtime.tool_model_failed'],
+            true,
+        ))) {
+            return 'failed';
+        }
+        if ($events->contains(fn (mixed $event): bool => in_array(
+            (string) data_get($event, 'event_type'),
+            ['runtime.usage_blocked', 'runtime.tool_model_blocked'],
+            true,
+        ))) {
+            return 'blocked';
+        }
+        $assistant = $result['assistant_message'] ?? null;
+        if ($assistant instanceof ConversationMessage
+            && (filled(data_get($assistant->metadata, 'failure_reason')) || is_array(data_get($assistant->metadata, 'failure')))) {
+            return 'failed';
+        }
+
+        return $status;
+    }
+
+    private function browserVoiceRuntimeFailureText(string $candidate): string
+    {
+        $candidate = trim($candidate);
+        if ($candidate !== '' && preg_match('/would you like me to try again\??$/iu', $candidate) === 1) {
+            return $candidate;
+        }
+        if ($candidate !== '' && preg_match('/\b(?:couldn\'t|cannot|can\'t|unavailable|timed out|didn\'t answer)\b/iu', $candidate) === 1) {
+            return rtrim($candidate, " \t\n\r\0\x0B.?!").'. Would you like me to try again?';
+        }
+
+        return 'I couldn’t finish that request because the service didn’t respond as expected. Would you like me to try again?';
+    }
+
+    private function isReceiptBackedWriteRun(AssistantRun $run, VoiceTurn $turn): bool
+    {
+        return $this->browserVoiceRunLane($run, $turn) === VoiceTurnLane::AppWrite
+            || ($run->handler ?: $turn->handler) === 'agent.generate_note';
+    }
+
+    private function reconcileBrowserVoiceV2RunTerminal(AssistantRun $run, VoiceTurn $turn): void
+    {
+        DB::transaction(function () use ($run, $turn): void {
+            $locked = AssistantRun::query()->whereKey($run->id)->lockForUpdate()->first();
+            if (! $locked instanceof AssistantRun || $locked->status === 'cancelled') {
+                return;
+            }
+
+            $status = match ($turn->state) {
+                VoiceTurnState::Completed => 'completed',
+                VoiceTurnState::Canceled => 'cancelled',
+                VoiceTurnState::Failed => 'failed',
+                default => $locked->status,
+            };
+            $locked->update([
+                'status' => $status,
+                'assistant_message_id' => $turn->final_assistant_message_id,
+                'error' => $status === 'failed' ? $turn->internal_failure_detail : $locked->error,
+                'result' => [
+                    'status' => $status,
+                    'voice_turn_id' => $turn->id,
+                    'assistant_message_id' => $turn->final_assistant_message_id,
+                    'reconciled_from_terminal_turn' => true,
+                ],
+                'cancelled_at' => $status === 'cancelled' ? ($locked->cancelled_at ?? now()) : $locked->cancelled_at,
+                'completed_at' => $locked->completed_at ?? now(),
+                'last_progress_at' => now(),
+            ]);
+        }, 3);
     }
 
     private function markCancelled(AssistantRun $run): void
@@ -332,23 +800,6 @@ class ProcessAssistantRun implements ShouldQueue
         }
 
         return $statuses->contains('queued') ? 'queued' : 'active';
-    }
-
-    private function hasEarlierActiveVoiceRun(AssistantRun $run): bool
-    {
-        $sequence = (int) data_get($run->metadata, 'voice_turn_sequence', 0);
-        if ($sequence <= 0 || ! (bool) data_get($run->metadata, 'voice_request', false)) {
-            return false;
-        }
-
-        return AssistantRun::query()
-            ->where('conversation_session_id', $run->conversation_session_id)
-            ->where('id', '!=', $run->id)
-            ->whereIn('status', ['queued', 'running'])
-            ->get(['id', 'metadata'])
-            ->contains(fn (AssistantRun $candidate): bool => (bool) data_get($candidate->metadata, 'voice_request', false)
-                && (int) data_get($candidate->metadata, 'voice_turn_sequence', 0) > 0
-                && (int) data_get($candidate->metadata, 'voice_turn_sequence') < $sequence);
     }
 
     private function updateVoiceTurnState(

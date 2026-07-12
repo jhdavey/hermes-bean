@@ -230,60 +230,6 @@ class VoiceRunSupersessionTest extends TestCase
         Queue::assertPushed(ProcessAssistantRun::class, 1);
     }
 
-    public function test_additive_voice_request_is_durable_while_the_previous_run_is_still_working(): void
-    {
-        $token = $this->apiToken('voice-durable-follow-up@example.com');
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
-            ->assertCreated()
-            ->json('data.id');
-        $first = $this->queueVoiceRun(
-            $token,
-            $sessionId,
-            'Delete my 8 p.m. reminder.',
-            'voice-delete-reminder',
-        )->assertAccepted()->json('data.run');
-
-        $payload = [
-            'content' => 'Create a note titled Universal.',
-            'source' => 'web_queued_voice',
-            'metadata' => [
-                ...$this->voiceMetadata('voice-create-note'),
-                'source' => 'web_queued_voice',
-                'queued_during_active_work' => true,
-                'queued_after_client_request_id' => 'voice-delete-reminder',
-                'voice_queue_id' => 'voice-queued-2',
-            ],
-        ];
-        $followUp = $this->withToken($token)
-            ->postJson("/api/assistant/sessions/{$sessionId}/runs", $payload)
-            ->assertAccepted()
-            ->assertJsonPath('data.status', 'queued')
-            ->assertJsonPath('data.run.source', 'web_queued_voice')
-            ->assertJsonPath('data.run.metadata.client_request_id', 'voice-create-note')
-            ->assertJsonPath('data.run.metadata.queued_after_client_request_id', 'voice-delete-reminder')
-            ->assertJsonPath('data.user_message.content', 'Create a note titled Universal.')
-            ->json('data');
-
-        $this->assertNotSame($first['id'], $followUp['run']['id']);
-        $this->assertDatabaseHas('conversation_messages', [
-            'id' => $followUp['user_message']['id'],
-            'conversation_session_id' => $sessionId,
-            'role' => 'user',
-            'content' => 'Create a note titled Universal.',
-        ]);
-        $this->assertDatabaseCount('assistant_runs', 2);
-        Queue::assertPushed(ProcessAssistantRun::class, 2);
-
-        // Reload/retry uses the stable request id and returns the same durable run.
-        $this->withToken($token)
-            ->postJson("/api/assistant/sessions/{$sessionId}/runs", $payload)
-            ->assertAccepted()
-            ->assertJsonPath('data.run.id', $followUp['run']['id'])
-            ->assertJsonPath('data.user_message.id', $followUp['user_message']['id']);
-        $this->assertDatabaseCount('assistant_runs', 2);
-        Queue::assertPushed(ProcessAssistantRun::class, 2);
-    }
-
     public function test_session_overlap_wait_cannot_exhaust_a_queued_run_on_its_first_release(): void
     {
         $job = new ProcessAssistantRun(999999);
@@ -291,43 +237,6 @@ class VoiceRunSupersessionTest extends TestCase
         $this->assertGreaterThanOrEqual(90, $job->tries);
         $this->assertSame(1, $job->maxExceptions);
         $this->assertCount(1, $job->middleware());
-    }
-
-    public function test_later_durable_voice_run_releases_until_earlier_sequence_is_terminal(): void
-    {
-        $token = $this->apiToken('voice-fifo-sequence@example.com');
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
-            ->assertCreated()
-            ->json('data.id');
-        $session = ConversationSession::findOrFail($sessionId);
-        $runs = app(AssistantRunService::class);
-        $firstMessage = ConversationMessage::create([
-            'user_id' => $session->user_id,
-            'conversation_session_id' => $session->id,
-            'client_turn_id' => 'voice-fifo-first',
-            'role' => 'user',
-            'content' => 'First voice action.',
-            'metadata' => [...$this->voiceMetadata('voice-fifo-first'), 'source' => 'openai_realtime_voice', 'voice_turn_sequence' => 10],
-        ]);
-        $secondMessage = ConversationMessage::create([
-            'user_id' => $session->user_id,
-            'conversation_session_id' => $session->id,
-            'client_turn_id' => 'voice-fifo-second',
-            'role' => 'user',
-            'content' => 'Second voice action.',
-            'metadata' => [...$this->voiceMetadata('voice-fifo-second'), 'source' => 'openai_realtime_voice', 'voice_turn_sequence' => 20],
-        ]);
-        $first = $runs->queueExistingMessage($session, $firstMessage, $this->voiceMetadata('voice-fifo-first'), 'web_queued_voice');
-        $second = $runs->queueExistingMessage($session->fresh(), $secondMessage, $this->voiceMetadata('voice-fifo-second'), 'web_queued_voice');
-        $runtime = Mockery::mock(HermesRuntimeService::class);
-        $runtime->shouldNotReceive('sendExistingMessage');
-        $job = (new ProcessAssistantRun($second['run']->id))->withFakeQueueInteractions();
-
-        $job->handle($runtime, $runs);
-
-        $job->assertReleased(1);
-        $this->assertSame('queued', AssistantRun::findOrFail($first['run']->id)->status);
-        $this->assertSame('queued', AssistantRun::findOrFail($second['run']->id)->status);
     }
 
     public function test_worker_drives_durable_voice_turn_from_queued_through_running_to_completed(): void

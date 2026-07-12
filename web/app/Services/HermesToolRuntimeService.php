@@ -2,12 +2,14 @@
 
 namespace App\Services;
 
+use App\Enums\VoiceTurnLane;
 use App\Models\ActivityEvent;
 use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Models\MemoryEvent;
 use App\Models\User;
+use App\Models\VoiceTurn;
 use App\Services\HermesToolRuntime\CrudPlannerRuntime;
 use App\Services\HermesToolRuntime\NativeToolRuntime;
 use App\Services\HermesToolRuntime\RuntimeSupport;
@@ -195,8 +197,10 @@ class HermesToolRuntimeService implements HermesRuntimeService
             'message_id' => $userMessage->id,
         ]);
 
-        $intentRoute = $this->intentRouter->route($userMessage);
-        if ($session->runtime_mode === 'onboarding' || $this->messageNeedsContextualAgentFollowUp($session, $userMessage)) {
+        $immutableVoiceRoute = $this->immutableBrowserVoiceV2Route($userMessage);
+        $intentRoute = $immutableVoiceRoute ?? $this->intentRouter->route($userMessage);
+        if ($immutableVoiceRoute === null
+            && ($session->runtime_mode === 'onboarding' || $this->messageNeedsContextualAgentFollowUp($session, $userMessage))) {
             $intentRoute = [
                 ...$intentRoute,
                 'lane' => BeanIntentRouter::NEEDS_COMPLEX_REASONING,
@@ -235,6 +239,9 @@ class HermesToolRuntimeService implements HermesRuntimeService
             try {
                 return $this->sendFastNoToolsResponse($session, $userMessage, $received, $routed, $intentRoute, $runtimeStartedAt);
             } catch (\Throwable $exception) {
+                if ($immutableVoiceRoute !== null && ! $this->prepareBrowserVoiceV2Retry($userMessage, $exception)) {
+                    throw $exception;
+                }
                 Log::warning('Bean fast no-tools lane is retrying without agent escalation.', [
                     'session_id' => $session->id,
                     'message_id' => $userMessage->id,
@@ -248,6 +255,10 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     'duration_ms' => $this->elapsedMs($runtimeStartedAt),
                 ], 'hermes.fast_chat', 'failed');
                 try {
+                    $recoveryTimeout = ($intentRoute['lane'] ?? null) === VoiceTurnLane::ComplexAgent->value
+                        ? max(5.0, (float) config('services.hermes_runtime.browser_voice_complex_recovery_timeout', 8))
+                        : max(8.0, (float) config('services.hermes_runtime.fast_chat_recovery_timeout', 8));
+
                     return $this->sendFastNoToolsResponse(
                         $session,
                         $userMessage,
@@ -255,7 +266,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                         $routed,
                         $intentRoute,
                         $runtimeStartedAt,
-                        max(8.0, (float) config('services.hermes_runtime.fast_chat_recovery_timeout', 8)),
+                        $recoveryTimeout,
                         2,
                     );
                 } catch (\Throwable $retryException) {
@@ -291,6 +302,53 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
 
         return $this->sendMessageWithTools($session, $userMessage, $received, $modelRoute, $prompt, collect([$routed]), $intentRoute);
+    }
+
+    /** @return array<string, mixed>|null */
+    private function immutableBrowserVoiceV2Route(ConversationMessage $message): ?array
+    {
+        $voiceTurnId = (int) data_get($message->metadata, 'voice_turn_id', 0);
+        if ($voiceTurnId <= 0 || data_get($message->metadata, 'source') !== 'browser_voice_v2') {
+            return null;
+        }
+
+        $turn = VoiceTurn::query()->find($voiceTurnId);
+        if (! $turn instanceof VoiceTurn || (int) $turn->user_message_id !== (int) $message->id) {
+            return null;
+        }
+
+        $runId = (int) data_get($message->metadata, 'assistant_run_id', 0);
+        $run = $runId > 0
+            ? AssistantRun::query()->whereKey($runId)->where('voice_turn_id', $turn->id)->first()
+            : null;
+        $lane = $run instanceof AssistantRun
+            ? (VoiceTurnLane::tryFrom((string) $run->lane) ?? $turn->lane)
+            : $turn->lane;
+        $handler = $run instanceof AssistantRun && filled($run->handler)
+            ? (string) $run->handler
+            : $turn->handler;
+
+        [$runtime, $toolMode] = match ($lane) {
+            VoiceTurnLane::Instant => ['fast_no_tools', 'none'],
+            VoiceTurnLane::AppRead, VoiceTurnLane::AppWrite => ['agent_tools', 'app_crud'],
+            VoiceTurnLane::External => ['agent_tools', 'external'],
+            VoiceTurnLane::ComplexAgent => ['fast_no_tools', 'none'],
+        };
+
+        return [
+            'lane' => $lane->value,
+            'handler' => $handler,
+            'runtime' => $runtime,
+            'queue' => $lane !== VoiceTurnLane::Instant,
+            'tool_mode' => $toolMode,
+            'reason' => 'Immutable Browser Voice v2 admission route.',
+            'confidence' => 1.0,
+            'work_plan' => $turn->runs()->get(['id', 'label', 'status'])->map(fn (AssistantRun $run): array => [
+                'id' => 'voice-job-'.$run->id,
+                'label' => $run->label ?: 'Work on request',
+                'status' => $run->status,
+            ])->all(),
+        ];
     }
 
     private function localTemporalAnswer(ConversationMessage $message): ?string
@@ -925,6 +983,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         \Throwable $exception,
     ): array {
         return DB::transaction(function () use ($session, $userMessage, $received, $routed, $runtimeStartedAt, $exception): array {
+            $browserVoiceV2 = data_get($userMessage->metadata, 'source') === 'browser_voice_v2';
             $this->lockRunForAssistantPersistence($session, $userMessage);
             $failed = $this->recordEvent($session, 'runtime.fast_response_failed_terminal', [
                 'message_id' => $userMessage->id,
@@ -935,7 +994,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'user_id' => $session->user_id,
                 'conversation_session_id' => $session->id,
                 'role' => 'assistant',
-                'content' => 'I’m sorry — I couldn’t finish that response. Please try again.',
+                'content' => 'I couldn’t finish that response because the service didn’t answer in time. Would you like me to try again?',
                 'metadata' => [
                     ...$this->assistantRunMetadata($userMessage),
                     'runtime' => 'fast_no_tools',
@@ -951,13 +1010,15 @@ class HermesToolRuntimeService implements HermesRuntimeService
             $session->update(['status' => 'active', 'last_activity_at' => now()]);
 
             return [
-                'status' => 'completed',
+                // Preserve the legacy message API contract; Browser Voice v2
+                // independently normalizes the terminal failure event below.
+                'status' => $browserVoiceV2 ? 'failed' : 'completed',
                 'session' => $session->refresh(),
                 'user_message' => $userMessage,
                 'assistant_message' => $assistantMessage,
                 'events' => collect([$received, $routed, $failed, $messageCompleted]),
                 'usage' => null,
-                'blocker' => null,
+                'blocker' => $browserVoiceV2 ? ['reason' => 'provider_timeout'] : null,
             ];
         });
     }
@@ -988,12 +1049,13 @@ class HermesToolRuntimeService implements HermesRuntimeService
             'messages' => $messages,
         ], JSON_THROW_ON_ERROR);
         $user = User::findOrFail($session->user_id);
+        $complexVoiceRequest = ($intentRoute['lane'] ?? null) === VoiceTurnLane::ComplexAgent->value;
         $preflight = $this->usageService->preflightDirect(
             $user,
             $session->workspace_id,
             $model,
             $this->usageService->estimateTokens($prompt),
-            220,
+            $complexVoiceRequest ? 1400 : 220,
             null,
             (string) ($intentRoute['lane'] ?? BeanIntentRouter::SIMPLE_CONVERSATION),
             [
@@ -1028,12 +1090,17 @@ class HermesToolRuntimeService implements HermesRuntimeService
             $messages,
             false,
             'none',
-            $timeoutSeconds ?? max(5.0, (float) config('services.hermes_runtime.fast_chat_timeout', 6)),
+            $timeoutSeconds ?? ($complexVoiceRequest
+                ? max(5.0, (float) config('services.hermes_runtime.browser_voice_complex_timeout', 7))
+                : max(5.0, (float) config('services.hermes_runtime.fast_chat_timeout', 6))),
         );
         $assistantContent = $this->assistantSafeResponseContent(
             $this->normalizedAssistantContent(data_get($response, 'choices.0.message.content', ''))
         );
         if ($assistantContent === '') {
+            if ($complexVoiceRequest) {
+                throw new \RuntimeException('The complex reasoning model returned an empty response.');
+            }
             $assistantContent = 'I’m here.';
         }
 
@@ -1109,19 +1176,31 @@ class HermesToolRuntimeService implements HermesRuntimeService
     {
         $profile = $this->profileForSession($session);
         $style = trim((string) data_get($profile?->settings, 'prompt', ''));
-        $history = $session->messages()
-            ->where('id', '<', $currentMessage->id)
-            ->whereIn('role', ['user', 'assistant'])
-            ->latest('id')
-            ->limit(6)
-            ->get()
-            ->reverse()
-            ->map(fn (ConversationMessage $message): array => [
-                'role' => $message->role === 'assistant' ? 'assistant' : 'user',
-                'content' => mb_substr((string) $message->content, 0, 1200),
-            ])
-            ->values()
-            ->all();
+        $complexVoiceRequest = ($intentRoute['lane'] ?? null) === VoiceTurnLane::ComplexAgent->value;
+        // Concurrent browser voice jobs can leave earlier user messages
+        // unresolved. A complex job receives only its sealed input so it can
+        // never repeat or act on a neighboring turn.
+        $history = $complexVoiceRequest
+            ? []
+            : $session->messages()
+                ->where('id', '<', $currentMessage->id)
+                ->whereIn('role', ['user', 'assistant'])
+                ->latest('id')
+                ->limit(6)
+                ->get()
+                ->reverse()
+                ->map(fn (ConversationMessage $message): array => [
+                    'role' => $message->role === 'assistant' ? 'assistant' : 'user',
+                    'content' => mb_substr((string) $message->content, 0, 1200),
+                ])
+                ->values()
+                ->all();
+        $laneInstruction = $complexVoiceRequest
+            ? 'Complete the requested reasoning, planning, drafting, or creative work now and return the useful result directly. Do not merely acknowledge it. You have no tools and must not claim that an app change has already happened.'
+            : "If the user asks for app work, external lookup, or deeper work, say you'll take care of it in one short sentence.";
+        $lengthInstruction = $complexVoiceRequest
+            ? 'Give a concise but complete answer of the length the request needs.'
+            : 'Keep the response under 45 words unless the user explicitly asks for a longer explanation.';
 
         return [
             [
@@ -1129,13 +1208,13 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'content' => trim(
                     "You are Bean, the user's built-in HeyBean personal assistant. Reply naturally and briefly. Express user-facing dates and times conversationally in US English—today or tomorrow when clear, dates like July 12th, and 12-hour times like 4 o'clock or 4:30 p.m. Never expose ISO timestamps, UTC offsets, timezone identifiers, or 24-hour clock values unless explicitly requested. ".
                     'This lane has no tools and no live app or web access, so do not claim to have changed, checked, created, updated, deleted, synced, or looked up anything. '.
-                    "If the user asks for app work, external lookup, or deeper work, say you'll take care of it in one short sentence. ".
+                    $laneInstruction.' '.
                     ($style !== '' ? "Bean style: {$style}" : '')
                 ),
             ],
             [
                 'role' => 'system',
-                'content' => 'Intent lane: '.($intentRoute['lane'] ?? BeanIntentRouter::SIMPLE_CONVERSATION).'. Keep the response under 45 words unless the user explicitly asks for a longer explanation.',
+                'content' => 'Intent lane: '.($intentRoute['lane'] ?? BeanIntentRouter::SIMPLE_CONVERSATION).'. '.$lengthInstruction,
             ],
             ...$history,
             [
@@ -1143,6 +1222,44 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'content' => (string) $currentMessage->content,
             ],
         ];
+    }
+
+    private function prepareBrowserVoiceV2Retry(ConversationMessage $message, \Throwable $exception): bool
+    {
+        $runId = (int) data_get($message->metadata, 'assistant_run_id', 0);
+        $voiceTurnId = (int) data_get($message->metadata, 'voice_turn_id', 0);
+        if ($runId <= 0 || $voiceTurnId <= 0) {
+            return false;
+        }
+        $run = AssistantRun::query()->whereKey($runId)->where('voice_turn_id', $voiceTurnId)->first();
+        $turn = VoiceTurn::query()->find($voiceTurnId);
+        if (! $run instanceof AssistantRun
+            || ! $turn instanceof VoiceTurn
+            || $run->status !== 'running'
+            || $turn->state->isTerminal()
+            || $turn->retry_count >= 1
+            || ($run->hard_deadline_at !== null && $run->hard_deadline_at->isPast())
+            || ($turn->hard_deadline_at !== null && $turn->hard_deadline_at->isPast())) {
+            return false;
+        }
+
+        $lifecycle = app(VoiceTurnLifecycleService::class);
+        $turn = $lifecycle->markRetryAttempt($turn, [
+            'run_id' => $run->id,
+            'exception_class' => $exception::class,
+            'reason' => mb_substr($exception->getMessage(), 0, 500),
+        ], 'runtime');
+        if ($turn->state->isTerminal() || $turn->retry_count !== 1) {
+            return false;
+        }
+        $turn = $lifecycle->markProgress($turn, [
+            'run_id' => $run->id,
+            'attempt' => 2,
+            'stage' => 'provider_retry_started',
+        ], 'runtime');
+
+        return ! $turn->state->isTerminal()
+            && AssistantRun::query()->whereKey($run->id)->where('status', 'running')->exists();
     }
 
     private function messageNeedsContextualAgentFollowUp(ConversationSession $session, ConversationMessage $message): bool

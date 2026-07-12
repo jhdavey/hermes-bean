@@ -4,8 +4,12 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
+        "benchmark:voice:browser": "node tests/browser/voice-v2-benchmark.mjs",
         "dev": "vite",
-        "test:voice": "node --test tests/js/voiceOrchestrator.test.mjs tests/js/realtimeVoiceTurn.test.mjs tests/js/localWakeGate.test.mjs"
+        "preflight:voice:production": "node tests/browser/voice-v2-production-preflight.mjs",
+        "test:voice": "node --test tests/js/*.test.mjs",
+        "test:voice:all": "npm run test:voice && npm run test:voice:browser",
+        "test:voice:browser": "playwright test --config=playwright.voice.config.mjs"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",

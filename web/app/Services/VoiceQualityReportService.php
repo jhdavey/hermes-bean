@@ -25,6 +25,10 @@ class VoiceQualityReportService
 
     private const TOOL_FINAL_AUDIO_P95_TARGET_MS = 8_000;
 
+    public function __construct(
+        private readonly BrowserVoiceV2DiagnosticsReportService $browserVoiceV2Diagnostics,
+    ) {}
+
     /**
      * @return array<string, mixed>
      */
@@ -55,6 +59,7 @@ class VoiceQualityReportService
                 'max_days' => self::MAX_WINDOW_DAYS,
             ],
             ...$aggregate,
+            'browser_voice_v2' => $this->browserVoiceV2Diagnostics->report($from, $to),
             'outcome_coverage' => $this->outcomeCoverage(
                 $messages,
                 $aggregate['population']['route_turn_counts'],

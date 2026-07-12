@@ -11,21 +11,38 @@ class FastCalendarReadService
     public function resolve(ConversationSession $session, string $content, array $metadata = []): ?string
     {
         $text = $this->normalize($content);
-        if (! preg_match('/\b(?:calendar|agenda|schedule)\b/u', $text)
+        $explicitCalendarRead = preg_match('/\b(?:calendar|agenda|schedule)\b/u', $text) === 1;
+        $contextualReference = preg_match('/\b(?:first one|next one|what time|when is|what about|and tomorrow|and today)\b/u', $text) === 1;
+        $allowPriorContext = ($metadata['allow_prior_context'] ?? false) === true;
+        if ((! $explicitCalendarRead && ! $contextualReference)
             || preg_match('/\b(?:add|create|make|set|schedule an?|book|delete|remove|update|change|move|reschedule)\b/u', $text)) {
             return null;
+        }
+        if (! $explicitCalendarRead && $contextualReference && ! $allowPriorContext) {
+            return null;
+        }
+
+        $scopeText = $text;
+        if (! $explicitCalendarRead) {
+            $prior = $allowPriorContext ? ($metadata['prior_transcript'] ?? null) : null;
+            if (! is_string($prior) || trim($prior) === '') {
+                return null;
+            }
+            $scopeText = preg_match('/\b(?:today|tomorrow)\b/u', $text) === 1
+                ? $text
+                : $this->normalize($prior).' '.$text;
         }
 
         $timezone = $this->timezone($session, $metadata);
         $now = now($timezone);
         $label = null;
-        if (preg_match('/\btomorrow\b/u', $text)) {
+        if (preg_match('/\btomorrow\b/u', $scopeText)) {
             $day = $now->copy()->addDay();
             $label = 'tomorrow';
-        } elseif (preg_match('/\btoday\b/u', $text)) {
+        } elseif (preg_match('/\btoday\b/u', $scopeText)) {
             $day = $now->copy();
             $label = 'today';
-        } elseif (preg_match('/\b(?:what(?:\'s| is) next|next on|next event|next appointment)\b/u', $text)) {
+        } elseif (preg_match('/\b(?:what(?:\'s| is) next|next on|next event|next appointment)\b/u', $scopeText)) {
             return $this->nextEventAnswer($session, $now, $timezone);
         } else {
             return null;
@@ -50,6 +67,10 @@ class FastCalendarReadService
 
         if ($events->isEmpty()) {
             return "You don’t have anything on your calendar {$label}.";
+        }
+
+        if ($contextualReference && preg_match('/\b(?:first one|what time|when is)\b/u', $text) === 1) {
+            return 'The first one is '.$this->eventPhrase($events->first(), $timezone).'.';
         }
 
         $items = $events->map(fn (CalendarEvent $event): string => $this->eventPhrase($event, $timezone))->all();

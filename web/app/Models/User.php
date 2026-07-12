@@ -104,6 +104,11 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->hasMany(ConversationMessage::class);
     }
 
+    public function voiceTurns(): HasMany
+    {
+        return $this->hasMany(VoiceTurn::class);
+    }
+
     public function activityEvents(): HasMany
     {
         return $this->hasMany(ActivityEvent::class);

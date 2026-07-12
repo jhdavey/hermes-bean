@@ -81,6 +81,13 @@ class OpenAiVoiceService
                     'instructions' => $instructions,
                     'audio' => [
                         'input' => [
+                            // Browser Voice v2 appends activated microphone PCM
+                            // over the Realtime data channel. WebRTC remains
+                            // receive-only so dormant room audio has no media path.
+                            'format' => [
+                                'type' => 'audio/pcm',
+                                'rate' => 24000,
+                            ],
                             'transcription' => [
                                 'model' => (string) config('services.openai.realtime_transcription_model', 'gpt-4o-mini-transcribe'),
                                 'language' => 'en',
@@ -90,7 +97,7 @@ class OpenAiVoiceService
                                 'type' => 'server_vad',
                                 'threshold' => (float) config('services.openai.realtime_vad_threshold', 0.5),
                                 'prefix_padding_ms' => (int) config('services.openai.realtime_vad_prefix_padding_ms', 300),
-                                'silence_duration_ms' => (int) config('services.openai.realtime_vad_silence_duration_ms', 650),
+                                'silence_duration_ms' => (int) config('services.openai.realtime_vad_silence_duration_ms', 2000),
                                 'create_response' => false,
                                 // Background VAD hits must not cut Bean off before the
                                 // client can validate the completed transcript.
@@ -101,8 +108,8 @@ class OpenAiVoiceService
                             'voice' => $voice,
                         ],
                     ],
-                    'tools' => $this->realtimeTools(),
-                    'tool_choice' => 'auto',
+                    'tools' => [],
+                    'tool_choice' => 'none',
                 ],
             ]);
 
@@ -125,33 +132,7 @@ class OpenAiVoiceService
             'expires_at' => data_get($payload, 'expires_at') ?: data_get($payload, 'client_secret.expires_at'),
             'session_id' => data_get($payload, 'session.id') ?: data_get($payload, 'id'),
             'realtime_url' => rtrim((string) config('services.openai.realtime_webrtc_url', 'https://api.openai.com/v1/realtime/calls'), '?'),
-            'tools' => $this->realtimeTools(),
-        ];
-    }
-
-    public function realtimeTools(): array
-    {
-        return [
-            [
-                'type' => 'function',
-                'name' => 'send_bean_request',
-                'description' => 'Send a user request to HeyBean Laravel when app data, tools, tasks, reminders, notes, calendar, memory, approvals, or longer-running agent work are needed. Laravel authenticates, scopes, executes, persists, and returns the result.',
-                'parameters' => [
-                    'type' => 'object',
-                    'properties' => [
-                        'request' => [
-                            'type' => 'string',
-                            'description' => 'The user request to execute in HeyBean.',
-                        ],
-                        'reason' => [
-                            'type' => 'string',
-                            'description' => 'Why Laravel app/tool execution is needed.',
-                        ],
-                    ],
-                    'required' => ['request'],
-                    'additionalProperties' => false,
-                ],
-            ],
+            'tools' => [],
         ];
     }
 
@@ -165,9 +146,8 @@ class OpenAiVoiceService
     private function realtimeInstructions(AgentProfile $profile, array $context): string
     {
         $beanName = trim((string) ($profile->display_name ?: 'Bean')) ?: 'Bean';
-        $timezone = trim((string) data_get($context, 'timezone', config('app.timezone', 'UTC'))) ?: 'UTC';
 
-        return trim("You are {$beanName}, HeyBean's realtime voice assistant. Always understand and respond in US English. Never switch languages or mirror a transcript in another language. If speech appears garbled or non-English, ask the user in English to repeat it. Speak dates and times naturally: use today or tomorrow when useful, month names with ordinal dates, and 12-hour times such as 4 o'clock, 4:30 p.m., or twelve p.m. Never speak ISO timestamps, UTC offsets, the internal timezone identifier, or 24-hour clock values unless the user explicitly requests them. Be warm, concise, and fast like a world-class voice assistant. The user starts a conversation by saying \"Hey Bean\" or by tapping the Bean button. The client controls whether the conversation is active or wake-only. While active, accept natural follow-ups without repeating the wake word. After the user says thanks, thank you, nevermind, cancel, stop, stop talking, stop listening, that's all, all done, no thanks, goodbye, bye, or a close variant, end that conversation and remain wake-only: do not answer, call tools, or resume from any later speech until the user explicitly says \"Hey Bean\" again. Never treat your own audio, a partial transcript, or a recognition artifact as a new request. If the user interrupts while you are speaking, stop and listen. For simple conversational answers, answer directly in one or two short, naturally speakable sentences. For requests that need HeyBean app data, mutations, current external information, approvals, or longer-running work, call send_bean_request instead of inventing results. Never claim to create, update, delete, complete, schedule, fetch private app data, or look up live facts unless Laravel returns that result. Interpret dates and times in the user's local timezone; the internal timezone identifier is {$timezone}.");
+        return trim("You are the US English transcription and speech surface for {$beanName} browser voice. The application owns wake detection, conversation state, request routing, tools, persistence, Stop, cancellation, and final response text. Never call tools or independently answer microphone input. Transcribe only words actually spoken, and do not invent speech from silence, music, background noise, or your own output. When the application explicitly asks you to speak supplied Bean text, speak it exactly, naturally, and without adding facts, questions, or tasks. Keep dates and times naturally spoken in US English.");
     }
 
     private function realtimeModel(): string

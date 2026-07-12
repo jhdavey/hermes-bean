@@ -1,13 +1,13 @@
 # Third-party notices
 
-The generated `runtime.js`, `runtime.wasm`, `asr-api.js`, and the contents packed into `model.data` include or derive from the following projects. The application-authored `wake-worker.js` and `gate-processor.js` are not upstream sherpa-onnx files.
+The generated `kws-runtime.js`, `kws-runtime.wasm`, `kws-api.js`, and the contents packed into `kws-model.data` provide strict wake candidate timestamps and include or derive from the following projects. The application-authored `wake-worker.js`, `gate-processor.js`, repository training script, and `bean-wake-model-v1.json` are not upstream sherpa-onnx files. The superseded general ASR runtime/model was removed.
 
 ## Apache License 2.0 components
 
 The full license is provided in `licenses/Apache-2.0.txt`.
 
 - [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), commit `d7526c835a5a70b9a936100dfc39e527a49893b6`.
-- [`sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01`](https://www.modelscope.cn/models/pkufool/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01), including its ONNX weights, token table, and BPE model.
+- `sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20`, including its ONNX weights and token table, as recorded by `manifest.json`.
 - [kaldi-native-fbank](https://github.com/csukuangfj/kaldi-native-fbank), [kaldi-decoder](https://github.com/k2-fsa/kaldi-decoder), [kaldifst](https://github.com/k2-fsa/kaldifst), [OpenFst](https://github.com/csukuangfj/openfst), and [simple-sentencepiece](https://github.com/pkufool/simple-sentencepiece).
 
 OpenFst copyright 2005-2015 Google, Inc. Kaldifst notes that individual authors or their employers own their contributions as discernible from its Git history.

@@ -101,6 +101,21 @@ class LandingPageFeatureTest extends TestCase
         }
     }
 
+    public function test_browser_voice_shell_marker_follows_the_feature_flag(): void
+    {
+        config()->set('features.browser_voice_v2', false);
+
+        $this->get('/login')
+            ->assertOk()
+            ->assertSee('data-browser-voice-v2="false"', false);
+
+        config()->set('features.browser_voice_v2', true);
+
+        $this->get('/login')
+            ->assertOk()
+            ->assertSee('data-browser-voice-v2="true"', false);
+    }
+
     public function test_register_route_shows_guided_beta_account_setup_copy(): void
     {
         $this->get('/register')

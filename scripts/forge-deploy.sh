@@ -27,3 +27,8 @@ php artisan config:cache
 php artisan route:cache
 php artisan view:cache
 php artisan storage:link >/dev/null 2>&1 || true
+
+# Long-lived queue and sub-minute scheduler processes otherwise continue
+# executing the previous release after the current symlink/code is updated.
+php artisan queue:restart
+php artisan schedule:interrupt || true

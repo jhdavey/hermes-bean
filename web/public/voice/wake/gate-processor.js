@@ -4,18 +4,16 @@ const TARGET_SAMPLE_RATE = 16000;
 const AUDIO_BATCH_SAMPLES = 1600;
 const MAX_RESAMPLED_SAMPLES_PER_RENDER = 512;
 const ACTIVITY_REPORT_MS = 50;
-// Streaming ASR can confirm the two-word wake phrase several hundred
-// milliseconds after the speaker has already started the command. Keep enough
-// locally buffered audio to deliver the complete wake-and-command onset once
-// the local detector admits the turn.
-const PROVIDER_PRE_ROLL_MS = 1200;
 const PROCESSOR_NAME = 'hey-bean-gate';
 
 class HeyBeanGateProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
 
-        this.gateOpen = false;
+        // This worklet is an analysis sink only. It never releases microphone
+        // samples through its audio output; activated provider PCM is emitted
+        // by LocalWakeGate over the Realtime data channel after local wake.
+        this.captureActive = false;
         this.destroyed = false;
         this.failed = false;
         this.generation = 0;
@@ -29,12 +27,6 @@ class HeyBeanGateProcessor extends AudioWorkletProcessor {
         this.activitySquareSum = 0;
         this.activityFrameCount = 0;
         this.activityReportFrames = Math.max(1, Math.round(sampleRate * ACTIVITY_REPORT_MS / 1000));
-        this.providerDelay = new Float32Array(
-            Math.max(1, Math.round(sampleRate * PROVIDER_PRE_ROLL_MS / 1000)),
-        );
-        this.providerDelayWriteIndex = 0;
-        this.providerDelayFrames = 0;
-
         this.port.onmessage = (event) => this.handleControlMessage(event.data);
 
         if (
@@ -68,21 +60,25 @@ class HeyBeanGateProcessor extends AudioWorkletProcessor {
                 this.generation = generation;
                 this.sequence = 0;
                 this.resetAudioPipeline();
-                this.gateOpen = false;
+                this.captureActive = false;
             }
 
-            if (message.type === 'open') {
-                this.gateOpen = true;
+            if (message.type === 'activate') {
+                this.captureActive = true;
                 return;
             }
 
             if (message.type === 'close') {
-                this.gateOpen = false;
+                this.captureActive = false;
+                this.port.postMessage({
+                    type: 'processor_ready',
+                    generation: this.generation,
+                });
                 return;
             }
 
             if (message.type === 'destroy') {
-                this.gateOpen = false;
+                this.captureActive = false;
                 this.destroyed = true;
                 this.resetAudioPipeline();
                 this.port.close();
@@ -116,7 +112,9 @@ class HeyBeanGateProcessor extends AudioWorkletProcessor {
                 this.resampleAndPost(monoInput);
             }
 
-            this.renderGate(inputChannels, outputs);
+            // The browser must never expose raw or delayed microphone audio as
+            // a MediaStream track. Keep the graph alive with bit-exact silence.
+            this.silence(outputs);
         } catch (error) {
             this.failClosed('audio_processing_failed', error);
             this.silence(outputs);
@@ -218,30 +216,6 @@ class HeyBeanGateProcessor extends AudioWorkletProcessor {
         );
     }
 
-    renderGate(inputChannels, outputs) {
-        const firstOutput = outputs[0]?.[0];
-        const frameCount = firstOutput?.length || inputChannels[0]?.length || 0;
-        const delayedMono = new Float32Array(frameCount);
-        const monoInput = inputChannels[0] || null;
-
-        for (let index = 0; index < frameCount; index += 1) {
-            const delayed = this.providerDelayFrames >= this.providerDelay.length
-                ? this.providerDelay[this.providerDelayWriteIndex]
-                : 0;
-            this.providerDelay[this.providerDelayWriteIndex] = monoInput?.[index] || 0;
-            this.providerDelayWriteIndex = (this.providerDelayWriteIndex + 1) % this.providerDelay.length;
-            this.providerDelayFrames = Math.min(this.providerDelayFrames + 1, this.providerDelay.length);
-            delayedMono[index] = this.gateOpen ? delayed : 0;
-        }
-
-        for (const outputChannels of outputs) {
-            for (const output of outputChannels) {
-                output.fill(0);
-                output.set(delayedMono.subarray(0, output.length));
-            }
-        }
-    }
-
     silence(outputs) {
         for (const outputChannels of outputs) {
             for (const output of outputChannels) {
@@ -258,13 +232,10 @@ class HeyBeanGateProcessor extends AudioWorkletProcessor {
         this.sourceFramesUntilTargetFrame = this.sourceFramesPerTargetFrame;
         this.activitySquareSum = 0;
         this.activityFrameCount = 0;
-        this.providerDelay.fill(0);
-        this.providerDelayWriteIndex = 0;
-        this.providerDelayFrames = 0;
     }
 
     failClosed(code, error) {
-        this.gateOpen = false;
+        this.captureActive = false;
         this.failed = true;
         this.resetAudioPipeline();
 

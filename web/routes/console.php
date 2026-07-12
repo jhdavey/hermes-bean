@@ -77,3 +77,7 @@ Schedule::command('plan-history:prune')->daily();
 Schedule::command('calendar-events:materialize-recurring')->daily();
 Schedule::command('reminders:send-due-notifications')->everyMinute();
 Schedule::command('voice-turns:reconcile-abandoned')->everyMinute()->withoutOverlapping(2);
+// Deadline enforcement must run independently of the worker executing the
+// request. A blocked provider/queue worker therefore cannot strand a voice
+// turn beyond its hard or rolling no-progress deadline.
+Schedule::command('browser-voice:enforce-deadlines')->everySecond()->withoutOverlapping(1);

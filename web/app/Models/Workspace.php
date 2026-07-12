@@ -56,6 +56,11 @@ class Workspace extends Model
         return $this->hasMany(CalendarEvent::class);
     }
 
+    public function voiceTurns(): HasMany
+    {
+        return $this->hasMany(VoiceTurn::class);
+    }
+
     public function eventCategories(): HasMany
     {
         return $this->hasMany(EventCategory::class);

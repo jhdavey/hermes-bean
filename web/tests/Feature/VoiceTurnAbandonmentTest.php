@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\ConversationMessage;
+use App\Models\ConversationSession;
 use App\Models\User;
 use App\Services\VoiceTurnAbandonmentService;
 use Carbon\CarbonImmutable;
@@ -13,7 +14,7 @@ class VoiceTurnAbandonmentTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_stale_accepted_turn_is_abandoned_without_assistant_text_and_late_completion_cannot_replace_it(): void
+    public function test_stale_accepted_legacy_turn_is_abandoned_without_assistant_text(): void
     {
         config()->set('services.openai.realtime_turn_abandon_after_seconds', 60);
         $this->travelTo(CarbonImmutable::parse('2026-07-10 12:00:00 UTC'));
@@ -23,24 +24,12 @@ class VoiceTurnAbandonmentTest extends TestCase
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
             ->assertCreated()
             ->json('data.id');
-        $payload = [
-            'session_id' => $sessionId,
-            'user_text' => 'Tell me something brief.',
-            'metadata' => [
-                'client_turn_id' => 'realtime-abandoned-1',
-                'voice_quality' => [
-                    'schema_version' => 1,
-                    'route' => 'direct',
-                ],
-            ],
-        ];
-
-        $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
-            ...$payload,
-            'outcome' => 'accepted',
-        ])->assertCreated()
-            ->assertJsonPath('data.outcome', 'accepted')
-            ->assertJsonPath('data.assistant_message', null);
+        $this->createLegacyTurn(
+            $sessionId,
+            'realtime-abandoned-1',
+            'Tell me something brief.',
+            'direct',
+        );
 
         $this->travel(61)->seconds();
         // If the scheduler is delayed, the report does not mislabel an overdue
@@ -79,18 +68,8 @@ class VoiceTurnAbandonmentTest extends TestCase
             'role' => 'assistant',
         ]);
 
-        // Reconciliation is idempotent and a late provider completion cannot overwrite
-        // the server's first terminal classification or fabricate durable assistant text.
+        // Reconciliation is idempotent and retains the first terminal classification.
         $this->assertSame(0, app(VoiceTurnAbandonmentService::class)->reconcile()['abandoned_count']);
-        $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
-            ...$payload,
-            'outcome' => 'completed',
-            'assistant_text' => 'This response arrived after the browser disappeared.',
-        ])->assertOk()
-            ->assertJsonPath('data.outcome', 'abandoned')
-            ->assertJsonPath('data.assistant_message', null)
-            ->assertJsonPath('data.user_message.metadata.voice_turn_outcome.status', 'abandoned')
-            ->assertJsonPath('data.user_message.metadata.voice_turn_outcome.reason', VoiceTurnAbandonmentService::REASON);
         $this->assertDatabaseCount('conversation_messages', 1);
 
         $this->withToken($token)->getJson('/api/admin/voice-quality?days=1')
@@ -112,31 +91,24 @@ class VoiceTurnAbandonmentTest extends TestCase
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')
             ->assertCreated()
             ->json('data.id');
-        $payload = [
-            'session_id' => $sessionId,
-            'user_text' => 'Give me a status update.',
-            'metadata' => [
-                'client_turn_id' => 'realtime-terminal-wins-1',
-                'voice_quality' => [
-                    'schema_version' => 1,
-                    'route' => 'status',
-                ],
-            ],
-        ];
-
-        $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
-            ...$payload,
-            'outcome' => 'accepted',
-        ])->assertCreated();
+        $message = $this->createLegacyTurn(
+            $sessionId,
+            'realtime-terminal-wins-1',
+            'Give me a status update.',
+            'status',
+        );
         $this->travel(59)->seconds();
         $this->assertSame(0, app(VoiceTurnAbandonmentService::class)->reconcile()['abandoned_count']);
 
-        $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
-            ...$payload,
-            'outcome' => 'cancelled',
-            'failure_reason' => 'client_disconnected',
-        ])->assertOk()
-            ->assertJsonPath('data.outcome', 'cancelled');
+        $metadata = $message->metadata;
+        $metadata['voice_turn_state'] = 'cancelled';
+        $metadata['voice_turn_outcome'] = array_merge($metadata['voice_turn_outcome'], [
+            'status' => 'cancelled',
+            'updated_at' => now()->toIso8601String(),
+            'terminal_at' => now()->toIso8601String(),
+            'reason' => 'client_disconnected',
+        ]);
+        $message->update(['metadata' => $metadata]);
 
         $this->travel(2)->minutes();
         $this->artisan('voice-turns:reconcile-abandoned')
@@ -165,18 +137,12 @@ class VoiceTurnAbandonmentTest extends TestCase
             ->assertCreated()
             ->json('data.id');
 
-        $this->withToken($token)->postJson('/api/assistant/voice/realtime/turn', [
-            'session_id' => $sessionId,
-            'user_text' => 'Are you still working on that?',
-            'outcome' => 'accepted',
-            'metadata' => [
-                'client_turn_id' => 'realtime-status-abandoned-1',
-                'voice_quality' => [
-                    'schema_version' => 1,
-                    'route' => 'status',
-                ],
-            ],
-        ])->assertCreated();
+        $this->createLegacyTurn(
+            $sessionId,
+            'realtime-status-abandoned-1',
+            'Are you still working on that?',
+            'status',
+        );
 
         $this->travel(61)->seconds();
         $this->artisan('voice-turns:reconcile-abandoned')
@@ -193,6 +159,38 @@ class VoiceTurnAbandonmentTest extends TestCase
             'conversation_session_id' => $sessionId,
             'client_turn_id' => 'realtime-status-abandoned-1',
             'role' => 'assistant',
+        ]);
+    }
+
+    private function createLegacyTurn(
+        int $sessionId,
+        string $clientTurnId,
+        string $content,
+        string $route,
+    ): ConversationMessage {
+        $session = ConversationSession::findOrFail($sessionId);
+        $acceptedAt = now()->toIso8601String();
+
+        return ConversationMessage::create([
+            'user_id' => $session->user_id,
+            'conversation_session_id' => $session->id,
+            'client_turn_id' => $clientTurnId,
+            'role' => 'user',
+            'content' => $content,
+            'metadata' => [
+                'source' => 'openai_realtime_voice',
+                'voice_request' => true,
+                'voice_turn_state' => 'accepted',
+                'voice_quality' => [
+                    'schema_version' => 1,
+                    'route' => $route,
+                ],
+                'voice_turn_outcome' => [
+                    'status' => 'accepted',
+                    'accepted_at' => $acceptedAt,
+                    'updated_at' => $acceptedAt,
+                ],
+            ],
         ]);
     }
 }

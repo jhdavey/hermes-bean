@@ -44,6 +44,11 @@ class ConversationSession extends Model
         return $this->hasMany(AssistantRun::class);
     }
 
+    public function voiceTurns(): HasMany
+    {
+        return $this->hasMany(VoiceTurn::class);
+    }
+
     public function blockers(): HasMany
     {
         return $this->hasMany(Blocker::class);

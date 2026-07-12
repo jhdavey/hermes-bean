@@ -2,6 +2,10 @@
 
 Hermes Bean is a Hermes-first personal assistant product. Hermes is the core operating system; the Flutter app and Laravel dashboard are the friendly consumer interface around it.
 
+## Authoritative voice contract
+
+All Bean voice behavior and voice implementation work is governed by [`bean-voice-rules.md`](bean-voice-rules.md). Read and update that contract whenever voice expectations change. The current browser-only replacement architecture and release gate are defined in [`browser-voice-implementation-spec.md`](browser-voice-implementation-spec.md).
+
 ## Product thesis
 
 The user talks to a powerful Hermes agent, and the agent owns a workspace it can read, write, and operate. The UI shows the agent doing work instead of hiding it behind generic chatbot responses.
@@ -58,3 +62,20 @@ php artisan test
 npm install --ignore-scripts
 npm run build
 ```
+
+### Browser Voice v2 runtime
+
+Browser voice is governed by [`bean-voice-rules.md`](bean-voice-rules.md); the implementation, automated gates, and remaining external certification are recorded in [`browser-voice-v2-release-evidence.md`](browser-voice-v2-release-evidence.md). It is enabled only with `BROWSER_VOICE_V2=true`; release certification is recorded as evidence and is not a second runtime gate or user allowlist. Production must run at least three concurrent Laravel queue-worker processes and the Laravel scheduler continuously. Three workers are required for the documented three-job voice concurrency; the server-side capacity policy cannot create concurrency when only one worker process exists. The scheduler enforces voice hard/no-progress deadlines every second independently of a potentially blocked request worker, so a once-per-minute cron without Laravel's sub-minute scheduler loop is not sufficient. Deployments must restart queue workers and interrupt any still-running sub-minute schedule loop so neither process continues executing the previous release; `scripts/forge-deploy.sh` does both.
+
+Before enabling new voice admissions:
+
+```bash
+cd web
+php artisan migrate --force
+php artisan schedule:list
+php artisan browser-voice:audit-invariants
+npm run test:voice:all
+php artisan test --filter=BrowserVoiceV2
+```
+
+Disabling the feature flag stops new Browser Voice v2 admissions. Recovery, delivery, and explicit cancellation remain available for work already admitted so rollback cannot strand a request.

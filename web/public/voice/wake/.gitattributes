@@ -1,6 +1,7 @@
 # Preserve generated Emscripten output byte-for-byte and keep binary payloads
 # out of textual diffs.
-runtime.js binary
-asr-api.js binary
-runtime.wasm binary
-model.data binary
+kws-runtime.js binary
+kws-api.js binary
+kws-runtime.wasm binary
+kws-model.data binary
+bean-wake-model-v1.json binary

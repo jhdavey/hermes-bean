@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes.local/schemas/browser-voice-v2-benchmark-result.schema.json",
+  "title": "Bean Browser Voice v2 benchmark result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "benchmark_id",
+    "generated_at",
+    "classification",
+    "representative_release_certification",
+    "release_certification",
+    "contract_targets",
+    "privacy",
+    "host",
+    "installed_products",
+    "corpus",
+    "requested",
+    "engines",
+    "summary",
+    "limitations"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": "1.2.0" },
+    "benchmark_id": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "classification": { "const": "prerecorded_engine_replay_plus_synthetic_browser_adapter" },
+    "representative_release_certification": { "const": false },
+    "release_certification": {
+      "type": "object",
+      "required": [
+        "release_certified",
+        "representative_release_certification",
+        "deterministic_local_regression_gate_pass",
+        "model_accuracy_gate_pass",
+        "activated_pcm_handoff_gate_pass",
+        "local_provider_input_pipeline_measured",
+        "local_provider_input_pipeline_gate_pass",
+        "actual_realtime_data_channel_provider_release_measured",
+        "representative_provider_release_gate_pass",
+        "missing_required_evidence"
+      ],
+      "properties": {
+        "release_certified": { "const": false },
+        "representative_release_certification": { "const": false },
+        "deterministic_local_regression_gate_pass": { "type": "boolean" },
+        "model_accuracy_gate_pass": { "type": "boolean" },
+        "activated_pcm_handoff_gate_pass": { "type": "boolean" },
+        "local_provider_input_pipeline_measured": { "type": "boolean" },
+        "local_provider_input_pipeline_gate_pass": { "type": "boolean" },
+        "actual_realtime_data_channel_provider_release_measured": { "const": false },
+        "representative_provider_release_gate_pass": { "const": false },
+        "missing_required_evidence": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    },
+    "contract_targets": { "type": "object" },
+    "privacy": {
+      "type": "object",
+      "required": [
+        "ambient_microphone_accessed",
+        "microphone_permission_requested",
+        "get_user_media_used",
+        "raw_audio_retained",
+        "raw_audio_output_emitted",
+        "replay_transport"
+      ],
+      "properties": {
+        "ambient_microphone_accessed": { "const": false },
+        "microphone_permission_requested": { "const": false },
+        "get_user_media_used": { "const": false },
+        "raw_audio_retained": { "const": false },
+        "raw_audio_output_emitted": { "const": false },
+        "replay_transport": { "type": "string" }
+      }
+    },
+    "host": { "type": "object" },
+    "installed_products": { "type": "array", "items": { "type": "object" } },
+    "corpus": {
+      "type": "object",
+      "required": [
+        "generator",
+        "sample_rate",
+        "unique_audio_files",
+        "unique_strict_wake_files",
+        "unique_isolated_strict_wake_files",
+        "unique_ongoing_speech_strict_wake_files",
+        "unique_missed_hey_files",
+        "unique_negative_privacy_files",
+        "negative_privacy_families",
+        "voices",
+        "entries"
+      ],
+      "properties": {
+        "generator": { "const": "macos_say_offline_tts" },
+        "generator_rate_words_per_minute": { "type": "number" },
+        "sample_rate": { "const": 16000 },
+        "speech_boundary": { "type": "string" },
+        "unique_audio_files": { "type": "integer", "minimum": 1 },
+        "unique_strict_wake_files": { "type": "integer", "minimum": 1 },
+        "unique_isolated_strict_wake_files": { "const": 6 },
+        "unique_ongoing_speech_strict_wake_files": { "const": 6 },
+        "unique_missed_hey_files": { "type": "integer", "minimum": 12 },
+        "unique_negative_privacy_files": { "type": "integer", "minimum": 42 },
+        "negative_privacy_families": {
+          "type": "array",
+          "minItems": 7,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "voices": {
+          "type": "array",
+          "minItems": 6,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "voice",
+              "locale",
+              "phrase",
+              "family",
+              "journey",
+              "expected",
+              "sample_rate",
+              "sample_count",
+              "active_end_sample",
+              "duration_ms",
+              "active_speech_end_ms",
+              "sha256"
+            ],
+            "properties": {
+              "id": { "type": "string" },
+              "voice": { "type": "string" },
+              "locale": { "type": "string" },
+              "phrase": { "type": "string" },
+              "family": { "type": "string", "minLength": 1 },
+              "journey": { "type": "string", "minLength": 1 },
+              "expected": { "enum": ["strict_wake", "missed_hey_confirmation", "reject"] },
+              "sample_rate": { "const": 16000 },
+              "sample_count": { "type": "integer", "minimum": 1 },
+              "active_end_sample": { "type": "integer", "minimum": 1 },
+              "duration_ms": { "type": "number", "minimum": 0 },
+              "active_speech_end_ms": { "type": "number", "minimum": 0 },
+              "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            }
+          }
+        }
+      }
+    },
+    "requested": { "type": "object" },
+    "engines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "engine",
+          "evidence_label",
+          "actual_browser_certification",
+          "status",
+          "duration_ms",
+          "pass"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "engine": { "enum": ["chromium", "webkit"] },
+          "evidence_label": { "type": "string" },
+          "proxy_for": { "type": ["string", "null"] },
+          "actual_browser_certification": { "const": false },
+          "status": { "enum": ["passed", "failed", "not_installed", "launch_unavailable"] },
+          "product_version": { "type": "string" },
+          "user_agent": { "type": "string" },
+          "headless": { "type": "boolean" },
+          "duration_ms": { "type": "number", "minimum": 0 },
+          "microphone_audit": {
+            "type": "object",
+            "required": [
+              "tripwire_installed",
+              "get_user_media_call_count",
+              "microphone_permission_requested",
+              "ambient_microphone_accessed"
+            ],
+            "properties": {
+              "tripwire_installed": { "type": "boolean" },
+              "get_user_media_call_count": { "type": "integer", "minimum": 0 },
+              "microphone_permission_requested": { "const": false },
+              "ambient_microphone_accessed": { "const": false }
+            }
+          },
+          "prerecorded_gate": { "$ref": "#/$defs/gateResult" },
+          "synthetic_adapter": { "type": "object" },
+          "browser_console": { "type": "array", "items": { "type": "object" } },
+          "error": { "type": "object" },
+          "pass": { "type": "boolean" }
+        }
+      }
+    },
+    "summary": { "type": "object" },
+    "limitations": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+  },
+  "$defs": {
+    "gateResult": {
+      "type": "object",
+      "required": [
+        "status",
+        "classification",
+        "representative_release_certification",
+        "ambient_microphone_accessed",
+        "get_user_media_used",
+        "model_accuracy",
+        "provider_release",
+        "release_certification",
+        "pass"
+      ],
+      "properties": {
+        "status": { "enum": ["passed", "failed", "unsupported"] },
+        "classification": { "const": "prerecorded_offline_tts_real_local_gate_engine_replay" },
+        "representative_release_certification": { "const": false },
+        "ambient_microphone_accessed": { "const": false },
+        "get_user_media_used": { "const": false },
+        "model_accuracy": { "type": "object" },
+        "provider_release": { "type": "object" },
+        "release_certification": {
+          "type": "object",
+          "required": ["representative_release_certification", "release_certified"],
+          "properties": {
+            "representative_release_certification": { "const": false },
+            "release_certified": { "const": false }
+          }
+        },
+        "pass": { "type": "boolean" }
+      }
+    }
+  }
+}

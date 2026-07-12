@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\ResetPasswordLink;
 use App\Services\AgentProfileService;
+use App\Services\BrowserVoiceV2Gate;
 use App\Services\CouponCodeService;
 use App\Services\OpenAiVoiceService;
 use App\Services\PlanLimitService;
@@ -372,6 +373,7 @@ class AuthController extends Controller
         $user->setAttribute('early_access_signup', $earlyAccessSignup);
         $user->setAttribute('email_verified', $user->hasVerifiedEmail());
         $user->setAttribute('plan_limits', app(PlanLimitService::class)->publicLimitsFor($user));
+        $user->setAttribute('browser_voice_v2_enabled', app(BrowserVoiceV2Gate::class)->enabledFor($user));
 
         return $user;
     }

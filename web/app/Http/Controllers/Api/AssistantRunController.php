@@ -7,6 +7,7 @@ use App\Jobs\ProcessAssistantRun;
 use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
+use App\Models\VoiceTurn;
 use App\Services\AssistantRunService;
 use App\Services\BeanIntentRouter;
 use App\Services\FastCalendarReadService;
@@ -42,6 +43,14 @@ class AssistantRunController extends Controller
         $data['metadata'] = $this->runs->sanitizeClientMetadata($data['metadata'] ?? []);
         $source = (string) ($data['source'] ?? data_get($data, 'metadata.source', 'http'));
         $clientRequestId = trim((string) data_get($data, 'metadata.client_request_id', ''));
+        if ($clientRequestId !== '' && VoiceTurn::query()
+            ->where('conversation_session_id', $ownedSession->id)
+            ->where('turn_id', $clientRequestId)
+            ->exists()) {
+            return response()->json([
+                'message' => 'This stable turn ID is owned by Browser Voice v2.',
+            ], 409);
+        }
         $intentRoute = $this->intentRouter->route($data['content']);
         if ($clientRequestId !== '') {
             $existingRun = $this->existingClientRequestRun($ownedSession, $clientRequestId);
@@ -470,7 +479,6 @@ class AssistantRunController extends Controller
             'flutter',
             'flutter_routed_chat',
             'web_queued_chat',
-            'web_queued_voice',
             'web_routed_chat',
             'production_smoke',
         ], true);
