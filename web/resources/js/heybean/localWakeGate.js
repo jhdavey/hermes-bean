@@ -585,7 +585,7 @@ export class LocalWakeGate {
         }
         if (data.type === 'error') {
             this.#fail(new LocalWakeGateError(String(data.message || 'The local wake detector failed.'), {
-                code: 'detector_failed',
+                code: String(data.code || 'detector_failed').slice(0, 80),
             }), generation);
             return;
         }

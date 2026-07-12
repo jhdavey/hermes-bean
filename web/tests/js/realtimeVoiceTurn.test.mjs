@@ -13,6 +13,7 @@ import {
     naturalizeRealtimeSpeechText,
     realtimeMicrophoneConstraints,
     realtimeUsageReportFromProviderEvent,
+    sanitizedLocalWakeFailure,
     shouldDisplayRealtimeTranscriptDraft,
     stageOptimisticUserTurn,
     stripRealtimeLocalWakePrefix,
@@ -137,6 +138,24 @@ test('[BV2-USAGE-01] provider transcription and speech usage become sanitized id
     });
     assert.equal(realtimeUsageReportFromProviderEvent({ type: 'response.done', response: { id: 'empty', usage: {} } }), null);
     assert.equal(realtimeUsageReportFromProviderEvent({ type: 'conversation.item.created' }), null);
+});
+
+test('[BV2-DIAGNOSTIC-01] local wake failures retain only a bounded sanitized cause chain', () => {
+    const deepest = Object.assign(new Error('Realtime transcription disconnected.\nBearer secret-must-not-be-copied'), {
+        code: 'transport failed!',
+    });
+    const outer = Object.assign(new Error('The local wake gate could not open safely.'), {
+        code: 'gate_open_failed',
+        cause: deepest,
+    });
+    const diagnostic = sanitizedLocalWakeFailure(outer);
+
+    assert.equal(diagnostic.stage, 'local_wake');
+    assert.equal(diagnostic.code, 'gate_open_failed');
+    assert.equal(diagnostic.cause_chain.length, 2);
+    assert.equal(diagnostic.cause_chain[1].code, 'transport_failed_');
+    assert.doesNotMatch(JSON.stringify(diagnostic), /secret-must-not-be-copied/);
+    assert.match(diagnostic.cause_chain[1].message, /Bearer \[redacted\]/);
 });
 
 test('microphone capture requests browser echo and noise controls', () => {

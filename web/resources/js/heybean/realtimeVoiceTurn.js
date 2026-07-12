@@ -31,6 +31,31 @@ export function realtimeUsageReportFromProviderEvent(payload = {}) {
     };
 }
 
+export function sanitizedLocalWakeFailure(error) {
+    const chain = [];
+    const seen = new Set();
+    let current = error;
+    while (current && typeof current === 'object' && chain.length < 4 && !seen.has(current)) {
+        seen.add(current);
+        const code = String(current.code || '').replace(/[^a-z0-9_.-]+/gi, '_').slice(0, 80);
+        const message = String(current.message || '')
+            .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+            .replace(/\bsk-[A-Za-z0-9_-]+\b/g, '[redacted]')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 240);
+        if (code || message) chain.push({ code: code || null, message: message || null });
+        current = current.cause;
+    }
+
+    return {
+        stage: 'local_wake',
+        code: chain[0]?.code || 'local_wake_failure',
+        message: chain[0]?.message || 'Private wake detection failed.',
+        cause_chain: chain,
+    };
+}
+
 export function isStrictRealtimeWakePhrase(text) {
     return /^\s*hey[\s,.-]*bean\b/i.test(String(text || ''));
 }

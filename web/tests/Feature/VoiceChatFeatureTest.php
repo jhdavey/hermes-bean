@@ -8,6 +8,7 @@ use App\Models\AiUsageLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 class VoiceChatFeatureTest extends TestCase
@@ -208,6 +209,28 @@ class VoiceChatFeatureTest extends TestCase
             ->assertJsonPath('data.0.user.email', 'voice-metered@example.com')
             ->assertJsonPath('data.0.metadata.lane', 'voice_realtime')
             ->assertJsonPath('data.0.metadata.usage_session_id', $usageSessionId);
+    }
+
+    public function test_authenticated_browser_can_record_a_sanitized_pre_turn_local_wake_failure(): void
+    {
+        Log::spy();
+        $token = $this->apiToken('voice-client-failure@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/client-failures', [
+            'stage' => 'local_wake',
+            'code' => 'gate_open_failed',
+            'message' => 'The local wake gate could not open safely.',
+            'cause_chain' => [
+                ['code' => 'gate_open_failed', 'message' => 'The local wake gate could not open safely.'],
+                ['code' => 'transport_failed', 'message' => 'Realtime transcription disconnected.'],
+            ],
+        ])->assertOk()->assertJsonPath('data.recorded', true);
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(
+            fn (string $message, array $context): bool => $message === 'Browser Voice v2 client failure.'
+                && $context['code'] === 'gate_open_failed'
+                && count($context['cause_chain']) === 2,
+        );
     }
 
     private function completedUsage(User $user, float $cost): AiUsageLog

@@ -10,6 +10,7 @@ use App\Services\PlanLimitService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class AssistantVoiceController extends Controller
 {
@@ -117,5 +118,28 @@ class AssistantVoiceController extends Controller
             'duplicate' => $result['duplicate'],
             'remaining' => $availability,
         ]]);
+    }
+
+    public function clientFailure(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'stage' => ['required', 'in:local_wake'],
+            'code' => ['required', 'string', 'max:80'],
+            'message' => ['required', 'string', 'max:240'],
+            'cause_chain' => ['present', 'array', 'max:4'],
+            'cause_chain.*.code' => ['nullable', 'string', 'max:80'],
+            'cause_chain.*.message' => ['nullable', 'string', 'max:240'],
+        ]);
+        $user = $request->user();
+        Log::warning('Browser Voice v2 client failure.', [
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'stage' => $data['stage'],
+            'code' => $data['code'],
+            'message' => $data['message'],
+            'cause_chain' => $data['cause_chain'],
+        ]);
+
+        return response()->json(['data' => ['recorded' => true]]);
     }
 }

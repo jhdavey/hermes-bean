@@ -21,6 +21,7 @@ import {
     naturalizeRealtimeSpeechText,
     realtimeMicrophoneConstraints,
     realtimeUsageReportFromProviderEvent,
+    sanitizedLocalWakeFailure,
     shouldDisplayRealtimeTranscriptDraft,
     stripRealtimeLocalWakePrefix,
 } from './realtimeVoiceTurn.js';
@@ -10055,8 +10056,15 @@ export function mountHeyBeanWebApp(mount) {
         render();
     }
 
-    function handleLocalWakeFailure(gate, connectionGeneration) {
+    function handleLocalWakeFailure(gate, connectionGeneration, error = null) {
         if (!localWakeConnectionIsCurrent(gate, connectionGeneration)) return;
+        const diagnostic = sanitizedLocalWakeFailure(error);
+        console.warn('Browser Voice v2 local wake failure', diagnostic);
+        void api('/assistant/voice/client-failures', {
+            method: 'POST',
+            body: diagnostic,
+            timeoutMs: 3000,
+        }).catch(() => {});
         handleRealtimeConnectionLoss('Private “Hey Bean” detection stopped. Tap the Bean button to reconnect.');
     }
 
@@ -10132,7 +10140,7 @@ export function mountHeyBeanWebApp(mount) {
                     updateRealtimeVoiceActivity(level);
                 }
             },
-            onError: () => handleLocalWakeFailure(localWakeGate, connectionGeneration),
+            onError: (error) => handleLocalWakeFailure(localWakeGate, connectionGeneration, error),
         });
         realtimeLocalWakeGate = localWakeGate;
 

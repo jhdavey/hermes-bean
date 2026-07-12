@@ -969,6 +969,25 @@ test('incomplete worker readiness is terminal and fail-closed', async () => {
     assert.equal(harness.errors[0]?.code, 'incomplete_readiness_barrier');
 });
 
+test('[BV2-DIAGNOSTIC-03] worker failure codes survive the fail-closed local gate boundary', async () => {
+    const harness = createHarness();
+    await harness.gate.start(harness.rawStream);
+    const generation = harness.gate.currentGeneration();
+    completeReadinessBarrier(harness, generation);
+    harness.workers[0].emit({
+        type: 'error',
+        generation,
+        code: 'decode_failed',
+        message: 'The keyword decoder exceeded its work limit.',
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(harness.gate.state, 'failed');
+    assert.equal(harness.rawTrack.stopped, true);
+    assert.equal(harness.errors[0].code, 'decode_failed');
+    assert.match(harness.errors[0].message, /decoder exceeded/);
+});
+
 test('PCM transfer is bounded until matching worker acknowledgements release capacity', async () => {
     const harness = createHarness({ maxInFlightPcm: 2 });
     await harness.gate.start(harness.rawStream);

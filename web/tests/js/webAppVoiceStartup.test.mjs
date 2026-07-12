@@ -120,3 +120,15 @@ test('[BV2-USAGE-02] realtime usage is reported once and a plan limit closes voi
     assert.match(markup, /Upgrade to keep going/);
     assert.match(markup, /href="\/pricing">View plans<\/a>/);
 });
+
+test('[BV2-DIAGNOSTIC-02] a post-readiness local wake failure records its sanitized cause before teardown', () => {
+    const start = source.indexOf('function handleLocalWakeFailure(');
+    const end = source.indexOf('\n    async function waitForLocalWakeReady(', start);
+    assert.ok(start >= 0 && end > start, 'the local wake failure boundary must remain discoverable');
+    const implementation = source.slice(start, end);
+
+    assert.match(implementation, /sanitizedLocalWakeFailure\(error\)/);
+    assert.match(implementation, /\/assistant\/voice\/client-failures/);
+    assert.match(implementation, /handleRealtimeConnectionLoss/);
+    assert.match(source, /onError: \(error\) => handleLocalWakeFailure\(localWakeGate, connectionGeneration, error\)/);
+});
