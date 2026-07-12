@@ -71,9 +71,13 @@ Before enabling new voice admissions:
 
 ```bash
 cd web
+# Set BROWSER_VOICE_V2=true in the deployed environment first.
 php artisan migrate --force
+php artisan config:clear
+php artisan config:cache
 php artisan schedule:list
 php artisan browser-voice:audit-invariants
+npm run preflight:voice:production
 npm run test:voice:all
 php artisan test --filter=BrowserVoiceV2
 ```

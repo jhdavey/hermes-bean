@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { browserVoiceV2ShellCheck } from './voice-v2-production-preflight-core.mjs';
 
 const baseUrl = new URL(process.env.VOICE_V2_PRODUCTION_URL || 'https://heybean.org');
 const timeoutMs = Math.max(1_000, Number(process.env.VOICE_V2_PREFLIGHT_TIMEOUT_MS || 15_000));
@@ -41,15 +42,17 @@ try {
     record('health', health.status === 200, { status: health.status, duration_ms: health.durationMs }, 'HTTP 200');
 
     const app = await request('/app');
-    const flag = app.body.match(/data-browser-voice-v2=["'](true|false)["']/i)?.[1] || null;
+    const shellCheck = browserVoiceV2ShellCheck(app.body);
     const assetPath = app.body.match(/(?:src|href)=["']([^"']*\/build\/assets\/app-[^"']+\.js)["']/i)?.[1] || null;
     record('app_shell', app.status === 200, { status: app.status, duration_ms: app.durationMs }, 'HTTP 200');
-    record('v2_shell_marker', flag !== null, flag, 'data-browser-voice-v2 is present');
+    record('v2_enabled', shellCheck.pass, shellCheck.actual, shellCheck.expected);
     record('app_asset_discovered', assetPath !== null, assetPath, 'hashed app JavaScript asset');
 
     if (assetPath !== null) {
         const appAsset = await request(assetPath);
         const routeMarkers = [
+            '/assistant/voice/realtime/session',
+            '/assistant/voice/realtime/usage',
             '/assistant/voice/turns',
             '/assistant/voice/state',
             '/assistant/voice/cancellations',
@@ -93,12 +96,14 @@ try {
         record('wake_worker_v8', false, null, 'current first-party wake worker');
     }
 
-    for (const path of [
-        '/api/assistant/voice/capabilities',
-        '/api/assistant/voice/state?session_id=1',
+    for (const probe of [
+        { path: '/api/assistant/voice/realtime/session', method: 'POST' },
+        { path: '/api/assistant/voice/realtime/usage', method: 'POST' },
+        { path: '/api/assistant/voice/capabilities', method: 'GET' },
+        { path: '/api/assistant/voice/state?session_id=1', method: 'GET' },
     ]) {
-        const response = await request(path, { headers: { Accept: 'application/json' } });
-        record(`route:${path.split('?')[0]}`, response.status === 401, response.status, 'HTTP 401 (route exists; authentication required)');
+        const response = await request(probe.path, { method: probe.method, headers: { Accept: 'application/json' } });
+        record(`route:${probe.path.split('?')[0]}`, response.status === 401, response.status, 'HTTP 401 (route exists; authentication required)');
     }
 } catch (error) {
     checks.push({

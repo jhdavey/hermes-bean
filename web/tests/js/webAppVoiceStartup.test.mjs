@@ -101,3 +101,22 @@ test('[BV2-BARGE-04] failed interruption transcription restores playback instead
     assert.ok(reject > claimCandidate, 'an unconfirmed interruption must restore the current playback');
     assert.ok(captureFailure > reject, 'ordinary capture failure handling must remain outside the interruption branch');
 });
+
+test('[BV2-USAGE-02] realtime usage is reported once and a plan limit closes voice with an upgrade path', () => {
+    const start = source.indexOf('async function reportBrowserVoiceV2RealtimeUsage(');
+    const end = source.indexOf('\n    function normalizeBrowserVoiceV2Speech(', start);
+    assert.ok(start >= 0 && end > start, 'the realtime usage reporter must remain discoverable');
+    const implementation = source.slice(start, end);
+
+    assert.match(implementation, /browserVoiceV2RealtimeUsageEventIds\.has\(eventId\)/);
+    assert.match(implementation, /\/assistant\/voice\/realtime\/usage/);
+    assert.match(implementation, /attempt < 1[\s\S]*setTimeout/);
+    assert.match(implementation, /reason: Number\(error\?\.status \|\| 0\) === 402 \? 'usage_limit'/);
+    assert.match(implementation, /state\.chatRunState = [\s\S]*'Upgrade to continue'/);
+
+    const markupStart = source.indexOf('function errorMarkup(');
+    const markupEnd = source.indexOf('\n    function isPlanLimitMessage(', markupStart);
+    const markup = source.slice(markupStart, markupEnd);
+    assert.match(markup, /Upgrade to keep going/);
+    assert.match(markup, /href="\/pricing">View plans<\/a>/);
+});

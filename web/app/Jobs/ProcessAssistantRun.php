@@ -20,6 +20,7 @@ use App\Services\FastDomainReadService;
 use App\Services\FastDomainWriteService;
 use App\Services\FastWeatherReadService;
 use App\Services\HermesRuntimeService;
+use App\Services\PlanLimitService;
 use App\Services\VoiceTurnLifecycleService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -73,6 +74,7 @@ class ProcessAssistantRun implements ShouldQueue
         ?FastWeatherReadService $weatherReads = null,
         ?FastDomainReadService $domainReads = null,
         ?FastDomainWriteService $domainWrites = null,
+        ?PlanLimitService $planLimits = null,
     ): void {
         $run = AssistantRun::with('session', 'userMessage')->find($this->assistantRunId);
         if (! $run || ! $run->session || ! $run->userMessage) {
@@ -88,6 +90,7 @@ class ProcessAssistantRun implements ShouldQueue
                 $weatherReads ?? app(FastWeatherReadService::class),
                 $domainReads ?? app(FastDomainReadService::class),
                 $domainWrites ?? app(FastDomainWriteService::class),
+                $planLimits ?? app(PlanLimitService::class),
             );
 
             return;
@@ -237,6 +240,7 @@ class ProcessAssistantRun implements ShouldQueue
         FastWeatherReadService $weatherReads,
         FastDomainReadService $domainReads,
         FastDomainWriteService $domainWrites,
+        PlanLimitService $planLimits,
     ): void {
         $turn = VoiceTurn::find($run->voice_turn_id);
         if (! $turn instanceof VoiceTurn) {
@@ -283,6 +287,16 @@ class ProcessAssistantRun implements ShouldQueue
             );
             $runLane = $this->browserVoiceRunLane($run, $turn);
             $runHandler = trim((string) ($run->handler ?: $turn->handler));
+            if ($runHandler === 'agent.generate_note') {
+                $message = $planLimits->noteCreationUpgradeMessage($turn->user()->firstOrFail());
+                if ($message !== null) {
+                    throw new BrowserVoiceHandlerException(
+                        'subscription_limit_reached',
+                        $message,
+                        $message,
+                    );
+                }
+            }
             $typedHandler = in_array($runHandler, [
                 'app.calendar.read',
                 'app.reminder.read',
@@ -614,6 +628,9 @@ class ProcessAssistantRun implements ShouldQueue
     private function browserVoiceRuntimeFailureText(string $candidate): string
     {
         $candidate = trim($candidate);
+        if ($candidate !== '' && preg_match('/\b(?:usage limit|current plan|upgrade|available on (?:premium|pro))\b/iu', $candidate) === 1) {
+            return $candidate;
+        }
         if ($candidate !== '' && preg_match('/would you like me to try again\??$/iu', $candidate) === 1) {
             return $candidate;
         }

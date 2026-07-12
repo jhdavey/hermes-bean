@@ -199,17 +199,37 @@ class PlanLimitService
 
     public function enforceNoteCreationLimit(User $user, int $additionalNotes = 1): ?JsonResponse
     {
+        $message = $this->noteCreationLimitMessage($user, $additionalNotes);
+
+        return $message === null ? null : $this->limitResponse($message);
+    }
+
+    public function noteCreationLimitMessage(User $user, int $additionalNotes = 1): ?string
+    {
+        if (! $this->canUseNotes($user)) {
+            return 'Notes are available on this plan after upgrading.';
+        }
+
         $limit = $this->noteLimitFor($user);
         if ($limit === null) {
             return null;
         }
 
         $currentNotes = Note::query()->where('user_id', $user->id)->count();
-        if ($currentNotes + max(0, $additionalNotes) > $limit) {
-            return $this->limitResponse("Your current plan includes up to {$limit} note".($limit === 1 ? '' : 's').'.');
+
+        return $currentNotes + max(0, $additionalNotes) > $limit
+            ? "Your current plan includes up to {$limit} note".($limit === 1 ? '' : 's').'.'
+            : null;
+    }
+
+    public function noteCreationUpgradeMessage(User $user, int $additionalNotes = 1): ?string
+    {
+        $message = $this->noteCreationLimitMessage($user, $additionalNotes);
+        if ($message === null || str_contains(mb_strtolower($message), 'upgrad')) {
+            return $message;
         }
 
-        return null;
+        return rtrim($message, '.').'. Upgrade your plan to create and manage more notes.';
     }
 
     public function canUseRecurringTasks(User $user): bool
@@ -257,7 +277,7 @@ class PlanLimitService
         return null;
     }
 
-    public function limitResponse(string $message): JsonResponse
+    public function limitResponse(string $message, array $context = []): JsonResponse
     {
         return response()->json([
             'message' => $message,
@@ -266,6 +286,7 @@ class PlanLimitService
                 'message' => $message,
                 'cta_label' => 'View plans',
                 'upgrade_url' => url('/pricing'),
+                ...$context,
             ],
         ], 402);
     }

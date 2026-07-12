@@ -325,6 +325,56 @@ class BrowserVoiceV2RuntimeFailureTest extends TestCase
         });
     }
 
+    public function test_direct_voice_note_creation_respects_the_base_plan_note_limit_and_returns_one_upgrade_final(): void
+    {
+        $turn = $this->admit(
+            'voice-v2-direct-note-limit@example.com',
+            'direct-note-limit-0001',
+            'Create a note titled Groceries that says milk and eggs.',
+        );
+        $this->fillNoteAllowance($turn);
+        $runtime = Mockery::mock(HermesRuntimeService::class);
+        $runtime->shouldNotReceive('sendExistingMessage');
+
+        (new ProcessAssistantRun($turn->runs()->firstOrFail()->id))->handle(
+            $runtime,
+            app(AssistantRunService::class),
+            app(VoiceTurnLifecycleService::class),
+        );
+
+        $turn->refresh()->load('finalAssistantMessage');
+        $this->assertSame(VoiceTurnState::Failed, $turn->state);
+        $this->assertSame('subscription_limit_reached', $turn->failure_category);
+        $this->assertStringContainsString('current plan includes up to 10 notes', $turn->finalAssistantMessage->content);
+        $this->assertStringContainsString('Upgrade your plan', $turn->finalAssistantMessage->content);
+        $this->assertSame(10, Note::where('user_id', $turn->user_id)->count());
+        $this->assertSame(1, $this->namedFinalMessages($turn));
+    }
+
+    public function test_generated_voice_note_checks_the_plan_limit_before_model_work_and_returns_one_upgrade_final(): void
+    {
+        $turn = $this->admitGeneratedNoteTurn(
+            'voice-v2-generated-note-limit@example.com',
+            'generated-note-limit-0001',
+        );
+        $this->fillNoteAllowance($turn);
+        $runtime = Mockery::mock(HermesRuntimeService::class);
+        $runtime->shouldNotReceive('sendExistingMessage');
+
+        (new ProcessAssistantRun($turn->runs()->firstOrFail()->id))->handle(
+            $runtime,
+            app(AssistantRunService::class),
+            app(VoiceTurnLifecycleService::class),
+        );
+
+        $turn->refresh()->load('finalAssistantMessage');
+        $this->assertSame(VoiceTurnState::Failed, $turn->state);
+        $this->assertSame('subscription_limit_reached', $turn->failure_category);
+        $this->assertStringContainsString('Upgrade your plan', $turn->finalAssistantMessage->content);
+        $this->assertSame(10, Note::where('user_id', $turn->user_id)->count());
+        $this->assertSame(1, $this->namedFinalMessages($turn));
+    }
+
     public function test_complex_provider_retry_records_progress_and_stays_inside_the_turn_deadline(): void
     {
         $this->configureRealRuntime();
@@ -561,6 +611,19 @@ class BrowserVoiceV2RuntimeFailureTest extends TestCase
         ])->assertCreated();
 
         return VoiceTurn::where('turn_id', $turnId)->firstOrFail();
+    }
+
+    private function fillNoteAllowance(VoiceTurn $turn): void
+    {
+        foreach (range(1, 10) as $index) {
+            Note::create([
+                'user_id' => $turn->user_id,
+                'workspace_id' => $turn->workspace_id,
+                'created_by_user_id' => $turn->user_id,
+                'title' => "Existing note {$index}",
+                'plain_text' => 'Existing plan-limited note.',
+            ]);
+        }
     }
 
     private function provisionalMessages(VoiceTurn $turn): int

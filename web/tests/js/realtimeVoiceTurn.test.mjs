@@ -12,6 +12,7 @@ import {
     isVoiceFillerOnly,
     naturalizeRealtimeSpeechText,
     realtimeMicrophoneConstraints,
+    realtimeUsageReportFromProviderEvent,
     shouldDisplayRealtimeTranscriptDraft,
     stageOptimisticUserTurn,
     stripRealtimeLocalWakePrefix,
@@ -100,6 +101,42 @@ test('provider event helpers target only the intended response or transcript ite
         type: 'conversation.item.delete',
         item_id: 'item-dormant',
     });
+});
+
+test('[BV2-USAGE-01] provider transcription and speech usage become sanitized idempotent reports', () => {
+    assert.deepEqual(realtimeUsageReportFromProviderEvent({
+        type: 'conversation.item.input_audio_transcription.completed',
+        event_id: 'event-transcription-1',
+        transcript: 'raw words must not be copied into the report',
+        usage: {
+            total_tokens: 26,
+            input_tokens: 17,
+            output_tokens: 9,
+            input_token_details: { text_tokens: 0, audio_tokens: 17 },
+        },
+    }), {
+        providerEventId: 'transcription:event-transcription-1',
+        eventType: 'transcription',
+        usage: {
+            total_tokens: 26,
+            input_tokens: 17,
+            output_tokens: 9,
+            input_token_details: { text_tokens: 0, audio_tokens: 17 },
+        },
+    });
+    assert.deepEqual(realtimeUsageReportFromProviderEvent({
+        type: 'response.done',
+        response: {
+            id: 'response-1',
+            usage: { total_tokens: 12, input_tokens: 5, output_tokens: 7 },
+        },
+    }), {
+        providerEventId: 'speech:response-1',
+        eventType: 'speech',
+        usage: { total_tokens: 12, input_tokens: 5, output_tokens: 7 },
+    });
+    assert.equal(realtimeUsageReportFromProviderEvent({ type: 'response.done', response: { id: 'empty', usage: {} } }), null);
+    assert.equal(realtimeUsageReportFromProviderEvent({ type: 'conversation.item.created' }), null);
 });
 
 test('microphone capture requests browser echo and noise controls', () => {

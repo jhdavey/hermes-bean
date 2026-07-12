@@ -10,6 +10,7 @@ use App\Models\ConversationSession;
 use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class AiUsageService
 {
@@ -103,6 +104,138 @@ class AiUsageService
             'reserved_output_tokens' => $reservedOutputTokens,
             'estimated_cost_usd' => $estimatedCost,
             'budget' => $budget,
+        ];
+    }
+
+    /**
+     * @return array{allowed:bool,reason:?string,input_tokens:int,reserved_output_tokens:int,estimated_cost_usd:float,budget:array<string,mixed>}
+     */
+    public function preflightRealtimeSession(User $user, ?int $workspaceId): array
+    {
+        return $this->preflightDirect(
+            $user,
+            $workspaceId,
+            (string) config('services.openai.realtime_model', 'gpt-realtime'),
+            estimatedCost: max(0.000001, (float) config('services.ai_usage.realtime_session_minimum_cost_usd', 0.001)),
+            requestType: 'voice_realtime',
+        );
+    }
+
+    public function recordRealtimeSessionOpened(
+        User $user,
+        ?int $workspaceId,
+        ?string $providerSessionId,
+        string $model,
+        string $transcriptionModel,
+    ): AiUsageLog {
+        return AiUsageLog::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'usage_session_id' => (string) Str::uuid(),
+            'provider' => 'openai',
+            'model' => $model,
+            'route_tier' => 'voice_realtime',
+            'request_type' => 'voice_realtime_session',
+            'status' => 'opened',
+            'input_tokens' => 0,
+            'output_tokens' => 0,
+            'total_tokens' => 0,
+            'tool_call_count' => 0,
+            'estimated_cost_usd' => 0,
+            'action_types' => ['voice_realtime_session'],
+            'metadata' => [
+                'provider_session_id' => $providerSessionId,
+                'transcription_model' => $transcriptionModel,
+                'opened_at' => now()->toIso8601String(),
+            ],
+        ]);
+    }
+
+    /**
+     * @param  array<string,mixed>  $usage
+     * @return array{log:AiUsageLog,duplicate:bool,availability:array<string,mixed>}
+     */
+    public function recordRealtimeUsage(
+        User $user,
+        string $usageSessionId,
+        string $providerEventId,
+        string $eventType,
+        array $usage,
+    ): array {
+        $sessionLog = AiUsageLog::query()
+            ->where('user_id', $user->id)
+            ->where('usage_session_id', $usageSessionId)
+            ->where('request_type', 'voice_realtime_session')
+            ->firstOrFail();
+        $eventIdentity = hash('sha256', $usageSessionId.'|'.$providerEventId);
+        $normalized = $this->normalizedRealtimeUsage($usage);
+        $model = $eventType === 'transcription'
+            ? (string) data_get($sessionLog->metadata, 'transcription_model', config('services.openai.realtime_transcription_model', 'gpt-4o-mini-transcribe'))
+            : (string) $sessionLog->model;
+        $cost = $this->estimatedRealtimeCost($model, $eventType, $normalized);
+        $existing = AiUsageLog::query()->createOrFirst(
+            ['provider_event_id' => $eventIdentity],
+            [
+                'user_id' => $user->id,
+                'workspace_id' => $sessionLog->workspace_id,
+                'provider' => 'openai',
+                'model' => $model,
+                'route_tier' => 'voice_realtime',
+                'request_type' => 'voice_realtime',
+                'status' => 'completed',
+                'input_tokens' => $normalized['input_tokens'],
+                'output_tokens' => $normalized['output_tokens'],
+                'total_tokens' => $normalized['total_tokens'],
+                'tool_call_count' => 0,
+                'estimated_cost_usd' => $cost,
+                'action_types' => [$eventType === 'transcription' ? 'realtime_transcription' : 'realtime_speech'],
+                'metadata' => [
+                    'usage_session_id' => $sessionLog->usage_session_id,
+                    'provider_session_id' => data_get($sessionLog->metadata, 'provider_session_id'),
+                    'provider_event_type' => $eventType,
+                    'usage' => $normalized,
+                ],
+            ],
+        );
+        $duplicate = ! $existing->wasRecentlyCreated;
+
+        $availability = $this->realtimeUsageAvailability($user);
+        if (! $availability['allowed']) {
+            $this->alertFromContext(
+                $user,
+                $sessionLog->workspace_id,
+                [],
+                'daily_cost_hard_limit',
+                'critical',
+                (float) $availability['limit_usd'],
+                (float) $availability['used_usd'],
+                (string) $availability['reason'],
+                [
+                    'lane' => 'voice_realtime',
+                    'plan_tier' => $availability['tier'],
+                    'usage_session_id' => $usageSessionId,
+                    'provider_session_id' => data_get($sessionLog->metadata, 'provider_session_id'),
+                ],
+            );
+        }
+
+        return ['log' => $existing, 'duplicate' => $duplicate, 'availability' => $availability];
+    }
+
+    /** @return array{allowed:bool,reason:?string,tier:string,used_usd:float,limit_usd:float|null} */
+    public function realtimeUsageAvailability(User $user): array
+    {
+        $budget = $this->budgetFor($user);
+        $limit = $budget['daily_cost_limit'] ?? null;
+        $used = $this->usageTotals($user->id, null, now()->startOfDay())['cost'];
+        $allowed = $user->isAdmin() || $limit === null || (float) $limit <= 0 || $used < (float) $limit;
+
+        return [
+            'allowed' => $allowed,
+            'reason' => $allowed ? null : 'You’ve reached today’s AI usage limit for your current plan. Upgrade for more voice usage, or try again tomorrow.',
+            'tier' => (string) ($budget['tier'] ?? $user->subscriptionTier()),
+            'used_usd' => round($used, 6),
+            'limit_usd' => $limit === null ? null : (float) $limit,
         ];
     }
 
@@ -388,6 +521,82 @@ class AiUsageService
                 $scopeId
             );
         }
+    }
+
+    /** @param array<string,mixed> $usage
+     * @return array<string,int>
+     */
+    private function normalizedRealtimeUsage(array $usage): array
+    {
+        $inputDetails = (array) ($usage['input_token_details'] ?? []);
+        $cachedDetails = (array) ($inputDetails['cached_tokens_details'] ?? []);
+        $outputDetails = (array) ($usage['output_token_details'] ?? []);
+        $inputTokens = max(0, (int) ($usage['input_tokens'] ?? 0));
+        $outputTokens = max(0, (int) ($usage['output_tokens'] ?? 0));
+
+        return [
+            'input_tokens' => $inputTokens,
+            'output_tokens' => $outputTokens,
+            'total_tokens' => max($inputTokens + $outputTokens, (int) ($usage['total_tokens'] ?? 0)),
+            'input_text_tokens' => max(0, (int) ($inputDetails['text_tokens'] ?? 0)),
+            'input_audio_tokens' => max(0, (int) ($inputDetails['audio_tokens'] ?? $inputTokens)),
+            'cached_text_tokens' => max(0, (int) ($cachedDetails['text_tokens'] ?? 0)),
+            'cached_audio_tokens' => max(0, (int) ($cachedDetails['audio_tokens'] ?? 0)),
+            'output_text_tokens' => max(0, (int) ($outputDetails['text_tokens'] ?? $outputTokens)),
+            'output_audio_tokens' => max(0, (int) ($outputDetails['audio_tokens'] ?? 0)),
+        ];
+    }
+
+    /** @param array<string,int> $usage */
+    private function estimatedRealtimeCost(string $model, string $eventType, array $usage): float
+    {
+        $pricing = $this->realtimePricingFor($model);
+        if ($eventType === 'transcription') {
+            return round(
+                (($usage['input_audio_tokens'] / 1_000_000) * ($pricing['audio_input'] ?? 0))
+                + (($usage['output_tokens'] / 1_000_000) * ($pricing['text_output'] ?? 0)),
+                6,
+            );
+        }
+
+        $cachedText = min($usage['input_text_tokens'], $usage['cached_text_tokens']);
+        $cachedAudio = min($usage['input_audio_tokens'], $usage['cached_audio_tokens']);
+        $uncachedText = max(0, $usage['input_text_tokens'] - $cachedText);
+        $uncachedAudio = max(0, $usage['input_audio_tokens'] - $cachedAudio);
+
+        return round(
+            (($uncachedText / 1_000_000) * ($pricing['text_input'] ?? 0))
+            + (($cachedText / 1_000_000) * ($pricing['cached_text_input'] ?? $pricing['text_input'] ?? 0))
+            + (($uncachedAudio / 1_000_000) * ($pricing['audio_input'] ?? 0))
+            + (($cachedAudio / 1_000_000) * ($pricing['cached_audio_input'] ?? $pricing['audio_input'] ?? 0))
+            + (($usage['output_text_tokens'] / 1_000_000) * ($pricing['text_output'] ?? 0))
+            + (($usage['output_audio_tokens'] / 1_000_000) * ($pricing['audio_output'] ?? 0)),
+            6,
+        );
+    }
+
+    /** @return array<string,float> */
+    private function realtimePricingFor(string $model): array
+    {
+        $prices = (array) config('services.ai_usage.realtime_pricing_per_million', []);
+        if (isset($prices[$model])) {
+            return array_map('floatval', (array) $prices[$model]);
+        }
+
+        foreach ($prices as $knownModel => $price) {
+            if (str_contains($model, (string) $knownModel)) {
+                return array_map('floatval', (array) $price);
+            }
+        }
+
+        return [
+            'text_input' => 4.00,
+            'cached_text_input' => 0.40,
+            'audio_input' => 32.00,
+            'cached_audio_input' => 0.40,
+            'text_output' => 16.00,
+            'audio_output' => 64.00,
+        ];
     }
 
     /**

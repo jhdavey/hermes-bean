@@ -149,6 +149,7 @@ return [
 
     'ai_usage' => [
         'reserve_output_tokens' => (int) env('AI_USAGE_RESERVE_OUTPUT_TOKENS', 1200),
+        'realtime_session_minimum_cost_usd' => (float) env('AI_USAGE_REALTIME_SESSION_MINIMUM_COST_USD', 0.001),
         'spike_multiplier' => (float) env('AI_USAGE_SPIKE_MULTIPLIER', 3),
         'spike_min_daily_cost_usd' => (float) env('AI_USAGE_SPIKE_MIN_DAILY_COST_USD', 1.00),
         'pricing_per_million' => [
@@ -157,6 +158,20 @@ return [
             'gpt-5.5' => ['input' => 5.00, 'output' => 30.00],
             'gpt-5.4' => ['input' => 2.50, 'output' => 15.00],
             'gpt-5.4-mini' => ['input' => 0.75, 'output' => 4.50],
+        ],
+        'realtime_pricing_per_million' => [
+            'gpt-realtime' => [
+                'text_input' => 4.00,
+                'cached_text_input' => 0.40,
+                'audio_input' => 32.00,
+                'cached_audio_input' => 0.40,
+                'text_output' => 16.00,
+                'audio_output' => 64.00,
+            ],
+            'gpt-4o-mini-transcribe' => [
+                'audio_input' => 1.25,
+                'text_output' => 5.00,
+            ],
         ],
         'limits' => [
             'base_cost_limit' => (float) env('AI_BASE_COST_LIMIT', 1.00),

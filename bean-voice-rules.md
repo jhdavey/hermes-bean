@@ -28,6 +28,17 @@ No implementation is considered correct merely because its happy path works. Sto
 - A deployed development build must still pass the read-only deployment preflight before authenticated voice testing so stale assets or missing routes are caught explicitly.
 - Broader-user rollout controls are out of scope until the product actually has outside users.
 
+## Subscription and usage enforcement
+
+- Browser voice uses the same per-user subscription limits as every other application surface. Voice may not bypass a plan limit by choosing an instant, typed, external, or complex lane.
+- Admin accounts are unlimited and bypass subscription usage and feature limits.
+- Deterministic local answers and typed reads that incur no provider cost do not consume AI cost budget. Provider-backed transcription, speech, model reasoning, and external calls are metered to the authenticated user that incurred them.
+- Realtime transcription and speech usage is recorded idempotently from provider usage events. A duplicate, late, or replayed provider event may not be charged twice.
+- The server checks the authenticated user's remaining budget before issuing a Realtime voice session and after recording each provider usage event. A client may display usage state, but it is never the quota owner.
+- Resource and feature entitlements, including note access and note-count limits, apply identically to direct voice writes and model-generated voice writes.
+- When a non-admin user reaches a plan limit, Bean stops admitting additional affected work, explains the limit in plain language, preserves already accepted work, and presents an explicit `View plans` upgrade action. A limit response is not described as a provider or technical failure.
+- Usage-limit failures and their user, workspace, plan, usage total, limit, lane, and provider-session identifiers must be retained in sanitized admin diagnostics.
+
 ## Terms
 
 - **Wake-only:** The microphone feature is enabled, but Bean has not been addressed. Room speech remains private and invisible.
@@ -388,6 +399,7 @@ Before a voice release, deterministic and representative-device tests must cover
 - Provider timeout, transport failure, worker crash, and ambiguous write reconciliation
 - Exactly one accepted user message and one final Bean message
 - Admin diagnostic completeness without raw audio
+- Base, Premium, and Pro voice usage enforcement; unlimited admin behavior; idempotent Realtime usage reporting; direct and generated note-limit enforcement; and a visible upgrade action
 
 ## Change-control rule
 

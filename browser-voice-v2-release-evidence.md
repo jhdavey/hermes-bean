@@ -4,7 +4,7 @@ Recorded July 11–12, 2026. This evidence covers the browser implementation onl
 
 ## Current release status
 
-The first-party wake model, hardened prerecorded gate, application/service suites, and browser-controller acceptance suites are green under the agreed 95% Bean Voice QA criterion. The final post-cleanup wake run passed 101 of 102 journeys (99.02%) with zero pre-confirmation PCM, zero runtime errors, 23/24 isolated strict wakes, 100% ongoing-speech strict-wake accuracy, 100% missed-`Hey` address accuracy, zero false accepts across 42 negatives, 6/6 reset recoveries, and 482.4 ms p95 wake confirmation. The public development site has not yet been updated to this build, and representative physical-microphone/browser testing remains pending. Therefore the broader Browser Voice v2 release is still not certified.
+The first-party wake model, hardened prerecorded gate, application/service suites, and browser-controller acceptance suites are green under the agreed 95% Bean Voice QA criterion. The final post-cleanup wake run passed 101 of 102 journeys (99.02%) with zero pre-confirmation PCM, zero runtime errors, 23/24 isolated strict wakes, 100% ongoing-speech strict-wake accuracy, 100% missed-`Hey` address accuracy, zero false accepts across 42 negatives, 6/6 reset recoveries, and 482.4 ms p95 wake confirmation. The public development site has the v8 wake assets but currently renders Browser Voice v2 disabled and predates the Realtime usage endpoint, so it is not the current local build. Representative physical-microphone/browser testing also remains pending. Therefore the broader Browser Voice v2 release is still not certified.
 
 Two representative release-certification gates still require execution after deployment:
 
@@ -46,6 +46,7 @@ The current machine has Google Chrome and Safari installed; Microsoft Edge is no
 | Typed app writes and exactly-once receipts | `BrowserVoiceV2LifecycleTest` reminder/calendar write cases; `BrowserVoiceV2WorkControlTest` multi-write and repeated-write cases |
 | Local and remote weather routing/failure | `BrowserVoiceV2LifecycleTest` weather context/provider cases; `BrowserVoiceV2ConversationContextTest` strict-wake weather case |
 | Complex work, generated notes, and bounded model authority | `BrowserVoiceV2RuntimeFailureTest` real complex runtime, no-tools, retry, empty-output, and isolation cases |
+| Per-user subscription usage, admin-unlimited access, feature entitlements, and upgrade recovery | `VoiceChatFeatureTest` Realtime session/usage/idempotency/admin-diagnostic cases; `BrowserVoiceV2RuntimeFailureTest` direct/generated note-limit journeys; `[BV2-USAGE-01..02]`; `PlanLimitEntitlementTest` |
 | Acknowledgement grace and non-overlapping finals | `[BV2-ACK-01..03]`, `[BV2-SPEECH-01..05]` |
 | Meaningful and false barge-in | `[BV2-BARGE-01..04]`, `[BV2-BROWSER-02]` |
 | Playback-only Stop | `[BV2-STOP-01..05]`, `[BV2-BROWSER-03]` |
@@ -63,9 +64,10 @@ The current machine has Google Chrome and Safari installed; Microsoft Edge is no
 
 | Gate | Result |
 | --- | --- |
-| Full PHP application suite | 416 tests, 4,307 assertions passed with a 1 GB test-process memory limit (July 12 final local pre-deployment gate) |
-| Browser Voice v2 focused PHP set | 103 tests, 1,084 assertions passed (July 12 post-wake cleanup) |
-| Complete browser voice JavaScript set | 114 tests passed, 0 skipped (July 12 final local pre-deployment gate) |
+| Full PHP application suite | 420 tests, 4,362 assertions passed with a 1 GB test-process memory limit (July 12 subscription-enforcement gate) |
+| Browser Voice v2 focused PHP set | 136 tests, 1,411 assertions passed (July 12 subscription-enforcement gate) |
+| Subscription and voice-entitlement focused PHP set | 29 tests, 356 assertions passed; Base/Premium/Pro limits, unlimited admin, cross-user isolation, exact-once Realtime usage, admin alert visibility, and direct/generated note limits covered |
+| Complete browser voice JavaScript set | 118 tests passed, 0 skipped (July 12 deployment-preflight regression gate) |
 | Playwright browser journeys | 6/6 journeys passed (July 12 final local pre-deployment gate) |
 | Hardened replay structure/schema | 3 tests passed; current corpus contains 78 files |
 | Final hardened prerecorded local-wake replay | **Pass:** 101/102 journeys (99.02%); 23/24 isolated strict wakes; 100% ongoing/address accuracy; 0/42 false accepts; 6/6 reset recovery; zero privacy/runtime hard failures; p95 482.4 ms |
@@ -86,7 +88,7 @@ The local application was also exercised through its real login and session-hydr
 
 Run `npm run preflight:voice:production` from `web/` before beginning the owner's authenticated deployed-development smoke. The command name reflects the public deployment target; it does not imply a customer production rollout or allowlist. The probe is deliberately public and read-only. It verifies the health endpoint, application shell marker, deployed client API boundaries, wake manifest and worker, and that unauthenticated voice-route requests reach authentication rather than a missing route. It does not authenticate, request microphone access, submit a voice turn, or certify latency.
 
-At `2026-07-12T13:48:22Z`, the preflight still failed against `https://heybean.org`: the app shell had no `data-browser-voice-v2` marker, the deployed `app-CnYdd3fv.js` bundle lacked the Browser Voice v2 turn/state/cancellation boundaries, the wake manifest was version 4 with the legacy `local-streaming-asr-prefix` detector, and the capabilities/state probes returned `404` rather than the expected unauthenticated `401`. Health and the app shell themselves returned `200`. This is deployment evidence, not a failure of the local v2 test suites, and the authenticated production smoke remains pending until the preflight passes after deployment.
+At `2026-07-12T17:41:26Z`, the corrected preflight failed against `https://heybean.org` for two actionable reasons: the app shell explicitly rendered `data-browser-voice-v2="false"`, and the deployed `app-BHKoyN2q.js` bundle plus route set lacked `/assistant/voice/realtime/usage`. The v8 wake manifest and worker, Realtime session route, capabilities route, state route, health check, and app shell were present. The earlier preflight incorrectly passed a `false` shell marker because it checked only for marker presence; `[BV2-DEPLOY-01..02]` now require the value to be `true`, and the public probe now requires the current Realtime usage client boundary and authenticated route. The latest build must be deployed with `BROWSER_VOICE_V2=true`, followed by Laravel configuration cache refresh, before the authenticated production smoke begins.
 
 ## Prerecorded real local-wake replay
 

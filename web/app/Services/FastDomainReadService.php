@@ -2,17 +2,28 @@
 
 namespace App\Services;
 
+use App\Exceptions\BrowserVoiceHandlerException;
 use App\Models\ConversationSession;
 use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
+use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 class FastDomainReadService
 {
+    public function __construct(private readonly PlanLimitService $planLimits) {}
+
     public function resolve(ConversationSession $session, string $handler, string $content, array $metadata = []): ?string
     {
+        if ($handler === 'app.note.read' && ! $this->planLimits->canUseNotes(User::findOrFail($session->user_id))) {
+            throw new BrowserVoiceHandlerException(
+                'subscription_limit_reached',
+                'Notes are available on this plan after upgrading.',
+                'Notes are available on this plan after upgrading.',
+            );
+        }
         $timezone = $this->timezone($metadata);
 
         return match ($handler) {

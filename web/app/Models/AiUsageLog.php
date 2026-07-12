@@ -12,6 +12,8 @@ class AiUsageLog extends Model
         'workspace_id',
         'conversation_session_id',
         'conversation_message_id',
+        'usage_session_id',
+        'provider_event_id',
         'provider',
         'model',
         'route_tier',

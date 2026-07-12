@@ -3,11 +3,13 @@
 namespace App\Services;
 
 use App\Enums\VoiceTurnLane;
+use App\Exceptions\BrowserVoiceHandlerException;
 use App\Models\AssistantRun;
 use App\Models\CalendarEvent;
 use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
+use App\Models\User;
 use App\Models\VoiceTurn;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -18,6 +20,7 @@ class FastDomainWriteService
 {
     public function __construct(
         private readonly BrowserVoiceTypedWriteParser $typedWrites,
+        private readonly PlanLimitService $planLimits,
     ) {}
 
     public function execute(VoiceTurn $turn, ?AssistantRun $run = null): ?string
@@ -111,6 +114,7 @@ class FastDomainWriteService
             if ($body === '') {
                 return null;
             }
+            $this->assertNoteCreationAllowed($locked);
             $title = $this->generatedNoteTitle(trim((string) ($lockedRun->input ?: $locked->transcript)));
             $note = Note::create([
                 ...$this->ownership($locked),
@@ -224,6 +228,7 @@ class FastDomainWriteService
     /** @return array{string, string, string, int}|null */
     private function createNote(VoiceTurn $turn): ?array
     {
+        $this->assertNoteCreationAllowed($turn);
         $body = $this->noteBody($turn->transcript);
         $title = $this->title($turn->transcript, 'note')
             ?? ($body !== '' ? mb_substr($body, 0, 80) : null);
@@ -239,6 +244,20 @@ class FastDomainWriteService
         ]);
 
         return ['Done—I created the note “'.$note->title.'”.', 'create', 'note', $note->id];
+    }
+
+    public function assertNoteCreationAllowed(VoiceTurn $turn): void
+    {
+        $message = $this->planLimits->noteCreationUpgradeMessage(User::findOrFail($turn->user_id));
+        if ($message === null) {
+            return;
+        }
+
+        throw new BrowserVoiceHandlerException(
+            'subscription_limit_reached',
+            $message,
+            $message,
+        );
     }
 
     /** @return array{string, string, string, int}|null */

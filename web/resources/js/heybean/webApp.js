@@ -20,6 +20,7 @@ import {
     isVoiceFillerOnly,
     naturalizeRealtimeSpeechText,
     realtimeMicrophoneConstraints,
+    realtimeUsageReportFromProviderEvent,
     shouldDisplayRealtimeTranscriptDraft,
     stripRealtimeLocalWakePrefix,
 } from './realtimeVoiceTurn.js';
@@ -262,6 +263,7 @@ export function mountHeyBeanWebApp(mount) {
     const browserVoiceV2TurnVersions = new Map();
     const browserVoiceV2JobStates = new Map();
     const browserVoiceV2AdmissionFailureTurnIds = new Set();
+    const browserVoiceV2RealtimeUsageEventIds = new Set();
     const browserVoiceV2AdmissionRegistry = new BrowserVoiceAdmissionRegistryV2();
     let chatAnnouncementTimer = 0;
     let chatAnnouncementSessionId = null;
@@ -10342,6 +10344,8 @@ export function mountHeyBeanWebApp(mount) {
 
     function handleBrowserVoiceV2RealtimeEvent(payload) {
         if (!browserVoiceV2Enabled()) return false;
+        const usageReport = realtimeUsageReportFromProviderEvent(payload);
+        if (usageReport) void reportBrowserVoiceV2RealtimeUsage(usageReport);
         if (browserVoiceV2SpeechTransport.handleEvent(payload)) return true;
         const type = String(payload?.type || '');
         if (type === 'input_audio_buffer.speech_started') {
@@ -10521,6 +10525,42 @@ export function mountHeyBeanWebApp(mount) {
         return false;
     }
 
+    async function reportBrowserVoiceV2RealtimeUsage(report, attempt = 0) {
+        const usageSessionId = String(realtimeSession?.usage_session_id || '');
+        const eventId = String(report?.providerEventId || '');
+        const connectionGeneration = realtimeConnectionGeneration;
+        if (!usageSessionId || !eventId || browserVoiceV2RealtimeUsageEventIds.has(eventId)) return;
+        browserVoiceV2RealtimeUsageEventIds.add(eventId);
+        try {
+            await api('/assistant/voice/realtime/usage', {
+                method: 'POST',
+                body: {
+                    usage_session_id: usageSessionId,
+                    provider_event_id: eventId,
+                    event_type: report.eventType,
+                    usage: report.usage,
+                },
+                timeoutMs: 5000,
+            });
+        } catch (error) {
+            if (attempt < 1 && Number(error?.status || 0) !== 402) {
+                browserVoiceV2RealtimeUsageEventIds.delete(eventId);
+                window.setTimeout(() => {
+                    void reportBrowserVoiceV2RealtimeUsage(report, attempt + 1);
+                }, 250);
+                return;
+            }
+            if (connectionGeneration !== realtimeConnectionGeneration
+                || usageSessionId !== String(realtimeSession?.usage_session_id || '')) return;
+            stopVoiceWakeListening({ clearDraft: true, reason: Number(error?.status || 0) === 402 ? 'usage_limit' : 'usage_accounting_failed' });
+            state.error = Number(error?.status || 0) === 402
+                ? friendlyError(error, 'continue with Bean voice')
+                : 'Bean couldn’t verify your remaining voice usage. Tap Bean to try again.';
+            state.chatRunState = Number(error?.status || 0) === 402 ? 'Upgrade to continue' : 'Voice unavailable';
+            render();
+        }
+    }
+
     function normalizeBrowserVoiceV2Speech(text) {
         return String(text || '').toLowerCase().replace(/[^a-z0-9\s]+/g, ' ').replace(/\s+/g, ' ').trim();
     }
@@ -10628,6 +10668,7 @@ export function mountHeyBeanWebApp(mount) {
         clearRealtimeMediaRecoveryTimers();
         browserVoiceV2PotentialBargeInItems.clear();
         browserVoiceV2ProviderWakeTurnIds.clear();
+        browserVoiceV2RealtimeUsageEventIds.clear();
         browserVoiceV2PendingLocalWakeTurnId = '';
         realtimeVoiceActive = false;
         state.voiceWakeListening = false;

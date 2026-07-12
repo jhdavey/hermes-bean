@@ -8,6 +8,29 @@ export function realtimeMicrophoneConstraints() {
     };
 }
 
+export function realtimeUsageReportFromProviderEvent(payload = {}) {
+    const type = String(payload?.type || '');
+    const transcription = type === 'conversation.item.input_audio_transcription.completed';
+    const speech = type === 'response.done';
+    if (!transcription && !speech) return null;
+    const usage = transcription ? payload?.usage : payload?.response?.usage;
+    if (!usage || typeof usage !== 'object') return null;
+    const totalTokens = Number(usage.total_tokens ?? 0);
+    const inputTokens = Number(usage.input_tokens ?? 0);
+    const outputTokens = Number(usage.output_tokens ?? 0);
+    if (![totalTokens, inputTokens, outputTokens].some((value) => Number.isFinite(value) && value > 0)) return null;
+    const sourceId = String(payload?.event_id
+        || (transcription ? payload?.item_id || payload?.item?.id : payload?.response?.id)
+        || '').trim();
+    if (!sourceId) return null;
+
+    return {
+        providerEventId: `${transcription ? 'transcription' : 'speech'}:${sourceId}`,
+        eventType: transcription ? 'transcription' : 'speech',
+        usage,
+    };
+}
+
 export function isStrictRealtimeWakePhrase(text) {
     return /^\s*hey[\s,.-]*bean\b/i.test(String(text || ''));
 }

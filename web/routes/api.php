@@ -84,6 +84,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/assistant/runs/{run}/cancel', [AssistantRunController::class, 'cancel']);
         Route::get('/assistant/voice/voices', [AssistantVoiceController::class, 'voices']);
         Route::post('/assistant/voice/realtime/session', [AssistantVoiceController::class, 'realtimeSession']);
+        Route::post('/assistant/voice/realtime/usage', [AssistantVoiceController::class, 'realtimeUsage']);
         Route::get('/assistant/voice/capabilities', [BrowserVoiceTurnController::class, 'capabilities']);
         Route::post('/assistant/voice/turns', [BrowserVoiceTurnController::class, 'store']);
         Route::post('/assistant/voice/turns/{turnId}/delivery', [BrowserVoiceTurnController::class, 'delivery']);

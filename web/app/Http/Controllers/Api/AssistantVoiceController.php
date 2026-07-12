@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\AgentProfileService;
+use App\Services\AiUsageService;
 use App\Services\OpenAiVoiceService;
+use App\Services\PlanLimitService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,6 +16,8 @@ class AssistantVoiceController extends Controller
     public function __construct(
         private readonly OpenAiVoiceService $voice,
         private readonly WorkspaceService $workspaces,
+        private readonly AiUsageService $usage,
+        private readonly PlanLimitService $planLimits,
     ) {}
 
     public function voices(): JsonResponse
@@ -34,9 +38,84 @@ class AssistantVoiceController extends Controller
 
         $workspace = $this->workspaces->resolveWorkspace($request->user(), $data['workspace_id'] ?? null);
         $profile = app(AgentProfileService::class)->ensureForWorkspace($workspace, $request->user());
+        $preflight = $this->usage->preflightRealtimeSession($request->user(), $workspace->id);
+        if (! $preflight['allowed']) {
+            $message = 'You’ve reached today’s AI usage limit for your current plan. Upgrade for more voice usage, or try again tomorrow.';
+            $this->usage->recordDirectCall(
+                $request->user(),
+                $workspace->id,
+                'voice_realtime',
+                (string) config('services.openai.realtime_model', 'gpt-realtime'),
+                metadata: ['reason' => $preflight['reason'], 'limit_stage' => 'session_preflight'],
+                actionTypes: ['voice_realtime_session'],
+                status: 'blocked',
+            );
 
-        return response()->json(['data' => $this->voice->createRealtimeSession($profile, [
+            return $this->planLimits->limitResponse($message, [
+                'limit_type' => 'daily_ai_usage',
+                'plan_tier' => $request->user()->subscriptionTier(),
+            ]);
+        }
+
+        $session = $this->voice->createRealtimeSession($profile, [
             'timezone' => $data['timezone'] ?? null,
-        ])]);
+        ]);
+        $usageSession = $this->usage->recordRealtimeSessionOpened(
+            $request->user(),
+            $workspace->id,
+            isset($session['session_id']) ? (string) $session['session_id'] : null,
+            (string) $session['model'],
+            (string) config('services.openai.realtime_transcription_model', 'gpt-4o-mini-transcribe'),
+        );
+
+        return response()->json(['data' => [
+            ...$session,
+            'usage_session_id' => $usageSession->usage_session_id,
+        ]]);
+    }
+
+    public function realtimeUsage(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'usage_session_id' => ['required', 'uuid'],
+            'provider_event_id' => ['required', 'string', 'max:191'],
+            'event_type' => ['required', 'in:transcription,speech'],
+            'usage' => ['required', 'array'],
+            'usage.total_tokens' => ['nullable', 'integer', 'min:0'],
+            'usage.input_tokens' => ['nullable', 'integer', 'min:0'],
+            'usage.output_tokens' => ['nullable', 'integer', 'min:0'],
+            'usage.input_token_details' => ['nullable', 'array'],
+            'usage.input_token_details.text_tokens' => ['nullable', 'integer', 'min:0'],
+            'usage.input_token_details.audio_tokens' => ['nullable', 'integer', 'min:0'],
+            'usage.input_token_details.cached_tokens' => ['nullable', 'integer', 'min:0'],
+            'usage.input_token_details.cached_tokens_details' => ['nullable', 'array'],
+            'usage.input_token_details.cached_tokens_details.text_tokens' => ['nullable', 'integer', 'min:0'],
+            'usage.input_token_details.cached_tokens_details.audio_tokens' => ['nullable', 'integer', 'min:0'],
+            'usage.output_token_details' => ['nullable', 'array'],
+            'usage.output_token_details.text_tokens' => ['nullable', 'integer', 'min:0'],
+            'usage.output_token_details.audio_tokens' => ['nullable', 'integer', 'min:0'],
+        ]);
+        $result = $this->usage->recordRealtimeUsage(
+            $request->user(),
+            $data['usage_session_id'],
+            $data['provider_event_id'],
+            $data['event_type'],
+            $data['usage'],
+        );
+        $availability = $result['availability'];
+        if (! $availability['allowed']) {
+            return $this->planLimits->limitResponse((string) $availability['reason'], [
+                'limit_type' => 'daily_ai_usage',
+                'plan_tier' => $availability['tier'],
+                'used_usd' => $availability['used_usd'],
+                'limit_usd' => $availability['limit_usd'],
+            ]);
+        }
+
+        return response()->json(['data' => [
+            'accepted' => true,
+            'duplicate' => $result['duplicate'],
+            'remaining' => $availability,
+        ]]);
     }
 }
