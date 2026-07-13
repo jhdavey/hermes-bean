@@ -22,6 +22,7 @@ import {
     isVoiceFillerOnly,
     naturalizeRealtimeSpeechText,
     realtimeMicrophoneConstraints,
+    reportRealtimeUsageReliably,
     realtimeUsageReportFromProviderEvent,
     sanitizedLocalWakeFailure,
     shouldDisplayRealtimeTranscriptDraft,
@@ -10537,33 +10538,38 @@ export function mountHeyBeanWebApp(mount) {
         return false;
     }
 
-    async function reportBrowserVoiceV2RealtimeUsage(report, attempt = 0) {
+    async function reportBrowserVoiceV2RealtimeUsage(report) {
         const usageSessionId = String(realtimeSession?.usage_session_id || '');
         const eventId = String(report?.providerEventId || '');
         const connectionGeneration = realtimeConnectionGeneration;
         if (!usageSessionId || !eventId || browserVoiceV2RealtimeUsageEventIds.has(eventId)) return;
         browserVoiceV2RealtimeUsageEventIds.add(eventId);
         try {
-            await api('/assistant/voice/realtime/usage', {
-                method: 'POST',
-                body: {
-                    usage_session_id: usageSessionId,
-                    provider_event_id: eventId,
-                    event_type: report.eventType,
-                    usage: report.usage,
-                },
-                timeoutMs: 5000,
+            await reportRealtimeUsageReliably(report, {
+                send: () => api('/assistant/voice/realtime/usage', {
+                    method: 'POST',
+                    body: {
+                        usage_session_id: usageSessionId,
+                        provider_event_id: eventId,
+                        event_type: report.eventType,
+                        usage: report.usage,
+                    },
+                    timeoutMs: 5000,
+                }),
             });
         } catch (error) {
-            if (attempt < 1 && Number(error?.status || 0) !== 402) {
-                browserVoiceV2RealtimeUsageEventIds.delete(eventId);
-                window.setTimeout(() => {
-                    void reportBrowserVoiceV2RealtimeUsage(report, attempt + 1);
-                }, 250);
-                return;
-            }
+            browserVoiceV2RealtimeUsageEventIds.delete(eventId);
             if (connectionGeneration !== realtimeConnectionGeneration
                 || usageSessionId !== String(realtimeSession?.usage_session_id || '')) return;
+            if (Number(error?.status || 0) !== 402) {
+                const diagnostic = sanitizedLocalWakeFailure(error, 'usage_accounting');
+                console.warn('Browser Voice v2 usage accounting failure', diagnostic);
+                void api('/assistant/voice/client-failures', {
+                    method: 'POST',
+                    body: diagnostic,
+                    timeoutMs: 3000,
+                }).catch(() => {});
+            }
             stopVoiceWakeListening({ clearDraft: true, reason: Number(error?.status || 0) === 402 ? 'usage_limit' : 'usage_accounting_failed' });
             state.error = Number(error?.status || 0) === 402
                 ? friendlyError(error, 'continue with Bean voice')

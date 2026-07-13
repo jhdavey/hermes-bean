@@ -24,6 +24,9 @@ export function assessBrowserVoiceV2Completeness(transcript, { hasHomeLocation =
             || /\b(?:reminder|remind me)\b.*\b(?:titled|called|named|about|to)\s+\S+/.test(normalized);
         if (!hasSubject) return { decision: 'incomplete', question: 'What should I remind you about?' };
         if (!hasClockTime) return { decision: 'incomplete', question: 'What time should I remind you?' };
+        // The reminder parser owns its payload. "Reminder to do the salt"
+        // must not fall through and reinterpret "to do" as a task noun.
+        return { decision: 'complete' };
     }
     const calendarCreate = creates
         && !complexGeneration

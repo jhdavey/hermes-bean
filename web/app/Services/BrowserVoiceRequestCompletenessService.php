@@ -82,8 +82,11 @@ class BrowserVoiceRequestCompletenessService
         $typedWrite = $creates && $typedHandler !== null
             ? $this->typedWrites->parseCreate($transcript, $typedHandler, $timezone)
             : null;
-        if ($typedWrite !== null && ($question = $typedWrite->clarificationQuestion()) !== null) {
-            return $question;
+        if ($typedWrite !== null) {
+            // Once the typed parser has claimed a complete reminder/calendar
+            // create, words inside its title cannot be reinterpreted as another
+            // application domain by the generic noun checks below.
+            return $typedWrite->clarificationQuestion();
         }
 
         if (preg_match('/\breminders?\b|\bremind me\b/u', $intentText) === 1) {

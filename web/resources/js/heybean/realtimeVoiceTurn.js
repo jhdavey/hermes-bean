@@ -49,6 +49,25 @@ export function realtimeUsageReportFromProviderEvent(payload = {}) {
     };
 }
 
+export async function reportRealtimeUsageReliably(report, {
+    send,
+    retryDelaysMs = [250, 750, 1500],
+    delay = (milliseconds) => new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds)),
+} = {}) {
+    if (typeof send !== 'function') throw new TypeError('Realtime usage reporting requires a sender.');
+    const schedule = Array.isArray(retryDelaysMs) ? retryDelaysMs : [];
+    let attempt = 0;
+    while (true) {
+        try {
+            return await send(report, attempt);
+        } catch (error) {
+            if (Number(error?.status || 0) === 402 || attempt >= schedule.length) throw error;
+            await delay(Math.max(0, Number(schedule[attempt]) || 0));
+            attempt += 1;
+        }
+    }
+}
+
 export function sanitizedLocalWakeFailure(error, stage = 'local_wake') {
     const chain = [];
     const seen = new Set();
@@ -66,11 +85,15 @@ export function sanitizedLocalWakeFailure(error, stage = 'local_wake') {
         current = current.cause;
     }
 
-    const normalizedStage = ['local_wake', 'startup', 'admission'].includes(stage) ? stage : 'local_wake';
+    const normalizedStage = ['local_wake', 'startup', 'admission', 'usage_accounting'].includes(stage)
+        ? stage
+        : 'local_wake';
     const fallback = normalizedStage === 'startup'
         ? ['voice_startup_failure', 'Browser voice startup failed.']
         : normalizedStage === 'admission'
             ? ['voice_admission_failure', 'Browser voice admission failed.']
+            : normalizedStage === 'usage_accounting'
+                ? ['voice_usage_accounting_failure', 'Browser voice usage accounting failed.']
             : ['local_wake_failure', 'Private wake detection failed.'];
 
     return {

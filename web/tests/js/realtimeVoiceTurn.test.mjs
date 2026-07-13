@@ -14,6 +14,7 @@ import {
     isVoiceFillerOnly,
     naturalizeRealtimeSpeechText,
     realtimeMicrophoneConstraints,
+    reportRealtimeUsageReliably,
     realtimeUsageReportFromProviderEvent,
     sanitizedLocalWakeFailure,
     shouldDisplayRealtimeTranscriptDraft,
@@ -27,6 +28,36 @@ const {
     captureHeyBeanChatControlFocus,
     restoreHeyBeanChatControlFocus,
 } = await import('../../resources/js/heybean/webApp.js');
+
+test('[BV2-USAGE-03] transient usage accounting retries idempotently without disabling voice prematurely', async () => {
+    const attempts = [];
+    const delays = [];
+    const result = await reportRealtimeUsageReliably({ providerEventId: 'speech:event-1' }, {
+        send: async (report, attempt) => {
+            attempts.push({ report, attempt });
+            if (attempt < 2) throw Object.assign(new Error('temporary transport failure'), { status: 503 });
+            return { accepted: true };
+        },
+        delay: async (milliseconds) => delays.push(milliseconds),
+    });
+
+    assert.deepEqual(result, { accepted: true });
+    assert.deepEqual(attempts.map(({ attempt }) => attempt), [0, 1, 2]);
+    assert.deepEqual(delays, [250, 750]);
+
+    let limitAttempts = 0;
+    await assert.rejects(
+        () => reportRealtimeUsageReliably({ providerEventId: 'speech:event-limit' }, {
+            send: async () => {
+                limitAttempts += 1;
+                throw Object.assign(new Error('usage limit'), { status: 402 });
+            },
+            delay: async () => assert.fail('a plan limit must not retry'),
+        }),
+        (error) => Number(error?.status) === 402,
+    );
+    assert.equal(limitAttempts, 1);
+});
 
 test('[BV2-STARTUP-04] a transient browser microphone release abort retries once before re-arm fails', async () => {
     const expectedStream = { id: 'second-acquisition' };

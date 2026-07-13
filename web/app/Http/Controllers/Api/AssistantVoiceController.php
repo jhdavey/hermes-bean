@@ -142,7 +142,7 @@ class AssistantVoiceController extends Controller
     public function clientFailure(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'stage' => ['required', 'in:local_wake,startup,admission'],
+            'stage' => ['required', 'in:local_wake,startup,admission,usage_accounting'],
             'code' => ['required', 'string', 'max:80'],
             'message' => ['required', 'string', 'max:240'],
             'cause_chain' => ['present', 'array', 'max:4'],

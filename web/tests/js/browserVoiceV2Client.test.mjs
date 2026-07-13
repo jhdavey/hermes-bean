@@ -100,6 +100,10 @@ test('[BV2-COMPLETENESS-01] exact fully specified reminder phrase proceeds witho
         { decision: 'complete' },
     );
     assert.deepEqual(
+        assessBrowserVoiceV2Completeness('Can you set a reminder to do the salt at 5pm?'),
+        { decision: 'complete' },
+    );
+    assert.deepEqual(
         assessBrowserVoiceV2Completeness('Create a reminder'),
         { decision: 'incomplete', question: 'What should I remind you about?' },
     );

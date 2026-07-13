@@ -11,6 +11,7 @@ class BrowserVoiceAdmissionRouter
     public function __construct(
         private readonly BrowserVoiceSubtaskSplitter $subtasks,
         private readonly BrowserVoiceIntentText $intentText,
+        private readonly BrowserVoiceTypedWriteParser $typedWrites,
     ) {}
 
     /**
@@ -68,8 +69,39 @@ class BrowserVoiceAdmissionRouter
         $contextualWeather = data_get($context, 'prior_handler') === 'external.weather'
             && $this->isContextualFollowUp($text);
         if ($this->containsMultipleRoutableOperations($text)
-            || count($applicationDomains) > 1
             || (($externalRequest || $contextualWeather) && $applicationDomains !== [])) {
+            return new VoiceTurnRoute(
+                VoiceTurnLane::ComplexAgent,
+                'agent.complex',
+                true,
+                'I’ll take care of those together.',
+                120,
+                10,
+            );
+        }
+
+        // A fully parsed typed create owns the nouns inside its payload. For
+        // example, "a reminder to do the salt" is one reminder write; "to do"
+        // is content, not a second task domain. Multi-operation transcripts
+        // were already rejected above by the subtask splitter.
+        $writeOperation = $this->writeOperation($intentText);
+        $typedCreate = $writeOperation === 'create'
+            ? $this->typedWrites->parseCreate($transcript, timezone: data_get($context, 'timezone'))
+            : null;
+        if ($typedCreate !== null && $typedCreate->clarificationQuestion() === null) {
+            $queuedFollowUp = (int) data_get($context, 'active_background_job_count', 0) > 0;
+
+            return new VoiceTurnRoute(
+                VoiceTurnLane::AppWrite,
+                "app.{$typedCreate->resource}.create",
+                $queuedFollowUp,
+                $queuedFollowUp ? 'Got it—I added that.' : null,
+                5,
+                2,
+            );
+        }
+
+        if (count($applicationDomains) > 1) {
             return new VoiceTurnRoute(
                 VoiceTurnLane::ComplexAgent,
                 'agent.complex',
@@ -115,7 +147,6 @@ class BrowserVoiceAdmissionRouter
                 $domain = $match[1];
             }
         }
-        $writeOperation = $this->writeOperation($intentText);
         if ($domain !== null && $writeOperation !== null) {
             $queuedFollowUp = (int) data_get($context, 'active_background_job_count', 0) > 0;
 

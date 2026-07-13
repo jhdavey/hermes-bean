@@ -297,6 +297,28 @@ class VoiceChatFeatureTest extends TestCase
         );
     }
 
+    public function test_authenticated_browser_can_record_a_sanitized_usage_accounting_failure(): void
+    {
+        Log::spy();
+        $token = $this->apiToken('voice-usage-accounting-failure@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/client-failures', [
+            'stage' => 'usage_accounting',
+            'code' => 'usage_transport_failed',
+            'message' => 'Realtime usage reporting exhausted its retry schedule.',
+            'cause_chain' => [[
+                'code' => 'usage_transport_failed',
+                'message' => 'Realtime usage reporting exhausted its retry schedule.',
+            ]],
+        ])->assertOk()->assertJsonPath('data.recorded', true);
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(
+            fn (string $message, array $context): bool => $message === 'Browser Voice v2 client failure.'
+                && $context['stage'] === 'usage_accounting'
+                && $context['code'] === 'usage_transport_failed',
+        );
+    }
+
     private function completedUsage(User $user, float $cost): AiUsageLog
     {
         return AiUsageLog::create([
