@@ -92,6 +92,8 @@ return [
         'server_api_key' => $openAiPublicKey,
         'public_key' => $openAiPublicKey,
         'realtime_model' => env('OPENAI_REALTIME_MODEL', 'gpt-realtime'),
+        'speech_model' => env('OPENAI_SPEECH_MODEL', 'tts-1'),
+        'speech_timeout' => (float) env('OPENAI_SPEECH_TIMEOUT', 20),
         'realtime_session_timeout' => (float) env('OPENAI_REALTIME_SESSION_TIMEOUT', 10),
         'realtime_transcription_model' => env('OPENAI_REALTIME_TRANSCRIPTION_MODEL', 'gpt-4o-mini-transcribe'),
         'realtime_vad_threshold' => (float) env('OPENAI_REALTIME_VAD_THRESHOLD', 0.5),
@@ -149,6 +151,7 @@ return [
     'ai_usage' => [
         'reserve_output_tokens' => (int) env('AI_USAGE_RESERVE_OUTPUT_TOKENS', 1200),
         'realtime_session_minimum_cost_usd' => (float) env('AI_USAGE_REALTIME_SESSION_MINIMUM_COST_USD', 0.001),
+        'speech_price_per_million_characters' => (float) env('AI_USAGE_SPEECH_PRICE_PER_MILLION_CHARACTERS', 15.0),
         'spike_multiplier' => (float) env('AI_USAGE_SPIKE_MULTIPLIER', 3),
         'spike_min_daily_cost_usd' => (float) env('AI_USAGE_SPIKE_MIN_DAILY_COST_USD', 1.00),
         'pricing_per_million' => [

@@ -207,7 +207,7 @@ class BrowserVoiceComplexPlanService
         }
 
         $target = null;
-        if (preg_match('/\b(?:titled|called|named)\s+[“"]?(.+?)(?=[”"]?\s+(?:for|on|at|today|tomorrow)\b|[”"]?[.!]*$)/iu', $input, $match) === 1) {
+        if (preg_match('/\b(?:titled|called|named|labeled|labelled)\s+[“"]?(.+?)(?=[”"]?\s+(?:for|on|at|today|tomorrow)\b|[”"]?[.!]*$)/iu', $input, $match) === 1) {
             $target = trim((string) $match[1], " \t\n\r\0\x0B\"“”");
         } elseif (preg_match('/\bremind me to\s+[“"]?(.+?)(?=[”"]?\s+(?:for|on|at|today|tomorrow)\b|[”"]?[.!]*$)/iu', $input, $match) === 1) {
             $target = trim((string) $match[1], " \t\n\r\0\x0B\"“”");

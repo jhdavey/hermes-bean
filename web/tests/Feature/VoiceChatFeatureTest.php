@@ -138,6 +138,59 @@ class VoiceChatFeatureTest extends TestCase
         );
     }
 
+    public function test_authenticated_browser_synthesizes_the_exact_server_owned_text_and_meters_it_once(): void
+    {
+        config()->set('services.openai.server_api_key', 'test-openai-key');
+        config()->set('services.openai.speech_model', 'tts-1-test');
+        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+        $token = $this->apiToken('voice-speech@example.com');
+        $text = 'Done—I created the note “Meal Plans” with five recipes.';
+        Http::fake([
+            'api.openai.test/v1/audio/speech' => Http::response('ID3-fake-mp3', 200, ['Content-Type' => 'audio/mpeg']),
+        ]);
+        $payload = [
+            'turn_id' => 'speech-clarification-turn-0001',
+            'speech_item_id' => 'speech-clarification-turn-0001:clarification',
+            'purpose' => 'clarification',
+            'text' => $text,
+        ];
+
+        $first = $this->withToken($token)->postJson('/api/assistant/voice/speech', $payload);
+        $first->assertOk()
+            ->assertHeader('Content-Type', 'audio/mpeg')
+            ->assertHeader('X-Bean-Speech-Text-Sha256', hash('sha256', $text));
+        $this->assertSame('ID3-fake-mp3', $first->getContent());
+        $this->withToken($token)->postJson('/api/assistant/voice/speech', $payload)->assertOk();
+
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/audio/speech'
+            && $request['model'] === 'tts-1-test'
+            && $request['input'] === $text
+            && $request['response_format'] === 'mp3'
+            && $request->hasHeader('Authorization', 'Bearer test-openai-key')
+            && $request->hasHeader('OpenAI-Safety-Identifier'));
+        $user = User::where('email', 'voice-speech@example.com')->firstOrFail();
+        $this->assertSame(1, AiUsageLog::where('user_id', $user->id)->where('request_type', 'voice_speech')->count());
+        $usage = AiUsageLog::where('user_id', $user->id)->where('request_type', 'voice_speech')->firstOrFail();
+        $this->assertSame(mb_strlen($text), data_get($usage->metadata, 'characters'));
+        $this->assertSame(['speech_synthesis'], $usage->action_types);
+    }
+
+    public function test_final_speech_rejects_text_that_does_not_match_the_durable_server_final(): void
+    {
+        $token = $this->apiToken('voice-speech-mismatch@example.com');
+        Http::fake();
+
+        $this->withToken($token)->postJson('/api/assistant/voice/speech', [
+            'turn_id' => 'missing-final-turn-0001',
+            'speech_item_id' => 'missing-final-turn-0001:final',
+            'purpose' => 'final',
+            'text' => 'I cannot create notes.',
+        ])->assertStatus(409)
+            ->assertJsonPath('error.code', 'voice_speech_text_mismatch');
+
+        Http::assertNothingSent();
+    }
+
     public function test_base_premium_and_pro_voice_sessions_stop_at_each_users_daily_plan_limit_while_admin_remains_unlimited(): void
     {
         config()->set('services.ai_usage.realtime_session_minimum_cost_usd', 0.001);

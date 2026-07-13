@@ -53,6 +53,7 @@ try {
         const routeMarkers = [
             '/assistant/voice/realtime/session',
             '/assistant/voice/realtime/usage',
+            '/assistant/voice/speech',
             '/assistant/voice/turns',
             '/assistant/voice/state',
             '/assistant/voice/cancellations',
@@ -99,6 +100,7 @@ try {
     for (const probe of [
         { path: '/api/assistant/voice/realtime/session', method: 'POST' },
         { path: '/api/assistant/voice/realtime/usage', method: 'POST' },
+        { path: '/api/assistant/voice/speech', method: 'POST' },
         { path: '/api/assistant/voice/capabilities', method: 'GET' },
         { path: '/api/assistant/voice/state?session_id=1', method: 'GET' },
     ]) {

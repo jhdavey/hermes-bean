@@ -94,7 +94,7 @@ final class BrowserVoiceTypedWriteParser
     {
         $temporalBoundary = '(?=\s+(?:(?:for|on|at|by)\s+)?(?:'.self::DATE_WORD_PATTERN.'|'.self::CLOCK_PATTERN.')\b|[.!?]*$)';
         $patterns = [
-            '/\b(?:titled|called|named)\s+[\x{201C}"]?(.+?)[\x{201D}"]?'.$temporalBoundary.'/iu',
+            '/\b(?:titled|called|named|labeled|labelled)\s+[\x{201C}"]?(.+?)[\x{201D}"]?'.$temporalBoundary.'/iu',
         ];
 
         if ($resource === 'reminder') {

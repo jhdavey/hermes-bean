@@ -80,6 +80,16 @@ class BrowserVoiceAdmissionRouter
         $externalRequest = $this->containsAny($intentText, ['weather', 'forecast', 'temperature', 'rain', 'storm']);
         $contextualWeather = data_get($context, 'prior_handler') === 'external.weather'
             && $this->isContextualFollowUp($text);
+        if ($this->isGeneratedNoteRequest($text)) {
+            return new VoiceTurnRoute(
+                VoiceTurnLane::ComplexAgent,
+                'agent.generate_note',
+                true,
+                'I’ll put that together.',
+                120,
+                10,
+            );
+        }
         if ($this->containsMultipleRoutableOperations($text)
             || (($externalRequest || $contextualWeather) && $applicationDomains !== [])) {
             return new VoiceTurnRoute(
@@ -141,18 +151,6 @@ class BrowserVoiceAdmissionRouter
                 ! $local,
                 $local ? null : 'Let me check that forecast.',
                 8,
-            );
-        }
-
-        if ($this->containsAny($intentText, ['note', 'notes'])
-            && $this->containsAny($intentText, ['plan', 'draft', 'brainstorm', 'generate', 'write me', 'pick', 'random'])) {
-            return new VoiceTurnRoute(
-                VoiceTurnLane::ComplexAgent,
-                'agent.generate_note',
-                true,
-                'I’ll put that together.',
-                120,
-                10,
             );
         }
 
@@ -303,6 +301,24 @@ class BrowserVoiceAdmissionRouter
     private function isContextualFollowUp(string $text): bool
     {
         return preg_match('/^(?:and\s+)?(?:what|how|when|where|which|who|will|is|are|did|does|do|can|could|would|about|what about)\b|\b(?:it|that|there|later|tomorrow|tonight|the first one|the next one)\b/u', $text) === 1;
+    }
+
+    private function isGeneratedNoteRequest(string $text): bool
+    {
+        if (! $this->containsAny($text, ['note', 'notes'])
+            || $this->writeOperation($text) === null) {
+            return false;
+        }
+
+        $intentText = $this->intentText->stripEntityPayloads($text);
+
+        return $this->containsAny($intentText, [
+            'plan', 'draft', 'brainstorm', 'generate', 'write me', 'pick', 'random',
+            'recipe', 'recipes', 'ideas', 'outline', 'summary', 'summarize',
+        ]) || preg_match(
+            '/\b(?:put|include|add|write|fill)\b.+\b(?:in|into|to)\s+(?:that|this|the)\s+note\b/u',
+            $text,
+        ) === 1;
     }
 
     /** @param array<string, mixed> $context */

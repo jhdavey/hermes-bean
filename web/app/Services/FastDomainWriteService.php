@@ -435,7 +435,7 @@ class FastDomainWriteService
     private function isContextualMutationReference(VoiceTurn $turn): bool
     {
         return preg_match('/^app\.(?:calendar|reminder|task|note)\.(?:delete|reschedule|complete)$/', $turn->handler) === 1
-            && preg_match('/\b(?:titled|called|named)\b/iu', $turn->transcript) !== 1
+            && preg_match('/\b(?:titled|called|named|labeled|labelled)\b/iu', $turn->transcript) !== 1
             && (! str_ends_with($turn->handler, '.delete') || ! $this->typedWrites->hasClockTime($turn->transcript))
             && preg_match(
                 '/\b(?:delete|remove|move|change|reschedule|set|complete|mark)\s+(?:(?:that|this)(?:\s+(?:reminder|task|note|(?:calendar\s+)?event|meeting|appointment))?|it|the\s+one)\b/iu',
@@ -578,8 +578,8 @@ class FastDomainWriteService
     private function title(string $text, string $nounPattern): ?string
     {
         $patterns = [
-            '/\b(?:titled|called|named)\s+[“"]?(.+?)(?=[”"]?\s+(?:for|on|at|today|tomorrow)\b|[”"]?[.!]*$)/iu',
-            '/\b(?:'.$nounPattern.')\b\s+(?:titled|called|named)\s+[“"]?(.+?)(?=[”"]?\s+(?:for|on|at|today|tomorrow|that says|saying|with)\b|[”"]?[.!]*$)/iu',
+            '/\b(?:titled|called|named|labeled|labelled)\s+[“"]?(.+?)(?=[”"]?\s+(?:for|on|at|today|tomorrow)\b|[”"]?[.!]*$)/iu',
+            '/\b(?:'.$nounPattern.')\b\s+(?:titled|called|named|labeled|labelled)\s+[“"]?(.+?)(?=[”"]?\s+(?:for|on|at|today|tomorrow|that says|saying|with)\b|[”"]?[.!]*$)/iu',
             '/\b(?:create|add|make|set|schedule|save)\s+(?:a\s+)?(?:'.$nounPattern.')\b\s+(?:to\s+)?[“"]?(.+?)(?=[”"]?\s+(?:for|on|at|today|tomorrow|that says|saying|with)\b|[”"]?[.!]*$)/iu',
             '/\bremind me to\s+[“"]?(.+?)(?=[”"]?\s+(?:for|on|at|today|tomorrow)\b|[”"]?[.!]*$)/iu',
         ];
@@ -598,7 +598,7 @@ class FastDomainWriteService
 
     private function referencedTitle(string $text): ?string
     {
-        if (preg_match('/\b(?:reminder|task|note|event|meeting|appointment)\b\s+(?:titled|called|named)\s+[“"]?(.+?)[”"]?[.!]*$/iu', $text, $match) !== 1) {
+        if (preg_match('/\b(?:reminder|task|note|event|meeting|appointment)\b\s+(?:titled|called|named|labeled|labelled)\s+[“"]?(.+?)[”"]?[.!]*$/iu', $text, $match) !== 1) {
             return null;
         }
 
@@ -616,7 +616,7 @@ class FastDomainWriteService
 
     private function generatedNoteTitle(string $request): string
     {
-        if (preg_match('/\bnote\s+(?:titled|called|named)\s+[“"]?(.+?)[”"]?(?:[.!]|$)/iu', $request, $match) === 1) {
+        if (preg_match('/\bnote\s+(?:titled|called|named|labeled|labelled)\s+[“"]?(.+?)(?=[”"]?\s+(?:and\s+)?(?:put|include|add|write|fill)\b|[”"]?[.!?]|$)/iu', $request, $match) === 1) {
             $title = trim((string) $match[1], " \t\n\r\0\x0B\"“”");
             if ($title !== '') {
                 return mb_substr($title, 0, 180);

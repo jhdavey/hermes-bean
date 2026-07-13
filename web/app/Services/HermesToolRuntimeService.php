@@ -1177,6 +1177,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         $profile = $this->profileForSession($session);
         $style = trim((string) data_get($profile?->settings, 'prompt', ''));
         $complexVoiceRequest = ($intentRoute['lane'] ?? null) === VoiceTurnLane::ComplexAgent->value;
+        $generatedNoteRequest = ($intentRoute['handler'] ?? null) === 'agent.generate_note';
         // Concurrent browser voice jobs can leave earlier user messages
         // unresolved. A complex job receives only its sealed input so it can
         // never repeat or act on a neighboring turn.
@@ -1195,9 +1196,11 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 ])
                 ->values()
                 ->all();
-        $laneInstruction = $complexVoiceRequest
-            ? 'Complete the requested reasoning, planning, drafting, or creative work now and return the useful result directly. Do not merely acknowledge it. You have no tools and must not claim that an app change has already happened.'
-            : "If the user asks for app work, external lookup, or deeper work, say you'll take care of it in one short sentence.";
+        $laneInstruction = $generatedNoteRequest
+            ? 'Generate only the complete note body requested by the user. Include the full requested number of items. Do not acknowledge, discuss capabilities, mention tools, or claim to save the note; the application will save your complete output through its typed note writer.'
+            : ($complexVoiceRequest
+                ? 'Complete the requested reasoning, planning, drafting, or creative work now and return the useful result directly. Do not merely acknowledge it. You have no tools and must not claim that an app change has already happened.'
+                : "If the user asks for app work, external lookup, or deeper work, say you'll take care of it in one short sentence.");
         $lengthInstruction = $complexVoiceRequest
             ? 'Give a concise but complete answer of the length the request needs.'
             : 'Keep the response under 45 words unless the user explicitly asks for a longer explanation.';

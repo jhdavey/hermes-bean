@@ -554,6 +554,72 @@ class BrowserVoiceV2LifecycleTest extends TestCase
         $this->assertSame(1, ConversationMessage::where('client_turn_id', 'worker-turn-0001')->where('role', 'assistant')->count());
     }
 
+    public function test_labeled_five_recipe_note_generates_and_saves_one_complete_note_with_one_final(): void
+    {
+        $token = $this->apiToken('voice-v2-five-recipe-note@example.com');
+        $sessionId = $this->sessionId($token);
+        $payload = $this->payload(
+            $sessionId,
+            'five-recipe-note-0001',
+            'Can you create a note labeled Meal Plans and put five simple dinner recipes in that note?',
+        );
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.turn.handler', 'agent.generate_note')
+            ->assertJsonCount(1, 'data.jobs');
+
+        $turn = VoiceTurn::where('turn_id', 'five-recipe-note-0001')->firstOrFail();
+        $run = $turn->runs()->sole();
+        $body = implode("\n\n", [
+            '1. Tomato basil pasta - Boil pasta and toss with tomato, basil, and olive oil.',
+            '2. Sheet-pan chicken - Roast chicken, potatoes, and broccoli on one pan.',
+            '3. Black bean tacos - Fill tortillas with seasoned beans and toppings.',
+            '4. Vegetable fried rice - Stir-fry rice, mixed vegetables, egg, and soy sauce.',
+            '5. Lemon salmon - Bake salmon with lemon and serve with green beans.',
+        ]);
+        $runtime = Mockery::mock(HermesRuntimeService::class);
+        $runtime->shouldReceive('sendExistingMessage')
+            ->once()
+            ->andReturnUsing(function (ConversationSession $session, ConversationMessage $message) use ($body): array {
+                $provisional = ConversationMessage::create([
+                    'user_id' => $session->user_id,
+                    'conversation_session_id' => $session->id,
+                    'role' => 'assistant',
+                    'content' => $body,
+                    'metadata' => ['assistant_run_id' => data_get($message->metadata, 'assistant_run_id')],
+                ]);
+
+                return [
+                    'status' => 'completed',
+                    'session' => $session,
+                    'user_message' => $message,
+                    'assistant_message' => $provisional,
+                    'events' => collect(),
+                    'blocker' => null,
+                ];
+            });
+
+        (new ProcessAssistantRun($run->id))->handle(
+            $runtime,
+            app(AssistantRunService::class),
+            app(VoiceTurnLifecycleService::class),
+        );
+
+        $turn->refresh()->load(['runs', 'finalAssistantMessage']);
+        $note = Note::where('metadata->browser_voice_turn_id', $turn->turn_id)->sole();
+        $this->assertSame('Meal Plans', $note->title);
+        $this->assertSame($body, $note->plain_text);
+        $this->assertSame('Done—I created the note “Meal Plans”.', $turn->finalAssistantMessage->content);
+        $this->assertSame('committed', data_get($turn->runs->sole()->metadata, 'write_receipt.status'));
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'user')->count());
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'assistant')->count());
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', $payload)
+            ->assertOk()
+            ->assertJsonPath('data.turn.final_text', 'Done—I created the note “Meal Plans”.');
+        $this->assertSame(1, Note::where('metadata->browser_voice_turn_id', $turn->turn_id)->count());
+    }
+
     public function test_contextual_voice_cancellation_is_a_separate_exact_once_turn_and_cancels_work_authoritatively(): void
     {
         $token = $this->apiToken('voice-v2-context-cancel@example.com');

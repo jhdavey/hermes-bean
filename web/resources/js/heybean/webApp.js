@@ -13,14 +13,12 @@ import {
     RealtimeInputTranscriptBuffer,
     stageOptimisticUserTurn,
     buildRealtimeConversationItemDeleteEvent,
-    buildRealtimeResponseEvent,
     buildRealtimeTargetedResponseCancellationEvent,
     isLikelyNonEnglishRealtimeTranscript,
     isRealtimeWakeAddressOnly,
     isRealtimeDuplicateCallConflict,
     isStrictRealtimeWakePhrase,
     isVoiceFillerOnly,
-    naturalizeRealtimeSpeechText,
     realtimeMicrophoneConstraints,
     reportRealtimeUsageReliably,
     realtimeUsageReportFromProviderEvent,
@@ -48,7 +46,7 @@ import {
     recoverBrowserVoiceV2Admission,
     resolveBrowserVoiceV2AdmissionClarification,
 } from './browserVoiceV2Client.js';
-import { BrowserVoiceRealtimeSpeechTransportV2 } from './browserVoiceRealtimeSpeechV2.js';
+import { BrowserVoiceHttpSpeechTransportV2 } from './browserVoiceHttpSpeechV2.js';
 import { BrowserVoiceRealtimeInputTransportV2 } from './browserVoiceRealtimeInputV2.js';
 
 export function captureHeyBeanChatControlFocus(mount) {
@@ -280,16 +278,8 @@ export function mountHeyBeanWebApp(mount) {
     const realtimeTurnSessionIds = new Map();
     let realtimePersistenceSessionCreation = null;
     const chatAnnouncementRegion = persistentChatAnnouncementRegion();
-    const browserVoiceV2SpeechTransport = new BrowserVoiceRealtimeSpeechTransportV2({
-        send: realtimeSend,
-        buildRequest: (item, clientResponseId) => buildRealtimeResponseEvent(
-            `Speak this HeyBean answer exactly and do not add any extra facts or tasks:\n\n${naturalizeRealtimeSpeechText(item.text)}`,
-            { clientResponseId },
-        ),
-        buildCancel: (providerResponseId) => {
-            const targeted = buildRealtimeTargetedResponseCancellationEvent(providerResponseId);
-            return [targeted || { type: 'response.cancel' }, { type: 'output_audio_buffer.clear' }];
-        },
+    const browserVoiceV2SpeechTransport = new BrowserVoiceHttpSpeechTransportV2({
+        requestAudio: requestBrowserVoiceV2SpeechAudio,
     });
     const browserVoiceV2InputTransport = new BrowserVoiceRealtimeInputTransportV2({
         send: realtimeSend,
@@ -297,9 +287,7 @@ export function mountHeyBeanWebApp(mount) {
     });
     const browserVoiceV2Playback = new BrowserVoicePlaybackAdapterV2({
         play: (item, listeners) => browserVoiceV2SpeechTransport.play(item, listeners),
-        setVolume: (_handle, volume) => {
-            if (realtimeRemoteAudio) realtimeRemoteAudio.volume = Math.max(0, Math.min(1, Number(volume) || 0));
-        },
+        setVolume: (handle, volume) => browserVoiceV2SpeechTransport.setVolume(handle, volume),
         stop: (handle, reason) => browserVoiceV2SpeechTransport.stop(handle, reason),
     });
     const browserVoiceV2Speech = new BrowserVoiceSpeechSchedulerV2({
@@ -637,6 +625,45 @@ export function mountHeyBeanWebApp(mount) {
             throw error;
         }
         return Object.prototype.hasOwnProperty.call(payload, 'data') ? payload.data : payload;
+    }
+
+    async function requestBrowserVoiceV2SpeechAudio(item, { signal } = {}) {
+        const text = String(item?.text || '').trim();
+        if (!text) throw new Error('Bean voice response text is empty.');
+        const response = await fetch('/api/assistant/voice/speech', {
+            method: 'POST',
+            signal,
+            headers: {
+                Accept: 'audio/mpeg, application/json',
+                'Content-Type': 'application/json',
+                ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+            },
+            body: JSON.stringify({
+                workspace_id: currentWorkspaceId() || null,
+                turn_id: String(item.turnId || ''),
+                speech_item_id: String(item.id || ''),
+                purpose: String(item.purpose || ''),
+                // This exact durable text is the only speech input. Never
+                // naturalize, summarize, or ask a second model to rewrite it.
+                text,
+            }),
+        });
+        if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            const error = new Error(String(payload.message || 'Bean voice playback could not be requested.'));
+            error.status = response.status;
+            error.payload = payload;
+            if (response.status === 402) {
+                stopVoiceWakeListening({ clearDraft: true, reason: 'usage_limit' });
+                state.error = error.message;
+                state.chatRunState = 'Upgrade to continue';
+                render();
+            }
+            throw error;
+        }
+        const audio = await response.blob();
+        if (!audio.size) throw new Error('Bean voice playback returned no audio.');
+        return audio;
     }
 
     async function apiForm(path, formData, options = {}) {
@@ -10372,12 +10399,33 @@ export function mountHeyBeanWebApp(mount) {
         return wake.state.activeTurn.id;
     }
 
+    function isBrowserVoiceV2RealtimeOutputEvent(type) {
+        return type === 'response.created'
+            || type === 'response.done'
+            || type === 'output_audio_buffer.started'
+            || type === 'output_audio_buffer.stopped'
+            || type === 'output_audio_buffer.cleared'
+            || type.startsWith('response.audio_')
+            || type.startsWith('response.output_audio_')
+            || type.startsWith('response.text.')
+            || type.startsWith('response.output_text.');
+    }
+
     function handleBrowserVoiceV2RealtimeEvent(payload) {
         if (!browserVoiceV2Enabled()) return false;
         const usageReport = realtimeUsageReportFromProviderEvent(payload);
         if (usageReport) void reportBrowserVoiceV2RealtimeUsage(usageReport);
-        if (browserVoiceV2SpeechTransport.handleEvent(payload)) return true;
         const type = String(payload?.type || '');
+        if (type === 'response.created') {
+            // Realtime is transcription-only. Any provider-created response is
+            // unowned and must be canceled before remote WebRTC audio can
+            // contradict the durable server final spoken by HTTP synthesis.
+            const targeted = buildRealtimeTargetedResponseCancellationEvent(payload.response?.id);
+            realtimeSend(targeted || { type: 'response.cancel' });
+            realtimeSend({ type: 'output_audio_buffer.clear' });
+            return true;
+        }
+        if (isBrowserVoiceV2RealtimeOutputEvent(type)) return true;
         if (type === 'input_audio_buffer.speech_started') {
             const transcriptId = payload.item_id || payload.item?.id || '';
             updateRealtimeVoiceActivity(Math.max(realtimeVoiceActivityLevel, 0.72));

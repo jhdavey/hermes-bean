@@ -121,6 +121,53 @@ class AiUsageService
         );
     }
 
+    /** @return array{allowed:bool,reason:?string,input_tokens:int,reserved_output_tokens:int,estimated_cost_usd:float,budget:array<string,mixed>} */
+    public function preflightSpeechSynthesis(User $user, ?int $workspaceId, int $characters): array
+    {
+        $model = (string) config('services.openai.speech_model', OpenAiVoiceService::DEFAULT_SPEECH_MODEL);
+
+        return $this->preflightDirect(
+            $user,
+            $workspaceId,
+            $model,
+            estimatedCost: $this->speechSynthesisCost($characters),
+            requestType: 'voice_speech',
+        );
+    }
+
+    public function recordSpeechSynthesis(
+        User $user,
+        ?int $workspaceId,
+        string $speechItemId,
+        string $model,
+        string $voice,
+        int $characters,
+    ): AiUsageLog {
+        return AiUsageLog::query()->createOrFirst(
+            ['provider_event_id' => hash('sha256', 'voice_speech|'.$user->id.'|'.$speechItemId)],
+            [
+                'user_id' => $user->id,
+                'workspace_id' => $workspaceId,
+                'provider' => 'openai',
+                'model' => $model,
+                'route_tier' => 'voice_speech',
+                'request_type' => 'voice_speech',
+                'status' => 'completed',
+                'input_tokens' => 0,
+                'output_tokens' => 0,
+                'total_tokens' => 0,
+                'tool_call_count' => 0,
+                'estimated_cost_usd' => $this->speechSynthesisCost($characters),
+                'action_types' => ['speech_synthesis'],
+                'metadata' => [
+                    'speech_item_id' => $speechItemId,
+                    'voice' => $voice,
+                    'characters' => max(0, $characters),
+                ],
+            ],
+        );
+    }
+
     public function recordRealtimeSessionOpened(
         User $user,
         ?int $workspaceId,
@@ -294,6 +341,13 @@ class AiUsageService
         $this->detectSpikes($session);
 
         return $log;
+    }
+
+    private function speechSynthesisCost(int $characters): float
+    {
+        $price = max(0.0, (float) config('services.ai_usage.speech_price_per_million_characters', 15.0));
+
+        return round((max(0, $characters) / 1_000_000) * $price, 6);
     }
 
     public function recordBlocked(

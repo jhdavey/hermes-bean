@@ -98,7 +98,7 @@ class BrowserVoiceJobPolicy
     public function isContextualMutationReference(string $handler, string $transcript): bool
     {
         if (preg_match('/^app\.(?:calendar|reminder|task|note)\.(?:delete|reschedule|complete)$/', $handler) !== 1
-            || preg_match('/\b(?:titled|called|named)\b/iu', $transcript) === 1
+            || preg_match('/\b(?:titled|called|named|labeled|labelled)\b/iu', $transcript) === 1
             || (str_ends_with($handler, '.delete') && $this->typedWrites->hasClockTime($transcript))) {
             return false;
         }
@@ -220,7 +220,7 @@ class BrowserVoiceJobPolicy
         }
 
         $temporalBoundary = '(?=\s+(?:(?:for|on|at|by)\s+)?(?:today|tomorrow|tonight|noon|midnight|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d{1,2}(?::[0-5]\d)?\s*(?:a\.?m\.?|p\.?m\.?))\b|[.!?]*$)';
-        if (preg_match('/\b(?:titled|called|named)\s+[“"]?(.+?)[”"]?[.!?]*$/iu', $turn->transcript, $match) === 1) {
+        if (preg_match('/\b(?:titled|called|named|labeled|labelled)\s+[“"]?(.+?)[”"]?[.!?]*$/iu', $turn->transcript, $match) === 1) {
             $candidate = trim((string) $match[1], " \t\n\r\0\x0B\"“”.,!?;");
             if ($candidate !== '') {
                 return mb_substr($candidate, 0, 180);
@@ -339,7 +339,7 @@ class BrowserVoiceJobPolicy
     private function referencedTitle(string $text): ?string
     {
         if (preg_match(
-            '/\b(?:reminder|task|note|(?:calendar )?event|meeting|appointment)\b\s+(?:titled|called|named)\s+[“"]?(.+?)(?=[”"]?\s+(?:to|for|on|at|today|tomorrow)\b|[”"]?[.!]*$)/iu',
+            '/\b(?:reminder|task|note|(?:calendar )?event|meeting|appointment)\b\s+(?:titled|called|named|labeled|labelled)\s+[“"]?(.+?)(?=[”"]?\s+(?:to|for|on|at|today|tomorrow)\b|[”"]?[.!]*$)/iu',
             $text,
             $match,
         ) !== 1) {

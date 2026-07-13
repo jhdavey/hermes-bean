@@ -5,14 +5,12 @@ import {
     acquireRealtimeMicrophone,
     RealtimeInputTranscriptBuffer,
     buildRealtimeConversationItemDeleteEvent,
-    buildRealtimeResponseEvent,
     buildRealtimeTargetedResponseCancellationEvent,
     isLikelyNonEnglishRealtimeTranscript,
     isRealtimeWakeAddressOnly,
     isRealtimeDuplicateCallConflict,
     isStrictRealtimeWakePhrase,
     isVoiceFillerOnly,
-    naturalizeRealtimeSpeechText,
     realtimeMicrophoneConstraints,
     reportRealtimeUsageReliably,
     realtimeUsageReportFromProviderEvent,
@@ -115,17 +113,6 @@ test('[BV2-STOP-05] browser voice Stop never routes active v2 work through gener
     assert.equal(browserVoiceV2OwnsStopAction({ enabled: false, activeWork: true }), false);
 });
 
-test('explicit v2 speech responses cannot invoke app tools and carry correlation metadata', () => {
-    assert.deepEqual(buildRealtimeResponseEvent('Hello.', { clientResponseId: 'client-response-1' }), {
-        type: 'response.create',
-        response: {
-            instructions: 'Hello.',
-            tool_choice: 'none',
-            metadata: { heybean_response_id: 'client-response-1' },
-        },
-    });
-});
-
 test('input transcript deltas stream into one draft and finalize per audio item', () => {
     const transcripts = new RealtimeInputTranscriptBuffer();
     assert.equal(transcripts.append({ itemId: 'one', delta: 'What ' }), 'What ');
@@ -140,18 +127,6 @@ test('wake-only draft fragments stay hidden while accepted speech can display', 
     assert.equal(shouldDisplayRealtimeTranscriptDraft('Hey'), false);
     assert.equal(shouldDisplayRealtimeTranscriptDraft('Hey Bean.'), false);
     assert.equal(shouldDisplayRealtimeTranscriptDraft('Hey Bean, what is the weather?'), true);
-});
-
-test('voice output humanizes canonical dates, times, and timezone identifiers', () => {
-    const now = new Date(2026, 6, 11, 10, 50);
-    assert.equal(
-        naturalizeRealtimeSpeechText('It starts at 2026-07-12T16:00:00-04:00.', { now }),
-        'It starts tomorrow at 4 p.m.',
-    );
-    assert.equal(
-        naturalizeRealtimeSpeechText('That is 18:30 (America/New_York).', { now }),
-        'That is 6:30 p.m.',
-    );
 });
 
 test('v2 transcript filters reject filler and non-Latin recognition artifacts', () => {

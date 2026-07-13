@@ -12,6 +12,8 @@ class OpenAiVoiceService
 
     public const DEFAULT_REALTIME_MODEL = 'gpt-realtime';
 
+    public const DEFAULT_SPEECH_MODEL = 'tts-1';
+
     private const VOICES = [
         'alloy' => 'Alloy',
         'ash' => 'Ash',
@@ -130,6 +132,51 @@ class OpenAiVoiceService
             'sdp' => $answerSdp,
             'session_id' => $this->providerSessionId($response->header('Location')),
             'tools' => [],
+        ];
+    }
+
+    /** @return array{audio:string,content_type:string,model:string,voice:string,characters:int} */
+    public function createSpeech(
+        AgentProfile $profile,
+        string $text,
+        ?string $safetyIdentifier = null,
+    ): array {
+        $input = trim($text);
+        if ($input === '') {
+            throw new RuntimeException('OpenAI speech input is empty.');
+        }
+        $voice = $this->normalizeVoice(data_get($profile->settings ?? [], 'voice.voice'));
+        $model = (string) config('services.openai.speech_model', self::DEFAULT_SPEECH_MODEL);
+        $response = Http::withToken($this->apiKey())
+            ->accept('audio/mpeg')
+            ->when($safetyIdentifier, fn ($request) => $request->withHeaders([
+                'OpenAI-Safety-Identifier' => $safetyIdentifier,
+            ]))
+            ->timeout((float) config('services.openai.speech_timeout', 20))
+            ->post($this->endpoint('/audio/speech'), [
+                'model' => $model,
+                'voice' => $voice,
+                'input' => $input,
+                'response_format' => 'mp3',
+            ]);
+
+        if (! $response->successful()) {
+            throw new RuntimeException(sprintf(
+                'OpenAI speech request failed with status %d: %s',
+                $response->status(),
+                mb_substr(preg_replace('/\s+/', ' ', $response->body()) ?? '', 0, 500),
+            ));
+        }
+        if ($response->body() === '') {
+            throw new RuntimeException('OpenAI speech response did not include audio.');
+        }
+
+        return [
+            'audio' => $response->body(),
+            'content_type' => (string) ($response->header('Content-Type') ?: 'audio/mpeg'),
+            'model' => $model,
+            'voice' => $voice,
+            'characters' => mb_strlen($input),
         ];
     }
 

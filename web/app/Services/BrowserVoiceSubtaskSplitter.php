@@ -38,9 +38,9 @@ final class BrowserVoiceSubtaskSplitter
 
             $previousIndex = array_key_last($segments);
             $previous = $segments[$previousIndex];
-            $hasTitle = preg_match('/\b(?:titled|called|named)\b/iu', $previous) === 1;
+            $hasTitle = preg_match('/\b(?:titled|called|named|labeled|labelled)\b/iu', $previous) === 1;
             $titleHasTemporalBoundary = preg_match(
-                '/\b(?:titled|called|named)\b.+\s+(?:(?:for|on|at|by)\s+)?(?:today|tomorrow|tonight|noon|midnight|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d{1,2}(?::[0-5]\d)?\s*(?:a\.?m\.?|p\.?m\.?))\b/iu',
+                '/\b(?:titled|called|named|labeled|labelled)\b.+\s+(?:(?:for|on|at|by)\s+)?(?:today|tomorrow|tonight|noon|midnight|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d{1,2}(?::[0-5]\d)?\s*(?:a\.?m\.?|p\.?m\.?))\b/iu',
                 $previous,
             ) === 1;
             $insideUnboundedTitle = $hasTitle && ! $titleHasTemporalBoundary;

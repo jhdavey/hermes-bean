@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\VoiceTurn;
 use App\Services\AgentProfileService;
 use App\Services\AiUsageService;
 use App\Services\OpenAiVoiceService;
@@ -10,6 +11,7 @@ use App\Services\PlanLimitService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -137,6 +139,84 @@ class AssistantVoiceController extends Controller
             'duplicate' => $result['duplicate'],
             'remaining' => $availability,
         ]]);
+    }
+
+    public function speech(Request $request): Response|JsonResponse
+    {
+        $data = $request->validate([
+            'workspace_id' => ['sometimes', 'nullable', 'integer', 'exists:workspaces,id'],
+            'turn_id' => ['required', 'string', 'max:191'],
+            'speech_item_id' => ['required', 'string', 'max:191'],
+            'purpose' => ['required', 'in:acknowledgement,final,clarification,interruption,cancellation'],
+            'text' => ['required', 'string', 'max:4096'],
+        ]);
+        $user = $request->user();
+        $workspace = $this->workspaces->resolveWorkspace($user, $data['workspace_id'] ?? null);
+        $text = trim((string) $data['text']);
+        if (in_array($data['purpose'], ['acknowledgement', 'final'], true)) {
+            $turn = VoiceTurn::query()
+                ->where('user_id', $user->id)
+                ->where('workspace_id', $workspace->id)
+                ->where('turn_id', $data['turn_id'])
+                ->first();
+            $expected = $data['purpose'] === 'final'
+                ? trim((string) $turn?->finalAssistantMessage()->value('content'))
+                : trim((string) $turn?->acknowledgement_text);
+            if ($expected === '' || ! hash_equals($expected, $text)) {
+                return response()->json([
+                    'message' => 'Bean could not verify the response text for speech.',
+                    'error' => ['code' => 'voice_speech_text_mismatch'],
+                ], 409);
+            }
+        }
+
+        $preflight = $this->usage->preflightSpeechSynthesis($user, $workspace->id, mb_strlen($text));
+        if (! $preflight['allowed']) {
+            return $this->planLimits->limitResponse(
+                'You’ve reached today’s AI usage limit for your current plan. Upgrade for more voice usage, or try again tomorrow.',
+                [
+                    'limit_type' => 'daily_ai_usage',
+                    'plan_tier' => $user->subscriptionTier(),
+                ],
+            );
+        }
+
+        $profile = app(AgentProfileService::class)->ensureForWorkspace($workspace, $user);
+        try {
+            $speech = $this->voice->createSpeech(
+                $profile,
+                $text,
+                hash_hmac('sha256', (string) $user->id, (string) config('app.key')),
+            );
+            $this->usage->recordSpeechSynthesis(
+                $user,
+                $workspace->id,
+                (string) $data['speech_item_id'],
+                (string) $speech['model'],
+                (string) $speech['voice'],
+                (int) $speech['characters'],
+            );
+        } catch (Throwable $error) {
+            Log::warning('Browser Voice v2 speech synthesis failed.', [
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'turn_id' => $data['turn_id'],
+                'speech_item_id' => $data['speech_item_id'],
+                'purpose' => $data['purpose'],
+                'error' => $error->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Bean couldn’t play that response, but the full answer is still in chat.',
+                'error' => ['code' => 'voice_speech_failed'],
+            ], 502);
+        }
+
+        return response($speech['audio'], 200, [
+            'Content-Type' => $speech['content_type'],
+            'Cache-Control' => 'no-store, private',
+            'X-Bean-Speech-Text-Sha256' => hash('sha256', $text),
+        ]);
     }
 
     public function clientFailure(Request $request): JsonResponse

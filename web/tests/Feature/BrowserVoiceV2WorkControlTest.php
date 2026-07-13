@@ -253,6 +253,27 @@ class BrowserVoiceV2WorkControlTest extends TestCase
             ->assertJsonCount(1, 'data.jobs');
     }
 
+    public function test_labeled_recipe_note_request_remains_one_generated_note_job(): void
+    {
+        $token = $this->apiToken('voice-v2-labeled-recipe-note-route@example.com');
+        $sessionId = $this->sessionId($token);
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', $this->payload(
+            $sessionId,
+            'generated-recipe-note-route-0001',
+            'Can you create a note labeled Meal Plans and put five simple dinner recipes in that note?',
+        ))->assertCreated()
+            ->assertJsonPath('data.turn.lane', 'complex_agent')
+            ->assertJsonPath('data.turn.handler', 'agent.generate_note')
+            ->assertJsonPath('data.jobs.0.handler', 'agent.generate_note')
+            ->assertJsonPath('data.jobs.0.label', 'Create generated note')
+            ->assertJsonCount(1, 'data.jobs');
+
+        $turn = VoiceTurn::where('turn_id', 'generated-recipe-note-route-0001')->sole();
+        $this->assertSame(1, $turn->runs()->count());
+        $this->assertSame('agent.generate_note', $turn->runs()->sole()->handler);
+    }
+
     public function test_a_deterministic_multi_read_plan_executes_real_subtasks_and_writes_one_combined_final(): void
     {
         $token = $this->apiToken('voice-v2-multi-read-execution@example.com');

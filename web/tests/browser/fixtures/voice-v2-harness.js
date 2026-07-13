@@ -509,6 +509,7 @@ class VoiceV2BrowserJourneyHarness {
                     itemId: handle.item.id,
                     turnId: handle.item.turnId,
                     purpose: handle.item.purpose,
+                    text: handle.item.text,
                     started: handle.started,
                     stopped: handle.stopped,
                     ended: handle.ended,

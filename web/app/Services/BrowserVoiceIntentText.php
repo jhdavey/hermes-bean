@@ -35,7 +35,7 @@ final class BrowserVoiceIntentText
         $payload = '(?:“[^”]*”|"[^"]*"|.+?)';
 
         $text = preg_replace(
-            '/\b(?:titled|called|named)\s+'.$payload.'(?=\s+(?:'.$temporalBoundary.'|'.$operationBoundary.')|[.!?]*$)/iu',
+            '/\b(?:titled|called|named|labeled|labelled)\s+'.$payload.'(?=\s+(?:'.$temporalBoundary.'|'.$operationBoundary.')|[.!?]*$)/iu',
             ' ',
             $text,
         ) ?? $text;

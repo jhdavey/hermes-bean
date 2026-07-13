@@ -187,7 +187,7 @@ class BrowserVoiceRequestCompletenessService
 
     private function hasCreatedNounContent(string $text, string $noun): bool
     {
-        return preg_match('/\b(?:titled|called|named|that says|saying|with (?:the )?(?:text|content))\s+\S+/u', $text) === 1
+        return preg_match('/\b(?:titled|called|named|labeled|labelled|that says|saying|with (?:the )?(?:text|content))\s+\S+/u', $text) === 1
             || preg_match('/\b(?:create|add|make|set|schedule|save)\s+(?:a |an |the )?(?:'.$noun.')\b\s+(?!for\b|on\b|at\b|today\b|tomorrow\b)\S+/u', $text) === 1
             || preg_match('/\S+\s+(?:as|into)\s+(?:a |an )?(?:'.$noun.')\b/u', $text) === 1;
     }
@@ -207,7 +207,7 @@ class BrowserVoiceRequestCompletenessService
         return ($hasAuthorizedContextualReference
                 && preg_match('/\b(?:that|it|the one|this)\b/u', $text) === 1)
             || preg_match('/\b(?:all|every)\b/u', $text) === 1
-            || preg_match('/\b(?:'.$noun.')\b\s+(?:titled|called|named)\s+\S+/u', $text) === 1
+            || preg_match('/\b(?:'.$noun.')\b\s+(?:titled|called|named|labeled|labelled)\s+\S+/u', $text) === 1
             || ($allowTemporalTarget && $this->hasTime($text));
     }
 

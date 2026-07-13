@@ -114,75 +114,6 @@ export function shouldDisplayRealtimeTranscriptDraft(text) {
     return !/^h(?:e(?:y(?:[\s,.-]*b(?:e(?:a(?:n)?)?)?)?)?)?[\s.!?,-]*$/i.test(draft);
 }
 
-function realtimeLocalDateKey(date) {
-    const value = date instanceof Date ? date : new Date(date);
-    if (Number.isNaN(value.getTime())) return '';
-    return [
-        value.getFullYear(),
-        String(value.getMonth() + 1).padStart(2, '0'),
-        String(value.getDate()).padStart(2, '0'),
-    ].join('-');
-}
-
-function realtimeDateLabel(dateKey, now) {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey || ''));
-    if (!match) return dateKey;
-    const [, yearText, monthText, dayText] = match;
-    const today = realtimeLocalDateKey(now);
-    const tomorrowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    if (dateKey === today) return 'today';
-    if (dateKey === realtimeLocalDateKey(tomorrowDate)) return 'tomorrow';
-    const year = Number(yearText);
-    const month = new Intl.DateTimeFormat('en-US', { month: 'long' })
-        .format(new Date(year, Number(monthText) - 1, 1));
-    const day = Number(dayText);
-    const modulo100 = day % 100;
-    const suffix = modulo100 >= 11 && modulo100 <= 13
-        ? 'th'
-        : ({ 1: 'st', 2: 'nd', 3: 'rd' }[day % 10] || 'th');
-    return `${month} ${day}${suffix}${year !== now.getFullYear() ? `, ${year}` : ''}`;
-}
-
-function realtimeTimeLabel(hoursText, minutesText) {
-    const hours = Number(hoursText);
-    const minutes = Number(minutesText);
-    if (!Number.isInteger(hours) || hours < 0 || hours > 23 || !Number.isInteger(minutes) || minutes < 0 || minutes > 59) {
-        return `${hoursText}:${minutesText}`;
-    }
-    const period = hours < 12 ? 'a.m.' : 'p.m.';
-    const twelveHour = hours % 12 || 12;
-    return minutes === 0
-        ? `${twelveHour} ${period}`
-        : `${twelveHour}:${String(minutes).padStart(2, '0')} ${period}`;
-}
-
-export function naturalizeRealtimeSpeechText(text, { now = new Date() } = {}) {
-    const reference = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
-    let output = String(text || '');
-    output = output.replace(
-        /\b(\d{4}-\d{2}-\d{2})[T ]([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?\b/g,
-        (_, date, hours, minutes) => `${realtimeDateLabel(date, reference)} at ${realtimeTimeLabel(hours, minutes)}`,
-    );
-    output = output.replace(
-        /\b(\d{4}-\d{2}-\d{2})\b/g,
-        (_, date) => realtimeDateLabel(date, reference),
-    );
-    output = output.replace(
-        /\b([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?\b(?!\s*(?:a\.?m\.?|p\.?m\.?))/gi,
-        (_, hours, minutes) => realtimeTimeLabel(hours, minutes),
-    );
-    return output
-        .replace(
-            /\b(?:at|on)\s+((?:today|tomorrow|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)(?:,\s+\d{4})?))\s+at\b/g,
-            '$1 at',
-        )
-        .replace(/\s*\([A-Za-z_]+\/[A-Za-z0-9_+\-/]+\)/g, '')
-        .replace(/\b[A-Za-z_]+\/[A-Za-z0-9_+\-/]+\b/g, 'local time')
-        .replace(/([ap]\.m\.)\./gi, '$1')
-        .replace(/\s{2,}/g, ' ')
-        .trim();
-}
-
 export function isLikelyNonEnglishRealtimeTranscript(text) {
     const letters = String(text || '').match(/\p{L}/gu) || [];
     if (!letters.length) return false;
@@ -248,15 +179,6 @@ export class RealtimeInputTranscriptBuffer {
         const index = Number.isSafeInteger(numericIndex) && numericIndex >= 0 ? numericIndex : 0;
         return `${id}:${index}`;
     }
-}
-
-export function buildRealtimeResponseEvent(instructions, { clientResponseId = '' } = {}) {
-    const response = {
-        instructions: String(instructions || '').trim(),
-        tool_choice: 'none',
-    };
-    if (clientResponseId) response.metadata = { heybean_response_id: String(clientResponseId) };
-    return { type: 'response.create', response };
 }
 
 export function buildRealtimeTargetedResponseCancellationEvent(responseId) {

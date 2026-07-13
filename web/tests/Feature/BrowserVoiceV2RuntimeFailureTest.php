@@ -320,8 +320,9 @@ class BrowserVoiceV2RuntimeFailureTest extends TestCase
             return $request->url() === 'https://api.openai.test/v1/chat/completions'
                 && ! array_key_exists('tools', $payload)
                 && ! array_key_exists('tool_choice', $payload)
-                && str_contains($systemText, 'return the useful result directly')
-                && str_contains($systemText, 'must not claim that an app change has already happened');
+                && str_contains($systemText, 'Generate only the complete note body')
+                && str_contains($systemText, 'Include the full requested number of items')
+                && str_contains($systemText, 'claim to save the note');
         });
     }
 

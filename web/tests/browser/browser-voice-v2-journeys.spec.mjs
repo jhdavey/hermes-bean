@@ -268,6 +268,40 @@ test('[BV2-BROWSER-09] a task read flows through reminder creation and contextua
         .toHaveText('Set it for 5 p.m.');
 });
 
+test('[BV2-BROWSER-12] a generated-note request remains one visible turn and speaks the exact durable final', async ({ page }) => {
+    await boot(page);
+    await markReady(page);
+    const transcript = 'Can you create a note labeled Meal Plans and put five simple dinner recipes in that note?';
+    const finalText = 'Done—I created the note “Meal Plans”.';
+
+    await page.evaluate(async ({ transcript, finalText }) => {
+        const harness = window.voiceHarness;
+        harness.wake('meal-plan-note-turn');
+        harness.partial('Can you create a note labeled Meal Plans');
+        harness.final(transcript);
+        harness.endUtterance();
+        await harness.waitForAdmissions();
+        await harness.updateTurn('meal-plan-note-turn', {
+            state: 'completed',
+            handler: 'agent.generate_note',
+            final_text: finalText,
+            jobs: [{ id: 'meal-plan-note-job', label: 'Create Meal Plans note', status: 'completed', version: 2 }],
+        });
+    }, { transcript, finalText });
+
+    await expect(page.locator('#chat [data-role="user"][data-turn-id="meal-plan-note-turn"]')).toHaveText(transcript);
+    await expect(page.locator('#chat [data-role="assistant"][data-turn-id="meal-plan-note-turn"]')).toHaveText(finalText);
+    const snapshot = await page.evaluate(() => window.voiceHarness.snapshot());
+    expect(snapshot.server.turns).toHaveLength(1);
+    expect(snapshot.server.messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
+    expect(snapshot.playback.plays).toHaveLength(1);
+    expect(snapshot.playback.plays[0]).toMatchObject({
+        turnId: 'meal-plan-note-turn',
+        purpose: 'final',
+        text: finalText,
+    });
+});
+
 test('[BV2-BROWSER-03] Stop is playback-only while three jobs run and a fourth stays visibly queued', async ({ page }) => {
     await boot(page);
     await markReady(page);
