@@ -22,6 +22,7 @@ export function assessBrowserVoiceV2Completeness(transcript, { hasHomeLocation =
     if (creates && !complexGeneration && /\b(?:reminder|remind me)\b/.test(normalized)) {
         const hasSubject = /\bremind me to\s+\S+/.test(normalized)
             || /\b(?:reminder|remind me)\b.*\b(?:titled|called|named|about|to)\s+\S+/.test(normalized)
+            || /\breminder\b\s+for\s+(?!(?:that|this|the)\s+task\b)(?!(?:today|tomorrow|tonight|next\b|noon|midnight|one\b|two\b|three\b|four\b|five\b|six\b|seven\b|eight\b|nine\b|ten\b|eleven\b|twelve\b|\d))\S(?:.*?\S)?\s+(?:for|on|at|by)\s+/.test(normalized)
             || /\b(?:for|about|to)\s+(?:that|this|the)\s+task\b/.test(normalized);
         if (!hasSubject) return { decision: 'incomplete', question: 'What should I remind you about?' };
         if (!hasClockTime) return { decision: 'incomplete', question: 'What time should I remind you?' };

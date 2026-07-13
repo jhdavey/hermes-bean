@@ -1017,6 +1017,51 @@ class BrowserVoiceV2LifecycleTest extends TestCase
         $this->assertSame('committed', data_get($turn->fresh()->metadata, 'write_receipt.status'));
     }
 
+    public function test_explicit_reminder_subject_between_for_and_time_is_a_typed_idempotent_write(): void
+    {
+        Carbon::setTestNow('2026-07-13 16:41:00', 'America/New_York');
+        $token = $this->apiToken('voice-v2-for-subject-reminder@example.com');
+        $sessionId = $this->sessionId($token);
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', [
+            ...$this->payload(
+                $sessionId,
+                'typed-for-temporal-only-reminder-0001',
+                'Can you set a reminder for today at 5 p.m.?',
+            ),
+            'timezone' => 'America/New_York',
+        ])->assertUnprocessable()
+            ->assertJsonPath('code', 'voice_request_incomplete')
+            ->assertJsonPath('question', 'What should I remind you about?');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', [
+            ...$this->payload(
+                $sessionId,
+                'typed-for-subject-reminder-0001',
+                'Can you set a reminder for salt for 5 p.m.?',
+            ),
+            'timezone' => 'America/New_York',
+            'conversation_context' => ['mode' => 'contextual_follow_up', 'epoch' => 1],
+        ])->assertCreated()
+            ->assertJsonPath('data.turn.handler', 'app.reminder.create');
+
+        $turn = VoiceTurn::where('turn_id', 'typed-for-subject-reminder-0001')->firstOrFail();
+        if (! $turn->state->isTerminal()) {
+            (new ProcessAssistantRun($turn->runs()->firstOrFail()->id))->handle(
+                app(HermesRuntimeService::class),
+                app(AssistantRunService::class),
+                app(VoiceTurnLifecycleService::class),
+            );
+        }
+
+        $reminder = Reminder::where('metadata->browser_voice_turn_id', $turn->turn_id)->sole();
+        $this->assertSame('salt', $reminder->title);
+        $this->assertSame('2026-07-13 17:00', $reminder->remind_at->timezone('America/New_York')->format('Y-m-d H:i'));
+        $this->assertSame(VoiceTurnState::Completed, $turn->fresh()->state);
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'user')->count());
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'assistant')->count());
+    }
+
     public function test_date_only_reminder_clarifies_for_a_clock_time_before_admission(): void
     {
         Carbon::setTestNow('2026-07-11 12:00:00', 'America/New_York');

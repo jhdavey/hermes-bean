@@ -44,12 +44,12 @@ test('[BV2-BROWSER-11] real provider event order admits the first contextual rem
     });
     routeBrowserVoiceRealtimeIngressV2(controller, {
         type: 'transcript_partial',
-        text: 'A reminder for that task',
+        text: 'Can you set a reminder for salt',
         providerItemId: 'provider-reminder',
     });
     routeBrowserVoiceRealtimeIngressV2(controller, {
         type: 'transcript_final',
-        text: 'A reminder for that task at five.',
+        text: 'Can you set a reminder for salt for five p.m.?',
         providerItemId: 'provider-reminder',
     });
     const followUp = controller.snapshot();
@@ -70,6 +70,6 @@ test('[BV2-BROWSER-11] real provider event order admits the first contextual rem
     const admissions = controller.drainEffects()
         .filter((effect) => effect.type === BROWSER_VOICE_EFFECTS.TURN_READY);
     assert.equal(admissions.length, 1);
-    assert.equal(admissions[0].transcript, 'A reminder for that task at five.');
+    assert.equal(admissions[0].transcript, 'Can you set a reminder for salt for five p.m.?');
     assert.deepEqual(admissions[0].conversationContext, { mode: 'contextual_follow_up', epoch: 1 });
 });

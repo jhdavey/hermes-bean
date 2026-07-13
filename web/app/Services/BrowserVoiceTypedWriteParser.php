@@ -99,6 +99,7 @@ final class BrowserVoiceTypedWriteParser
 
         if ($resource === 'reminder') {
             $patterns[] = '/\bremind me to\s+[\x{201C}"]?(.+?)[\x{201D}"]?'.$temporalBoundary.'/iu';
+            $patterns[] = '/\b(?:create|add|make|set|save)\s+(?:a\s+|an\s+|the\s+)?reminder\b\s+for\s+(?!(?:that|this|the)\s+task\b)(?!'.self::DATE_WORD_PATTERN.'\b|'.self::CLOCK_PATTERN.'\b)(.+?)'.$temporalBoundary.'/iu';
             $patterns[] = '/\b(?:create|add|make|set|save)\s+(?:a\s+|an\s+|the\s+)?reminder\b\s+(?:to\s+|about\s+)?(?!for\b|on\b|at\b|'.self::DATE_WORD_PATTERN.'\b)(.+?)'.$temporalBoundary.'/iu';
         } else {
             $patterns[] = '/\b(?:create|add|make|set|schedule|save|book)\s+(?:a\s+|an\s+|the\s+)?'.self::CALENDAR_NOUN_PATTERN.'\b\s+(?:(?:to|about|with)\s+)?(?!for\b|on\b|at\b|'.self::DATE_WORD_PATTERN.'\b)(.+?)'.$temporalBoundary.'/iu';

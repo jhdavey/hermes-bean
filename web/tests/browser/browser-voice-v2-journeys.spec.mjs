@@ -230,8 +230,8 @@ test('[BV2-BROWSER-09] a task read flows through reminder creation and contextua
         harness.finishPlayback();
 
         harness.followUp('salt-reminder-follow-up');
-        harness.partial('A reminder for that task');
-        harness.final('A reminder for that task at 5 p.m.');
+        harness.partial('Can you set a reminder for salt');
+        harness.final('Can you set a reminder for salt for 5 p.m.?');
         harness.endUtterance();
         await harness.waitForAdmissions();
         await harness.updateTurn('salt-reminder-follow-up', {
@@ -256,14 +256,14 @@ test('[BV2-BROWSER-09] a task read flows through reminder creation and contextua
     ]);
     const admissions = result.calls.filter((call) => call.path === '/assistant/voice/turns');
     const reminderAdmission = admissions.at(-2);
-    expect(reminderAdmission.options.body.transcript).toBe('A reminder for that task at 5 p.m.');
+    expect(reminderAdmission.options.body.transcript).toBe('Can you set a reminder for salt for 5 p.m.?');
     expect(reminderAdmission.options.body.conversation_context).toMatchObject({ mode: 'contextual_follow_up' });
     const correctionAdmission = admissions.at(-1);
     expect(correctionAdmission.options.body.transcript).toBe('Set it for 5 p.m.');
     expect(correctionAdmission.options.body.conversation_context).toMatchObject({ mode: 'contextual_follow_up' });
     expect(result.snapshot.server.messages.filter((message) => message.role === 'user')).toHaveLength(3);
     await expect(page.locator('#chat [data-role="user"][data-turn-id="salt-reminder-follow-up"]'))
-        .toHaveText('A reminder for that task at 5 p.m.');
+        .toHaveText('Can you set a reminder for salt for 5 p.m.?');
     await expect(page.locator('#chat [data-role="user"][data-turn-id="salt-reminder-correction"]'))
         .toHaveText('Set it for 5 p.m.');
 });
