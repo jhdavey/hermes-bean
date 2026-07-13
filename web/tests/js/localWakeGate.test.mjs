@@ -861,6 +861,30 @@ test('[BV2-WAKE-09] published consumer readiness requires a post-enable live-dec
     assert.equal(harness.gate.isOpen(), true);
 });
 
+test('[BV2-WAKE-10] startup primes a clean consumer-enabled generation before the first user wake', async () => {
+    const harness = createHarness({ consumerReady: false });
+    await harness.gate.start(harness.rawStream);
+    completeReadinessBarrier(harness);
+    const disabledGeneration = harness.gate.currentGeneration();
+
+    harness.gate.setConsumerReady(true);
+    const primedGeneration = harness.gate.resetAfterTurn();
+    assert.ok(primedGeneration > disabledGeneration);
+    assert.equal(harness.gate.isConsumerAdmissionReady(), false);
+
+    completeReadinessBarrier(harness, primedGeneration);
+    assert.equal(harness.gate.isConsumerAdmissionReady(), true);
+    harness.workers[0].emit(wakeMessage(harness, primedGeneration));
+
+    assert.equal(harness.detections.length, 1);
+    assert.equal(harness.detections[0].generation, primedGeneration);
+    assert.equal(harness.gate.isOpen(), true);
+    assert.equal(
+        harness.workers[0].messages.filter(({ message }) => message.reason === 'consumer_not_ready').length,
+        0,
+    );
+});
+
 test('missed-Hey candidate stays private and only obvious second-person confirmation opens it', async () => {
     const harness = createHarness();
     await harness.gate.start(harness.rawStream);

@@ -10319,15 +10319,17 @@ export function mountHeyBeanWebApp(mount) {
         }
         if (!connectionIsCurrent()) throw new Error('Realtime voice connection was superseded.');
 
-        // Establish a fresh local audio boundary only after the provider can
-        // consume the gated track. This discards every startup sample and any
-        // in-flight local decode while keeping model and provider setup fully
-        // parallel. The UI is not allowed to claim wake readiness until this
-        // final generation has crossed the complete local barrier.
+        // Establish a fresh, consumer-enabled local generation only after the
+        // provider can consume the gated track. A generation created while the
+        // consumer is disabled may have already decoded startup audio; merely
+        // raising its sequence floor leaves the user's first utterance doing
+        // the clean re-arm that startup itself must own.
+        localWakeGate.setConsumerReady(true);
         if (!localWakeGate.resetAfterTurn()) {
             throw new Error('Private “Hey Bean” detection could not prepare for listening.');
         }
         await waitForLocalWakeReady(localWakeGate, connectionGeneration);
+        await waitForLocalWakeConsumerAdmission(localWakeGate, connectionGeneration);
         if (!connectionIsCurrent()) throw new Error('Realtime voice connection was superseded.');
 
         return localWakeGate;
@@ -10777,19 +10779,12 @@ export function mountHeyBeanWebApp(mount) {
             const readyWakeGate = await connectRealtimeVoice(connectionGeneration);
             if (connectionGeneration !== realtimeConnectionGeneration) return;
             if (!localWakeConnectionIsCurrent(readyWakeGate, connectionGeneration)
-                || !readyWakeGate.isReady()) {
+                || !readyWakeGate.isReady()
+                || !readyWakeGate.isConsumerAdmissionReady()) {
                 throw new Error('Private “Hey Bean” detection was not ready for listening.');
             }
             browserVoiceV2Controller.providerReady({ source: 'webrtc' });
             realtimeVoiceActive = true;
-            readyWakeGate.setConsumerReady(true);
-            // setConsumerReady establishes a new PCM sequence floor. Do not
-            // publish wake readiness until the worker has acknowledged audio
-            // captured after that floor; otherwise the first spoken wake can
-            // be correctly rejected as startup residue while the UI claims it
-            // is already listening.
-            await waitForLocalWakeConsumerAdmission(readyWakeGate, connectionGeneration);
-            if (connectionGeneration !== realtimeConnectionGeneration) return;
             state.voiceWakeListening = true;
             state.voiceProcessing = false;
             const controller = browserVoiceV2Controller.snapshot();

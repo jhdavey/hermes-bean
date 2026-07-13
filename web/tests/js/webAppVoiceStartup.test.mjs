@@ -31,21 +31,28 @@ test('[BV2-WAKE-01] wake-ready is published only after provider transport and a 
     const localDescription = connect.indexOf('peerConnection.localDescription?.sdp', offer);
     const parallelSetup = connect.indexOf('Promise.all([localWakePromise, openRealtimeSession(localOfferSdp)])');
     const providerTransport = connect.indexOf('transportReady,');
-    const freshBoundary = connect.indexOf('localWakeGate.resetAfterTurn()', providerTransport);
+    const consumerEnabled = connect.indexOf('localWakeGate.setConsumerReady(true)', providerTransport);
+    const freshBoundary = connect.indexOf('localWakeGate.resetAfterTurn()', consumerEnabled);
     const finalLocalBarrier = connect.indexOf(
         'await waitForLocalWakeReady(localWakeGate, connectionGeneration)',
         freshBoundary,
     );
-    const returnReadyGate = connect.indexOf('return localWakeGate;', finalLocalBarrier);
+    const finalConsumerBarrier = connect.indexOf(
+        'await waitForLocalWakeConsumerAdmission(localWakeGate, connectionGeneration)',
+        finalLocalBarrier,
+    );
+    const returnReadyGate = connect.indexOf('return localWakeGate;', finalConsumerBarrier);
 
     assert.ok(localWakeSetup >= 0 && recvOnly > localWakeSetup, 'local wake setup must start before negotiation');
     assert.ok(offer > recvOnly && localDescription > offer, 'the negotiated local description must own the submitted SDP');
     assert.ok(parallelSetup > localDescription, 'local wake readiness and same-origin SDP setup must overlap');
     assert.doesNotMatch(connect, /direction:\s*'sendrecv'|addTrack\(/);
     assert.ok(providerTransport > parallelSetup, 'provider capture readiness must be awaited');
-    assert.ok(freshBoundary > providerTransport, 'startup audio must be discarded after provider readiness');
+    assert.ok(consumerEnabled > providerTransport, 'consumer admission may open only after provider readiness');
+    assert.ok(freshBoundary > consumerEnabled, 'startup audio must be discarded in a consumer-enabled generation');
     assert.ok(finalLocalBarrier > freshBoundary, 'the fresh local generation must become fully ready');
-    assert.ok(returnReadyGate > finalLocalBarrier, 'only the fully ready local gate may leave startup');
+    assert.ok(finalConsumerBarrier > finalLocalBarrier, 'the fresh generation must decode post-boundary PCM');
+    assert.ok(returnReadyGate > finalConsumerBarrier, 'only the fully wake-admissible local gate may leave startup');
 
     const start = source.indexOf('async function startVoiceWakeListening(');
     const end = source.indexOf('\n    function toggleVoiceWakeListening(', start);
@@ -53,23 +60,18 @@ test('[BV2-WAKE-01] wake-ready is published only after provider transport and a 
     const implementation = source.slice(start, end);
     const connectReady = implementation.indexOf('const readyWakeGate = await connectRealtimeVoice(connectionGeneration)');
     const localReadyCheck = implementation.indexOf('!readyWakeGate.isReady()', connectReady);
-    const providerReady = implementation.indexOf('browserVoiceV2Controller.providerReady', localReadyCheck);
+    const consumerReadyCheck = implementation.indexOf('!readyWakeGate.isConsumerAdmissionReady()', localReadyCheck);
+    const providerReady = implementation.indexOf('browserVoiceV2Controller.providerReady', consumerReadyCheck);
     const active = implementation.indexOf('realtimeVoiceActive = true', providerReady);
-    const consumerReady = implementation.indexOf('readyWakeGate.setConsumerReady(true)', active);
-    const consumerBarrier = implementation.indexOf(
-        'await waitForLocalWakeConsumerAdmission(readyWakeGate, connectionGeneration)',
-        consumerReady,
-    );
-    const listening = implementation.indexOf('state.voiceWakeListening = true', consumerBarrier);
-    const readyLabel = implementation.indexOf("'Listening for “Hey Bean”…'", consumerBarrier);
+    const listening = implementation.indexOf('state.voiceWakeListening = true', active);
+    const readyLabel = implementation.indexOf("'Listening for “Hey Bean”…'", listening);
 
     assert.ok(connectReady >= 0);
     assert.ok(localReadyCheck > connectReady, 'the final local barrier must be verified at handoff');
-    assert.ok(providerReady > localReadyCheck, 'controller readiness must wait for both transports');
-    assert.ok(active > providerReady && consumerReady > active, 'provider capture must become active before accepting wakes');
-    assert.ok(consumerBarrier > consumerReady, 'a post-enable PCM acknowledgement must open consumer admission');
-    assert.ok(listening > consumerBarrier, 'the public listening state must wait for consumer admission');
-    assert.ok(readyLabel > consumerBarrier, 'the UI may claim listening only after consumer admission opens');
+    assert.ok(consumerReadyCheck > localReadyCheck, 'handoff must verify wake admission, not only worker readiness');
+    assert.ok(providerReady > consumerReadyCheck, 'controller readiness must wait for both transports');
+    assert.ok(active > providerReady && listening > active, 'capture must become active before publishing listening');
+    assert.ok(readyLabel > listening, 'the UI may claim listening only after consumer admission opens');
 
     const detectedStart = source.indexOf('function handleLocalWakeDetected(');
     const detectedEnd = source.indexOf('\n    function handleLocalWakeFailure(', detectedStart);
