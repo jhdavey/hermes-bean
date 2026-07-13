@@ -164,8 +164,15 @@ export function isLikelyNonEnglishRealtimeTranscript(text) {
 
 export function stripRealtimeLocalWakePrefix(text) {
     return String(text || '')
-        .replace(/^\s*(?:(?:hey|they|he)[\s,.-]+(?:bean|ben|bin|bing|being|beane|beam)|habe(?:en|ing))\b[\s,.:;!?-]*/i, '')
+        .replace(/^\s*(?:(?:hey|they|he)[\s,.-]+(?:bean|ben|bin|bing|being|beane|beam)|habe(?:en|ing)|bean)\b[\s,.:;!?-]*/i, '')
         .trim();
+}
+
+export function isRealtimeWakeAddressOnly(text) {
+    const transcript = String(text || '').trim();
+    if (!transcript) return true;
+    return stripRealtimeLocalWakePrefix(transcript) === ''
+        && /^(?:(?:hey|they|he)[\s,.-]+(?:bean|ben|bin|bing|being|beane|beam)|habe(?:en|ing)|bean)\b[\s.!?,-]*$/i.test(transcript);
 }
 
 export function isVoiceFillerOnly(text) {

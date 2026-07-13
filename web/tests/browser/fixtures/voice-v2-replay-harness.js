@@ -2,6 +2,7 @@ import { LocalWakeGate } from '/resources/js/heybean/localWakeGate.js';
 import { BrowserVoiceRealtimeInputTransportV2 } from '/resources/js/heybean/browserVoiceRealtimeInputV2.js';
 
 const WAKE_TARGET_P95_MS = 500;
+const STRICT_COMMAND_MIN_RELEASED_PCM_SAMPLES = 6_400;
 const DEFAULT_WAKE_REPLAYS = 4;
 const RESET_TIMEOUT_MS = 12_000;
 let configuredRun = null;
@@ -110,6 +111,7 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
             let maxAbs = 0;
             for (const sample of event.samples || []) maxAbs = Math.max(maxAbs, Math.abs(sample));
             activeTrial.activatedPcmChunkCount += 1;
+            activeTrial.activatedPcmSampleCount += Number(event.samples?.length) || 0;
             activeTrial.activatedPcmMaxAbs = Math.max(activeTrial.activatedPcmMaxAbs, maxAbs);
             if (activeTrial.detections.length === 0) {
                 activeTrial.preConfirmationActivatedPcmCount += 1;
@@ -150,10 +152,12 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
         const readyMs = performance.now() - startupStartedAt;
 
         const strictWakeEntries = corpus.filter((entry) => entry.family === 'isolated_strict_wake');
+        const strictCommandEntries = corpus.filter((entry) => entry.family === 'strict_wake_time_command');
         const ongoingSpeechWakeEntries = corpus.filter((entry) => entry.family === 'strict_wake_in_ongoing_speech');
         const addressEntries = corpus.filter((entry) => entry.expected === 'missed_hey_confirmation');
         const negativeEntries = corpus.filter((entry) => entry.expected === 'reject');
         const strictTrials = [];
+        const strictCommandTrials = [];
         const ongoingSpeechWakeTrials = [];
         const addressTrials = [];
         const negativeTrials = [];
@@ -190,6 +194,7 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
         for (let repetition = 2; repetition <= wakeReplays; repetition += 1) {
             for (const entry of strictWakeEntries) strictTrials.push(await runTrial(entry, repetition));
         }
+        for (const entry of strictCommandEntries) strictCommandTrials.push(await runTrial(entry, 1));
         for (const entry of ongoingSpeechWakeEntries) {
             ongoingSpeechWakeTrials.push(await runTrial(entry, 1, 'ongoing_speech_then_strict_wake'));
         }
@@ -214,7 +219,9 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
         );
         const addressAccuracy = ratio(addressTrials.filter((trial) => trial.matched).length, addressTrials.length);
         const falseWakeCount = negativeTrials.filter((trial) => trial.detections.length > 0).length;
-        const acceptedTrials = [...strictTrials, ...ongoingSpeechWakeTrials, ...addressTrials];
+        const strictCommandReleasePassCount = strictCommandTrials.filter((trial) => trial.matched
+            && trial.activated_pcm_sample_count >= STRICT_COMMAND_MIN_RELEASED_PCM_SAMPLES).length;
+        const acceptedTrials = [...strictTrials, ...strictCommandTrials, ...ongoingSpeechWakeTrials, ...addressTrials];
         const activatedPcmReleaseCount = acceptedTrials.filter(
             (trial) => trial.matched && trial.first_activated_pcm_observed,
         ).length;
@@ -224,11 +231,13 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
         ).length;
         const resetRecoveryPassCount = rejectionResetRecovery.filter((journey) => journey.pass).length;
         const qaJourneyCount = strictTrials.length
+            + strictCommandTrials.length
             + ongoingSpeechWakeTrials.length
             + addressTrials.length
             + negativeTrials.length
             + rejectionResetRecovery.length;
         const qaJourneyPassCount = strictTrials.filter((trial) => trial.matched).length
+            + strictCommandReleasePassCount
             + ongoingSpeechWakeTrials.filter((trial) => trial.matched).length
             + addressTrials.filter((trial) => trial.matched).length
             + negativeTrials.filter((trial) => trial.matched).length
@@ -243,6 +252,7 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
             && privacyPass
             && activatedPcmReleaseCount === expectedActivatedPcmReleaseCount
             && providerAppendCount === expectedActivatedPcmReleaseCount
+            && strictCommandReleasePassCount === strictCommandTrials.length
             && errors.length === 0;
 
         return {
@@ -291,6 +301,14 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
                 detection_accuracy: ongoingSpeechWakeAccuracy,
                 trials: ongoingSpeechWakeTrials,
             },
+            strict_wake_command_release: {
+                unique_audio_files: strictCommandEntries.length,
+                sample_count: strictCommandTrials.length,
+                minimum_released_pcm_samples: STRICT_COMMAND_MIN_RELEASED_PCM_SAMPLES,
+                pass_count: strictCommandReleasePassCount,
+                pass: strictCommandReleasePassCount === strictCommandTrials.length,
+                trials: strictCommandTrials,
+            },
             missed_hey_address: {
                 unique_audio_files: addressEntries.length,
                 unique_address_forms: new Set(addressEntries.map((entry) => entry.family)).size,
@@ -328,6 +346,10 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
                 bean_voice_qa_pass_rate: voiceQaPassRate,
                 required_qa_pass_rate: 0.95,
                 strict_wake_accuracy: strictAccuracy,
+                strict_wake_command_release_accuracy: ratio(
+                    strictCommandReleasePassCount,
+                    strictCommandTrials.length,
+                ),
                 strict_wake_in_ongoing_speech_accuracy: ongoingSpeechWakeAccuracy,
                 missed_hey_address_accuracy: addressAccuracy,
                 near_miss_false_acceptance_rate: ratio(falseWakeCount, negativeTrials.length),
@@ -403,6 +425,7 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
             detections: [],
             classifierDecisions: [],
             activatedPcmChunkCount: 0,
+            activatedPcmSampleCount: 0,
             activatedPcmMaxAbs: 0,
             preConfirmationActivatedPcmCount: 0,
             firstActivatedPcmAt: null,
@@ -495,6 +518,7 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
             first_activated_pcm_source_sequence: trial.firstActivatedPcmSourceSequence,
             first_activated_pcm_was_boundary_release: trial.firstActivatedPcmReleased,
             activated_pcm_callback_count: trial.activatedPcmChunkCount,
+            activated_pcm_sample_count: trial.activatedPcmSampleCount,
             activated_pcm_max_abs: trial.activatedPcmMaxAbs,
             pre_confirmation_activated_pcm_count: trial.preConfirmationActivatedPcmCount,
             model_confirmation_to_first_activated_pcm_ms: detection && trial.firstActivatedPcmAt !== null

@@ -130,9 +130,11 @@ export class BrowserVoiceRealtimeSpeechTransportV2 {
             const providerResponseId = clean(payload.response?.id);
             const current = this.current;
             if (!current || clientResponseId !== current.clientResponseId) {
-                if (clientResponseId && (this.abandonedClientIds.has(clientResponseId) || clientResponseId.startsWith('browser-voice-speech-'))) {
-                    this.buildCancel(providerResponseId).filter(Boolean).forEach((event) => this.send(event));
-                }
+                // The server configures Realtime as transcription-only. Fail
+                // closed if the provider ever creates an unowned response:
+                // ignoring its events is insufficient because WebRTC audio can
+                // still reach the speaker without application playback state.
+                this.buildCancel(providerResponseId).filter(Boolean).forEach((event) => this.send(event));
                 return true;
             }
             current.providerResponseId = providerResponseId;

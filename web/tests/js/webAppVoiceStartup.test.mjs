@@ -190,3 +190,21 @@ test('[BV2-STARTUP-03] startup uses one same-origin SDP owner and fails closed w
         'an expected canceled poll must not overwrite the terminal startup result with raw AbortError copy',
     );
 });
+
+test('[BV2-PROVIDER-OWNER-01] the server is the sole Realtime session configuration owner', () => {
+    assert.doesNotMatch(source, /realtimeInstructionsUpdate|type:\s*'session\.update'/);
+});
+
+test('[BV2-WAKE-RESIDUE-01] an address-only provider transcript cannot reach admission', () => {
+    const completed = source.indexOf("if (type === 'conversation.item.input_audio_transcription.completed')");
+    const failed = source.indexOf("if (type === 'conversation.item.input_audio_transcription.failed')", completed);
+    assert.ok(completed >= 0 && failed > completed);
+    const implementation = source.slice(completed, failed);
+    const addressOnly = implementation.indexOf('isRealtimeWakeAddressOnly(transcript)');
+    const deleteProviderItem = implementation.indexOf('buildRealtimeConversationItemDeleteEvent(transcriptId)', addressOnly);
+    const final = implementation.indexOf('browserVoiceV2Controller.transcriptFinal(command');
+
+    assert.ok(addressOnly >= 0, 'wake residue must have an explicit fail-closed branch');
+    assert.ok(deleteProviderItem > addressOnly, 'wake residue must be erased from provider conversation state');
+    assert.ok(final > deleteProviderItem, 'address-only handling must return before transcript admission');
+});

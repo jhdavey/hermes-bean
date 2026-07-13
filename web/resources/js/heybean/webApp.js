@@ -16,6 +16,7 @@ import {
     buildRealtimeResponseEvent,
     buildRealtimeTargetedResponseCancellationEvent,
     isLikelyNonEnglishRealtimeTranscript,
+    isRealtimeWakeAddressOnly,
     isRealtimeDuplicateCallConflict,
     isStrictRealtimeWakePhrase,
     isVoiceFillerOnly,
@@ -9977,18 +9978,6 @@ export function mountHeyBeanWebApp(mount) {
         return true;
     }
 
-    function realtimeInstructionsUpdate() {
-        return {
-            type: 'session.update',
-            session: {
-                type: 'realtime',
-                instructions: 'You are the US English transcription and speech surface for Bean browser voice. The application owns wake, conversation, routing, tools, persistence, Stop, cancellation, and final text. Never call tools or independently answer microphone input. When explicitly asked to speak supplied Bean text, speak it exactly, naturally, and without adding facts.',
-                tools: [],
-                tool_choice: 'none',
-            },
-        };
-    }
-
     async function openRealtimeSession(sdp) {
         if (!state.session?.id) {
             const onboarding = needsBeanOnboarding();
@@ -10209,7 +10198,6 @@ export function mountHeyBeanWebApp(mount) {
         dataChannel.addEventListener('open', () => {
             if (!connectionIsCurrent()) return;
             dataChannelReady = true;
-            realtimeSend(realtimeInstructionsUpdate());
             markTransportReady();
         });
         dataChannel.addEventListener('message', (event) => {
@@ -10421,6 +10409,14 @@ export function mountHeyBeanWebApp(mount) {
                 browserVoiceV2Controller.confirmBargeIn({ source: 'provider_transcript' });
             }
             const command = stripRealtimeLocalWakePrefix(transcript).trim();
+            if (isRealtimeWakeAddressOnly(transcript)) {
+                updateVoiceWakeDraft('');
+                state.chatRunState = 'Listening…';
+                if (transcriptId) realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
+                render();
+                browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
+                return true;
+            }
             if (!command) {
                 if (browserVoiceV2Controller.snapshot().followUpCandidate) {
                     browserVoiceV2Controller.rejectFollowUpCandidate('empty_transcript', {

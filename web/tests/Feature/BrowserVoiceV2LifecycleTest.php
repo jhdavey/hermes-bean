@@ -135,6 +135,41 @@ class BrowserVoiceV2LifecycleTest extends TestCase
             ->assertJsonPath('data.turn.final_text', 'It’s twelve p.m.');
     }
 
+    public function test_missed_hey_address_routes_to_local_time_without_acknowledgement_or_work(): void
+    {
+        Carbon::setTestNow('2026-07-13 17:10:00', 'UTC');
+        $token = $this->apiToken('voice-v2-missed-hey-time@example.com');
+        $sessionId = $this->sessionId($token);
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', [
+            ...$this->payload($sessionId, 'missed-hey-time-0001', 'Bean, what time is it?'),
+            'timezone' => 'America/New_York',
+        ])->assertCreated()
+            ->assertJsonPath('data.turn.state', 'completed')
+            ->assertJsonPath('data.turn.lane', 'instant')
+            ->assertJsonPath('data.turn.handler', 'instant.current_time')
+            ->assertJsonPath('data.turn.acknowledgement_required', false)
+            ->assertJsonPath('data.turn.final_text', 'It’s 1:10 p.m.')
+            ->assertJsonPath('data.jobs', []);
+
+        Queue::assertNotPushed(ProcessAssistantRun::class);
+    }
+
+    public function test_address_only_transcript_cannot_create_a_turn_or_generic_work(): void
+    {
+        $token = $this->apiToken('voice-v2-address-only@example.com');
+        $sessionId = $this->sessionId($token);
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns',
+            $this->payload($sessionId, 'address-only-turn-0001', 'Bean.')
+        )->assertUnprocessable()
+            ->assertJsonPath('code', 'voice_request_incomplete')
+            ->assertJsonPath('question', 'What can I help you with?');
+
+        $this->assertSame(0, VoiceTurn::where('turn_id', 'address-only-turn-0001')->count());
+        Queue::assertNotPushed(ProcessAssistantRun::class);
+    }
+
     public function test_conflicting_duplicate_admission_cannot_reuse_a_stable_turn_id(): void
     {
         $token = $this->apiToken('voice-v2-conflict@example.com');

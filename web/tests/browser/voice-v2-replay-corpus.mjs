@@ -51,6 +51,9 @@ export const MISSED_HEY_ADDRESS_CASES = Object.freeze([
     Object.freeze({ family: 'set_a_reminder', phrase: 'Bean, set a reminder for four p.m.' }),
     Object.freeze({ family: 'create_a_note', phrase: 'Bean, create a note called groceries.' }),
 ]);
+export const STRICT_WAKE_COMMAND_CASES = Object.freeze([
+    Object.freeze({ family: 'strict_wake_time_command', phrase: 'Hey Bean, what time is it?' }),
+]);
 
 /**
  * Generate a memory-only, offline TTS corpus before any browser starts.
@@ -123,6 +126,7 @@ export async function createOfflineReplayCorpus({ rate = 185 } = {}) {
             unique_strict_wake_files: corpus.filter((entry) => entry.expected === 'strict_wake').length,
             unique_isolated_strict_wake_files: corpus.filter((entry) => entry.family === 'isolated_strict_wake').length,
             unique_ongoing_speech_strict_wake_files: corpus.filter((entry) => entry.family === 'strict_wake_in_ongoing_speech').length,
+            unique_strict_wake_command_files: corpus.filter((entry) => entry.family === 'strict_wake_time_command').length,
             unique_missed_hey_files: corpus.filter((entry) => entry.expected === 'missed_hey_confirmation').length,
             unique_negative_privacy_files: corpus.filter((entry) => entry.expected === 'reject').length,
             negative_privacy_families: NEGATIVE_PRIVACY_CASES.map((entry) => entry.family),
@@ -143,6 +147,7 @@ export function publicCorpusMetadata(generated) {
         unique_strict_wake_files: generated.unique_strict_wake_files,
         unique_isolated_strict_wake_files: generated.unique_isolated_strict_wake_files,
         unique_ongoing_speech_strict_wake_files: generated.unique_ongoing_speech_strict_wake_files,
+        unique_strict_wake_command_files: generated.unique_strict_wake_command_files,
         unique_missed_hey_files: generated.unique_missed_hey_files,
         unique_negative_privacy_files: generated.unique_negative_privacy_files,
         negative_privacy_families: [...generated.negative_privacy_families],
@@ -176,6 +181,13 @@ export function buildReplayCases(installedVoices) {
             phrase: 'Hey Bean.',
             expected: 'strict_wake',
         })),
+        ...STRICT_WAKE_COMMAND_CASES.flatMap((command) => REPLAY_ENGLISH_VOICES.map((voice) => withVoice(voice, {
+            id: `strict-command-${slug(command.family)}-${slug(voice)}`,
+            family: command.family,
+            journey: 'strict_wake_preserves_complete_command_audio',
+            phrase: command.phrase,
+            expected: 'strict_wake',
+        }))),
         ...REPLAY_ENGLISH_VOICES.map((voice) => withVoice(voice, {
             id: `ongoing-speech-strict-wake-${slug(voice)}`,
             family: 'strict_wake_in_ongoing_speech',

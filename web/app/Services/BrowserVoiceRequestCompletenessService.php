@@ -18,7 +18,10 @@ class BrowserVoiceRequestCompletenessService
         bool $hasAuthorizedContextualReference = false,
     ): ?string {
         $text = str_replace('’', "'", mb_strtolower(trim($transcript)));
-        $text = preg_replace('/^hey[\s,.-]+bean[\s,.:;-]*/u', '', $text) ?? $text;
+        $text = preg_replace('/^\s*(?:hey[\s,.-]+)?bean\b[\s,.:;!?-]*/u', '', $text) ?? $text;
+        if (trim($text) === '') {
+            return 'What can I help you with?';
+        }
         $intentText = $this->intentText->stripEntityPayloads($text);
         if ($this->isExplicitCancellation($text) || $this->isWorkStatusQuestion($text)) {
             return null;

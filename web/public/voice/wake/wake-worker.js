@@ -25,12 +25,17 @@ const FIRST_PARTY_ADDRESS_MAX_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 2.8);
 const FIRST_PARTY_ADDRESS_INTERVAL_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.3);
 const KEYWORD_ALIAS = 'HEY_BEAN';
 const STRICT_WAKE_ALIAS = 'HEY_BEAN';
-const RUNTIME_VERSION = '8';
+const STRICT_NEAR_MISS_ALIASES = new Set(['HEY_BEAM', 'HEY_BEN']);
+const RUNTIME_VERSION = '9';
 
 // This threshold is experimental and is not release-certified. The expanded
 // replay corpus demonstrates that this generic model cannot separate Hey Bean
 // from important near-misses such as Hey beam while retaining adequate recall.
-const STRICT_KEYWORDS = 'HH EY1 B IY1 N :1.2 #0.1 @HEY_BEAN';
+const STRICT_KEYWORDS = [
+    'HH EY1 B IY1 N :1.2 #0.1 @HEY_BEAN',
+    'HH EY1 B IY1 M :1.2 #0.1 @HEY_BEAM',
+    'HH EY1 B EH1 N :1.2 #0.1 @HEY_BEN',
+].join('\n');
 
 const assetBaseUrl = new URL('./', self.location.href);
 
@@ -276,12 +281,15 @@ function classifyBeanCandidate(decisionType, keywordResult) {
         ? 'strict_wake'
         : 'missed_hey_confirmation';
     const windows = decisionType === 'strict_wake'
-        ? [1.8, 1.2].map((seconds) => ({
-            samples: classificationAudio.subarray(Math.max(
-                0,
-                classificationAudio.length - Math.round(TARGET_SAMPLE_RATE * seconds),
-            )),
-        }))
+        ? [
+            ...isolatedStrictWakeWindows(),
+            ...[1.8, 1.2].map((seconds) => ({
+                samples: classificationAudio.subarray(Math.max(
+                    0,
+                    classificationAudio.length - Math.round(TARGET_SAMPLE_RATE * seconds),
+                )),
+            })),
+        ]
         : [{ samples: classificationSamplesForKeyword(keywordResult) }];
     let probabilities = null;
     let samples = null;
@@ -314,6 +322,23 @@ function classifyBeanCandidate(decisionType, keywordResult) {
         probability: probabilities[expectedIndex],
         threshold,
         sampleCount: samples.length,
+    });
+}
+
+function isolatedStrictWakeWindows() {
+    const retainedStartSample = Math.max(0, acceptedSampleCount - classificationAudio.length);
+    const onsetSample = Number.isSafeInteger(utteranceOnsetSample) ? utteranceOnsetSample : retainedStartSample;
+    const start = Math.max(retainedStartSample, onsetSample - CLASSIFICATION_LEADING_PAD_SAMPLES);
+    const localStart = start - retainedStartSample;
+    return [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8].map((seconds) => {
+        const end = Math.min(
+            acceptedSampleCount,
+            Math.max(start + 400, onsetSample + Math.round(seconds * TARGET_SAMPLE_RATE)),
+        );
+        const speech = classificationAudio.subarray(localStart, end - retainedStartSample);
+        const isolated = new Float32Array(speech.length + CLASSIFICATION_TRAILING_PAD_SAMPLES);
+        isolated.set(speech);
+        return { samples: isolated };
     });
 }
 
@@ -868,6 +893,9 @@ function keywordDecision({ strictResult }) {
         // is released, so accepting an in-stream match does not expose the
         // earlier room conversation to the provider.
         return { type: 'strict_wake', addressRelated: false };
+    }
+    if (STRICT_NEAR_MISS_ALIASES.has(strictResult.keyword)) {
+        return { type: 'reject', addressRelated: false };
     }
     if (strictResult.keyword) return { type: 'reject', addressRelated: false };
 

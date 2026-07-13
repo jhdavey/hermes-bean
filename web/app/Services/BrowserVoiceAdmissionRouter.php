@@ -178,7 +178,7 @@ class BrowserVoiceAdmissionRouter
     private function normalize(string $transcript): string
     {
         $text = str_replace('’', "'", mb_strtolower(trim($transcript)));
-        $text = preg_replace('/^\s*hey[\s,.-]+bean[\s,.:;-]*/u', '', $text) ?? $text;
+        $text = preg_replace('/^\s*(?:hey[\s,.-]+)?bean\b[\s,.:;!?-]*/u', '', $text) ?? $text;
 
         return trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
     }

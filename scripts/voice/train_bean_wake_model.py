@@ -57,6 +57,10 @@ STRICT_PHRASES = (
     "Hey Bean.",
     "Hey, Bean.",
     "Hey Bean!",
+    "Hey Bean, what time is it?",
+    "Hey Bean, what's the weather this evening?",
+    "Hey Bean, set a reminder for four p.m. today.",
+    "Hey Bean, create a note called groceries.",
     "We should finish the shopping list before dinner and, hey Bean.",
 )
 
@@ -280,7 +284,12 @@ def resample_ratio(samples: np.ndarray, ratio: float) -> np.ndarray:
     return np.interp(source_positions, np.arange(samples.size), samples).astype(np.float32)
 
 
-def candidate_acoustic_variants(samples: np.ndarray, rng: np.random.Generator, label: str) -> list[np.ndarray]:
+def candidate_acoustic_variants(
+    samples: np.ndarray,
+    rng: np.random.Generator,
+    label: str,
+    phrase: str,
+) -> list[np.ndarray]:
     """Approximate candidate-window, browser, room, and device variation locally.
 
     Production classifies the timestamped candidate prefix, not a complete
@@ -340,12 +349,20 @@ def candidate_acoustic_variants(samples: np.ndarray, rng: np.random.Generator, l
             end = int(round(seconds * SAMPLE_RATE))
             if WINDOW_SAMPLES <= end < bounded.size:
                 variants.append(bounded[:end].copy())
-    elif label == "strict_wake" and bounded.size > int(1.8 * SAMPLE_RATE):
-        # A deliberate wake at the end of ongoing room speech is classified
-        # from a bounded trailing window rather than the full conversation.
-        for seconds in (1.0, 1.2, 1.4, 1.8, 2.0):
-            size = int(round(seconds * SAMPLE_RATE))
-            variants.append(bounded[-size:].copy())
+    elif label == "strict_wake":
+        if phrase.lower().lstrip().startswith("hey"):
+            # Production may receive a candidate after command speech begins.
+            # Mirror the browser's onset-anchored classifier windows.
+            for seconds in (0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8):
+                end = int(round(seconds * SAMPLE_RATE))
+                if WINDOW_SAMPLES <= end < bounded.size:
+                    variants.append(np.pad(bounded[:end].copy(), (0, 4_000)))
+        elif bounded.size > int(1.8 * SAMPLE_RATE):
+            # A deliberate wake at the end of ongoing room speech is classified
+            # from a bounded trailing window rather than the full conversation.
+            for seconds in (1.0, 1.2, 1.4, 1.8, 2.0):
+                size = int(round(seconds * SAMPLE_RATE))
+                variants.append(bounded[-size:].copy())
 
     return variants
 
@@ -357,7 +374,9 @@ def matrix_for(items: list[Utterance], augmentation_copies: int, seed: int) -> t
     metadata: list[dict] = []
     class_index = {label: index for index, label in enumerate(CLASSES)}
     for item in items:
-        for acoustic_index, samples in enumerate(candidate_acoustic_variants(read_wave(item.path), rng, item.label)):
+        for acoustic_index, samples in enumerate(candidate_acoustic_variants(
+            read_wave(item.path), rng, item.label, item.phrase,
+        )):
             base = feature_vector(samples)
             for vector in augmented_features(base, rng, augmentation_copies):
                 vectors.append(vector)
@@ -418,6 +437,7 @@ def train_temporal_cnn(
     validation_y: np.ndarray,
     epochs: int,
     seed: int,
+    initial_state: dict[str, np.ndarray] | None = None,
 ) -> tuple[dict[str, np.ndarray], list[float], np.ndarray, np.ndarray]:
     try:
         import torch
@@ -450,10 +470,16 @@ def train_temporal_cnn(
             return self.dense2(value)
 
     model = WakeNet()
+    if initial_state:
+        model.load_state_dict({name: torch.from_numpy(value) for name, value in initial_state.items()})
     counts = np.bincount(y, minlength=len(CLASSES)).astype(np.float32)
     class_weights = torch.tensor(np.sum(counts) / np.maximum(counts, 1.0), dtype=torch.float32)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0015, weight_decay=0.0005)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=0.00035 if initial_state else 0.0015,
+        weight_decay=0.0005,
+    )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, epochs))
     dataset = TensorDataset(torch.from_numpy(x.astype(np.float32)), torch.from_numpy(y))
     loader = DataLoader(dataset, batch_size=128, shuffle=True, generator=torch.Generator().manual_seed(seed))
@@ -599,6 +625,7 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=6)
     parser.add_argument("--steps", type=int, default=250)
     parser.add_argument("--epochs", type=int, default=80)
+    parser.add_argument("--initial-model", type=Path)
     parser.add_argument("--architecture", choices=("temporal_cnn", "softmax"), default="temporal_cnn")
     parser.add_argument(
         "--final-fit-all",
@@ -616,9 +643,9 @@ def main() -> None:
 
     by_voices = lambda names: [item for item in items if item.voice in names]
     if args.final_fit_all:
-        x_fit, y_fit, _ = matrix_for(items, augmentation_copies=0, seed=args.seed)
-        x_validation, y_validation, _ = matrix_for(items, augmentation_copies=0, seed=args.seed + 1)
-        x_held_out, y_held_out, held_metadata = matrix_for(items, augmentation_copies=0, seed=args.seed + 2)
+        x_fit, y_fit, held_metadata = matrix_for(items, augmentation_copies=0, seed=args.seed)
+        x_validation, y_validation = x_fit.copy(), y_fit.copy()
+        x_held_out, y_held_out = x_fit.copy(), y_fit.copy()
         fit_voices = all_voices
         validation_voices = all_voices
         held_out_voices: tuple[str, ...] = ()
@@ -632,9 +659,19 @@ def main() -> None:
         held_out_voices = HELD_OUT_VOICES
         evidence_classification = "voice_disjoint_split_evaluation"
 
-    mean = np.mean(x_fit, axis=0).astype(np.float32)
-    deviation = np.std(x_fit, axis=0).astype(np.float32)
-    deviation = np.maximum(deviation, 0.08)
+    initial_state = None
+    if args.initial_model:
+        initial_model = json.loads(args.initial_model.read_text(encoding="utf-8"))
+        mean = np.asarray(initial_model["normalization"]["mean"], dtype=np.float32)
+        deviation = np.asarray(initial_model["normalization"]["deviation"], dtype=np.float32)
+        initial_state = {
+            name: np.asarray(layer["values"], dtype=np.float32).reshape(layer["shape"])
+            for name, layer in initial_model["classifier"]["layers"].items()
+        }
+    else:
+        mean = np.mean(x_fit, axis=0).astype(np.float32)
+        deviation = np.std(x_fit, axis=0).astype(np.float32)
+        deviation = np.maximum(deviation, 0.08)
     x_fit = (x_fit - mean) / deviation
     x_validation = (x_validation - mean) / deviation
     x_held_out = (x_held_out - mean) / deviation
@@ -648,6 +685,7 @@ def main() -> None:
             y_validation,
             args.epochs,
             args.seed,
+            initial_state,
         )
         held_out_probabilities = cnn_probabilities(state, x_held_out)
         classifier = {
@@ -711,6 +749,7 @@ def main() -> None:
             "held_out_voices": list(held_out_voices),
             "rates_wpm": list(RATES),
             "seed": args.seed,
+            "fine_tuned_from": str(args.initial_model) if args.initial_model else None,
             "augmented_fit_samples": int(x_fit.shape[0]),
             "validation_samples": int(x_validation.shape[0]),
             "held_out_samples": int(x_held_out.shape[0]),

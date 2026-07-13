@@ -7,6 +7,7 @@ import {
     NEGATIVE_PRIVACY_CASES,
     publicCorpusMetadata,
     REPLAY_ENGLISH_VOICES,
+    STRICT_WAKE_COMMAND_CASES,
 } from './voice-v2-replay-corpus.mjs';
 
 const locales = new Map(REPLAY_ENGLISH_VOICES.map((voice) => [voice, 'en_US']));
@@ -27,9 +28,11 @@ test('wake replay matrix cross-tests every required family across all six voices
         ],
     );
     assert.equal(MISSED_HEY_ADDRESS_CASES.length, 4);
+    assert.equal(STRICT_WAKE_COMMAND_CASES.length, 1);
 
     assert.equal(cases.filter((entry) => entry.family === 'isolated_strict_wake').length, 6);
     assert.equal(cases.filter((entry) => entry.family === 'strict_wake_in_ongoing_speech').length, 6);
+    assert.equal(cases.filter((entry) => entry.family === 'strict_wake_time_command').length, 6);
 
     for (const negative of NEGATIVE_PRIVACY_CASES) {
         const entries = cases.filter((entry) => entry.family === negative.family);
@@ -73,6 +76,7 @@ test('public corpus metadata emits no raw PCM while retaining coverage provenanc
         unique_strict_wake_files: 12,
         unique_isolated_strict_wake_files: 6,
         unique_ongoing_speech_strict_wake_files: 6,
+        unique_strict_wake_command_files: 6,
         unique_missed_hey_files: MISSED_HEY_ADDRESS_CASES.length * 6,
         unique_negative_privacy_files: NEGATIVE_PRIVACY_CASES.length * 6,
         negative_privacy_families: NEGATIVE_PRIVACY_CASES.map((entry) => entry.family),

@@ -27,7 +27,7 @@ The matrix has 78 unique files across six English system voices:
 - four safe missed-`Hey` address forms across all six voices (24 files); and
 - seven privacy/near-miss families across all six voices (42 files): `Hey beam`, `Hey Ben`, third-person `Bean` both mid-utterance and at utterance start, `green bean`, the `been` homophone, and ongoing conversation without an address.
 
-For each voice, the runner presents every negative family, verifies a re-arm after every rejection, and then requires an immediate strict wake. The default four repetitions apply to the six isolated wake files (24 strict-wake samples); continuous-speech wakes, missed-`Hey` forms, and unique cross-voice privacy files run once each. `VOICE_V2_WAKE_REPLAYS` increases only isolated-wake repetitions, preserving broad coverage without multiplying the already cross-voice negative matrix.
+For each voice, the runner presents every negative family, verifies a re-arm after every rejection, and then requires an immediate strict wake. The default four repetitions apply to the six isolated wake files (24 strict-wake samples); wake-plus-command, continuous-speech wake, missed-`Hey`, and unique cross-voice privacy files run once each. `VOICE_V2_WAKE_REPLAYS` increases only isolated-wake repetitions, preserving broad coverage without multiplying the already cross-voice negative matrix.
 
 Results deliberately separate:
 

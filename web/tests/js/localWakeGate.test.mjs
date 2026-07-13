@@ -74,6 +74,7 @@ globalThis.__wakeBoundary = {
     }).type, 'none');
 
     assert.match(source, /HH EY1 B IY1 N :1\.2 #0\.1 @HEY_BEAN/);
+    assert.match(source, /classification = classification \|\| classifyBeanCandidate/);
     assert.match(source, /releaseBoundary:/);
     assert.match(source, /sourceSequence/);
     assert.match(source, /classifyFirstPartyAddressPrefix/);

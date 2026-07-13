@@ -89,6 +89,21 @@ test('[BV2-SPEECH-TRANSPORT-04] an unrelated provider response never starts or c
     assert.deepEqual(run.starts, []);
     assert.deepEqual(run.ends, []);
     assert.notEqual(run.transport.snapshot().current, null);
+    assert.ok(run.sent.some((event) => event.type === 'response.cancel' && event.response_id === 'unrelated'));
+    assert.ok(run.sent.some((event) => event.type === 'output_audio_buffer.clear'));
+});
+
+test('[BV2-SPEECH-TRANSPORT-06] an automatic provider response is canceled even when no app speech exists', () => {
+    const run = harness();
+    run.transport.handleEvent({
+        type: 'response.created',
+        response: { id: 'provider-auto-response', metadata: {} },
+    });
+
+    assert.ok(run.sent.some((event) => event.type === 'response.cancel'
+        && event.response_id === 'provider-auto-response'));
+    assert.ok(run.sent.some((event) => event.type === 'output_audio_buffer.clear'));
+    assert.deepEqual(run.starts, []);
 });
 
 test('[BV2-SPEECH-TRANSPORT-05] failed TTS reports one scoped playback error and releases ownership', () => {

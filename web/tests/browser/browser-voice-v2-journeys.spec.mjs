@@ -74,6 +74,35 @@ test('[BV2-BROWSER-01] fresh-load readiness, wake privacy, live transcript, and 
     expect(state.controller.lastRejectedEvent.reason).toBe('stale_sequence');
 });
 
+test('[BV2-BROWSER-07] a released wake fragment stays private until the complete instant command arrives', async ({ page }) => {
+    await boot(page);
+    await markReady(page);
+
+    const callsBeforeWake = await page.evaluate(() => window.voiceHarness.server.calls.length);
+    await page.evaluate(() => {
+        const harness = window.voiceHarness;
+        harness.wake('wake-fragment-time-turn');
+        harness.providerTranscript('Bean.');
+    });
+
+    await expect(page.locator('#voice-state')).toHaveAttribute('data-state', 'capturing');
+    await expect(page.locator('#voice-input')).toHaveText('');
+    expect(await page.evaluate(() => window.voiceHarness.server.calls.length)).toBe(callsBeforeWake);
+
+    await page.evaluate(async () => {
+        const harness = window.voiceHarness;
+        harness.providerTranscript('What time is it?');
+        harness.endUtterance('complete');
+        await harness.waitForAdmissions();
+    });
+
+    const state = await page.evaluate(() => window.voiceHarness.snapshot());
+    expect(state.server.turns).toHaveLength(1);
+    expect(state.server.turns[0].transcript).toBe('What time is it?');
+    expect(state.server.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+    await expect(page.locator('#chat [data-role="user"]')).toHaveText('What time is it?');
+});
+
 test('[BV2-BROWSER-02] follow-up, false barge, and meaningful barge preserve exact turns and visible answers', async ({ page }) => {
     await boot(page);
     await markReady(page);

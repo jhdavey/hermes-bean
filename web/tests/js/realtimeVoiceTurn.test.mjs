@@ -8,6 +8,7 @@ import {
     buildRealtimeResponseEvent,
     buildRealtimeTargetedResponseCancellationEvent,
     isLikelyNonEnglishRealtimeTranscript,
+    isRealtimeWakeAddressOnly,
     isRealtimeDuplicateCallConflict,
     isStrictRealtimeWakePhrase,
     isVoiceFillerOnly,
@@ -134,7 +135,13 @@ test('strict wake and released transcript prefix handling remain conservative', 
     assert.equal(isStrictRealtimeWakePhrase('Hey Ben'), false);
     assert.equal(isStrictRealtimeWakePhrase('To begin, say Hey Bean'), false);
     assert.equal(stripRealtimeLocalWakePrefix('Hey Bean, what is the weather?'), 'what is the weather?');
+    assert.equal(stripRealtimeLocalWakePrefix('Bean, what time is it?'), 'what time is it?');
+    assert.equal(stripRealtimeLocalWakePrefix('Bean.'), '');
     assert.equal(stripRealtimeLocalWakePrefix('Being honest is important'), 'Being honest is important');
+    assert.equal(isRealtimeWakeAddressOnly('Hey Bean.'), true);
+    assert.equal(isRealtimeWakeAddressOnly('Bean.'), true);
+    assert.equal(isRealtimeWakeAddressOnly('Bean, what time is it?'), false);
+    assert.equal(isRealtimeWakeAddressOnly('Being honest is important'), false);
 });
 
 test('provider event helpers target only the intended response or transcript item', () => {
