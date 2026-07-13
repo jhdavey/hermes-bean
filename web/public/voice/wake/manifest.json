@@ -1,11 +1,11 @@
 {
-  "version": 9,
+  "version": 10,
   "releaseCertified": false,
   "wakeModelQaCertified": true,
   "detector": "bean-first-party-classifier-with-local-strict-timing-candidate",
-  "worker": "/voice/wake/wake-worker.js?v=9",
+  "worker": "/voice/wake/wake-worker.js?v=10",
   "workerType": "classic",
-  "audioWorklet": "/voice/wake/gate-processor.js?v=9",
+  "audioWorklet": "/voice/wake/gate-processor.js?v=10",
   "processorName": "hey-bean-gate",
   "sampleRate": 16000,
   "audioBatchSamples": 1600,
@@ -37,7 +37,7 @@
   ],
   "firstPartyModel": {
     "id": "bean-first-party-wake-v1",
-    "path": "/voice/wake/bean-wake-model-v1.json?v=9",
+    "path": "/voice/wake/bean-wake-model-v1.json?v=10",
     "bytes": 1094259,
     "sha256": "3bdc1e1db3e4c8629bbd0302aac5259aeaf7b1627d33f64b10bae594162e718e",
     "architecture": "temporal_conv1d_v1",
@@ -63,7 +63,7 @@
     "nearMissFalseAcceptanceRate": 0,
     "resetRecoveryRate": 1,
     "wakeTimingSamples": 24,
-    "wakeP95Ms": 490.1,
+    "wakeP95Ms": 477.2,
     "fineTunedSyntheticTrainingAccuracy": 0.955006,
     "zeroPreConfirmationPcm": true,
     "runtimeErrors": 0,
@@ -87,22 +87,22 @@
   "requiresCrossOriginIsolation": false,
   "vendorAssets": [
     {
-      "path": "/voice/wake/kws-runtime.js?v=9",
+      "path": "/voice/wake/kws-runtime.js?v=10",
       "bytes": 90517,
       "sha256": "371a0433929467b916a095d90eff0fef36c101c50cc856a3f733f4569616a6d6"
     },
     {
-      "path": "/voice/wake/kws-runtime.wasm?v=9",
+      "path": "/voice/wake/kws-runtime.wasm?v=10",
       "bytes": 10612628,
       "sha256": "9e8ef9ffba6c212732d9da6b659936ae16da3c63a8760cdcf0ee2b391e18ce63"
     },
     {
-      "path": "/voice/wake/kws-model.data?v=9",
+      "path": "/voice/wake/kws-model.data?v=10",
       "bytes": 5448042,
       "sha256": "a4fbe1a6eddebb6671cf948ea0051d923bcd3a556c1df5e6c2fa9b99ad6b7802"
     },
     {
-      "path": "/voice/wake/kws-api.js?v=9",
+      "path": "/voice/wake/kws-api.js?v=10",
       "bytes": 11679,
       "sha256": "c693a402438a12ef0c34fcaa52cb279e60713477aa19f6cb157a37f06b53b4b3"
     }

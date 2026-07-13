@@ -48,6 +48,10 @@ import {
 } from './browserVoiceV2Client.js';
 import { BrowserVoiceHttpSpeechTransportV2 } from './browserVoiceHttpSpeechV2.js';
 import { BrowserVoiceRealtimeInputTransportV2 } from './browserVoiceRealtimeInputV2.js';
+import {
+    BROWSER_VOICE_REALTIME_INGRESS_RESULTS,
+    routeBrowserVoiceRealtimeIngressV2,
+} from './browserVoiceRealtimeIngressV2.js';
 
 export function captureHeyBeanChatControlFocus(mount) {
     const active = mount?.ownerDocument?.activeElement;
@@ -10429,14 +10433,13 @@ export function mountHeyBeanWebApp(mount) {
         if (type === 'input_audio_buffer.speech_started') {
             const transcriptId = payload.item_id || payload.item?.id || '';
             updateRealtimeVoiceActivity(Math.max(realtimeVoiceActivityLevel, 0.72));
-            if (browserVoiceV2Controller.snapshot().speechActive) {
+            const ingress = routeBrowserVoiceRealtimeIngressV2(browserVoiceV2Controller, {
+                type: 'speech_started',
+                providerItemId: transcriptId || null,
+            });
+            if (ingress === BROWSER_VOICE_REALTIME_INGRESS_RESULTS.POTENTIAL_BARGE_IN) {
                 if (transcriptId) browserVoiceV2PotentialBargeInItems.add(transcriptId);
                 browserVoiceV2Controller.potentialBargeIn('potential_speech', { source: 'provider_vad' });
-            } else {
-                browserVoiceV2Controller.speechStarted({
-                    source: 'provider_vad',
-                    providerItemId: transcriptId || null,
-                });
             }
             return true;
         }
@@ -10466,8 +10469,9 @@ export function mountHeyBeanWebApp(mount) {
             const commandDraft = stripRealtimeLocalWakePrefix(draft).trim();
             if (commandDraft && shouldDisplayRealtimeTranscriptDraft(commandDraft)
                 && !isLikelyNonEnglishRealtimeTranscript(commandDraft)) {
-                browserVoiceV2Controller.transcriptPartial(commandDraft, {
-                    source: 'provider_transcript',
+                routeBrowserVoiceRealtimeIngressV2(browserVoiceV2Controller, {
+                    type: 'transcript_partial',
+                    text: commandDraft,
                     providerItemId: transcriptId,
                 });
             }
@@ -10539,18 +10543,11 @@ export function mountHeyBeanWebApp(mount) {
                 browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
                 return true;
             }
-            browserVoiceV2Controller.transcriptFinal(command, {
-                source: 'provider_transcript',
+            routeBrowserVoiceRealtimeIngressV2(browserVoiceV2Controller, {
+                type: 'transcript_final',
+                text: command,
                 providerItemId: transcriptId || null,
             });
-            // Realtime server VAD has already observed the contract's two seconds
-            // of silence, so the controller's endpoint deadline is due immediately.
-            if (browserVoiceV2Controller.snapshot().conversationState === BROWSER_VOICE_CONVERSATION_STATES.CAPTURING) {
-                browserVoiceV2Controller.speechEnded({
-                    source: 'provider_vad',
-                    observedSilenceMs: browserVoiceV2Controller.snapshot().config.endpointMs,
-                });
-            }
             browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
             return true;
         }

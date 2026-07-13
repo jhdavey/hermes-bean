@@ -75,14 +75,14 @@ try {
         // The recorded check below owns the failure without leaking a response body.
     }
     record('wake_manifest_v9', wakeManifestResponse.status === 200
-        && wakeManifest?.version === 9
+        && wakeManifest?.version === 10
         && wakeManifest?.detector === 'bean-first-party-classifier-with-local-strict-timing-candidate'
         && wakeManifest?.wakeModelQaCertified === true, {
         status: wakeManifestResponse.status,
         version: wakeManifest?.version ?? null,
         detector: wakeManifest?.detector ?? null,
         wake_model_qa_certified: wakeManifest?.wakeModelQaCertified ?? null,
-    }, 'first-party wake-model manifest version 9');
+    }, 'first-party wake-model manifest version 10');
 
     if (typeof wakeManifest?.worker === 'string') {
         const worker = await request(wakeManifest.worker);

@@ -233,7 +233,7 @@ test('[BV2-WAKE-RESIDUE-01] an address-only provider transcript cannot reach adm
     const implementation = source.slice(completed, failed);
     const addressOnly = implementation.indexOf('isRealtimeWakeAddressOnly(transcript)');
     const deleteProviderItem = implementation.indexOf('buildRealtimeConversationItemDeleteEvent(transcriptId)', addressOnly);
-    const final = implementation.indexOf('browserVoiceV2Controller.transcriptFinal(command');
+    const final = implementation.indexOf("type: 'transcript_final'");
 
     assert.ok(addressOnly >= 0, 'wake residue must have an explicit fail-closed branch');
     assert.ok(deleteProviderItem > addressOnly, 'wake residue must be erased from provider conversation state');

@@ -19,6 +19,8 @@ const MAX_CLASSIFICATION_SAMPLES = TARGET_SAMPLE_RATE * 3;
 const CLASSIFICATION_LEADING_PAD_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.1);
 const CLASSIFICATION_TRAILING_PAD_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.25);
 const STRICT_ACCEPTANCE_PROBABILITY = 0.5;
+const STRICT_PREFIX_ACCEPTANCE_PROBABILITY = 0.8;
+const STRICT_PREFIX_FALLBACK_SILENCE_CHUNKS = 4;
 const ADDRESS_ACCEPTANCE_PROBABILITY = 0.95;
 const FIRST_PARTY_ADDRESS_MIN_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.5);
 const FIRST_PARTY_ADDRESS_MAX_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 2.8);
@@ -26,7 +28,7 @@ const FIRST_PARTY_ADDRESS_INTERVAL_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.3
 const KEYWORD_ALIAS = 'HEY_BEAN';
 const STRICT_WAKE_ALIAS = 'HEY_BEAN';
 const STRICT_NEAR_MISS_ALIASES = new Set(['HEY_BEAM', 'HEY_BEN']);
-const RUNTIME_VERSION = '9';
+const RUNTIME_VERSION = '10';
 
 // This threshold is experimental and is not release-certified. The expanded
 // replay corpus demonstrates that this generic model cannot separate Hey Bean
@@ -345,16 +347,35 @@ function isolatedStrictWakeWindows() {
 function classifyFirstPartyAddressPrefix() {
     if (!beanWakeModel || classificationAudio.length < FIRST_PARTY_ADDRESS_MIN_SAMPLES) return null;
     const probabilities = beanWakeProbabilities(classificationAudio, beanWakeModel);
-    const expectedClass = 'missed_hey_confirmation';
-    const expectedIndex = beanWakeModel.classes.indexOf(expectedClass);
+    const missedHeyClass = 'missed_hey_confirmation';
+    const strictWakeClass = 'strict_wake';
+    const missedHeyIndex = beanWakeModel.classes.indexOf(missedHeyClass);
+    const strictWakeIndex = beanWakeModel.classes.indexOf(strictWakeClass);
     const winningIndex = probabilities.indexOf(Math.max(...probabilities));
+    // Never let the fallback preempt the timing detector while the utterance
+    // is still in progress. Four local silent chunks give the strict decoder
+    // its trailing-blank window first; only a genuinely missed timing result
+    // reaches this acoustic recovery path.
+    const strictWakeAccepted = silentChunksAfterSpeech >= STRICT_PREFIX_FALLBACK_SILENCE_CHUNKS
+        && winningIndex === strictWakeIndex
+        && probabilities[strictWakeIndex] >= STRICT_PREFIX_ACCEPTANCE_PROBABILITY;
+    const missedHeyAccepted = winningIndex === missedHeyIndex
+        && probabilities[missedHeyIndex] >= ADDRESS_ACCEPTANCE_PROBABILITY;
+    const expectedClass = strictWakeAccepted ? strictWakeClass : missedHeyClass;
+    const expectedIndex = strictWakeAccepted ? strictWakeIndex : missedHeyIndex;
     return Object.freeze({
-        accepted: winningIndex === expectedIndex
-            && probabilities[expectedIndex] >= ADDRESS_ACCEPTANCE_PROBABILITY,
+        accepted: strictWakeAccepted || missedHeyAccepted,
+        // This is the timing-detector fallback, so it always uses the existing
+        // missed-Hey privacy protocol even when the acoustic model's strict
+        // class is what rescued the address. Only the timing-owned path may
+        // publish a strict wake activation.
+        activation: 'missed_hey_confirmation',
         expectedClass,
         winningClass: beanWakeModel.classes[winningIndex] || 'reject',
         probability: probabilities[expectedIndex],
-        threshold: ADDRESS_ACCEPTANCE_PROBABILITY,
+        threshold: strictWakeAccepted
+            ? STRICT_PREFIX_ACCEPTANCE_PROBABILITY
+            : ADDRESS_ACCEPTANCE_PROBABILITY,
         sampleCount: classificationAudio.length,
     });
 }
@@ -765,7 +786,11 @@ function handleAudio(message) {
             nextFirstPartyAddressSample = utteranceSamples + FIRST_PARTY_ADDRESS_INTERVAL_SAMPLES;
             classification = classifyFirstPartyAddressPrefix();
             if (classification?.accepted) {
-                decision = { type: 'address_confirmed', addressRelated: true };
+                decision = {
+                    type: 'address_confirmed',
+                    addressRelated: true,
+                    activation: classification.activation,
+                };
             } else if (classification) {
                 // Sanitized rejection telemetry makes the complete missed-Hey
                 // journey diagnosable without exposing PCM or dormant text.
@@ -814,7 +839,8 @@ function handleAudio(message) {
             // thread can cross its complete readiness barrier on this chunk.
             armed = false;
             acknowledge(sequence, generation, true);
-            if (decision.type === 'address_confirmed') {
+            if (decision.type === 'address_confirmed'
+                && decision.activation !== 'strict_wake') {
                 // This event contains no audio or text and remains invisible to
                 // the application. It preserves the local confirmation protocol.
                 postMessage({ type: 'address_candidate', generation: currentGeneration });
@@ -830,7 +856,7 @@ function handleAudio(message) {
                 type: 'wake_confirmed',
                 keyword: KEYWORD_ALIAS,
                 variant: decision.type === 'strict_wake' ? 'HEY BEAN' : 'BEAN',
-                activation: decision.type === 'strict_wake'
+                activation: decision.type === 'strict_wake' || decision.activation === 'strict_wake'
                     ? 'strict_wake'
                     : 'missed_hey_confirmation',
                 generation: currentGeneration,
