@@ -194,6 +194,9 @@ class BrowserVoiceJobPolicy
                 $turn->handler,
                 is_string(data_get($turn->metadata, 'timezone')) ? data_get($turn->metadata, 'timezone') : null,
                 $turn->accepted_at,
+                is_string(data_get($turn->metadata, 'contextual_reference.title'))
+                    ? data_get($turn->metadata, 'contextual_reference.title')
+                    : null,
             );
             if ($typed?->title !== null) {
                 return $typed->title;

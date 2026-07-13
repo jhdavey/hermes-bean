@@ -13,6 +13,7 @@ use App\Models\ConversationSession;
 use App\Models\VoiceTurn;
 use App\Models\VoiceTurnEvent;
 use App\Services\BrowserVoiceComplexPlanService;
+use App\Services\BrowserVoiceContextReferenceResolver;
 use App\Services\BrowserVoiceInstantHandler;
 use App\Services\BrowserVoiceJobPolicy;
 use App\Services\BrowserVoiceProjectionService;
@@ -33,6 +34,7 @@ class BrowserVoiceTurnController extends Controller
         private readonly VoiceTurnLifecycleService $lifecycle,
         private readonly BrowserVoiceProjectionService $projection,
         private readonly BrowserVoiceRequestCompletenessService $completeness,
+        private readonly BrowserVoiceContextReferenceResolver $contextReferences,
         private readonly BrowserVoiceComplexPlanService $complexPlans,
         private readonly BrowserVoiceInstantHandler $instantHandler,
         private readonly BrowserVoiceJobPolicy $jobPolicy,
@@ -91,8 +93,19 @@ class BrowserVoiceTurnController extends Controller
         $hasDefaultLocation = filled(data_get($data, 'location_context.label'))
             || (data_get($data, 'location_context.latitude') !== null
                 && data_get($data, 'location_context.longitude') !== null);
-        $contextualFollowUp = data_get($data, 'conversation_context.mode') === 'contextual_follow_up'
-            && $this->hasConversationContextAnchor($request, $session, $data);
+        $priorTurn = $this->contextReferences->priorTurn($request->user(), $session, $data);
+        $contextualFollowUp = $priorTurn instanceof VoiceTurn;
+        $contextualReference = data_get($existingTurn?->metadata, 'contextual_reference');
+        if (! is_array($contextualReference)) {
+            $contextualReference = $priorTurn instanceof VoiceTurn
+                ? $this->contextReferences->resolve(
+                    $request->user(),
+                    $session,
+                    $priorTurn,
+                    (string) $data['transcript'],
+                )
+                : null;
+        }
         $hasActiveReference = $this->hasUnambiguousActiveContextualReference(
             $request,
             $session,
@@ -104,6 +117,7 @@ class BrowserVoiceTurnController extends Controller
             $data['timezone'] ?? null,
             true,
             $contextualFollowUp || $hasActiveReference,
+            $contextualReference !== null,
         )) !== null) {
             return response()->json([
                 'message' => $question,
@@ -412,29 +426,6 @@ class BrowserVoiceTurnController extends Controller
             ->where('handler', "app.{$domain}.create")
             ->whereIn('state', [VoiceTurnState::Accepted->value, VoiceTurnState::Running->value])
             ->count() === 1;
-    }
-
-    /** @param array<string, mixed> $data */
-    private function hasConversationContextAnchor(
-        Request $request,
-        ConversationSession $session,
-        array $data,
-    ): bool {
-        $epoch = (int) data_get($data, 'conversation_context.epoch', -1);
-        $generation = (int) ($data['controller_generation'] ?? -1);
-        if ($epoch < 1 || $generation < 0) {
-            return false;
-        }
-
-        return VoiceTurn::query()
-            ->where('user_id', $request->user()->id)
-            ->where('conversation_session_id', $session->id)
-            ->latest('id')
-            ->limit(50)
-            ->get()
-            ->contains(fn (VoiceTurn $candidate): bool => (int) data_get($candidate->metadata, 'conversation_context.epoch', -2) === $epoch
-                && (int) data_get($candidate->metadata, 'controller_generation', -2) === $generation
-            );
     }
 
     private function cancelTurnSafely(

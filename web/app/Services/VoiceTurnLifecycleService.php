@@ -24,6 +24,7 @@ class VoiceTurnLifecycleService
         private readonly BrowserVoiceAdmissionRouter $router,
         private readonly VoiceTurnPrivacyService $privacy,
         private readonly FastDomainWriteService $domainWrites,
+        private readonly BrowserVoiceContextReferenceResolver $contextReferences,
     ) {}
 
     /**
@@ -54,20 +55,11 @@ class VoiceTurnLifecycleService
         // earlier concurrent admissions settle, but an idempotent retry must
         // still resolve to the originally admitted turn.
         $fingerprintContext = $inputContext;
-        $priorTurn = $conversationContext['mode'] === 'contextual_follow_up'
-            ? VoiceTurn::query()
-                ->where('user_id', $user->id)
-                ->where('conversation_session_id', $session->id)
-                ->where('turn_id', '!=', $turnId)
-                ->latest('id')
-                ->limit(50)
-                ->get()
-                ->first(fn (VoiceTurn $candidate): bool => (int) data_get($candidate->metadata, 'conversation_context.epoch', -1) === $conversationContext['epoch']
-                    && (int) data_get($candidate->metadata, 'controller_generation', -1)
-                        === (int) ($input['controller_generation'] ?? -2)
-                )
-            : null;
+        $priorTurn = $this->contextReferences->priorTurn($user, $session, $input);
         $inputContext['prior_context_authorized'] = $priorTurn instanceof VoiceTurn;
+        $contextualReference = $priorTurn instanceof VoiceTurn
+            ? $this->contextReferences->resolve($user, $session, $priorTurn, $transcript)
+            : null;
         $activeBackgroundJobCount = AssistantRun::query()
             ->where('user_id', $user->id)
             ->where('conversation_session_id', $session->id)
@@ -82,6 +74,7 @@ class VoiceTurnLifecycleService
                 'prior_handler' => $priorTurn->handler,
                 'prior_transcript' => $priorTurn->transcript,
             ] : []),
+            ...($contextualReference !== null ? ['contextual_reference' => $contextualReference] : []),
         ];
         $declaredLocalHandler = trim((string) ($input['declared_local_handler'] ?? '')) ?: null;
         $route = $this->router->route($transcript, $context, $declaredLocalHandler);

@@ -183,6 +183,9 @@ class FastDomainWriteService
             $turn->handler,
             $this->timezone($turn),
             $turn->accepted_at,
+            is_string(data_get($turn->metadata, 'contextual_reference.title'))
+                ? data_get($turn->metadata, 'contextual_reference.title')
+                : null,
         );
         if ($intent === null || ! $intent->isActionable()) {
             return null;

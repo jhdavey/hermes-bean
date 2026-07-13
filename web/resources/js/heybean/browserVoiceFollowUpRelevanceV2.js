@@ -36,7 +36,11 @@ export function classifyBrowserVoiceFollowUpRelevance(text, { final = false } = 
             : BROWSER_VOICE_FOLLOW_UP_RELEVANCE.PENDING;
     }
 
-    const directAddress = normalized.match(/^bean\s+(.+)$/)?.[1] || normalized;
+    const directAddress = (normalized.match(/^bean\s+(.+)$/)?.[1] || normalized)
+        // Natural acknowledgements may lead into a real follow-up request.
+        // Strip only a closed set of conversational lead-ins and still require
+        // the remaining text to satisfy the meaningful-request grammar below.
+        .replace(/^(?:(?:okay|ok|great|sounds good|all right|alright)\s+)+/, '');
     const exactResponse = /^(?:yes|yep|no|nope|okay|ok|sure|please|thanks|thank you|that's all|that is all|goodbye|bye|take care|stop|quiet|wait|repeat that|say that again)$/;
     const directAction = /^(?:(?:also|and|then|actually|instead|please)\s+)*(?:tell|show|check|find|look up|read|create|add|make|set|schedule|remind|delete|remove|change|move|reschedule|cancel|complete|mark|plan|draft|write|save|send|call|text|help|repeat|say)\b/;
     const directQuestion = /^(?:what|what's|when|where|which|who|why|how)\s+(?:about\b|is\b|are\b|was\b|were\b|do\b|does\b|did\b|can\b|could\b|would\b|will\b|should\b|time\b|date\b|day\b|weather\b|temperature\b|comes?\b|happens?\b)/;

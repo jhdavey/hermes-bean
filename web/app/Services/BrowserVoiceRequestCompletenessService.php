@@ -16,6 +16,7 @@ class BrowserVoiceRequestCompletenessService
         ?string $timezone = null,
         bool $inspectSubtasks = true,
         bool $hasAuthorizedContextualReference = false,
+        bool $hasResolvedEntityReference = false,
     ): ?string {
         $text = str_replace('’', "'", mb_strtolower(trim($transcript)));
         $text = preg_replace('/^\s*(?:hey[\s,.-]+)?bean\b[\s,.:;!?-]*/u', '', $text) ?? $text;
@@ -55,6 +56,7 @@ class BrowserVoiceRequestCompletenessService
                             || ($previousOperation === 'create'
                                 && $previousDomain !== null
                                 && $segmentDomain === $previousDomain),
+                        $hasResolvedEntityReference,
                     );
                     if ($question !== null) {
                         return $question;
@@ -83,6 +85,14 @@ class BrowserVoiceRequestCompletenessService
             ? $this->typedWrites->parseCreate($transcript, $typedHandler, $timezone)
             : null;
         if ($typedWrite !== null) {
+            if ($typedWrite->resource === 'reminder'
+                && $typedWrite->title === null
+                && $typedWrite->hasClockTime
+                && $hasResolvedEntityReference
+                && preg_match('/\b(?:for|about|to)\s+(?:that|this|the)\s+task\b/iu', $text) === 1) {
+                return null;
+            }
+
             // Once the typed parser has claimed a complete reminder/calendar
             // create, words inside its title cannot be reinterpreted as another
             // application domain by the generic noun checks below.

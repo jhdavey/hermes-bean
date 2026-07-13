@@ -21,7 +21,8 @@ export function assessBrowserVoiceV2Completeness(transcript, { hasHomeLocation =
 
     if (creates && !complexGeneration && /\b(?:reminder|remind me)\b/.test(normalized)) {
         const hasSubject = /\bremind me to\s+\S+/.test(normalized)
-            || /\b(?:reminder|remind me)\b.*\b(?:titled|called|named|about|to)\s+\S+/.test(normalized);
+            || /\b(?:reminder|remind me)\b.*\b(?:titled|called|named|about|to)\s+\S+/.test(normalized)
+            || /\b(?:for|about|to)\s+(?:that|this|the)\s+task\b/.test(normalized);
         if (!hasSubject) return { decision: 'incomplete', question: 'What should I remind you about?' };
         if (!hasClockTime) return { decision: 'incomplete', question: 'What time should I remind you?' };
         // The reminder parser owns its payload. "Reminder to do the salt"

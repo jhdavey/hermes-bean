@@ -86,7 +86,11 @@ class BrowserVoiceAdmissionRouter
         // were already rejected above by the subtask splitter.
         $writeOperation = $this->writeOperation($intentText);
         $typedCreate = $writeOperation === 'create'
-            ? $this->typedWrites->parseCreate($transcript, timezone: data_get($context, 'timezone'))
+            ? $this->typedWrites->parseCreate(
+                $transcript,
+                timezone: data_get($context, 'timezone'),
+                contextualTitle: data_get($context, 'contextual_reference.title'),
+            )
             : null;
         if ($typedCreate !== null && $typedCreate->clarificationQuestion() === null) {
             $queuedFollowUp = (int) data_get($context, 'active_background_job_count', 0) > 0;

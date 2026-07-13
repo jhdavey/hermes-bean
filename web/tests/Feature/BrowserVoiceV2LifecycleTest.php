@@ -1210,7 +1210,7 @@ class BrowserVoiceV2LifecycleTest extends TestCase
         $this->assertSame(0, $turn->events()->where('event_type', 'acknowledgement_started')->count());
     }
 
-    public function test_task_read_then_reminder_to_do_that_task_is_one_typed_contextual_write(): void
+    public function test_task_read_then_that_task_reminder_is_one_durable_typed_contextual_write(): void
     {
         Carbon::setTestNow('2026-07-13 14:49:00', 'America/New_York');
         Queue::fake([EnforceBrowserVoiceTurnDeadline::class]);
@@ -1233,11 +1233,12 @@ class BrowserVoiceV2LifecycleTest extends TestCase
             ->assertJsonPath('data.turn.handler', 'app.task.read')
             ->assertJsonPath('data.turn.final_text', fn (string $text): bool => str_contains($text, '“salt”'));
 
-        $this->withToken($token)->postJson('/api/assistant/voice/turns', [
-            ...$this->payload($sessionId, 'salt-reminder-follow-up-0001', 'Can you set a reminder to do the salt at 5pm?'),
+        $reminderPayload = [
+            ...$this->payload($sessionId, 'salt-reminder-follow-up-0001', 'Okay, great. Can you set a reminder at 5 p.m. for that task?'),
             'timezone' => 'America/New_York',
             'conversation_context' => ['mode' => 'contextual_follow_up', 'epoch' => 1],
-        ])->assertCreated()
+        ];
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', $reminderPayload)->assertCreated()
             ->assertJsonPath('data.turn.lane', 'app_write')
             ->assertJsonPath('data.turn.handler', 'app.reminder.create')
             ->assertJsonPath('data.turn.state', 'completed')
@@ -1247,11 +1248,58 @@ class BrowserVoiceV2LifecycleTest extends TestCase
 
         $turn = VoiceTurn::where('turn_id', 'salt-reminder-follow-up-0001')->firstOrFail();
         $reminder = Reminder::where('metadata->browser_voice_turn_id', $turn->turn_id)->sole();
-        $this->assertSame('do the salt', $reminder->title);
+        $this->assertSame('salt', $reminder->title);
         $this->assertSame('2026-07-13 17:00', $reminder->remind_at->timezone('America/New_York')->format('Y-m-d H:i'));
         $this->assertSame('app.task.read', data_get($turn->metadata, 'prior_handler'));
+        $this->assertSame('salt', data_get($turn->metadata, 'contextual_reference.title'));
+        $this->assertSame('task', data_get($turn->metadata, 'contextual_reference.domain'));
         $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'user')->count());
         $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'assistant')->count());
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', $reminderPayload)
+            ->assertOk()
+            ->assertJsonPath('data.turn.id', $turn->id)
+            ->assertJsonPath('data.turn.state', 'completed');
+        $this->assertSame(1, Reminder::where('metadata->browser_voice_turn_id', $turn->turn_id)->count());
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'user')->count());
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'assistant')->count());
+    }
+
+    public function test_ambiguous_that_task_reminder_clarifies_without_admitting_or_writing(): void
+    {
+        Carbon::setTestNow('2026-07-13 15:19:00', 'America/New_York');
+        Queue::fake([EnforceBrowserVoiceTurnDeadline::class]);
+        $token = $this->apiToken('voice-v2-ambiguous-task-reminder@example.com');
+        $sessionId = $this->sessionId($token);
+        $session = ConversationSession::findOrFail($sessionId);
+        foreach (['salt', 'buy groceries'] as $title) {
+            Task::create([
+                'user_id' => $session->user_id,
+                'workspace_id' => $session->workspace_id,
+                'title' => $title,
+                'status' => 'open',
+                'due_at' => Carbon::parse('2026-07-13 18:00:00', 'America/New_York')->utc(),
+            ]);
+        }
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', [
+            ...$this->payload($sessionId, 'ambiguous-task-read-0001', 'What is on my to-do list for today?'),
+            'timezone' => 'America/New_York',
+            'conversation_context' => ['mode' => 'new_conversation', 'epoch' => 1],
+        ])->assertCreated()
+            ->assertJsonPath('data.turn.handler', 'app.task.read');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', [
+            ...$this->payload($sessionId, 'ambiguous-reminder-follow-up-0001', 'Can you set a reminder at 5 p.m. for that task?'),
+            'timezone' => 'America/New_York',
+            'conversation_context' => ['mode' => 'contextual_follow_up', 'epoch' => 1],
+        ])->assertUnprocessable()
+            ->assertJsonPath('code', 'voice_request_incomplete')
+            ->assertJsonPath('question', 'What should I remind you about?');
+
+        $this->assertDatabaseMissing('voice_turns', ['turn_id' => 'ambiguous-reminder-follow-up-0001']);
+        $this->assertSame(0, ConversationMessage::where('client_turn_id', 'ambiguous-reminder-follow-up-0001')->count());
+        $this->assertSame(0, Reminder::where('metadata->browser_voice_turn_id', 'ambiguous-reminder-follow-up-0001')->count());
     }
 
     /** @return array<string, mixed> */

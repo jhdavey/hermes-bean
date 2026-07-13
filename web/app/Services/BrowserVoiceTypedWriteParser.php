@@ -21,6 +21,7 @@ final class BrowserVoiceTypedWriteParser
         ?string $handler = null,
         ?string $timezone = null,
         ?CarbonInterface $referenceTime = null,
+        ?string $contextualTitle = null,
     ): ?BrowserVoiceTypedWriteIntent {
         $text = $this->withoutWake($transcript);
         if (preg_match(self::CREATE_PATTERN, $text) !== 1) {
@@ -34,9 +35,17 @@ final class BrowserVoiceTypedWriteParser
 
         $hasClockTime = $this->hasClockTime($text);
 
+        $title = $this->title($text, $resource);
+        if ($title === null
+            && $resource === 'reminder'
+            && filled($contextualTitle)
+            && preg_match('/\b(?:for|about|to)\s+(?:that|this|the)\s+task\b/iu', $text) === 1) {
+            $title = mb_substr(trim((string) $contextualTitle), 0, 180) ?: null;
+        }
+
         return new BrowserVoiceTypedWriteIntent(
             resource: $resource,
-            title: $this->title($text, $resource),
+            title: $title,
             scheduledAt: $hasClockTime
                 ? $this->parseScheduledAt($text, $timezone, $referenceTime)
                 : null,

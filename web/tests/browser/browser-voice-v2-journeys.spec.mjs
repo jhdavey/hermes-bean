@@ -230,8 +230,8 @@ test('[BV2-BROWSER-09] a task read flows into a complete reminder-to-do follow-u
         harness.finishPlayback();
 
         harness.followUp('salt-reminder-follow-up');
-        harness.partial('Can you set a reminder to do the salt');
-        harness.final('Can you set a reminder to do the salt at 5pm?');
+        harness.partial('Okay, great. Can you set a reminder at 5 p.m.');
+        harness.final('Okay, great. Can you set a reminder at 5 p.m. for that task?');
         harness.endUtterance();
         await harness.waitForAdmissions();
         return { snapshot: harness.snapshot(), calls: harness.server.calls };
@@ -242,11 +242,11 @@ test('[BV2-BROWSER-09] a task read flows into a complete reminder-to-do follow-u
         'salt-reminder-follow-up',
     ]);
     const reminderAdmission = result.calls.filter((call) => call.path === '/assistant/voice/turns').at(-1);
-    expect(reminderAdmission.options.body.transcript).toBe('Can you set a reminder to do the salt at 5pm?');
+    expect(reminderAdmission.options.body.transcript).toBe('Okay, great. Can you set a reminder at 5 p.m. for that task?');
     expect(reminderAdmission.options.body.conversation_context).toMatchObject({ mode: 'contextual_follow_up' });
     expect(result.snapshot.server.messages.filter((message) => message.role === 'user')).toHaveLength(2);
     await expect(page.locator('#chat [data-role="user"][data-turn-id="salt-reminder-follow-up"]'))
-        .toHaveText('Can you set a reminder to do the salt at 5pm?');
+        .toHaveText('Okay, great. Can you set a reminder at 5 p.m. for that task?');
 });
 
 test('[BV2-BROWSER-03] Stop is playback-only while three jobs run and a fourth stays visibly queued', async ({ page }) => {

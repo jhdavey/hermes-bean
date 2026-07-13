@@ -463,6 +463,7 @@ test('[BV2-FOLLOWUP-04] deterministic relevance grammar fails closed for ambient
         "What's on my to-do list for today?",
         'Anything on my calendar tomorrow?',
         'Also create a note',
+        'Okay, great. Can you set a reminder at 5 p.m. for that task?',
         'Did you finish that?',
         'Did you get the weather forecast for later?',
         'Is it going to rain tonight?',
