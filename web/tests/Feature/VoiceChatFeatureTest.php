@@ -87,10 +87,15 @@ class VoiceChatFeatureTest extends TestCase
             $parts = collect($request->data())->keyBy('name');
             $sdp = (string) data_get($parts->get('sdp'), 'contents');
             $session = json_decode((string) data_get($parts->get('session'), 'contents'), true);
+            $sdpContentType = (string) data_get($parts->get('sdp'), 'headers.Content-Type');
+            $sessionContentType = (string) data_get($parts->get('session'), 'headers.Content-Type');
 
             return $request->url() === 'https://api.openai.test/v1/realtime/calls'
                 && $request->hasHeader('Authorization', 'Bearer test-openai-key')
                 && $request->hasHeader('OpenAI-Safety-Identifier')
+                && $sdpContentType === 'application/sdp'
+                && $sessionContentType === 'application/json'
+                && str_ends_with($sdp, "\r\n")
                 && str_contains($sdp, 'm=audio 9 UDP/TLS/RTP/SAVPF 111')
                 && data_get($session, 'type') === 'realtime'
                 && data_get($session, 'model') === 'gpt-realtime-test'

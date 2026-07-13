@@ -28,7 +28,8 @@ test('[BV2-WAKE-01] wake-ready is published only after provider transport and a 
     const localWakeSetup = connect.indexOf('const localWakePromise = localWakeGate.start');
     const recvOnly = connect.indexOf("peerConnection.addTransceiver('audio', { direction: 'recvonly' })");
     const offer = connect.indexOf('const offer = await peerConnection.createOffer()');
-    const parallelSetup = connect.indexOf('Promise.all([localWakePromise, openRealtimeSession(offer.sdp)])');
+    const localDescription = connect.indexOf('peerConnection.localDescription?.sdp', offer);
+    const parallelSetup = connect.indexOf('Promise.all([localWakePromise, openRealtimeSession(localOfferSdp)])');
     const providerTransport = connect.indexOf('transportReady,');
     const freshBoundary = connect.indexOf('localWakeGate.resetAfterTurn()', providerTransport);
     const finalLocalBarrier = connect.indexOf(
@@ -38,7 +39,8 @@ test('[BV2-WAKE-01] wake-ready is published only after provider transport and a 
     const returnReadyGate = connect.indexOf('return localWakeGate;', finalLocalBarrier);
 
     assert.ok(localWakeSetup >= 0 && recvOnly > localWakeSetup, 'local wake setup must start before negotiation');
-    assert.ok(offer > recvOnly && parallelSetup > offer, 'local wake readiness and same-origin SDP setup must overlap');
+    assert.ok(offer > recvOnly && localDescription > offer, 'the negotiated local description must own the submitted SDP');
+    assert.ok(parallelSetup > localDescription, 'local wake readiness and same-origin SDP setup must overlap');
     assert.doesNotMatch(connect, /direction:\s*'sendrecv'|addTrack\(/);
     assert.ok(providerTransport > parallelSetup, 'provider capture readiness must be awaited');
     assert.ok(freshBoundary > providerTransport, 'startup audio must be discarded after provider readiness');
@@ -146,7 +148,8 @@ test('[BV2-STARTUP-03] startup uses one same-origin SDP owner and fails closed w
     const connectStart = source.indexOf('async function connectRealtimeVoice(');
     const connectEnd = source.indexOf('\n    function handleRealtimeConnectionLoss(', connectStart);
     const connect = source.slice(connectStart, connectEnd);
-    assert.match(connect, /openRealtimeSession\(offer\.sdp\)/);
+    assert.match(connect, /peerConnection\.localDescription\?\.sdp \|\| offer\.sdp/);
+    assert.match(connect, /openRealtimeSession\(localOfferSdp\)/);
     assert.match(connect, /session\?\.sdp/);
     assert.doesNotMatch(connect, /client_secret|realtime_url|api\.openai\.com/);
 
@@ -158,4 +161,13 @@ test('[BV2-STARTUP-03] startup uses one same-origin SDP owner and fails closed w
     const naturalFailure = implementation.indexOf('Bean couldn’t connect voice right now.', stop);
     assert.ok(diagnostic >= 0 && stop > diagnostic && naturalFailure > stop);
     assert.doesNotMatch(implementation, /state\.error\s*=\s*error\?\.message|state\.error\s*=\s*error\.message/);
+
+    const stateErrorStart = source.indexOf('function handleBrowserVoiceV2StateError(');
+    const stateErrorEnd = source.indexOf('\n    function updateVoiceWakeDraft(', stateErrorStart);
+    const stateError = source.slice(stateErrorStart, stateErrorEnd);
+    assert.match(stateError, /if \(\/abort\/i\.test\(abortSignature\)\) return;/);
+    assert.ok(
+        stateError.indexOf('/abort/i.test(abortSignature)') < stateError.indexOf('state.error = friendlyError'),
+        'an expected canceled poll must not overwrite the terminal startup result with raw AbortError copy',
+    );
 });

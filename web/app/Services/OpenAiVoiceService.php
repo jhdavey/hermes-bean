@@ -74,6 +74,7 @@ class OpenAiVoiceService
         $voice = $this->normalizeVoice(data_get($profile->settings ?? [], 'voice.voice'));
         $model = $this->realtimeModel();
         $session = $this->realtimeSessionConfiguration($profile, $context, $voice, $model);
+        $normalizedSdp = preg_replace('/\r\n|\r|\n/', "\r\n", trim($sdp))."\r\n";
 
         $response = Http::withToken($this->apiKey())
             ->accept('application/sdp')
@@ -82,8 +83,8 @@ class OpenAiVoiceService
             ]))
             ->timeout((float) config('services.openai.realtime_session_timeout', 10))
             ->asMultipart()
-            ->attach('sdp', $sdp)
-            ->attach('session', json_encode($session, JSON_THROW_ON_ERROR))
+            ->attach('sdp', $normalizedSdp, null, ['Content-Type' => 'application/sdp'])
+            ->attach('session', json_encode($session, JSON_THROW_ON_ERROR), null, ['Content-Type' => 'application/json'])
             ->post($this->endpoint('/realtime/calls'));
 
         if (! $response->successful()) {

@@ -9885,6 +9885,8 @@ export function mountHeyBeanWebApp(mount) {
 
     function handleBrowserVoiceV2StateError(error, context = {}) {
         if (!browserVoiceV2Enabled() || Number(context.failureCount || 0) < 3) return;
+        const abortSignature = `${error?.name || ''} ${error?.code || ''} ${error?.message || ''}`;
+        if (/abort/i.test(abortSignature)) return;
         state.error = friendlyError(error, 'refresh Bean voice work');
         render();
     }
@@ -10237,9 +10239,10 @@ export function mountHeyBeanWebApp(mount) {
 
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
+        const localOfferSdp = String(peerConnection.localDescription?.sdp || offer.sdp || '');
         let session;
         try {
-            const setup = await Promise.all([localWakePromise, openRealtimeSession(offer.sdp)]);
+            const setup = await Promise.all([localWakePromise, openRealtimeSession(localOfferSdp)]);
             session = setup[1];
             if (Number(setup[0]?.sampleRate) !== 16000) {
                 throw new Error('Private wake detection did not provide 16 kHz local PCM.');
