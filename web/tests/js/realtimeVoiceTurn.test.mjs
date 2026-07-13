@@ -38,13 +38,13 @@ test('[BV2-STARTUP-04] a transient browser microphone release abort retries once
         }
         return expectedStream;
     }, { audio: true }, {
-        retryDelayMs: 200,
+        retryDelaysMs: [250, 750, 1500],
         delay: async (milliseconds) => delays.push(milliseconds),
     });
 
     assert.equal(stream, expectedStream);
     assert.equal(calls.length, 2);
-    assert.deepEqual(delays, [200]);
+    assert.deepEqual(delays, [250]);
 
     const permissionFailure = Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' });
     await assert.rejects(
@@ -53,6 +53,22 @@ test('[BV2-STARTUP-04] a transient browser microphone release abort retries once
         }),
         permissionFailure,
     );
+
+    let sustainedAbortCalls = 0;
+    const sustainedAbort = Object.assign(new Error('signal is aborted without reason'), { code: 20 });
+    const sustainedDelays = [];
+    await assert.rejects(
+        () => acquireRealtimeMicrophone(async () => {
+            sustainedAbortCalls += 1;
+            throw sustainedAbort;
+        }, { audio: true }, {
+            retryDelaysMs: [250, 750, 1500],
+            delay: async (milliseconds) => sustainedDelays.push(milliseconds),
+        }),
+        sustainedAbort,
+    );
+    assert.equal(sustainedAbortCalls, 4);
+    assert.deepEqual(sustainedDelays, [250, 750, 1500]);
 });
 
 test('[BV2-STOP-05] browser voice Stop never routes active v2 work through generic task cancellation', () => {

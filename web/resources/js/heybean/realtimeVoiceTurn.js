@@ -9,16 +9,20 @@ export function realtimeMicrophoneConstraints() {
 }
 
 export async function acquireRealtimeMicrophone(getUserMedia, constraints, {
-    retryDelayMs = 200,
+    retryDelaysMs = [250, 750, 1500],
     delay = (milliseconds) => new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds)),
 } = {}) {
-    try {
-        return await getUserMedia(constraints);
-    } catch (error) {
-        const abortSignature = `${error?.name || ''} ${error?.code || ''} ${error?.message || ''}`;
-        if (!/abort|(^|\s)20(\s|$)/i.test(abortSignature)) throw error;
-        await delay(retryDelayMs);
-        return getUserMedia(constraints);
+    const retrySchedule = Array.isArray(retryDelaysMs) ? retryDelaysMs : [];
+    for (let attempt = 0; ; attempt += 1) {
+        try {
+            return await getUserMedia(constraints);
+        } catch (error) {
+            const abortSignature = `${error?.name || ''} ${error?.code || ''} ${error?.message || ''}`;
+            if (!/abort|(^|\s)20(\s|$)/i.test(abortSignature) || attempt >= retrySchedule.length) {
+                throw error;
+            }
+            await delay(Math.max(0, Number(retrySchedule[attempt]) || 0));
+        }
     }
 }
 
