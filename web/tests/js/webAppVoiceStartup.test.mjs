@@ -65,6 +65,22 @@ test('[BV2-WAKE-01] wake-ready is published only after provider transport and a 
     assert.ok(active > providerReady && listening > active, 'capture must become active before accepting wakes');
     assert.ok(consumerReady > listening, 'the local detector must stay non-consuming throughout startup');
     assert.ok(readyLabel > consumerReady, 'the UI may claim listening only after consumer admission opens');
+
+    const stopStart = source.indexOf('function stopVoiceWakeListening(');
+    const stopEnd = source.indexOf('\n    function stopRealtimeVoiceForContextChange(', stopStart);
+    const stop = source.slice(stopStart, stopEnd);
+    assert.match(stop, /realtimeLocalTeardown = Promise\.allSettled\(\[precedingTeardown, localWakeStopping\]\)/);
+
+    const teardownBarrier = implementation.indexOf('await realtimeLocalTeardown;');
+    const postBarrierGenerationCheck = implementation.indexOf(
+        'if (connectionGeneration !== realtimeConnectionGeneration) return;',
+        teardownBarrier,
+    );
+    assert.ok(teardownBarrier >= 0 && teardownBarrier < connectReady, 're-arm must finish the previous local teardown before reconnecting');
+    assert.ok(
+        postBarrierGenerationCheck > teardownBarrier && postBarrierGenerationCheck < connectReady,
+        'a stop during the teardown wait must invalidate the pending restart',
+    );
 });
 
 test('[BV2-PRIVACY-PCM-04] local wake clears provider input before LocalWakeGate flushes activated PCM', () => {

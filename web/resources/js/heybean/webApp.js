@@ -243,6 +243,7 @@ export function mountHeyBeanWebApp(mount) {
     let realtimeRemoteAudio = null;
     let realtimeSession = null;
     let realtimeConnectionGeneration = 0;
+    let realtimeLocalTeardown = Promise.resolve();
     let realtimeVoiceActive = false;
     let realtimeDisconnectedTimer = 0;
     let realtimeMicrophoneMuteTimer = 0;
@@ -10655,6 +10656,8 @@ export function mountHeyBeanWebApp(mount) {
 
     function stopVoiceWakeListening(options = {}) {
         const localWakeStopping = realtimeLocalWakeGate?.stop();
+        const precedingTeardown = realtimeLocalTeardown;
+        realtimeLocalTeardown = Promise.allSettled([precedingTeardown, localWakeStopping]).then(() => {});
         browserVoiceV2InputTransport.deactivate();
         clearRealtimeVoiceInputFeedback();
         realtimeLocalWakeGate = null;
@@ -10678,7 +10681,6 @@ export function mountHeyBeanWebApp(mount) {
         realtimePeerConnection = null;
         realtimeRawMicrophoneStream = null;
         realtimeSession = null;
-        void localWakeStopping?.catch?.(() => {});
         if (realtimeRemoteAudio) {
             try {
                 realtimeRemoteAudio.pause();
@@ -10724,6 +10726,8 @@ export function mountHeyBeanWebApp(mount) {
         // durability gate does not add perceptible latency after transcription.
         warmRealtimePersistenceSession();
         try {
+            await realtimeLocalTeardown;
+            if (connectionGeneration !== realtimeConnectionGeneration) return;
             const readyWakeGate = await connectRealtimeVoice(connectionGeneration);
             if (connectionGeneration !== realtimeConnectionGeneration) return;
             if (!localWakeConnectionIsCurrent(readyWakeGate, connectionGeneration)
