@@ -151,6 +151,9 @@ test('[BV2-STARTUP-03] startup uses one same-origin SDP owner and fails closed w
     assert.match(connect, /peerConnection\.localDescription\?\.sdp \|\| offer\.sdp/);
     assert.match(connect, /openRealtimeSession\(localOfferSdp\)/);
     assert.match(connect, /session\?\.sdp/);
+    assert.match(connect, /const answerSdp = String\(session\?\.sdp \|\| ''\);/);
+    assert.doesNotMatch(connect, /const answerSdp = String\(session\?\.sdp \|\| ''\)\.trim\(\)/);
+    assert.match(connect, /setRemoteDescription\(\{ type: 'answer', sdp: answerSdp \}\)/);
     assert.doesNotMatch(connect, /client_secret|realtime_url|api\.openai\.com/);
 
     const start = source.indexOf('async function startVoiceWakeListening(');

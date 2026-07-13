@@ -10268,8 +10268,8 @@ export function mountHeyBeanWebApp(mount) {
             throw new Error('Realtime voice connection was superseded.');
         }
         realtimeSession = session;
-        const answerSdp = String(session?.sdp || '').trim();
-        if (!answerSdp) throw new Error('Realtime voice connection did not include an SDP answer.');
+        const answerSdp = String(session?.sdp || '');
+        if (!answerSdp.trim()) throw new Error('Realtime voice connection did not include an SDP answer.');
         if (!connectionIsCurrent()) throw new Error('Realtime voice connection was superseded.');
         await peerConnection.setRemoteDescription({ type: 'answer', sdp: answerSdp });
         let transportTimer = null;
