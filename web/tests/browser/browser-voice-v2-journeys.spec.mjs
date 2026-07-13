@@ -212,7 +212,7 @@ test('[BV2-BROWSER-08] an instant answer opens a no-wake task follow-up and admi
         .toHaveText("What's on my to-do list for today?");
 });
 
-test('[BV2-BROWSER-09] a task read flows into a complete reminder-to-do follow-up without a second wake', async ({ page }) => {
+test('[BV2-BROWSER-09] a task read flows through reminder creation and contextual correction without another wake', async ({ page }) => {
     await boot(page);
     await markReady(page);
 
@@ -234,19 +234,38 @@ test('[BV2-BROWSER-09] a task read flows into a complete reminder-to-do follow-u
         harness.final('Okay, great. Can you set a reminder at 5 p.m. for that task?');
         harness.endUtterance();
         await harness.waitForAdmissions();
+        await harness.updateTurn('salt-reminder-follow-up', {
+            state: 'completed',
+            final_text: 'Done—I created the reminder “salt” for today at 5 p.m.',
+        });
+        harness.startPlayback();
+        harness.finishPlayback();
+
+        harness.followUp('salt-reminder-correction');
+        harness.partial('Set it for');
+        harness.final('Set it for 5 p.m.');
+        harness.endUtterance();
+        await harness.waitForAdmissions();
         return { snapshot: harness.snapshot(), calls: harness.server.calls };
     });
 
     expect(result.snapshot.server.turns.map((turn) => turn.turn_id)).toEqual([
         'salt-task-read',
         'salt-reminder-follow-up',
+        'salt-reminder-correction',
     ]);
-    const reminderAdmission = result.calls.filter((call) => call.path === '/assistant/voice/turns').at(-1);
+    const admissions = result.calls.filter((call) => call.path === '/assistant/voice/turns');
+    const reminderAdmission = admissions.at(-2);
     expect(reminderAdmission.options.body.transcript).toBe('Okay, great. Can you set a reminder at 5 p.m. for that task?');
     expect(reminderAdmission.options.body.conversation_context).toMatchObject({ mode: 'contextual_follow_up' });
-    expect(result.snapshot.server.messages.filter((message) => message.role === 'user')).toHaveLength(2);
+    const correctionAdmission = admissions.at(-1);
+    expect(correctionAdmission.options.body.transcript).toBe('Set it for 5 p.m.');
+    expect(correctionAdmission.options.body.conversation_context).toMatchObject({ mode: 'contextual_follow_up' });
+    expect(result.snapshot.server.messages.filter((message) => message.role === 'user')).toHaveLength(3);
     await expect(page.locator('#chat [data-role="user"][data-turn-id="salt-reminder-follow-up"]'))
         .toHaveText('Okay, great. Can you set a reminder at 5 p.m. for that task?');
+    await expect(page.locator('#chat [data-role="user"][data-turn-id="salt-reminder-correction"]'))
+        .toHaveText('Set it for 5 p.m.');
 });
 
 test('[BV2-BROWSER-03] Stop is playback-only while three jobs run and a fourth stays visibly queued', async ({ page }) => {

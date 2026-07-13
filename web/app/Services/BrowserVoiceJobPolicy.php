@@ -104,7 +104,7 @@ class BrowserVoiceJobPolicy
         }
 
         return preg_match(
-            '/\b(?:delete|remove|move|change|reschedule|complete|mark)\s+(?:(?:that|this)(?:\s+(?:reminder|task|note|(?:calendar\s+)?event|meeting|appointment))?|it|the\s+one)\b/iu',
+            '/\b(?:delete|remove|move|change|reschedule|set|complete|mark)\s+(?:(?:that|this)(?:\s+(?:reminder|task|note|(?:calendar\s+)?event|meeting|appointment))?|it|the\s+one)\b/iu',
             $transcript,
         ) === 1;
     }

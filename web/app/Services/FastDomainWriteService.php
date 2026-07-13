@@ -199,7 +199,7 @@ class FastDomainWriteService
             ...$this->ownership($turn),
             'conversation_session_id' => $turn->conversation_session_id,
             'title' => $title,
-            'remind_at' => $at->utc(),
+            'remind_at' => $at->copy()->utc(),
             'status' => 'scheduled',
             'metadata' => $this->resourceMetadata($turn),
         ]);
@@ -221,7 +221,7 @@ class FastDomainWriteService
             'title' => $title,
             'type' => 'todo',
             'status' => 'open',
-            'due_at' => $due?->utc(),
+            'due_at' => $due?->copy()->utc(),
             'metadata' => $this->resourceMetadata($turn),
         ]);
 
@@ -284,7 +284,7 @@ class FastDomainWriteService
             ...$this->ownership($turn),
             'conversation_session_id' => $turn->conversation_session_id,
             'title' => $title,
-            'starts_at' => $startsAt->utc(),
+            'starts_at' => $startsAt->copy()->utc(),
             'ends_at' => $startsAt->copy()->addHour()->utc(),
             'status' => 'scheduled',
             'metadata' => $this->resourceMetadata($turn),
@@ -342,14 +342,17 @@ class FastDomainWriteService
             return null;
         }
         if ($target instanceof Reminder) {
-            $target->update(['remind_at' => $at->utc()]);
+            $target->update(['remind_at' => $at->copy()->utc()]);
             $type = 'reminder';
         } elseif ($target instanceof Task) {
-            $target->update(['due_at' => $at->utc()]);
+            $target->update(['due_at' => $at->copy()->utc()]);
             $type = 'task';
         } elseif ($target instanceof CalendarEvent) {
             $duration = max(60, $target->starts_at?->diffInSeconds($target->ends_at, true) ?? 3600);
-            $target->update(['starts_at' => $at->utc(), 'ends_at' => $at->copy()->addSeconds($duration)->utc()]);
+            $target->update([
+                'starts_at' => $at->copy()->utc(),
+                'ends_at' => $at->copy()->addSeconds($duration)->utc(),
+            ]);
             $type = 'calendar event';
         } else {
             return null;
@@ -435,7 +438,7 @@ class FastDomainWriteService
             && preg_match('/\b(?:titled|called|named)\b/iu', $turn->transcript) !== 1
             && (! str_ends_with($turn->handler, '.delete') || ! $this->typedWrites->hasClockTime($turn->transcript))
             && preg_match(
-                '/\b(?:delete|remove|move|change|reschedule|complete|mark)\s+(?:(?:that|this)(?:\s+(?:reminder|task|note|(?:calendar\s+)?event|meeting|appointment))?|it|the\s+one)\b/iu',
+                '/\b(?:delete|remove|move|change|reschedule|set|complete|mark)\s+(?:(?:that|this)(?:\s+(?:reminder|task|note|(?:calendar\s+)?event|meeting|appointment))?|it|the\s+one)\b/iu',
                 $turn->transcript,
             ) === 1;
     }
@@ -675,7 +678,9 @@ class FastDomainWriteService
         $date = $value->isToday() ? 'today' : ($value->isTomorrow() ? 'tomorrow' : $value->format('F jS'));
         $time = mb_strtolower($value->format('g:i a'));
         $time = str_replace(':00 ', ' ', $time);
-        $time = str_replace([' am', ' pm'], [' a.m.', ' p.m.'], $time);
+        // Callers finish the sentence. Keep the meridiem natural without
+        // embedding a second terminal period ("5 p.m..") in confirmations.
+        $time = str_replace([' am', ' pm'], [' a.m', ' p.m'], $time);
 
         return "{$date} at {$time}";
     }

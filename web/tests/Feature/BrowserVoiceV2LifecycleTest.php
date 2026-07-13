@@ -1242,6 +1242,7 @@ class BrowserVoiceV2LifecycleTest extends TestCase
             ->assertJsonPath('data.turn.lane', 'app_write')
             ->assertJsonPath('data.turn.handler', 'app.reminder.create')
             ->assertJsonPath('data.turn.state', 'completed')
+            ->assertJsonPath('data.turn.final_text', 'Done—I created the reminder “salt” for today at 5 p.m.')
             ->assertJsonPath('data.turn.acknowledgement_required', false)
             ->assertJsonPath('data.jobs.0.label', 'Update reminders')
             ->assertJsonPath('data.jobs.0.status', 'completed');
@@ -1255,6 +1256,26 @@ class BrowserVoiceV2LifecycleTest extends TestCase
         $this->assertSame('task', data_get($turn->metadata, 'contextual_reference.domain'));
         $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'user')->count());
         $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'assistant')->count());
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', [
+            ...$this->payload($sessionId, 'salt-reminder-correction-0001', 'Set it for 5 p.m.'),
+            'timezone' => 'America/New_York',
+            'conversation_context' => ['mode' => 'contextual_follow_up', 'epoch' => 1],
+        ])->assertCreated()
+            ->assertJsonPath('data.turn.lane', 'app_write')
+            ->assertJsonPath('data.turn.handler', 'app.reminder.reschedule')
+            ->assertJsonPath('data.turn.state', 'completed')
+            ->assertJsonPath('data.turn.side_effect_status', 'committed')
+            ->assertJsonPath('data.turn.final_text', 'Done—I moved “salt” to today at 5 p.m.')
+            ->assertJsonPath('data.jobs.0.label', 'Update reminders')
+            ->assertJsonPath('data.jobs.0.status', 'completed');
+
+        $correction = VoiceTurn::where('turn_id', 'salt-reminder-correction-0001')->firstOrFail();
+        $this->assertSame('app.reminder.create', data_get($correction->metadata, 'prior_handler'));
+        $this->assertSame(1, Reminder::where('metadata->browser_voice_turn_id', $turn->turn_id)->count());
+        $this->assertSame('2026-07-13 17:00', $reminder->fresh()->remind_at->timezone('America/New_York')->format('Y-m-d H:i'));
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $correction->turn_id)->where('role', 'user')->count());
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $correction->turn_id)->where('role', 'assistant')->count());
 
         $this->withToken($token)->postJson('/api/assistant/voice/turns', $reminderPayload)
             ->assertOk()

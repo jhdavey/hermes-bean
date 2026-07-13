@@ -63,6 +63,18 @@ class BrowserVoiceAdmissionRouter
             );
         }
 
+        $contextualRescheduleDomain = $this->contextualRescheduleDomain($text, $context);
+        if ($contextualRescheduleDomain !== null) {
+            return new VoiceTurnRoute(
+                VoiceTurnLane::AppWrite,
+                "app.{$contextualRescheduleDomain}.reschedule",
+                false,
+                null,
+                5,
+                2,
+            );
+        }
+
         $intentText = $this->intentText->stripEntityPayloads($text);
         $applicationDomains = $this->applicationDomains($intentText);
         $externalRequest = $this->containsAny($intentText, ['weather', 'forecast', 'temperature', 'rain', 'storm']);
@@ -291,6 +303,19 @@ class BrowserVoiceAdmissionRouter
     private function isContextualFollowUp(string $text): bool
     {
         return preg_match('/^(?:and\s+)?(?:what|how|when|where|which|who|will|is|are|did|does|do|can|could|would|about|what about)\b|\b(?:it|that|there|later|tomorrow|tonight|the first one|the next one)\b/u', $text) === 1;
+    }
+
+    /** @param array<string, mixed> $context */
+    private function contextualRescheduleDomain(string $text, array $context): ?string
+    {
+        if (data_get($context, 'prior_context_authorized') !== true
+            || ! $this->typedWrites->hasClockTime($text)
+            || preg_match('/^(?:please\s+)?(?:set|move|change|reschedule)\s+(?:it|that|this|the\s+one)\s+(?:for|to|at)\b/u', $text) !== 1
+            || preg_match('/^app\.(reminder|task|calendar)\.(?:create|read|reschedule)$/', (string) data_get($context, 'prior_handler'), $match) !== 1) {
+            return null;
+        }
+
+        return $match[1];
     }
 
     /** @param array<int, string> $terms */

@@ -118,6 +118,10 @@ test('[BV2-CONTEXT-02] a timed reminder for that task reaches server-owned conte
         assessBrowserVoiceV2Completeness('Okay, great. Can you set a reminder at 5 p.m. for that task?'),
         { decision: 'complete' },
     );
+    assert.deepEqual(
+        assessBrowserVoiceV2Completeness('Set it for 5 p.m.'),
+        { decision: 'complete' },
+    );
 });
 
 test('[BV2-COMPLETENESS-04] date-only typed writes clarify for a clock time and natural calendar writes proceed', () => {
