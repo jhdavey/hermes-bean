@@ -619,6 +619,7 @@ class VoiceV2BrowserJourneyHarness {
                 timezone: 'America/New_York',
                 controllerGeneration: this.controller.snapshot().generation,
                 providerConnectionGeneration: this.controller.snapshot().connectionGeneration,
+                conversationContext: effect.conversationContext,
             }).then((snapshot) => this.applyProjection(snapshot))
                 .finally(() => this.admissions.delete(admission));
             this.admissions.add(admission);

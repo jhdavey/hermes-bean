@@ -66,12 +66,17 @@ export function sanitizedLocalWakeFailure(error, stage = 'local_wake') {
         current = current.cause;
     }
 
+    const normalizedStage = ['local_wake', 'startup', 'admission'].includes(stage) ? stage : 'local_wake';
+    const fallback = normalizedStage === 'startup'
+        ? ['voice_startup_failure', 'Browser voice startup failed.']
+        : normalizedStage === 'admission'
+            ? ['voice_admission_failure', 'Browser voice admission failed.']
+            : ['local_wake_failure', 'Private wake detection failed.'];
+
     return {
-        stage: stage === 'startup' ? 'startup' : 'local_wake',
-        code: chain[0]?.code || (stage === 'startup' ? 'voice_startup_failure' : 'local_wake_failure'),
-        message: chain[0]?.message || (stage === 'startup'
-            ? 'Browser voice startup failed.'
-            : 'Private wake detection failed.'),
+        stage: normalizedStage,
+        code: chain[0]?.code || fallback[0],
+        message: chain[0]?.message || fallback[1],
         cause_chain: chain,
     };
 }

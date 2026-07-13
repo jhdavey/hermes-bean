@@ -179,6 +179,10 @@ class BrowserVoiceAdmissionRouter
     {
         $text = str_replace('’', "'", mb_strtolower(trim($transcript)));
         $text = preg_replace('/^\s*(?:hey[\s,.-]+)?bean\b[\s,.:;!?-]*/u', '', $text) ?? $text;
+        // Speech transcription commonly emits all three spellings. Canonicalize
+        // them before domain routing so an authoritative task read can never
+        // fall through to the general agent merely because it used "to-do".
+        $text = preg_replace('/\bto[\x{2010}-\x{2015}-]do\b/u', 'todo', $text) ?? $text;
 
         return trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
     }

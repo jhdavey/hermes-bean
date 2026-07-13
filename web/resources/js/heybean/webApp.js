@@ -9601,7 +9601,7 @@ export function mountHeyBeanWebApp(mount) {
         return state.messages.length !== before;
     }
 
-    function failBrowserVoiceV2Admission(turnId, isCurrent) {
+    function failBrowserVoiceV2Admission(turnId, isCurrent, error = null) {
         removeBrowserVoiceV2ProvisionalMessage(turnId);
         if (!isCurrent || browserVoiceV2AdmissionFailureTurnIds.has(turnId)) {
             render();
@@ -9609,6 +9609,13 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         browserVoiceV2AdmissionFailureTurnIds.add(turnId);
+        const diagnostic = sanitizedLocalWakeFailure(error, 'admission');
+        console.warn('Browser Voice v2 admission failure', diagnostic);
+        void api('/assistant/voice/client-failures', {
+            method: 'POST',
+            body: diagnostic,
+            timeoutMs: 3000,
+        }).catch(() => {});
         browserVoiceV2Controller.admissionFailed(turnId, 'admission_recovery_exhausted', {
             source: 'admission_recovery',
         });
@@ -9656,7 +9663,10 @@ export function mountHeyBeanWebApp(mount) {
                 turnId,
                 sessionId,
                 transcript: content,
-                timeoutMs: /\b(?:weather|forecast|temperature|rain|storm)\b/i.test(content) ? 8500 : 3500,
+                // Successful reads still return at their normal low latency. The
+                // wider transport envelope prevents a transient network delay
+                // from aborting an otherwise healthy, deadline-owned server turn.
+                timeoutMs: 8500,
                 timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
                 controllerGeneration: controllerState.generation,
                 providerConnectionGeneration: controllerState.connectionGeneration,
@@ -9674,7 +9684,7 @@ export function mountHeyBeanWebApp(mount) {
             const clarification = resolveBrowserVoiceV2AdmissionClarification(error, turnId, state.messages);
             if (clarification) {
                 if (!admissionCanClarify()) {
-                    failBrowserVoiceV2Admission(turnId, admissionStillCurrent());
+                    failBrowserVoiceV2Admission(turnId, admissionStillCurrent(), error);
                     return;
                 }
                 state.messages = clarification.messages;
@@ -9731,10 +9741,14 @@ export function mountHeyBeanWebApp(mount) {
                     }
                 }
                 if (browserVoiceV2TurnStates.has(turnId)) return;
-                failBrowserVoiceV2Admission(turnId, admissionStillCurrent() && recovery.status !== 'stale');
+                failBrowserVoiceV2Admission(
+                    turnId,
+                    admissionStillCurrent() && recovery.status !== 'stale',
+                    recovery.error || error,
+                );
                 return;
             }
-            failBrowserVoiceV2Admission(turnId, admissionStillCurrent());
+            failBrowserVoiceV2Admission(turnId, admissionStillCurrent(), error);
         } finally {
             browserVoiceV2AdmissionRegistry.finish(admissionScope);
         }

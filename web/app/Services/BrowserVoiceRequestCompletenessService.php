@@ -19,6 +19,7 @@ class BrowserVoiceRequestCompletenessService
     ): ?string {
         $text = str_replace('’', "'", mb_strtolower(trim($transcript)));
         $text = preg_replace('/^\s*(?:hey[\s,.-]+)?bean\b[\s,.:;!?-]*/u', '', $text) ?? $text;
+        $text = preg_replace('/\bto[\x{2010}-\x{2015}-]do\b/u', 'todo', $text) ?? $text;
         if (trim($text) === '') {
             return 'What can I help you with?';
         }

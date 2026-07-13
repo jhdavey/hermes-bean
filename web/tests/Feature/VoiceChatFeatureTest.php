@@ -276,6 +276,27 @@ class VoiceChatFeatureTest extends TestCase
         );
     }
 
+    public function test_authenticated_browser_can_record_a_sanitized_admission_failure(): void
+    {
+        Log::spy();
+        $token = $this->apiToken('voice-admission-failure@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/client-failures', [
+            'stage' => 'admission',
+            'code' => 'AbortError',
+            'message' => 'The durable turn request timed out.',
+            'cause_chain' => [
+                ['code' => 'AbortError', 'message' => 'The durable turn request timed out.'],
+            ],
+        ])->assertOk()->assertJsonPath('data.recorded', true);
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(
+            fn (string $message, array $context): bool => $message === 'Browser Voice v2 client failure.'
+                && $context['stage'] === 'admission'
+                && $context['code'] === 'AbortError',
+        );
+    }
+
     private function completedUsage(User $user, float $cost): AiUsageLog
     {
         return AiUsageLog::create([

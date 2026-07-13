@@ -153,6 +153,21 @@ test('[BV2-DIAGNOSTIC-02] a post-readiness local wake failure records its saniti
     assert.match(source, /onError: \(error\) => handleLocalWakeFailure\(localWakeGate, connectionGeneration, error\)/);
 });
 
+test('[BV2-DIAGNOSTIC-03] exhausted durable admission reports a sanitized diagnostic and retains a recovery envelope', () => {
+    const start = source.indexOf('function failBrowserVoiceV2Admission(');
+    const end = source.indexOf('\n    async function admitBrowserVoiceV2Turn(', start);
+    assert.ok(start >= 0 && end > start, 'the admission failure boundary must remain discoverable');
+    const failure = source.slice(start, end);
+    assert.match(failure, /sanitizedLocalWakeFailure\(error, 'admission'\)/);
+    assert.match(failure, /\/assistant\/voice\/client-failures/);
+
+    const admissionStart = source.indexOf('async function admitBrowserVoiceV2Turn(');
+    const admissionEnd = source.indexOf('\n    function applyBrowserVoiceV2Snapshot(', admissionStart);
+    const admission = source.slice(admissionStart, admissionEnd);
+    assert.match(admission, /timeoutMs:\s*8500/);
+    assert.match(admission, /recovery\.error \|\| error/);
+});
+
 test('[BV2-STARTUP-03] startup uses one same-origin SDP owner and fails closed with a natural retry prompt', () => {
     const openStart = source.indexOf('async function openRealtimeSession(');
     const openEnd = source.indexOf('\n    function clearRealtimeDisconnectedTimer(', openStart);

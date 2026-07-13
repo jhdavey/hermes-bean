@@ -1168,6 +1168,48 @@ class BrowserVoiceV2LifecycleTest extends TestCase
             ->assertJsonPath('data.jobs.0.status', 'completed');
     }
 
+    public function test_voice_state_answer_then_to_do_follow_up_uses_authoritative_tasks_without_an_acknowledgement(): void
+    {
+        Carbon::setTestNow('2026-07-13 14:30:00', 'America/New_York');
+        Queue::fake([EnforceBrowserVoiceTurnDeadline::class]);
+        $token = $this->apiToken('voice-v2-to-do-follow-up@example.com');
+        $sessionId = $this->sessionId($token);
+        $session = ConversationSession::findOrFail($sessionId);
+        Task::create([
+            'user_id' => $session->user_id,
+            'workspace_id' => $session->workspace_id,
+            'title' => 'Review launch checklist',
+            'status' => 'open',
+            'due_at' => Carbon::parse('2026-07-13 16:00:00', 'America/New_York')->utc(),
+        ]);
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', [
+            ...$this->payload($sessionId, 'voice-state-before-task-0001', 'Can you hear me?'),
+            'timezone' => 'America/New_York',
+            'conversation_context' => ['mode' => 'new_conversation', 'epoch' => 1],
+        ])->assertCreated()
+            ->assertJsonPath('data.turn.handler', 'instant.voice_state')
+            ->assertJsonPath('data.turn.final_text', 'Yes—I can hear you.');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', [
+            ...$this->payload($sessionId, 'to-do-follow-up-0001', 'Is there anything on my to-do list for today?'),
+            'timezone' => 'America/New_York',
+            'conversation_context' => ['mode' => 'contextual_follow_up', 'epoch' => 1],
+        ])->assertCreated()
+            ->assertJsonPath('data.turn.lane', 'app_read')
+            ->assertJsonPath('data.turn.handler', 'app.task.read')
+            ->assertJsonPath('data.turn.state', 'completed')
+            ->assertJsonPath('data.turn.acknowledgement_required', false)
+            ->assertJsonPath('data.jobs.0.label', 'Check tasks')
+            ->assertJsonPath('data.jobs.0.status', 'completed')
+            ->assertJsonPath('data.turn.final_text', fn (string $text): bool => str_contains($text, 'Review launch checklist'));
+
+        $turn = VoiceTurn::where('turn_id', 'to-do-follow-up-0001')->firstOrFail();
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'user')->count());
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'assistant')->count());
+        $this->assertSame(0, $turn->events()->where('event_type', 'acknowledgement_started')->count());
+    }
+
     /** @return array<string, mixed> */
     private function payload(int $sessionId, string $turnId, string $transcript = 'Hey Bean, can you hear me?'): array
     {
