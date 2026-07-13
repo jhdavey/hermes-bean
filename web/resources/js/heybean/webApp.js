@@ -10554,7 +10554,10 @@ export function mountHeyBeanWebApp(mount) {
                         event_type: report.eventType,
                         usage: report.usage,
                     },
-                    timeoutMs: 5000,
+                    // Accounting is asynchronous and idempotent. Allow normal
+                    // production warm-up/network spikes to return their receipt
+                    // instead of disabling an otherwise healthy voice session.
+                    timeoutMs: 10000,
                 }),
             });
         } catch (error) {

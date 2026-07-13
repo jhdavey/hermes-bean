@@ -131,6 +131,7 @@ test('[BV2-USAGE-02] realtime usage is reported once and a plan limit closes voi
     assert.match(implementation, /browserVoiceV2RealtimeUsageEventIds\.has\(eventId\)/);
     assert.match(implementation, /\/assistant\/voice\/realtime\/usage/);
     assert.match(implementation, /reportRealtimeUsageReliably\(report/);
+    assert.match(implementation, /timeoutMs:\s*10000/);
     assert.match(implementation, /sanitizedLocalWakeFailure\(error, 'usage_accounting'\)/);
     assert.match(implementation, /reason: Number\(error\?\.status \|\| 0\) === 402 \? 'usage_limit'/);
     assert.match(implementation, /state\.chatRunState = [\s\S]*'Upgrade to continue'/);
