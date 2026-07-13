@@ -87,7 +87,23 @@ class OpenAiVoiceService
             ->post($this->endpoint('/realtime/calls'));
 
         if (! $response->successful()) {
-            throw new RuntimeException('OpenAI realtime call request failed with status '.$response->status().'.');
+            $providerCode = preg_replace(
+                '/[^a-z0-9_.-]+/i',
+                '_',
+                (string) $response->json('error.code', 'unknown_error'),
+            );
+            $providerMessage = preg_replace(
+                '/\s+/',
+                ' ',
+                (string) $response->json('error.message', 'The provider rejected the realtime call.'),
+            );
+
+            throw new RuntimeException(sprintf(
+                'OpenAI realtime call request failed with status %d (%s): %s',
+                $response->status(),
+                substr((string) $providerCode, 0, 80),
+                substr((string) $providerMessage, 0, 500),
+            ));
         }
 
         $answerSdp = trim($response->body());
