@@ -9,6 +9,7 @@ import {
     themeModesByKey,
 } from './config.js';
 import {
+    acquireRealtimeMicrophone,
     RealtimeInputTranscriptBuffer,
     stageOptimisticUserTurn,
     buildRealtimeConversationItemDeleteEvent,
@@ -10150,7 +10151,10 @@ export function mountHeyBeanWebApp(mount) {
         });
         realtimeLocalWakeGate = localWakeGate;
 
-        const rawMicrophoneStream = await navigator.mediaDevices.getUserMedia(realtimeMicrophoneConstraints());
+        const rawMicrophoneStream = await acquireRealtimeMicrophone(
+            (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+            realtimeMicrophoneConstraints(),
+        );
         if (connectionGeneration !== realtimeConnectionGeneration) {
             rawMicrophoneStream.getTracks().forEach((track) => track.stop());
             throw new Error('Realtime voice connection was superseded.');

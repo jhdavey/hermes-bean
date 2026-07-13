@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    acquireRealtimeMicrophone,
     RealtimeInputTranscriptBuffer,
     buildRealtimeConversationItemDeleteEvent,
     buildRealtimeResponseEvent,
@@ -25,6 +26,34 @@ const {
     captureHeyBeanChatControlFocus,
     restoreHeyBeanChatControlFocus,
 } = await import('../../resources/js/heybean/webApp.js');
+
+test('[BV2-STARTUP-04] a transient browser microphone release abort retries once before re-arm fails', async () => {
+    const expectedStream = { id: 'second-acquisition' };
+    const calls = [];
+    const delays = [];
+    const stream = await acquireRealtimeMicrophone(async (constraints) => {
+        calls.push(constraints);
+        if (calls.length === 1) {
+            throw Object.assign(new Error('signal is aborted without reason'), { name: 'AbortError', code: 20 });
+        }
+        return expectedStream;
+    }, { audio: true }, {
+        retryDelayMs: 200,
+        delay: async (milliseconds) => delays.push(milliseconds),
+    });
+
+    assert.equal(stream, expectedStream);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(delays, [200]);
+
+    const permissionFailure = Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' });
+    await assert.rejects(
+        () => acquireRealtimeMicrophone(async () => { throw permissionFailure; }, { audio: true }, {
+            delay: async () => assert.fail('non-transient microphone failures must not retry'),
+        }),
+        permissionFailure,
+    );
+});
 
 test('[BV2-STOP-05] browser voice Stop never routes active v2 work through generic task cancellation', () => {
     assert.equal(browserVoiceV2OwnsStopAction({ enabled: true, activeWork: true }), true);

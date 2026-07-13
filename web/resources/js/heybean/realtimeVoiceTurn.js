@@ -8,6 +8,20 @@ export function realtimeMicrophoneConstraints() {
     };
 }
 
+export async function acquireRealtimeMicrophone(getUserMedia, constraints, {
+    retryDelayMs = 200,
+    delay = (milliseconds) => new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds)),
+} = {}) {
+    try {
+        return await getUserMedia(constraints);
+    } catch (error) {
+        const abortSignature = `${error?.name || ''} ${error?.code || ''} ${error?.message || ''}`;
+        if (!/abort|(^|\s)20(\s|$)/i.test(abortSignature)) throw error;
+        await delay(retryDelayMs);
+        return getUserMedia(constraints);
+    }
+}
+
 export function realtimeUsageReportFromProviderEvent(payload = {}) {
     const type = String(payload?.type || '');
     const transcription = type === 'conversation.item.input_audio_transcription.completed';
