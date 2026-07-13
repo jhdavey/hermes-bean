@@ -75,6 +75,17 @@ class OpenAiVoiceService
         $model = $this->realtimeModel();
         $session = $this->realtimeSessionConfiguration($profile, $context, $voice, $model);
         $normalizedSdp = preg_replace('/\r\n|\r|\n/', "\r\n", trim($sdp))."\r\n";
+        $boundary = '----BeanRealtime'.bin2hex(random_bytes(18));
+        $sessionJson = json_encode($session, JSON_THROW_ON_ERROR);
+        $multipartBody = "--{$boundary}\r\n"
+            ."Content-Disposition: form-data; name=\"sdp\"\r\n"
+            ."Content-Type: application/sdp\r\n\r\n"
+            .$normalizedSdp."\r\n"
+            ."--{$boundary}\r\n"
+            ."Content-Disposition: form-data; name=\"session\"\r\n"
+            ."Content-Type: application/json\r\n\r\n"
+            .$sessionJson."\r\n"
+            ."--{$boundary}--\r\n";
 
         $response = Http::withToken($this->apiKey())
             ->accept('application/sdp')
@@ -82,9 +93,7 @@ class OpenAiVoiceService
                 'OpenAI-Safety-Identifier' => $safetyIdentifier,
             ]))
             ->timeout((float) config('services.openai.realtime_session_timeout', 10))
-            ->asMultipart()
-            ->attach('sdp', $normalizedSdp, null, ['Content-Type' => 'application/sdp'])
-            ->attach('session', json_encode($session, JSON_THROW_ON_ERROR), null, ['Content-Type' => 'application/json'])
+            ->withBody($multipartBody, "multipart/form-data; boundary={$boundary}")
             ->post($this->endpoint('/realtime/calls'));
 
         if (! $response->successful()) {

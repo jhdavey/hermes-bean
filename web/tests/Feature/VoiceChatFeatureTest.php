@@ -84,17 +84,16 @@ class VoiceChatFeatureTest extends TestCase
         ]);
 
         Http::assertSent(function ($request): bool {
-            $parts = collect($request->data())->keyBy('name');
-            $sdp = (string) data_get($parts->get('sdp'), 'contents');
-            $session = json_decode((string) data_get($parts->get('session'), 'contents'), true);
-            $sdpContentType = (string) data_get($parts->get('sdp'), 'headers.Content-Type');
-            $sessionContentType = (string) data_get($parts->get('session'), 'headers.Content-Type');
+            $body = $request->body();
+            preg_match('/name="sdp"\r\nContent-Type: application\/sdp\r\n\r\n(.*?)\r\n--/s', $body, $sdpMatch);
+            preg_match('/name="session"\r\nContent-Type: application\/json\r\n\r\n(.*?)\r\n--/s', $body, $sessionMatch);
+            $sdp = (string) ($sdpMatch[1] ?? '');
+            $session = json_decode((string) ($sessionMatch[1] ?? ''), true);
 
             return $request->url() === 'https://api.openai.test/v1/realtime/calls'
                 && $request->hasHeader('Authorization', 'Bearer test-openai-key')
                 && $request->hasHeader('OpenAI-Safety-Identifier')
-                && $sdpContentType === 'application/sdp'
-                && $sessionContentType === 'application/json'
+                && str_starts_with((string) $request->header('Content-Type')[0], 'multipart/form-data; boundary=----BeanRealtime')
                 && str_ends_with($sdp, "\r\n")
                 && str_contains($sdp, 'm=audio 9 UDP/TLS/RTP/SAVPF 111')
                 && data_get($session, 'type') === 'realtime'
