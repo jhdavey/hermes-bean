@@ -47,38 +47,35 @@ class VoiceChatFeatureTest extends TestCase
         ])->assertUnprocessable();
     }
 
-    public function test_authenticated_user_can_create_transcription_and_speech_only_realtime_session(): void
+    public function test_authenticated_user_can_create_transcription_and_speech_only_realtime_call_through_same_origin(): void
     {
         config()->set('services.openai.server_api_key', 'test-openai-key');
         config()->set('services.openai.realtime_model', 'gpt-realtime-test');
-        config()->set('services.openai.realtime_webrtc_url', 'https://api.openai.test/v1/realtime/calls');
         config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
         $token = $this->apiToken('voice-realtime@example.com');
 
         $this->withToken($token)->patchJson('/api/auth/me', ['voice' => 'shimmer'])->assertOk();
 
         Http::fake([
-            'api.openai.test/v1/realtime/client_secrets' => Http::response([
-                'value' => 'ephemeral-client-secret',
-                'expires_at' => 1893456000,
-                'session' => [
-                    'id' => 'sess_test_123',
-                ],
-            ], 200),
+            'api.openai.test/v1/realtime/calls' => Http::response(
+                "v=0\r\no=- 123 456 IN IP4 127.0.0.1\r\n",
+                201,
+                ['Content-Type' => 'application/sdp', 'Location' => '/v1/realtime/calls/call_test_123'],
+            ),
         ]);
 
         $this->withToken($token)->postJson('/api/assistant/voice/realtime/session', [
             'timezone' => 'America/New_York',
+            'sdp' => "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n",
         ])->assertOk()
             ->assertJsonPath('data.provider', 'openai_realtime')
             ->assertJsonPath('data.model', 'gpt-realtime-test')
             ->assertJsonPath('data.voice', 'shimmer')
-            ->assertJsonPath('data.client_secret', 'ephemeral-client-secret')
-            ->assertJsonPath('data.session_id', 'sess_test_123')
+            ->assertJsonPath('data.sdp', "v=0\r\no=- 123 456 IN IP4 127.0.0.1")
+            ->assertJsonPath('data.session_id', 'call_test_123')
             ->assertJsonStructure(['data' => ['usage_session_id']])
-            ->assertJsonPath('data.realtime_url', 'https://api.openai.test/v1/realtime/calls')
             ->assertJsonPath('data.tools', [])
-            ->assertJsonMissing(['test-openai-key']);
+            ->assertJsonMissing(['test-openai-key', 'client_secret', 'realtime_url']);
 
         $this->assertDatabaseHas('ai_usage_logs', [
             'user_id' => User::where('email', 'voice-realtime@example.com')->firstOrFail()->id,
@@ -87,27 +84,54 @@ class VoiceChatFeatureTest extends TestCase
         ]);
 
         Http::assertSent(function ($request): bool {
-            $payload = $request->data();
+            $parts = collect($request->data())->keyBy('name');
+            $sdp = (string) data_get($parts->get('sdp'), 'contents');
+            $session = json_decode((string) data_get($parts->get('session'), 'contents'), true);
 
-            return $request->url() === 'https://api.openai.test/v1/realtime/client_secrets'
+            return $request->url() === 'https://api.openai.test/v1/realtime/calls'
                 && $request->hasHeader('Authorization', 'Bearer test-openai-key')
-                && data_get($payload, 'session.type') === 'realtime'
-                && data_get($payload, 'session.model') === 'gpt-realtime-test'
-                && data_get($payload, 'session.audio.output.voice') === 'shimmer'
-                && data_get($payload, 'session.audio.input.format.type') === 'audio/pcm'
-                && data_get($payload, 'session.audio.input.format.rate') === 24000
-                && data_get($payload, 'session.audio.input.transcription.language') === 'en'
-                && str_contains((string) data_get($payload, 'session.audio.input.transcription.prompt'), 'background noise')
-                && data_get($payload, 'session.audio.input.turn_detection.type') === 'server_vad'
-                && data_get($payload, 'session.audio.input.turn_detection.silence_duration_ms') === 2000
-                && data_get($payload, 'session.audio.input.turn_detection.create_response') === false
-                && data_get($payload, 'session.audio.input.turn_detection.interrupt_response') === false
-                && data_get($payload, 'session.tools') === []
-                && data_get($payload, 'session.tool_choice') === 'none'
-                && str_contains((string) data_get($payload, 'session.instructions'), 'US English transcription and speech surface')
-                && str_contains((string) data_get($payload, 'session.instructions'), 'Never call tools')
-                && str_contains((string) data_get($payload, 'session.instructions'), 'Never call tools or independently answer microphone input');
+                && $request->hasHeader('OpenAI-Safety-Identifier')
+                && str_contains($sdp, 'm=audio 9 UDP/TLS/RTP/SAVPF 111')
+                && data_get($session, 'type') === 'realtime'
+                && data_get($session, 'model') === 'gpt-realtime-test'
+                && data_get($session, 'audio.output.voice') === 'shimmer'
+                && data_get($session, 'audio.input.format.type') === 'audio/pcm'
+                && data_get($session, 'audio.input.format.rate') === 24000
+                && data_get($session, 'audio.input.transcription.model') === 'gpt-4o-mini-transcribe'
+                && data_get($session, 'audio.input.transcription.language') === 'en'
+                && data_get($session, 'audio.input.turn_detection.silence_duration_ms') === 2000
+                && data_get($session, 'audio.input.turn_detection.create_response') === false
+                && data_get($session, 'audio.input.turn_detection.interrupt_response') === false
+                && str_contains((string) data_get($session, 'instructions'), 'US English transcription and speech surface')
+                && str_contains((string) data_get($session, 'instructions'), 'Never call tools or independently answer microphone input');
         });
+    }
+
+    public function test_realtime_provider_failure_is_terminal_sanitized_and_does_not_open_usage_session(): void
+    {
+        config()->set('services.openai.server_api_key', 'test-openai-key');
+        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+        Http::fake([
+            'api.openai.test/v1/realtime/calls' => Http::response(['error' => ['message' => 'provider detail']], 503),
+        ]);
+        Log::spy();
+        $token = $this->apiToken('voice-realtime-failure@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/realtime/session', [
+            'sdp' => "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n",
+        ])->assertStatus(502)
+            ->assertJsonPath('error.code', 'realtime_connection_failed')
+            ->assertJsonPath('message', 'Bean couldn’t connect voice right now. Tap Bean to try again.')
+            ->assertJsonMissing(['provider detail', 'test-openai-key']);
+
+        $this->assertDatabaseMissing('ai_usage_logs', [
+            'user_id' => User::where('email', 'voice-realtime-failure@example.com')->firstOrFail()->id,
+            'request_type' => 'voice_realtime_session',
+        ]);
+        Log::shouldHaveReceived('warning')->once()->withArgs(
+            fn (string $message, array $context): bool => $message === 'Browser Voice v2 provider connection failed.'
+                && $context['stage'] === 'realtime_sdp',
+        );
     }
 
     public function test_base_premium_and_pro_voice_sessions_stop_at_each_users_daily_plan_limit_while_admin_remains_unlimited(): void
@@ -116,12 +140,7 @@ class VoiceChatFeatureTest extends TestCase
         config()->set('services.ai_usage.limits.base_cost_limit', 0.01);
         config()->set('services.ai_usage.limits.premium_cost_limit', 0.02);
         config()->set('services.ai_usage.limits.pro_cost_limit', 0.03);
-        Http::fake([
-            '*' => Http::response([
-                'value' => 'admin-ephemeral-secret',
-                'session' => ['id' => 'sess_admin_unlimited'],
-            ]),
-        ]);
+        Http::fake(['*' => Http::response("v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n", 201)]);
 
         foreach (['base' => 0.01, 'premium' => 0.02, 'pro' => 0.03] as $tier => $cost) {
             $email = "voice-limit-{$tier}@example.com";
@@ -130,7 +149,7 @@ class VoiceChatFeatureTest extends TestCase
             $user->forceFill(['subscription_tier' => $tier])->save();
             $this->completedUsage($user, $cost);
 
-            $this->withToken($token)->postJson('/api/assistant/voice/realtime/session')
+            $this->withToken($token)->postJson('/api/assistant/voice/realtime/session', ['sdp' => 'v=0'])
                 ->assertStatus(402)
                 ->assertJsonPath('error.code', 'subscription_limit_reached')
                 ->assertJsonPath('error.cta_label', 'View plans')
@@ -142,9 +161,9 @@ class VoiceChatFeatureTest extends TestCase
         $admin = User::where('email', 'voice-limit-admin@example.com')->firstOrFail();
         $admin->forceFill(['is_admin' => true, 'subscription_tier' => 'base'])->save();
         $this->completedUsage($admin, 999);
-        $this->withToken($adminToken)->postJson('/api/assistant/voice/realtime/session')
+        $this->withToken($adminToken)->postJson('/api/assistant/voice/realtime/session', ['sdp' => 'v=0'])
             ->assertOk()
-            ->assertJsonPath('data.session_id', 'sess_admin_unlimited');
+            ->assertJsonPath('data.provider', 'openai_realtime');
     }
 
     public function test_realtime_usage_is_charged_once_and_returns_an_upgrade_action_when_the_event_reaches_the_plan_limit(): void
@@ -156,14 +175,13 @@ class VoiceChatFeatureTest extends TestCase
             'text_output' => 5.00,
         ]);
         config()->set('services.openai.realtime_transcription_model', 'gpt-4o-mini-transcribe');
-        Http::fake([
-            '*' => Http::response([
-                'value' => 'metered-ephemeral-secret',
-                'session' => ['id' => 'sess_metered_123'],
-            ]),
-        ]);
+        Http::fake(['*' => Http::response(
+            "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n",
+            201,
+            ['Location' => '/v1/realtime/calls/sess_metered_123'],
+        )]);
         $token = $this->apiToken('voice-metered@example.com');
-        $session = $this->withToken($token)->postJson('/api/assistant/voice/realtime/session')->assertOk();
+        $session = $this->withToken($token)->postJson('/api/assistant/voice/realtime/session', ['sdp' => 'v=0'])->assertOk();
         $usageSessionId = $session->json('data.usage_session_id');
         $payload = [
             'usage_session_id' => $usageSessionId,
@@ -230,6 +248,27 @@ class VoiceChatFeatureTest extends TestCase
             fn (string $message, array $context): bool => $message === 'Browser Voice v2 client failure.'
                 && $context['code'] === 'gate_open_failed'
                 && count($context['cause_chain']) === 2,
+        );
+    }
+
+    public function test_authenticated_browser_can_record_a_sanitized_startup_failure(): void
+    {
+        Log::spy();
+        $token = $this->apiToken('voice-startup-failure@example.com');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/client-failures', [
+            'stage' => 'startup',
+            'code' => 'AbortError',
+            'message' => 'signal is aborted without reason',
+            'cause_chain' => [
+                ['code' => 'AbortError', 'message' => 'signal is aborted without reason'],
+            ],
+        ])->assertOk()->assertJsonPath('data.recorded', true);
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(
+            fn (string $message, array $context): bool => $message === 'Browser Voice v2 client failure.'
+                && $context['stage'] === 'startup'
+                && $context['code'] === 'AbortError',
         );
     }
 

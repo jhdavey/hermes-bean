@@ -25,8 +25,10 @@ test('[BV2-WAKE-01] wake-ready is published only after provider transport and a 
     assert.ok(connectStart >= 0 && connectEnd > connectStart, 'realtime startup must remain discoverable');
     const connect = source.slice(connectStart, connectEnd);
 
-    const parallelSetup = connect.indexOf('Promise.all([localWakePromise, openRealtimeSession()])');
+    const localWakeSetup = connect.indexOf('const localWakePromise = localWakeGate.start');
     const recvOnly = connect.indexOf("peerConnection.addTransceiver('audio', { direction: 'recvonly' })");
+    const offer = connect.indexOf('const offer = await peerConnection.createOffer()');
+    const parallelSetup = connect.indexOf('Promise.all([localWakePromise, openRealtimeSession(offer.sdp)])');
     const providerTransport = connect.indexOf('transportReady,');
     const freshBoundary = connect.indexOf('localWakeGate.resetAfterTurn()', providerTransport);
     const finalLocalBarrier = connect.indexOf(
@@ -35,8 +37,8 @@ test('[BV2-WAKE-01] wake-ready is published only after provider transport and a 
     );
     const returnReadyGate = connect.indexOf('return localWakeGate;', finalLocalBarrier);
 
-    assert.ok(parallelSetup >= 0, 'local wake and provider session setup must remain parallel');
-    assert.ok(recvOnly > parallelSetup, 'the provider WebRTC media path must remain receive-only');
+    assert.ok(localWakeSetup >= 0 && recvOnly > localWakeSetup, 'local wake setup must start before negotiation');
+    assert.ok(offer > recvOnly && parallelSetup > offer, 'local wake readiness and same-origin SDP setup must overlap');
     assert.doesNotMatch(connect, /direction:\s*'sendrecv'|addTrack\(/);
     assert.ok(providerTransport > parallelSetup, 'provider capture readiness must be awaited');
     assert.ok(freshBoundary > providerTransport, 'startup audio must be discarded after provider readiness');
@@ -131,4 +133,29 @@ test('[BV2-DIAGNOSTIC-02] a post-readiness local wake failure records its saniti
     assert.match(implementation, /\/assistant\/voice\/client-failures/);
     assert.match(implementation, /handleRealtimeConnectionLoss/);
     assert.match(source, /onError: \(error\) => handleLocalWakeFailure\(localWakeGate, connectionGeneration, error\)/);
+});
+
+test('[BV2-STARTUP-03] startup uses one same-origin SDP owner and fails closed with a natural retry prompt', () => {
+    const openStart = source.indexOf('async function openRealtimeSession(');
+    const openEnd = source.indexOf('\n    function clearRealtimeDisconnectedTimer(', openStart);
+    const open = source.slice(openStart, openEnd);
+    assert.match(open, /openRealtimeSession\(sdp\)/);
+    assert.match(open, /\/assistant\/voice\/realtime\/session/);
+    assert.match(open, /body:[\s\S]*sdp/);
+
+    const connectStart = source.indexOf('async function connectRealtimeVoice(');
+    const connectEnd = source.indexOf('\n    function handleRealtimeConnectionLoss(', connectStart);
+    const connect = source.slice(connectStart, connectEnd);
+    assert.match(connect, /openRealtimeSession\(offer\.sdp\)/);
+    assert.match(connect, /session\?\.sdp/);
+    assert.doesNotMatch(connect, /client_secret|realtime_url|api\.openai\.com/);
+
+    const start = source.indexOf('async function startVoiceWakeListening(');
+    const end = source.indexOf('\n    function toggleVoiceWakeListening(', start);
+    const implementation = source.slice(start, end);
+    const diagnostic = implementation.indexOf("sanitizedLocalWakeFailure(error, 'startup')");
+    const stop = implementation.indexOf('stopVoiceWakeListening', diagnostic);
+    const naturalFailure = implementation.indexOf('Bean couldn’t connect voice right now.', stop);
+    assert.ok(diagnostic >= 0 && stop > diagnostic && naturalFailure > stop);
+    assert.doesNotMatch(implementation, /state\.error\s*=\s*error\?\.message|state\.error\s*=\s*error\.message/);
 });

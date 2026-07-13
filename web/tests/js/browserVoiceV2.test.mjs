@@ -169,6 +169,34 @@ test('[BV2-WAKE-01] readiness admits the first wake exactly once and rejects sta
     assert.equal(voice.snapshot().lastRejectedEvent.reason, 'stale_sequence');
 });
 
+test('[BV2-WAKE-08] a failed first mic start can be stopped, re-armed, and accept the first wake once', () => {
+    const voice = new BrowserVoiceControllerV2();
+    const failedStart = voice.start();
+    const failedConnection = failedStart.connectionGeneration;
+    voice.dispatch({ type: 'connection_failed', reason: 'startup_timeout', source: 'provider' });
+    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.FAILED);
+
+    voice.disable('startup_failed');
+    const restarted = voice.start();
+    assert.ok(restarted.connectionGeneration > failedConnection);
+    voice.providerReady({ source: 'provider' });
+    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
+
+    voice.dispatch({
+        type: 'provider_ready',
+        connectionGeneration: failedConnection,
+        generation: failedStart.generation,
+        sequence: 99,
+        source: 'stale-provider',
+    });
+    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
+    assert.equal(voice.snapshot().lastRejectedEvent.reason, 'stale_generation');
+
+    const wake = voice.wakeConfirmed({ turnId: 'rearmed-first-turn', source: 'local_wake' });
+    assert.equal(wake.state.activeTurn.id, 'rearmed-first-turn');
+    assert.equal(wake.effects.filter((item) => item.type === BROWSER_VOICE_EFFECTS.ACTIVATE_CAPTURE).length, 1);
+});
+
 test('[BV2-TRANSCRIPT-01] live final text replaces its partial and the utterance closes at 2,000 ms, not 1,999', () => {
     const { voice, time } = createReadyVoice();
     const turnId = beginWakeCapture(voice);

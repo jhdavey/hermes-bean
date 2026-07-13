@@ -31,7 +31,7 @@ export function realtimeUsageReportFromProviderEvent(payload = {}) {
     };
 }
 
-export function sanitizedLocalWakeFailure(error) {
+export function sanitizedLocalWakeFailure(error, stage = 'local_wake') {
     const chain = [];
     const seen = new Set();
     let current = error;
@@ -49,9 +49,11 @@ export function sanitizedLocalWakeFailure(error) {
     }
 
     return {
-        stage: 'local_wake',
-        code: chain[0]?.code || 'local_wake_failure',
-        message: chain[0]?.message || 'Private wake detection failed.',
+        stage: stage === 'startup' ? 'startup' : 'local_wake',
+        code: chain[0]?.code || (stage === 'startup' ? 'voice_startup_failure' : 'local_wake_failure'),
+        message: chain[0]?.message || (stage === 'startup'
+            ? 'Browser voice startup failed.'
+            : 'Private wake detection failed.'),
         cause_chain: chain,
     };
 }

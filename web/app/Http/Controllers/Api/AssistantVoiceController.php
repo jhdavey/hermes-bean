@@ -11,6 +11,7 @@ use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class AssistantVoiceController extends Controller
 {
@@ -35,6 +36,7 @@ class AssistantVoiceController extends Controller
         $data = $request->validate([
             'workspace_id' => ['sometimes', 'nullable', 'integer', 'exists:workspaces,id'],
             'timezone' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'sdp' => ['required', 'string', 'max:200000'],
         ]);
 
         $workspace = $this->workspaces->resolveWorkspace($request->user(), $data['workspace_id'] ?? null);
@@ -58,9 +60,26 @@ class AssistantVoiceController extends Controller
             ]);
         }
 
-        $session = $this->voice->createRealtimeSession($profile, [
-            'timezone' => $data['timezone'] ?? null,
-        ]);
+        try {
+            $session = $this->voice->createRealtimeCall(
+                $profile,
+                $data['sdp'],
+                ['timezone' => $data['timezone'] ?? null],
+                hash_hmac('sha256', (string) $request->user()->id, (string) config('app.key')),
+            );
+        } catch (Throwable $error) {
+            Log::warning('Browser Voice v2 provider connection failed.', [
+                'user_id' => $request->user()->id,
+                'workspace_id' => $workspace->id,
+                'stage' => 'realtime_sdp',
+                'error' => $error->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Bean couldn’t connect voice right now. Tap Bean to try again.',
+                'error' => ['code' => 'realtime_connection_failed'],
+            ], 502);
+        }
         $usageSession = $this->usage->recordRealtimeSessionOpened(
             $request->user(),
             $workspace->id,
@@ -123,7 +142,7 @@ class AssistantVoiceController extends Controller
     public function clientFailure(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'stage' => ['required', 'in:local_wake'],
+            'stage' => ['required', 'in:local_wake,startup'],
             'code' => ['required', 'string', 'max:80'],
             'message' => ['required', 'string', 'max:240'],
             'cause_chain' => ['present', 'array', 'max:4'],

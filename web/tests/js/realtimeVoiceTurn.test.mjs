@@ -158,6 +158,17 @@ test('[BV2-DIAGNOSTIC-01] local wake failures retain only a bounded sanitized ca
     assert.match(diagnostic.cause_chain[1].message, /Bearer \[redacted\]/);
 });
 
+test('[BV2-STARTUP-02] startup failures are classified for diagnostics without becoming raw UI copy', () => {
+    const diagnostic = sanitizedLocalWakeFailure(
+        Object.assign(new Error('signal is aborted without reason'), { code: 'AbortError' }),
+        'startup',
+    );
+
+    assert.equal(diagnostic.stage, 'startup');
+    assert.equal(diagnostic.code, 'AbortError');
+    assert.equal(diagnostic.cause_chain.length, 1);
+});
+
 test('microphone capture requests browser echo and noise controls', () => {
     assert.deepEqual(realtimeMicrophoneConstraints(), {
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },

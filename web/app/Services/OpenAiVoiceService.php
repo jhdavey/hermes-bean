@@ -65,62 +65,34 @@ class OpenAiVoiceService
         return $profile->refresh();
     }
 
-    public function createRealtimeSession(AgentProfile $profile, array $context = []): array
-    {
+    public function createRealtimeCall(
+        AgentProfile $profile,
+        string $sdp,
+        array $context = [],
+        ?string $safetyIdentifier = null,
+    ): array {
         $voice = $this->normalizeVoice(data_get($profile->settings ?? [], 'voice.voice'));
         $model = $this->realtimeModel();
-        $instructions = $this->realtimeInstructions($profile, $context);
+        $session = $this->realtimeSessionConfiguration($profile, $context, $voice, $model);
 
         $response = Http::withToken($this->apiKey())
-            ->acceptJson()
+            ->accept('application/sdp')
+            ->when($safetyIdentifier, fn ($request) => $request->withHeaders([
+                'OpenAI-Safety-Identifier' => $safetyIdentifier,
+            ]))
             ->timeout((float) config('services.openai.realtime_session_timeout', 10))
-            ->post($this->endpoint('/realtime/client_secrets'), [
-                'session' => [
-                    'type' => 'realtime',
-                    'model' => $model,
-                    'instructions' => $instructions,
-                    'audio' => [
-                        'input' => [
-                            // Browser Voice v2 appends activated microphone PCM
-                            // over the Realtime data channel. WebRTC remains
-                            // receive-only so dormant room audio has no media path.
-                            'format' => [
-                                'type' => 'audio/pcm',
-                                'rate' => 24000,
-                            ],
-                            'transcription' => [
-                                'model' => (string) config('services.openai.realtime_transcription_model', 'gpt-4o-mini-transcribe'),
-                                'language' => 'en',
-                                'prompt' => 'The user speaks US English. Transcribe only words actually spoken. Do not insert words for silence, music, or background noise. Product names may include Bean and HeyBean.',
-                            ],
-                            'turn_detection' => [
-                                'type' => 'server_vad',
-                                'threshold' => (float) config('services.openai.realtime_vad_threshold', 0.5),
-                                'prefix_padding_ms' => (int) config('services.openai.realtime_vad_prefix_padding_ms', 300),
-                                'silence_duration_ms' => (int) config('services.openai.realtime_vad_silence_duration_ms', 2000),
-                                'create_response' => false,
-                                // Background VAD hits must not cut Bean off before the
-                                // client can validate the completed transcript.
-                                'interrupt_response' => false,
-                            ],
-                        ],
-                        'output' => [
-                            'voice' => $voice,
-                        ],
-                    ],
-                    'tools' => [],
-                    'tool_choice' => 'none',
-                ],
-            ]);
+            ->asMultipart()
+            ->attach('sdp', $sdp)
+            ->attach('session', json_encode($session, JSON_THROW_ON_ERROR))
+            ->post($this->endpoint('/realtime/calls'));
 
         if (! $response->successful()) {
-            throw new RuntimeException('OpenAI realtime session request failed with status '.$response->status().'.');
+            throw new RuntimeException('OpenAI realtime call request failed with status '.$response->status().'.');
         }
 
-        $payload = $response->json();
-        $clientSecret = data_get($payload, 'value') ?: data_get($payload, 'client_secret.value') ?: data_get($payload, 'client_secret');
-        if (! is_string($clientSecret) || trim($clientSecret) === '') {
-            throw new RuntimeException('OpenAI realtime session response did not include a client secret.');
+        $answerSdp = trim($response->body());
+        if ($answerSdp === '') {
+            throw new RuntimeException('OpenAI realtime call response did not include an SDP answer.');
         }
 
         return [
@@ -128,12 +100,67 @@ class OpenAiVoiceService
             'model' => $model,
             'voice' => $voice,
             'voice_label' => self::VOICES[$voice],
-            'client_secret' => $clientSecret,
-            'expires_at' => data_get($payload, 'expires_at') ?: data_get($payload, 'client_secret.expires_at'),
-            'session_id' => data_get($payload, 'session.id') ?: data_get($payload, 'id'),
-            'realtime_url' => rtrim((string) config('services.openai.realtime_webrtc_url', 'https://api.openai.com/v1/realtime/calls'), '?'),
+            'sdp' => $answerSdp,
+            'session_id' => $this->providerSessionId($response->header('Location')),
             'tools' => [],
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function realtimeSessionConfiguration(
+        AgentProfile $profile,
+        array $context,
+        string $voice,
+        string $model,
+    ): array {
+        return [
+            'type' => 'realtime',
+            'model' => $model,
+            'instructions' => $this->realtimeInstructions($profile, $context),
+            'audio' => [
+                'input' => [
+                    // Browser Voice v2 appends activated microphone PCM over
+                    // the data channel. WebRTC remains receive-only so dormant
+                    // room audio has no provider media path.
+                    'format' => [
+                        'type' => 'audio/pcm',
+                        'rate' => 24000,
+                    ],
+                    'transcription' => [
+                        'model' => (string) config('services.openai.realtime_transcription_model', 'gpt-4o-mini-transcribe'),
+                        'language' => 'en',
+                        'prompt' => 'The user speaks US English. Transcribe only words actually spoken. Do not insert words for silence, music, or background noise. Product names may include Bean and HeyBean.',
+                    ],
+                    'turn_detection' => [
+                        'type' => 'server_vad',
+                        'threshold' => (float) config('services.openai.realtime_vad_threshold', 0.5),
+                        'prefix_padding_ms' => (int) config('services.openai.realtime_vad_prefix_padding_ms', 300),
+                        'silence_duration_ms' => (int) config('services.openai.realtime_vad_silence_duration_ms', 2000),
+                        'create_response' => false,
+                        'interrupt_response' => false,
+                    ],
+                ],
+                'output' => [
+                    'voice' => $voice,
+                ],
+            ],
+            'tools' => [],
+            'tool_choice' => 'none',
+        ];
+    }
+
+    private function providerSessionId(?string $location): ?string
+    {
+        if (! is_string($location) || trim($location) === '') {
+            return null;
+        }
+
+        $path = parse_url($location, PHP_URL_PATH);
+        $candidate = basename(is_string($path) ? $path : $location);
+
+        return $candidate !== '' ? $candidate : null;
     }
 
     public function normalizeVoice(?string $voice): string

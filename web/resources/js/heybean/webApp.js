@@ -9985,7 +9985,7 @@ export function mountHeyBeanWebApp(mount) {
         };
     }
 
-    async function openRealtimeSession() {
+    async function openRealtimeSession(sdp) {
         if (!state.session?.id) {
             const onboarding = needsBeanOnboarding();
             state.session = await api('/assistant/sessions', {
@@ -9995,7 +9995,10 @@ export function mountHeyBeanWebApp(mount) {
         }
         return api('/assistant/voice/realtime/session', {
             method: 'POST',
-            body: { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '' },
+            body: {
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+                sdp,
+            },
             timeoutMs: 15000,
         });
     }
@@ -10157,16 +10160,6 @@ export function mountHeyBeanWebApp(mount) {
             await waitForLocalWakeReady(localWakeGate, connectionGeneration);
             return localAudio;
         });
-        const [localAudio, session] = await Promise.all([localWakePromise, openRealtimeSession()]);
-        if (!localWakeConnectionIsCurrent(localWakeGate, connectionGeneration)) {
-            await localWakeGate.stop();
-            throw new Error('Realtime voice connection was superseded.');
-        }
-
-        realtimeSession = session;
-        const secret = String(session?.client_secret || '').trim();
-        if (!secret) throw new Error('Realtime voice session did not include a client secret.');
-
         const peerConnection = new RTCPeerConnection();
         const remoteAudio = new Audio();
         remoteAudio.autoplay = true;
@@ -10177,9 +10170,6 @@ export function mountHeyBeanWebApp(mount) {
             const [stream] = event.streams;
             if (stream) remoteAudio.srcObject = stream;
         };
-        if (Number(localAudio?.sampleRate) !== 16000) {
-            throw new Error('Private wake detection did not provide 16 kHz local PCM.');
-        }
         peerConnection.addTransceiver('audio', { direction: 'recvonly' });
 
         realtimeDataChannel = peerConnection.createDataChannel('oai-events');
@@ -10247,26 +10237,15 @@ export function mountHeyBeanWebApp(mount) {
 
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
-        const model = encodeURIComponent(String(session.model || 'gpt-realtime'));
-        const baseUrl = String(session.realtime_url || 'https://api.openai.com/v1/realtime').replace(/\?+$/, '');
-        const sdpResponse = await fetchWithTimeout(`${baseUrl}?model=${model}`, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${secret}`,
-                'Content-Type': 'application/sdp',
-                Accept: 'application/sdp, application/json',
-            },
-            body: offer.sdp,
-        }, 15000);
-        if (!sdpResponse.ok) {
-            const errorBody = await sdpResponse.text().catch(() => '');
-            let detail = '';
-            try {
-                detail = JSON.parse(errorBody)?.error?.message || '';
-            } catch (_) {
-                detail = errorBody.trim().slice(0, 220);
+        let session;
+        try {
+            const setup = await Promise.all([localWakePromise, openRealtimeSession(offer.sdp)]);
+            session = setup[1];
+            if (Number(setup[0]?.sampleRate) !== 16000) {
+                throw new Error('Private wake detection did not provide 16 kHz local PCM.');
             }
-            if (duplicateCallRetry < 1 && isRealtimeDuplicateCallConflict(sdpResponse.status, detail)) {
+        } catch (error) {
+            if (duplicateCallRetry < 1 && isRealtimeDuplicateCallConflict(error?.status, error?.message)) {
                 await disposeRealtimeConnectionAttempt({
                     localWakeGate,
                     rawMicrophoneStream,
@@ -10279,10 +10258,17 @@ export function mountHeyBeanWebApp(mount) {
                 }
                 return connectRealtimeVoice(connectionGeneration, duplicateCallRetry + 1);
             }
-            throw new Error(`Realtime voice connection failed (${sdpResponse.status})${detail ? `: ${detail}` : ''}.`);
+            throw error;
         }
+        if (!localWakeConnectionIsCurrent(localWakeGate, connectionGeneration)) {
+            await localWakeGate.stop();
+            throw new Error('Realtime voice connection was superseded.');
+        }
+        realtimeSession = session;
+        const answerSdp = String(session?.sdp || '').trim();
+        if (!answerSdp) throw new Error('Realtime voice connection did not include an SDP answer.');
         if (!connectionIsCurrent()) throw new Error('Realtime voice connection was superseded.');
-        await peerConnection.setRemoteDescription({ type: 'answer', sdp: await sdpResponse.text() });
+        await peerConnection.setRemoteDescription({ type: 'answer', sdp: answerSdp });
         let transportTimer = null;
         try {
             await Promise.race([
@@ -10751,8 +10737,16 @@ export function mountHeyBeanWebApp(mount) {
             render();
         } catch (error) {
             if (connectionGeneration !== realtimeConnectionGeneration) return;
+            const diagnostic = sanitizedLocalWakeFailure(error, 'startup');
+            void api('/assistant/voice/client-failures', {
+                method: 'POST',
+                body: diagnostic,
+                timeoutMs: 3000,
+            }).catch(() => {});
             stopVoiceWakeListening({ clearDraft: false });
-            state.error = friendlyError(error, 'start realtime Bean voice');
+            state.error = Number(error?.status || 0) === 402
+                ? friendlyError(error, 'start realtime Bean voice')
+                : 'Bean couldn’t connect voice right now. Tap Bean to try again.';
             state.voiceProcessing = false;
             render();
         }
