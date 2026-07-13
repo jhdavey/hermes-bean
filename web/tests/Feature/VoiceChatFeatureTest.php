@@ -71,7 +71,7 @@ class VoiceChatFeatureTest extends TestCase
             ->assertJsonPath('data.provider', 'openai_realtime')
             ->assertJsonPath('data.model', 'gpt-realtime-test')
             ->assertJsonPath('data.voice', 'shimmer')
-            ->assertJsonPath('data.sdp', "v=0\r\no=- 123 456 IN IP4 127.0.0.1")
+            ->assertJsonPath('data.sdp', "v=0\r\no=- 123 456 IN IP4 127.0.0.1\r\n")
             ->assertJsonPath('data.session_id', 'call_test_123')
             ->assertJsonStructure(['data' => ['usage_session_id']])
             ->assertJsonPath('data.tools', [])

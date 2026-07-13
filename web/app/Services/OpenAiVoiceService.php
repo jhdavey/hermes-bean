@@ -116,10 +116,11 @@ class OpenAiVoiceService
             ));
         }
 
-        $answerSdp = trim($response->body());
-        if ($answerSdp === '') {
+        $answerBody = $response->body();
+        if (trim($answerBody) === '') {
             throw new RuntimeException('OpenAI realtime call response did not include an SDP answer.');
         }
+        $answerSdp = preg_replace('/\r\n|\r|\n/', "\r\n", trim($answerBody))."\r\n";
 
         return [
             'provider' => 'openai_realtime',
