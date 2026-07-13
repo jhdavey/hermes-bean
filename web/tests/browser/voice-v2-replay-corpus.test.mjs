@@ -23,6 +23,8 @@ test('wake replay matrix cross-tests every required family across all six voices
             'hey_beam_near_miss',
             'hey_ben_near_miss',
             'ongoing_conversation_without_address',
+            'pretty_girl_ambient_speech',
+            'pretty_good_ambient_speech',
             'third_person_bean_at_utterance_start',
             'third_person_bean_mid_utterance',
         ],
@@ -87,7 +89,7 @@ test('public corpus metadata emits no raw PCM while retaining coverage provenanc
     assert.equal(JSON.stringify(metadata).includes('forbidden-raw-audio'), false);
     assert.equal(JSON.stringify(metadata).includes('pcm_s16le_base64'), false);
     assert.equal(metadata.voices.length, 6);
-    assert.equal(metadata.unique_negative_privacy_files, 42);
+    assert.equal(metadata.unique_negative_privacy_files, 54);
 });
 
 test('benchmark schema makes release certification and privacy claims explicit', async () => {

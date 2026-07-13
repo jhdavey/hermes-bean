@@ -888,7 +888,10 @@ test('[BV2-WAKE-10] startup primes a clean consumer-enabled generation before th
 test('[BV2-WAKE-11] the first-party prefix path recovers a strict Hey Bean missed by keyword timing', async () => {
     const worker = await readFile(new URL('../../public/voice/wake/wake-worker.js', import.meta.url), 'utf8');
 
-    assert.match(worker, /STRICT_PREFIX_ACCEPTANCE_PROBABILITY = 0\.8/);
+    assert.match(worker, /STRICT_ACCEPTANCE_PROBABILITY = 0\.5/);
+    assert.match(worker, /STRICT_PREFIX_ACCEPTANCE_PROBABILITY = 0\.99/);
+    assert.match(worker, /@PRETTY_GIRL/);
+    assert.match(worker, /@PRETTY_GOOD/);
     assert.match(worker, /strictWakeAccepted = silentChunksAfterSpeech >= STRICT_PREFIX_FALLBACK_SILENCE_CHUNKS/);
     assert.match(worker, /activation: 'missed_hey_confirmation'/);
     assert.match(worker, /decision\.activation !== 'strict_wake'/);

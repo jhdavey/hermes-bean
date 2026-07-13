@@ -268,6 +268,53 @@ test('[BV2-BROWSER-09] a task read flows through reminder creation and contextua
         .toHaveText('Set it for 5 p.m.');
 });
 
+test('[BV2-BROWSER-13] expired follow-up returns to wake-only and ambient dog-directed speech stays invisible', async ({ page }) => {
+    await boot(page);
+    await markReady(page);
+
+    const result = await page.evaluate(async () => {
+        const harness = window.voiceHarness;
+        harness.wake('task-read-before-dormancy');
+        harness.final("What's on my to-do list for today?");
+        harness.endUtterance();
+        await harness.waitForAdmissions();
+        await harness.updateTurn('task-read-before-dormancy', {
+            state: 'completed',
+            final_text: 'Your tasks today are: “salt” today at 6 p.m.',
+        });
+        harness.startPlayback();
+        harness.finishPlayback();
+
+        const followUp = harness.controller.snapshot();
+        harness.controller.dispatch({
+            type: 'timer_fired',
+            timerKey: 'follow_up',
+            atMs: followUp.deadlines.followUpAt,
+            source: 'synthetic-follow-up-expiry',
+        });
+
+        const callsBeforeAmbient = harness.server.calls.length;
+        const messagesBeforeAmbient = harness.server.read().messages.length;
+        harness.controller.speechStarted({ turnId: 'ambient-pretty-girl', source: 'provider' });
+        harness.controller.transcriptFinal('Pretty good.', { source: 'provider' });
+        harness.controller.speechEnded({ source: 'provider' });
+        await harness.waitForAdmissions();
+
+        return {
+            snapshot: harness.snapshot(),
+            callsBeforeAmbient,
+            messagesBeforeAmbient,
+        };
+    });
+
+    expect(result.snapshot.controller.conversationState).toBe('wake_only');
+    expect(result.snapshot.server.turns).toHaveLength(1);
+    expect(result.snapshot.server.messages).toHaveLength(result.messagesBeforeAmbient);
+    expect(await page.evaluate(() => window.voiceHarness.server.calls.length)).toBe(result.callsBeforeAmbient);
+    await expect(page.locator('#voice-input')).toHaveText('');
+    await expect(page.locator('#chat [data-role="user"]')).toHaveCount(1);
+});
+
 test('[BV2-BROWSER-12] a generated-note request remains one visible turn and speaks the exact durable final', async ({ page }) => {
     await boot(page);
     await markReady(page);

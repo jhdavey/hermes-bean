@@ -91,6 +91,8 @@ REJECT_PHRASES = (
     "Hey beans.",
     "Hey team.",
     "Hey B.",
+    "Pretty girl.",
+    "Pretty good.",
     "I told Sarah about Bean yesterday.",
     "Bean is a useful assistant.",
     "Bean was mentioned in the meeting.",

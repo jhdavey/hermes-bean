@@ -1,11 +1,11 @@
 {
-  "version": 10,
+  "version": 11,
   "releaseCertified": false,
   "wakeModelQaCertified": true,
   "detector": "bean-first-party-classifier-with-local-strict-timing-candidate",
-  "worker": "/voice/wake/wake-worker.js?v=10",
+  "worker": "/voice/wake/wake-worker.js?v=11",
   "workerType": "classic",
-  "audioWorklet": "/voice/wake/gate-processor.js?v=10",
+  "audioWorklet": "/voice/wake/gate-processor.js?v=11",
   "processorName": "hey-bean-gate",
   "sampleRate": 16000,
   "audioBatchSamples": 1600,
@@ -37,7 +37,7 @@
   ],
   "firstPartyModel": {
     "id": "bean-first-party-wake-v1",
-    "path": "/voice/wake/bean-wake-model-v1.json?v=10",
+    "path": "/voice/wake/bean-wake-model-v1.json?v=11",
     "bytes": 1094259,
     "sha256": "3bdc1e1db3e4c8629bbd0302aac5259aeaf7b1627d33f64b10bae594162e718e",
     "architecture": "temporal_conv1d_v1",
@@ -52,18 +52,18 @@
   },
   "qaEvidence": {
     "classification": "prerecorded_offline_tts_real_local_gate_engine_replay",
-    "journeysPassed": 107,
-    "journeysExecuted": 108,
-    "passRate": 0.990741,
+    "journeysPassed": 120,
+    "journeysExecuted": 120,
+    "passRate": 1,
     "requiredPassRate": 0.95,
     "strictWakeAccuracy": 1,
     "strictWakeCommandReleaseAccuracy": 1,
     "ongoingSpeechStrictWakeAccuracy": 1,
-    "missedHeyAddressAccuracy": 0.958333,
+    "missedHeyAddressAccuracy": 1,
     "nearMissFalseAcceptanceRate": 0,
     "resetRecoveryRate": 1,
     "wakeTimingSamples": 24,
-    "wakeP95Ms": 477.2,
+    "wakeP95Ms": 483.2,
     "fineTunedSyntheticTrainingAccuracy": 0.955006,
     "zeroPreConfirmationPcm": true,
     "runtimeErrors": 0,
@@ -87,22 +87,22 @@
   "requiresCrossOriginIsolation": false,
   "vendorAssets": [
     {
-      "path": "/voice/wake/kws-runtime.js?v=10",
+      "path": "/voice/wake/kws-runtime.js?v=11",
       "bytes": 90517,
       "sha256": "371a0433929467b916a095d90eff0fef36c101c50cc856a3f733f4569616a6d6"
     },
     {
-      "path": "/voice/wake/kws-runtime.wasm?v=10",
+      "path": "/voice/wake/kws-runtime.wasm?v=11",
       "bytes": 10612628,
       "sha256": "9e8ef9ffba6c212732d9da6b659936ae16da3c63a8760cdcf0ee2b391e18ce63"
     },
     {
-      "path": "/voice/wake/kws-model.data?v=10",
+      "path": "/voice/wake/kws-model.data?v=11",
       "bytes": 5448042,
       "sha256": "a4fbe1a6eddebb6671cf948ea0051d923bcd3a556c1df5e6c2fa9b99ad6b7802"
     },
     {
-      "path": "/voice/wake/kws-api.js?v=10",
+      "path": "/voice/wake/kws-api.js?v=11",
       "bytes": 11679,
       "sha256": "c693a402438a12ef0c34fcaa52cb279e60713477aa19f6cb157a37f06b53b4b3"
     }

@@ -25,6 +25,14 @@ export const NEGATIVE_PRIVACY_CASES = Object.freeze([
         phrase: 'Hey Ben.',
     }),
     Object.freeze({
+        family: 'pretty_girl_ambient_speech',
+        phrase: 'Pretty girl.',
+    }),
+    Object.freeze({
+        family: 'pretty_good_ambient_speech',
+        phrase: 'Pretty good.',
+    }),
+    Object.freeze({
         family: 'third_person_bean_mid_utterance',
         phrase: 'I told Sarah about Bean yesterday.',
     }),

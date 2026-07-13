@@ -18,8 +18,10 @@ const MAX_SOURCE_BOUNDARIES = 100;
 const MAX_CLASSIFICATION_SAMPLES = TARGET_SAMPLE_RATE * 3;
 const CLASSIFICATION_LEADING_PAD_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.1);
 const CLASSIFICATION_TRAILING_PAD_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.25);
+// The independently timed strict path retains its certified operating point.
+// The prefix fallback is much stricter because it has no second timing vote.
 const STRICT_ACCEPTANCE_PROBABILITY = 0.5;
-const STRICT_PREFIX_ACCEPTANCE_PROBABILITY = 0.8;
+const STRICT_PREFIX_ACCEPTANCE_PROBABILITY = 0.99;
 const STRICT_PREFIX_FALLBACK_SILENCE_CHUNKS = 4;
 const ADDRESS_ACCEPTANCE_PROBABILITY = 0.95;
 const FIRST_PARTY_ADDRESS_MIN_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.5);
@@ -27,8 +29,13 @@ const FIRST_PARTY_ADDRESS_MAX_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 2.8);
 const FIRST_PARTY_ADDRESS_INTERVAL_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.3);
 const KEYWORD_ALIAS = 'HEY_BEAN';
 const STRICT_WAKE_ALIAS = 'HEY_BEAN';
-const STRICT_NEAR_MISS_ALIASES = new Set(['HEY_BEAM', 'HEY_BEN']);
-const RUNTIME_VERSION = '10';
+const STRICT_NEAR_MISS_ALIASES = new Set([
+    'HEY_BEAM',
+    'HEY_BEN',
+    'PRETTY_GIRL',
+    'PRETTY_GOOD',
+]);
+const RUNTIME_VERSION = '11';
 
 // This threshold is experimental and is not release-certified. The expanded
 // replay corpus demonstrates that this generic model cannot separate Hey Bean
@@ -37,6 +44,8 @@ const STRICT_KEYWORDS = [
     'HH EY1 B IY1 N :1.2 #0.1 @HEY_BEAN',
     'HH EY1 B IY1 M :1.2 #0.1 @HEY_BEAM',
     'HH EY1 B EH1 N :1.2 #0.1 @HEY_BEN',
+    'P R IH1 T IY0 G ER1 L :1.2 #0.1 @PRETTY_GIRL',
+    'P R IH1 T IY0 G UH1 D :1.2 #0.1 @PRETTY_GOOD',
 ].join('\n');
 
 const assetBaseUrl = new URL('./', self.location.href);
