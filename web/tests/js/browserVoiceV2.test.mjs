@@ -460,6 +460,8 @@ test('[BV2-FOLLOWUP-04] deterministic relevance grammar fails closed for ambient
     for (const meaningful of [
         'Hey Bean',
         'What about today?',
+        "What's on my to-do list for today?",
+        'Anything on my calendar tomorrow?',
         'Also create a note',
         'Did you finish that?',
         'Did you get the weather forecast for later?',

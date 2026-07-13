@@ -185,8 +185,8 @@ test('[BV2-BROWSER-08] an instant answer opens a no-wake task follow-up and admi
 
         const beforeFollowUp = harness.controller.snapshot();
         const followUpResult = harness.followUp('task-follow-up');
-        harness.partial('Is there anything on my to-do list');
-        harness.final('Is there anything on my to-do list for today?');
+        harness.partial("What's on my to-do list");
+        harness.final("What's on my to-do list for today?");
         harness.endUtterance();
         await harness.waitForAdmissions();
         return {
@@ -204,12 +204,12 @@ test('[BV2-BROWSER-08] an instant answer opens a no-wake task follow-up and admi
         'voice-state-before-task',
         'task-follow-up',
     ]);
-    expect(state.server.turns[1].transcript).toBe('Is there anything on my to-do list for today?');
+    expect(state.server.turns[1].transcript).toBe("What's on my to-do list for today?");
     const taskAdmission = result.calls.filter((call) => call.path === '/assistant/voice/turns').at(-1);
     expect(taskAdmission.options.body.conversation_context).toMatchObject({ mode: 'contextual_follow_up' });
     expect(state.server.messages.filter((message) => message.role === 'user')).toHaveLength(2);
     await expect(page.locator('#chat [data-role="user"][data-turn-id="task-follow-up"]'))
-        .toHaveText('Is there anything on my to-do list for today?');
+        .toHaveText("What's on my to-do list for today?");
 });
 
 test('[BV2-BROWSER-09] a task read flows into a complete reminder-to-do follow-up without a second wake', async ({ page }) => {

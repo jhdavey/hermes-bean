@@ -833,6 +833,34 @@ test('[BV2-WAKE-03] startup speech is never admitted and the first post-readines
     );
 });
 
+test('[BV2-WAKE-09] published consumer readiness requires a post-enable live-decode acknowledgement', async () => {
+    const harness = createHarness({ consumerReady: false });
+    await harness.gate.start(harness.rawStream);
+    const generation = harness.gate.currentGeneration();
+    completeReadinessBarrier(harness, generation);
+
+    assert.equal(harness.gate.isReady(), true);
+    assert.equal(harness.gate.isConsumerAdmissionReady(), false);
+    harness.gate.setConsumerReady(true);
+    assert.equal(harness.gate.isConsumerAdmissionReady(), false);
+
+    harness.emitPcm({ generation });
+    const postEnableAudio = harness.workers[0].messages
+        .filter(({ message }) => message.type === 'audio' && message.generation === generation)
+        .at(-1).message;
+    harness.workers[0].emit({
+        type: 'ack',
+        generation,
+        sequence: postEnableAudio.sequence,
+        accepted: true,
+    });
+
+    assert.equal(harness.gate.isConsumerAdmissionReady(), true);
+    harness.workers[0].emit(wakeMessage(harness, generation));
+    assert.equal(harness.detections.length, 1);
+    assert.equal(harness.gate.isOpen(), true);
+});
+
 test('missed-Hey candidate stays private and only obvious second-person confirmation opens it', async () => {
     const harness = createHarness();
     await harness.gate.start(harness.rawStream);

@@ -55,16 +55,28 @@ test('[BV2-WAKE-01] wake-ready is published only after provider transport and a 
     const localReadyCheck = implementation.indexOf('!readyWakeGate.isReady()', connectReady);
     const providerReady = implementation.indexOf('browserVoiceV2Controller.providerReady', localReadyCheck);
     const active = implementation.indexOf('realtimeVoiceActive = true', providerReady);
-    const listening = implementation.indexOf('state.voiceWakeListening = true', active);
-    const consumerReady = implementation.indexOf('readyWakeGate.setConsumerReady(true)', listening);
-    const readyLabel = implementation.indexOf("state.chatRunState = 'Listening for “Hey Bean”…'", consumerReady);
+    const consumerReady = implementation.indexOf('readyWakeGate.setConsumerReady(true)', active);
+    const consumerBarrier = implementation.indexOf(
+        'await waitForLocalWakeConsumerAdmission(readyWakeGate, connectionGeneration)',
+        consumerReady,
+    );
+    const listening = implementation.indexOf('state.voiceWakeListening = true', consumerBarrier);
+    const readyLabel = implementation.indexOf("'Listening for “Hey Bean”…'", consumerBarrier);
 
     assert.ok(connectReady >= 0);
     assert.ok(localReadyCheck > connectReady, 'the final local barrier must be verified at handoff');
     assert.ok(providerReady > localReadyCheck, 'controller readiness must wait for both transports');
-    assert.ok(active > providerReady && listening > active, 'capture must become active before accepting wakes');
-    assert.ok(consumerReady > listening, 'the local detector must stay non-consuming throughout startup');
-    assert.ok(readyLabel > consumerReady, 'the UI may claim listening only after consumer admission opens');
+    assert.ok(active > providerReady && consumerReady > active, 'provider capture must become active before accepting wakes');
+    assert.ok(consumerBarrier > consumerReady, 'a post-enable PCM acknowledgement must open consumer admission');
+    assert.ok(listening > consumerBarrier, 'the public listening state must wait for consumer admission');
+    assert.ok(readyLabel > consumerBarrier, 'the UI may claim listening only after consumer admission opens');
+
+    const detectedStart = source.indexOf('function handleLocalWakeDetected(');
+    const detectedEnd = source.indexOf('\n    function handleLocalWakeFailure(', detectedStart);
+    const detected = source.slice(detectedStart, detectedEnd);
+    assert.match(detected, /const completingStartup = state\.voiceProcessing/);
+    assert.match(detected, /gate\.isConsumerAdmissionReady\(\)/);
+    assert.match(detected, /\(!state\.voiceWakeListening && !completingStartup\)/);
 
     const stopStart = source.indexOf('function stopVoiceWakeListening(');
     const stopEnd = source.indexOf('\n    function stopRealtimeVoiceForContextChange(', stopStart);

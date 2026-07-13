@@ -10052,9 +10052,14 @@ export function mountHeyBeanWebApp(mount) {
     function handleLocalWakeDetected(gate, connectionGeneration) {
         if (!localWakeConnectionIsCurrent(gate, connectionGeneration)) return;
 
+        const controller = browserVoiceV2Controller.snapshot();
+        const completingStartup = state.voiceProcessing
+            && realtimeVoiceActive
+            && gate.isConsumerAdmissionReady()
+            && controller.conversationState === BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY;
         if (!browserVoiceV2Enabled()
             || !realtimeVoiceActive
-            || !state.voiceWakeListening) {
+            || (!state.voiceWakeListening && !completingStartup)) {
             gate.resetAfterTurn();
             return;
         }
@@ -10091,6 +10096,24 @@ export function mountHeyBeanWebApp(mount) {
             await new Promise((resolve) => window.setTimeout(resolve, 50));
         }
         if (!localWakeConnectionIsCurrent(gate, connectionGeneration) || !gate.isReady()) {
+            throw new Error('Realtime voice connection was superseded.');
+        }
+    }
+
+    async function waitForLocalWakeConsumerAdmission(gate, connectionGeneration, timeoutMs = 2000) {
+        const deadline = Date.now() + timeoutMs;
+        while (localWakeConnectionIsCurrent(gate, connectionGeneration)
+            && !gate.isConsumerAdmissionReady()) {
+            if (gate.state === 'failed') {
+                throw new Error('Private “Hey Bean” detection could not become wake-ready.');
+            }
+            if (Date.now() >= deadline) {
+                throw new Error('Private “Hey Bean” detection took too long to become wake-ready.');
+            }
+            await new Promise((resolve) => window.setTimeout(resolve, 20));
+        }
+        if (!localWakeConnectionIsCurrent(gate, connectionGeneration)
+            || !gate.isConsumerAdmissionReady()) {
             throw new Error('Realtime voice connection was superseded.');
         }
     }
@@ -10759,10 +10782,23 @@ export function mountHeyBeanWebApp(mount) {
             }
             browserVoiceV2Controller.providerReady({ source: 'webrtc' });
             realtimeVoiceActive = true;
+            readyWakeGate.setConsumerReady(true);
+            // setConsumerReady establishes a new PCM sequence floor. Do not
+            // publish wake readiness until the worker has acknowledged audio
+            // captured after that floor; otherwise the first spoken wake can
+            // be correctly rejected as startup residue while the UI claims it
+            // is already listening.
+            await waitForLocalWakeConsumerAdmission(readyWakeGate, connectionGeneration);
+            if (connectionGeneration !== realtimeConnectionGeneration) return;
             state.voiceWakeListening = true;
             state.voiceProcessing = false;
-            readyWakeGate.setConsumerReady(true);
-            state.chatRunState = 'Listening for “Hey Bean”…';
+            const controller = browserVoiceV2Controller.snapshot();
+            state.chatRunState = [
+                BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING,
+                BROWSER_VOICE_CONVERSATION_STATES.CAPTURING,
+            ].includes(controller.conversationState)
+                ? 'Listening…'
+                : 'Listening for “Hey Bean”…';
             updateVoiceWakeDraft('');
             render();
         } catch (error) {

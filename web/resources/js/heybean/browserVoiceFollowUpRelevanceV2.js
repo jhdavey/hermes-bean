@@ -40,6 +40,7 @@ export function classifyBrowserVoiceFollowUpRelevance(text, { final = false } = 
     const exactResponse = /^(?:yes|yep|no|nope|okay|ok|sure|please|thanks|thank you|that's all|that is all|goodbye|bye|take care|stop|quiet|wait|repeat that|say that again)$/;
     const directAction = /^(?:(?:also|and|then|actually|instead|please)\s+)*(?:tell|show|check|find|look up|read|create|add|make|set|schedule|remind|delete|remove|change|move|reschedule|cancel|complete|mark|plan|draft|write|save|send|call|text|help|repeat|say)\b/;
     const directQuestion = /^(?:what|what's|when|where|which|who|why|how)\s+(?:about\b|is\b|are\b|was\b|were\b|do\b|does\b|did\b|can\b|could\b|would\b|will\b|should\b|time\b|date\b|day\b|weather\b|temperature\b|comes?\b|happens?\b)/;
+    const scopedStoredDataQuestion = /^(?:(?:what's|what is)\s+(?:on|in)\s+(?:my\s+)?|(?:anything|something)\s+(?:on|in)\s+(?:my\s+)?)(?:to[ -]?do\s+list|task\s+list|tasks?|calendar|schedule|reminders?|notes?)\b/;
     const assistantQuestion = /^(?:can|could|would|will|should)\s+you\s+(?:tell|show|check|find|look|read|create|add|make|set|schedule|remind|delete|remove|change|move|cancel|plan|draft|write|save|repeat|say|help|hear)\b/;
     const assistantStateQuestion = /^(?:do|did|are|is|have|were)\s+you\s+(?:hear|finish|finished|complete|completed|done|working|still|able|ready|listening|get|got|check|find)\b/;
     const scopedAuxiliaryQuestion = /^(?:(?:is|will|could|should)\s+it\b.*\b(?:rain|snow|storm|sunny|weather|forecast|temperature|done|finished|working|ready)\b|(?:do|did)\s+i\s+have\b|(?:is|are)\s+there\b.*\b(?:anything|event|appointment|meeting|reminder|task|note)\b|(?:did|has|is)\s+(?:it|that)\b.*\b(?:finish|finished|done|working|ready)\b)/;
@@ -50,6 +51,7 @@ export function classifyBrowserVoiceFollowUpRelevance(text, { final = false } = 
     if (exactResponse.test(directAddress)
         || directAction.test(directAddress)
         || directQuestion.test(directAddress)
+        || scopedStoredDataQuestion.test(directAddress)
         || assistantQuestion.test(directAddress)
         || assistantStateQuestion.test(directAddress)
         || scopedAuxiliaryQuestion.test(directAddress)

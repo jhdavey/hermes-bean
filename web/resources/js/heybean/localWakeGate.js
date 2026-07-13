@@ -116,6 +116,10 @@ export class LocalWakeGate {
             && !['failed', 'stopping', 'stopped'].includes(this.state);
     }
 
+    isConsumerAdmissionReady() {
+        return this.isReady() && this.#consumerCanAdmitCurrentDecision();
+    }
+
     currentGeneration() {
         return this.generation;
     }
