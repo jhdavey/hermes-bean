@@ -9,6 +9,7 @@ import {
     REPLAY_ENGLISH_VOICES,
     STRICT_WAKE_COMMAND_CASES,
 } from './voice-v2-replay-corpus.mjs';
+import { withBenchmarkDeadline } from './voice-v2-benchmark-deadline.mjs';
 
 const locales = new Map(REPLAY_ENGLISH_VOICES.map((voice) => [voice, 'en_US']));
 
@@ -110,4 +111,35 @@ test('benchmark schema makes release certification and privacy claims explicit',
     assert.equal(schema.properties.privacy.properties.raw_audio_output_emitted.const, false);
     assert.equal(schema.properties.engines.items.properties.diagnostic_asr, undefined);
     assert.equal(schema.properties.engines.items.properties.legacy_asr_text_diagnostic, undefined);
+});
+
+test('benchmark deadline resolves completed work and clears its timer', async () => {
+    let cleared = null;
+    const result = await withBenchmarkDeadline(Promise.resolve('done'), {
+        timeoutMs: 25,
+        label: 'completed replay',
+        setTimeoutFn: () => 17,
+        clearTimeoutFn: (timer) => { cleared = timer; },
+    });
+
+    assert.equal(result, 'done');
+    assert.equal(cleared, 17);
+});
+
+test('benchmark deadline deterministically rejects a stalled engine', async () => {
+    let deadlineCallback = null;
+    let cleared = null;
+    const stalled = withBenchmarkDeadline(new Promise(() => {}), {
+        timeoutMs: 300000,
+        label: 'webkit prerecorded wake replay',
+        setTimeoutFn: (callback) => {
+            deadlineCallback = callback;
+            return 23;
+        },
+        clearTimeoutFn: (timer) => { cleared = timer; },
+    });
+    deadlineCallback();
+
+    await assert.rejects(stalled, /webkit prerecorded wake replay exceeded 300000 ms/);
+    assert.equal(cleared, 23);
 });

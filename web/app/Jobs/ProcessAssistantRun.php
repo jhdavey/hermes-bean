@@ -32,10 +32,8 @@ class ProcessAssistantRun implements ShouldQueue
 {
     use Queueable;
 
-    // WithoutOverlapping releases a later run while an earlier run in the same
-    // conversation owns the lock. Those releases consume attempts, so this must
-    // cover the full lock lifetime rather than treating a normal queue wait as a
-    // terminal one-attempt failure.
+    // Browser Voice v2 uses these attempts only for lifecycle-scheduler waits.
+    // Legacy runs still use queue middleware below.
     public int $tries = 120;
 
     public int $maxExceptions = 1;
@@ -51,13 +49,18 @@ class ProcessAssistantRun implements ShouldQueue
         $run = AssistantRun::query()
             ->select(['id', 'workspace_id', 'conversation_session_id', 'voice_turn_id', 'resource_lock_key'])
             ->find($this->assistantRunId);
-        $lockKey = $run?->voice_turn_id
-            ? ($run->resource_lock_key
-                ? "browser-voice-resource-{$run->workspace_id}-{$run->resource_lock_key}"
-                : "browser-voice-run-{$this->assistantRunId}")
-            : ($run?->conversation_session_id
-                ? "assistant-session-{$run->conversation_session_id}"
-                : "assistant-run-{$this->assistantRunId}");
+
+        // The transactional VoiceTurnLifecycleService scheduler is the sole
+        // Browser Voice v2 execution-order authority. A second queue lock here
+        // would race its capacity, dependency, priority, and resource decisions
+        // while consuming attempts without recording a durable scheduler wait.
+        if ($run?->voice_turn_id !== null) {
+            return [];
+        }
+
+        $lockKey = $run?->conversation_session_id
+            ? "assistant-session-{$run->conversation_session_id}"
+            : "assistant-run-{$this->assistantRunId}";
 
         return [
             (new WithoutOverlapping($lockKey))
@@ -275,6 +278,7 @@ class ProcessAssistantRun implements ShouldQueue
                 ...(is_array($runtimeUserMessage->metadata) ? $runtimeUserMessage->metadata : []),
                 'assistant_run_id' => $run->id,
                 'defer_memory_candidate' => true,
+                'defer_response_persistence' => true,
             ]);
             $typedFinalText = $this->executeBrowserVoiceTypedHandler(
                 $run,
@@ -322,7 +326,8 @@ class ProcessAssistantRun implements ShouldQueue
             $provisional = $result['assistant_message'] ?? null;
             $finalText = $typedHandler
                 ? trim((string) $typedFinalText)
-                : ($provisional instanceof ConversationMessage ? trim((string) $provisional->content) : '');
+                : trim((string) ($result['assistant_content']
+                    ?? ($provisional instanceof ConversationMessage ? $provisional->content : '')));
             $runtimeStatus = $this->browserVoiceRuntimeStatus($result);
             $runtimeCanceled = in_array($runtimeStatus, ['cancelled', 'canceled'], true);
             $runtimeFailed = in_array($runtimeStatus, ['failed', 'blocked', 'error'], true);

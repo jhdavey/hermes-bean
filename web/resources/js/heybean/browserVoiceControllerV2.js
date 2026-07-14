@@ -23,7 +23,6 @@ export const BROWSER_VOICE_TIMER_KEYS = Object.freeze({
 
 export const BROWSER_VOICE_EFFECTS = Object.freeze({
     ACTIVATE_CAPTURE: 'activate_capture',
-    ASSESS_COMPLETENESS: 'assess_completeness',
     CANCEL_ALL_TIMERS: 'cancel_all_timers',
     CANCEL_TIMER: 'cancel_timer',
     CLARIFICATION_EXPIRED: 'clarification_expired',
@@ -48,6 +47,7 @@ const UNSCOPED_EVENT_TYPES = new Set([
     'start',
     'disable',
     'reconnect_started',
+    'restore_clarification',
     'stop_playback',
 ]);
 
@@ -55,7 +55,6 @@ const TURN_SCOPED_EVENT_TYPES = new Set([
     'transcript_partial',
     'transcript_final',
     'speech_ended',
-    'completeness_decided',
     'capture_failed',
     'follow_up_candidate_rejected',
     'admission_clarification_required',
@@ -71,6 +70,26 @@ const DEFAULT_CONFIG = Object.freeze({
 
 function cleanText(value) {
     return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+// Endpointing is intentionally domain agnostic. This guard only recognizes
+// unmistakably open grammatical boundaries so a mid-sentence pause can keep
+// listening briefly. Semantic completeness belongs exclusively to server
+// admission, where application context and typed handlers are authoritative.
+function hasOpenUtteranceBoundary(value) {
+    const text = cleanText(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9'\s]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!text) return true;
+
+    if (/\b(?:a|an|the|my|your|this|that|some|any|for|with|to|at|on|by|from|about|of|called|titled|named|containing|saying|and|or)$/.test(text)) {
+        return true;
+    }
+
+    return /^(?:can|could|would|will) you(?: please)? [a-z][a-z'-]*$/.test(text);
 }
 
 function joinSegments(segments, draft = '') {
@@ -162,15 +181,16 @@ function beginTurn(state, event, originState) {
             segments: [],
             draft: '',
             finalizedDraft: '',
-            assessmentPending: false,
             submitted: false,
             clarificationQuestion: '',
             clarificationContinuation: false,
+            clarificationDurable: false,
         },
         followUpCandidate: null,
         liveDraft: '',
         finalizedTranscript: '',
         closeAfterPlayback: false,
+        followUpResponseExpected: false,
         speechActive: false,
         closedTurnIds,
         deadlines: { endpointAt: null, clarificationAt: null, followUpAt: null },
@@ -269,10 +289,10 @@ function promoteFollowUpCandidate(state, text, final) {
         segments: [],
         draft: text,
         finalizedDraft: final ? text : '',
-        assessmentPending: false,
         submitted: false,
         clarificationQuestion: '',
         clarificationContinuation: false,
+        clarificationDurable: false,
     };
     return {
         state: {
@@ -281,6 +301,7 @@ function promoteFollowUpCandidate(state, text, final) {
             activeTurn,
             followUpCandidate: null,
             liveDraft: text,
+            followUpResponseExpected: false,
             closedTurnIds,
             deadlines: { ...state.deadlines, followUpAt: null },
         },
@@ -311,6 +332,7 @@ export function createBrowserVoiceControllerState(options = {}) {
         finalizedTranscript: '',
         speechActive: false,
         closeAfterPlayback: false,
+        followUpResponseExpected: false,
         recoveryState: null,
         failureReason: '',
         deadlines: { endpointAt: null, clarificationAt: null, followUpAt: null },
@@ -382,6 +404,56 @@ export function reduceBrowserVoiceController(state, event) {
                 speechActive: false,
             },
             effects: [effect(BROWSER_VOICE_EFFECTS.CANCEL_ALL_TIMERS)],
+        };
+    }
+
+    if (event.type === 'restore_clarification') {
+        const turnId = cleanText(event.turnId);
+        const question = cleanText(event.question);
+        const transcript = cleanText(event.transcript);
+        if (!turnId || !question || [
+            BROWSER_VOICE_CONVERSATION_STATES.OFF,
+            BROWSER_VOICE_CONVERSATION_STATES.STARTING,
+            BROWSER_VOICE_CONVERSATION_STATES.FAILED,
+            BROWSER_VOICE_CONVERSATION_STATES.RECOVERING_CONNECTION,
+        ].includes(state.conversationState)) {
+            return rejectEvent(state, event, 'clarification_not_restorable');
+        }
+        if (state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION
+            && state.activeTurn?.id === turnId
+            && state.activeTurn.clarificationQuestion === question) {
+            return unchanged(state);
+        }
+        const epoch = Math.max(1, Number(event.conversationEpoch) || state.conversationEpoch || 1);
+        return {
+            state: {
+                ...state,
+                conversationEpoch: epoch,
+                conversationState: BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION,
+                activeTurn: {
+                    id: turnId,
+                    originState: BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY,
+                    conversationContext: {
+                        mode: BROWSER_VOICE_CONTEXT_MODES.NEW_CONVERSATION,
+                        epoch,
+                    },
+                    segments: transcript ? [transcript] : [],
+                    draft: '',
+                    finalizedDraft: '',
+                    submitted: false,
+                    clarificationQuestion: question,
+                    clarificationContinuation: false,
+                    clarificationDurable: true,
+                },
+                followUpCandidate: null,
+                liveDraft: '',
+                finalizedTranscript: transcript,
+                deadlines: { endpointAt: null, clarificationAt: null, followUpAt: null },
+            },
+            effects: [effect(BROWSER_VOICE_EFFECTS.SPEAK_CLARIFICATION, {
+                turnId,
+                text: question,
+            })],
         };
     }
 
@@ -557,6 +629,7 @@ export function reduceBrowserVoiceController(state, event) {
                             draft: '',
                             finalizedDraft: '',
                             clarificationContinuation: true,
+                            clarificationDurable: true,
                         },
                         speechActive: false,
                         deadlines: { ...state.deadlines, clarificationAt: null, endpointAt: null },
@@ -605,7 +678,12 @@ export function reduceBrowserVoiceController(state, event) {
                     state: {
                         ...state,
                         conversationState: BROWSER_VOICE_CONVERSATION_STATES.CAPTURING,
-                        activeTurn: { ...state.activeTurn, draft: '', finalizedDraft: '', clarificationContinuation: true },
+                        activeTurn: {
+                            ...state.activeTurn,
+                            draft: '',
+                            finalizedDraft: '',
+                            clarificationContinuation: Boolean(state.activeTurn.clarificationDurable),
+                        },
                         deadlines: { ...state.deadlines, clarificationAt: null, endpointAt: null },
                     },
                     effects: [effect(BROWSER_VOICE_EFFECTS.CANCEL_TIMER, { timerKey: BROWSER_VOICE_TIMER_KEYS.CLARIFICATION })],
@@ -631,7 +709,10 @@ export function reduceBrowserVoiceController(state, event) {
             if (state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP && state.followUpCandidate) {
                 const draft = cleanText(event.text);
                 const final = event.type === 'transcript_final';
-                const relevance = classifyBrowserVoiceFollowUpRelevance(draft, { final });
+                const relevance = classifyBrowserVoiceFollowUpRelevance(draft, {
+                    final,
+                    responseExpected: state.followUpResponseExpected,
+                });
                 if (relevance === BROWSER_VOICE_FOLLOW_UP_RELEVANCE.MEANINGFUL) {
                     return promoteFollowUpCandidate(state, draft, final);
                 }
@@ -671,7 +752,10 @@ export function reduceBrowserVoiceController(state, event) {
         case 'speech_ended': {
             if (state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP && state.followUpCandidate) {
                 const draft = cleanText(state.followUpCandidate.finalizedDraft || state.followUpCandidate.draft);
-                const relevance = classifyBrowserVoiceFollowUpRelevance(draft, { final: true });
+                const relevance = classifyBrowserVoiceFollowUpRelevance(draft, {
+                    final: true,
+                    responseExpected: state.followUpResponseExpected,
+                });
                 if (relevance !== BROWSER_VOICE_FOLLOW_UP_RELEVANCE.MEANINGFUL) {
                     return rejectFollowUpCandidate(state, event, atMs, 'not_meaningful');
                 }
@@ -757,6 +841,7 @@ export function reduceBrowserVoiceController(state, event) {
                         submitted: false,
                         clarificationQuestion: cleanText(event.question),
                         clarificationContinuation: false,
+                        clarificationDurable: true,
                     },
                     deadlines: { endpointAt: null, clarificationAt: null, followUpAt: null },
                 },
@@ -804,17 +889,75 @@ export function reduceBrowserVoiceController(state, event) {
             if (timerKey === BROWSER_VOICE_TIMER_KEYS.ENDPOINT) {
                 const deadline = state.deadlines.endpointAt;
                 if (!Number.isFinite(deadline) || atMs < deadline) return rejectEvent(state, event, 'early_or_canceled_timer');
-                const transcript = joinSegments(state.activeTurn.segments, state.activeTurn.draft);
+                const segment = cleanText(state.activeTurn.draft);
+                const segments = segment ? [...state.activeTurn.segments, segment] : state.activeTurn.segments;
+                const transcript = joinSegments(segments);
+
+                if (!state.activeTurn.clarificationDurable && hasOpenUtteranceBoundary(transcript)) {
+                    const clarificationAt = atMs + state.config.clarificationMs;
+                    return {
+                        state: {
+                            ...state,
+                            conversationState: BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION,
+                            activeTurn: {
+                                ...state.activeTurn,
+                                segments,
+                                draft: '',
+                                finalizedDraft: '',
+                                clarificationContinuation: false,
+                            },
+                            liveDraft: transcript,
+                            deadlines: {
+                                ...state.deadlines,
+                                endpointAt: null,
+                                clarificationAt,
+                            },
+                        },
+                        effects: [
+                            effect(BROWSER_VOICE_EFFECTS.DRAFT_CHANGED, {
+                                text: transcript,
+                                turnId: state.activeTurn.id,
+                                final: true,
+                            }),
+                            effect(BROWSER_VOICE_EFFECTS.SCHEDULE_TIMER, {
+                                timerKey: BROWSER_VOICE_TIMER_KEYS.CLARIFICATION,
+                                delayMs: state.config.clarificationMs,
+                                turnId: state.activeTurn.id,
+                            }),
+                        ],
+                    };
+                }
+
+                const clarificationContinuation = Boolean(state.activeTurn.clarificationContinuation);
+                const activeTurn = {
+                    ...state.activeTurn,
+                    segments,
+                    draft: '',
+                    finalizedDraft: '',
+                    submitted: true,
+                    clarificationContinuation: false,
+                };
                 return {
                     state: {
                         ...state,
-                        activeTurn: { ...state.activeTurn, assessmentPending: true },
+                        conversationState: BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP,
+                        activeTurn,
+                        liveDraft: '',
+                        finalizedTranscript: transcript,
                         deadlines: { ...state.deadlines, endpointAt: null },
                     },
-                    effects: [effect(BROWSER_VOICE_EFFECTS.ASSESS_COMPLETENESS, {
-                        turnId: state.activeTurn.id,
-                        transcript,
-                    })],
+                    effects: [
+                        effect(BROWSER_VOICE_EFFECTS.DRAFT_CHANGED, { text: '', turnId: activeTurn.id, final: true }),
+                        effect(BROWSER_VOICE_EFFECTS.TURN_READY, {
+                            turnId: activeTurn.id,
+                            transcript,
+                            ...(clarificationContinuation ? {
+                                clarificationContinuation: true,
+                                clarificationAnswer: segment,
+                            } : {}),
+                            conversationContext: { ...activeTurn.conversationContext },
+                        }),
+                    ],
                 };
             }
             if (timerKey === BROWSER_VOICE_TIMER_KEYS.CLARIFICATION) {
@@ -841,7 +984,10 @@ export function reduceBrowserVoiceController(state, event) {
                     },
                     effects: [
                         effect(BROWSER_VOICE_EFFECTS.DRAFT_CHANGED, { text: '', turnId: turn?.id || null }),
-                        effect(BROWSER_VOICE_EFFECTS.CLARIFICATION_EXPIRED, { turnId: turn?.id || null }),
+                        effect(BROWSER_VOICE_EFFECTS.CLARIFICATION_EXPIRED, {
+                            turnId: turn?.id || null,
+                            durable: Boolean(turn?.clarificationDurable),
+                        }),
                         ...(returnToFollowUp ? [effect(BROWSER_VOICE_EFFECTS.SCHEDULE_TIMER, {
                             timerKey: BROWSER_VOICE_TIMER_KEYS.FOLLOW_UP,
                             delayMs: state.config.followUpMs,
@@ -860,108 +1006,13 @@ export function reduceBrowserVoiceController(state, event) {
                     state: {
                         ...state,
                         conversationState: BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY,
+                        followUpResponseExpected: false,
                         deadlines: { ...state.deadlines, followUpAt: null },
                     },
                     effects: [],
                 };
             }
             return rejectEvent(state, event, 'unknown_timer');
-        }
-
-        case 'completeness_decided': {
-            if (state.conversationState !== BROWSER_VOICE_CONVERSATION_STATES.CAPTURING
-                || !state.activeTurn?.assessmentPending) {
-                return rejectEvent(state, event, 'assessment_not_pending');
-            }
-            const decision = cleanText(event.decision).toLowerCase();
-            const segment = cleanText(state.activeTurn.draft);
-            const segments = segment ? [...state.activeTurn.segments, segment] : state.activeTurn.segments;
-            if (decision === 'complete') {
-                const transcript = joinSegments(segments);
-                const activeTurn = {
-                    ...state.activeTurn,
-                    segments,
-                    draft: '',
-                    finalizedDraft: '',
-                    assessmentPending: false,
-                    submitted: true,
-                    clarificationContinuation: false,
-                };
-                return {
-                    state: {
-                        ...state,
-                        conversationState: BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP,
-                        activeTurn,
-                        liveDraft: '',
-                        finalizedTranscript: transcript,
-                    },
-                    effects: [
-                        effect(BROWSER_VOICE_EFFECTS.DRAFT_CHANGED, { text: '', turnId: activeTurn.id, final: true }),
-                        effect(BROWSER_VOICE_EFFECTS.TURN_READY, {
-                            turnId: activeTurn.id,
-                            transcript,
-                            conversationContext: { ...activeTurn.conversationContext },
-                        }),
-                    ],
-                };
-            }
-            if (decision === 'incomplete' && cleanText(event.question)) {
-                const activeTurn = {
-                    ...state.activeTurn,
-                    segments,
-                    draft: '',
-                    finalizedDraft: '',
-                    assessmentPending: false,
-                    clarificationQuestion: cleanText(event.question),
-                    clarificationContinuation: false,
-                };
-                return {
-                    state: {
-                        ...state,
-                        conversationState: BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION,
-                        activeTurn,
-                        liveDraft: joinSegments(segments),
-                        deadlines: { ...state.deadlines, clarificationAt: null },
-                    },
-                    effects: [
-                        effect(BROWSER_VOICE_EFFECTS.SPEAK_CLARIFICATION, {
-                            turnId: activeTurn.id,
-                            text: activeTurn.clarificationQuestion,
-                        }),
-                    ],
-                };
-            }
-            // An uncertain pause, or an incomplete result without a safe
-            // specific question, listens silently without admitting work. It
-            // still has the clarification deadline so an abandoned fragment
-            // cannot strand capture (and every deferred final) indefinitely.
-            const activeTurn = {
-                ...state.activeTurn,
-                segments,
-                draft: '',
-                finalizedDraft: '',
-                assessmentPending: false,
-                clarificationContinuation: false,
-            };
-            const liveDraft = joinSegments(segments);
-            const clarificationAt = atMs + state.config.clarificationMs;
-            return {
-                state: {
-                    ...state,
-                    conversationState: BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION,
-                    activeTurn,
-                    liveDraft,
-                    deadlines: { ...state.deadlines, clarificationAt },
-                },
-                effects: [
-                    effect(BROWSER_VOICE_EFFECTS.DRAFT_CHANGED, { text: liveDraft, turnId: activeTurn.id }),
-                    effect(BROWSER_VOICE_EFFECTS.SCHEDULE_TIMER, {
-                        timerKey: BROWSER_VOICE_TIMER_KEYS.CLARIFICATION,
-                        delayMs: state.config.clarificationMs,
-                        turnId: activeTurn.id,
-                    }),
-                ],
-            };
         }
 
         case 'playback_started':
@@ -1021,6 +1072,7 @@ export function reduceBrowserVoiceController(state, event) {
                         activeTurn: playbackOwnsActiveTurn ? null : state.activeTurn,
                         speechActive: false,
                         closeAfterPlayback: false,
+                        followUpResponseExpected: false,
                         closedTurnIds,
                         deadlines: { ...state.deadlines, followUpAt: null },
                     },
@@ -1035,6 +1087,7 @@ export function reduceBrowserVoiceController(state, event) {
                     activeTurn: playbackOwnsActiveTurn && state.activeTurn?.submitted ? null : state.activeTurn,
                     speechActive: false,
                     closeAfterPlayback: false,
+                    followUpResponseExpected: Boolean(event.responseExpected),
                     closedTurnIds,
                     deadlines: { ...state.deadlines, followUpAt },
                 },
@@ -1220,21 +1273,22 @@ export class BrowserVoiceControllerV2 {
         });
     }
 
+    restoreClarification({ turnId = '', transcript = '', question = '', conversationEpoch = 0 } = {}) {
+        return this.dispatch({
+            type: 'restore_clarification',
+            turnId,
+            transcript,
+            question,
+            conversationEpoch,
+        });
+    }
+
     admissionFailed(turnId, reason = 'admission_failed', event = {}) {
         return this.dispatch({
             type: 'admission_failed',
             turnId: cleanText(turnId) || this.state.activeTurn?.id || null,
             reason,
             ...event,
-        });
-    }
-
-    completenessDecided(decision, detail = {}) {
-        return this.dispatch({
-            type: 'completeness_decided',
-            turnId: this.state.activeTurn?.id || null,
-            decision,
-            ...detail,
         });
     }
 

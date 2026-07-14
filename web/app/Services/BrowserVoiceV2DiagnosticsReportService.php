@@ -40,6 +40,7 @@ class BrowserVoiceV2DiagnosticsReportService
         $metrics = $this->latencyMetrics($rows);
         $gates = $this->benchmarkGates($metrics);
         $alerts = $this->alerts($rows, $gates);
+        $clientFailures = $this->clientFailures($from, $to);
 
         return [
             'population' => [
@@ -63,6 +64,7 @@ class BrowserVoiceV2DiagnosticsReportService
             'latency_metrics' => $metrics,
             'benchmark_gates' => $gates,
             'alerts' => $alerts,
+            'client_failures' => $clientFailures,
             'telemetry_coverage' => $this->telemetryCoverage($rows, $metrics),
             'privacy' => [
                 'transcript_source' => 'voice_turns.sanitized_transcript',
@@ -72,6 +74,45 @@ class BrowserVoiceV2DiagnosticsReportService
                 'diagnostic_payloads_sanitized' => true,
             ],
             'turns' => $rows->values()->all(),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function clientFailures(CarbonInterface $from, CarbonInterface $to): array
+    {
+        $events = ActivityEvent::query()
+            ->where('event_type', 'browser_voice_v2.client_failure')
+            ->whereBetween('created_at', [$from, $to])
+            ->orderByDesc('id')
+            ->limit(200)
+            ->get();
+
+        return [
+            'count' => $events->count(),
+            'stage_counts' => $events
+                ->countBy(fn (ActivityEvent $event): string => (string) data_get($event->payload, 'stage', 'unknown'))
+                ->all(),
+            'events' => $events->map(function (ActivityEvent $event): array {
+                $payload = is_array($event->payload) ? $event->payload : [];
+
+                return [
+                    'id' => $event->id,
+                    'user_id' => $event->user_id,
+                    'workspace_id' => $event->workspace_id,
+                    'conversation_session_id' => $event->conversation_session_id,
+                    'turn_id' => $this->privacy->sanitizeTranscript((string) data_get($payload, 'turn_id', '')) ?: null,
+                    'stage' => $this->privacy->sanitizeTranscript((string) data_get($payload, 'stage', 'unknown')),
+                    'code' => $this->privacy->sanitizeTranscript((string) data_get($payload, 'code', 'unknown')),
+                    'message' => $this->privacy->sanitizeTranscript((string) data_get($payload, 'message', '')),
+                    'cause_chain' => collect(data_get($payload, 'cause_chain', []))
+                        ->take(4)
+                        ->map(fn (mixed $cause): array => [
+                            'code' => $this->privacy->sanitizeTranscript((string) data_get($cause, 'code', '')),
+                            'message' => $this->privacy->sanitizeTranscript((string) data_get($cause, 'message', '')),
+                        ])->values()->all(),
+                    'created_at' => $this->iso($event->created_at),
+                ];
+            })->values()->all(),
         ];
     }
 

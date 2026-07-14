@@ -612,6 +612,8 @@ PROMPT;
         }
 
         return DB::transaction(function () use ($session, $userMessage, $events, $message, $context): array {
+            $deferResponsePersistence = data_get($userMessage->metadata, 'defer_response_persistence', false) === true;
+            $assistantContent = $this->assistantSafeResponseContent($message);
             $this->lockRunForAssistantPersistence($session, $userMessage);
             $failed = $this->recordEvent($session, 'runtime.tool_model_failed', [
                 'message_id' => $userMessage->id,
@@ -619,11 +621,11 @@ PROMPT;
                 ...$context,
             ], 'hermes.tools', 'failed');
 
-            $assistantMessage = ConversationMessage::create([
+            $assistantMessage = $deferResponsePersistence ? null : ConversationMessage::create([
                 'user_id' => $session->user_id,
                 'conversation_session_id' => $session->id,
                 'role' => 'assistant',
-                'content' => $this->assistantSafeResponseContent($message),
+                'content' => $assistantContent,
                 'metadata' => [
                     ...$this->assistantRunMetadata($userMessage),
                     'runtime' => 'tools',
@@ -632,9 +634,15 @@ PROMPT;
                 ],
             ]);
 
-            $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
-                'message_id' => $assistantMessage->id,
-            ]);
+            $responseCompleted = $this->recordEvent(
+                $session,
+                $deferResponsePersistence ? 'runtime.response_generated' : 'runtime.message_completed',
+                [
+                    'message_id' => $assistantMessage?->id,
+                    'source_message_id' => $userMessage->id,
+                    'persistence_deferred' => $deferResponsePersistence,
+                ],
+            );
 
             $session->update(['status' => 'active', 'last_activity_at' => now()]);
 
@@ -643,7 +651,8 @@ PROMPT;
                 'session' => $session->refresh(),
                 'user_message' => $userMessage,
                 'assistant_message' => $assistantMessage,
-                'events' => $events->push($failed)->push($messageCompleted),
+                'assistant_content' => $assistantContent,
+                'events' => $events->push($failed)->push($responseCompleted),
                 'blocker' => null,
             ];
         });
@@ -656,6 +665,7 @@ PROMPT;
         }
 
         return DB::transaction(function () use ($session, $userMessage, $events, $message, $context): array {
+            $deferResponsePersistence = data_get($userMessage->metadata, 'defer_response_persistence', false) === true;
             $this->lockRunForAssistantPersistence($session, $userMessage);
             $blocked = $this->recordEvent($session, 'runtime.usage_blocked', [
                 'message_id' => $userMessage->id,
@@ -663,7 +673,7 @@ PROMPT;
                 ...$context,
             ], 'usage.guardrail', 'blocked');
 
-            $assistantMessage = ConversationMessage::create([
+            $assistantMessage = $deferResponsePersistence ? null : ConversationMessage::create([
                 'user_id' => $session->user_id,
                 'conversation_session_id' => $session->id,
                 'role' => 'assistant',
@@ -676,9 +686,15 @@ PROMPT;
                 ],
             ]);
 
-            $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
-                'message_id' => $assistantMessage->id,
-            ]);
+            $responseCompleted = $this->recordEvent(
+                $session,
+                $deferResponsePersistence ? 'runtime.response_generated' : 'runtime.message_completed',
+                [
+                    'message_id' => $assistantMessage?->id,
+                    'source_message_id' => $userMessage->id,
+                    'persistence_deferred' => $deferResponsePersistence,
+                ],
+            );
 
             $session->update(['status' => 'active', 'last_activity_at' => now()]);
 
@@ -687,7 +703,8 @@ PROMPT;
                 'session' => $session->refresh(),
                 'user_message' => $userMessage,
                 'assistant_message' => $assistantMessage,
-                'events' => $events->push($blocked)->push($messageCompleted),
+                'assistant_content' => $message,
+                'events' => $events->push($blocked)->push($responseCompleted),
                 'blocker' => null,
             ];
         });

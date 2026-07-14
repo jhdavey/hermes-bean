@@ -21,12 +21,12 @@ interface HermesRuntimeService
     public function progressEvents(ConversationSession $session): Collection;
 
     /**
-     * @return array{status:string, session:ConversationSession, user_message:mixed, assistant_message:mixed|null, events:mixed, blocker:mixed|null}
+     * @return array{status:string, session:ConversationSession, user_message:mixed, assistant_message:mixed|null, assistant_content?:string, events:mixed, blocker:mixed|null}
      */
     public function sendMessage(ConversationSession $session, string $content, array $metadata = []): array;
 
     /**
-     * @return array{status:string, session:ConversationSession, user_message:mixed, assistant_message:mixed|null, events:mixed, blocker:mixed|null}
+     * @return array{status:string, session:ConversationSession, user_message:mixed, assistant_message:mixed|null, assistant_content?:string, events:mixed, blocker:mixed|null}
      */
     public function sendExistingMessage(ConversationSession $session, ConversationMessage $userMessage): array;
 }

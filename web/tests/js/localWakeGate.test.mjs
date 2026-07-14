@@ -20,6 +20,7 @@ test('orchestration protocol matches the packaged same-origin worker and worklet
     ]);
 
     assert.match(processor, new RegExp(`const PROCESSOR_NAME = '${LOCAL_WAKE_GATE_PROCESSOR_NAME}'`));
+    assert.match(processor, /const AUDIO_BATCH_SAMPLES = 1280/);
     assert.match(processor, /registerProcessor\(PROCESSOR_NAME,/);
     assert.match(processor, /type:\s*'audio'/);
     assert.match(processor, /message\.type === 'activate'/);
@@ -885,13 +886,13 @@ test('[BV2-WAKE-10] startup primes a clean consumer-enabled generation before th
     );
 });
 
-test('[BV2-WAKE-11] the first-party prefix path recovers a strict Hey Bean missed by keyword timing', async () => {
+test('[BV2-WAKE-11] one generic verifier owns wake acceptance and recovers strict Hey Bean missed by timing', async () => {
     const worker = await readFile(new URL('../../public/voice/wake/wake-worker.js', import.meta.url), 'utf8');
 
-    assert.match(worker, /STRICT_ACCEPTANCE_PROBABILITY = 0\.5/);
+    assert.match(worker, /STRICT_ACCEPTANCE_PROBABILITY = 0\.75/);
     assert.match(worker, /STRICT_PREFIX_ACCEPTANCE_PROBABILITY = 0\.99/);
-    assert.match(worker, /@PRETTY_GIRL/);
-    assert.match(worker, /@PRETTY_GOOD/);
+    assert.doesNotMatch(worker, /STRICT_NEAR_MISS_ALIASES/);
+    assert.deepEqual([...new Set(worker.match(/@[A-Z_]+/g))], ['@HEY_BEAN']);
     assert.match(worker, /strictWakeAccepted = silentChunksAfterSpeech >= STRICT_PREFIX_FALLBACK_SILENCE_CHUNKS/);
     assert.match(worker, /activation: 'missed_hey_confirmation'/);
     assert.match(worker, /decision\.activation !== 'strict_wake'/);

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Data\VoiceTurnRoute;
 use App\Enums\VoiceTurnLane;
 use App\Enums\VoiceTurnSideEffectStatus;
 use App\Enums\VoiceTurnState;
@@ -22,6 +23,7 @@ class VoiceTurnLifecycleService
 {
     public function __construct(
         private readonly BrowserVoiceAdmissionRouter $router,
+        private readonly BrowserVoiceRequestCompletenessService $completeness,
         private readonly VoiceTurnPrivacyService $privacy,
         private readonly FastDomainWriteService $domainWrites,
         private readonly BrowserVoiceContextReferenceResolver $contextReferences,
@@ -77,7 +79,16 @@ class VoiceTurnLifecycleService
             ...($contextualReference !== null ? ['contextual_reference' => $contextualReference] : []),
         ];
         $declaredLocalHandler = trim((string) ($input['declared_local_handler'] ?? '')) ?: null;
-        $route = $this->router->route($transcript, $context, $declaredLocalHandler);
+        $clarificationQuestion = trim((string) ($input['_clarification_question'] ?? '')) ?: null;
+        $route = $clarificationQuestion === null
+            ? $this->router->route($transcript, $context, $declaredLocalHandler)
+            : new VoiceTurnRoute(
+                VoiceTurnLane::ComplexAgent,
+                'clarification.pending',
+                false,
+                null,
+                30,
+            );
         $fingerprint = hash('sha256', json_encode([
             'session_id' => (int) $session->id,
             'transcript' => $transcript,
@@ -86,7 +97,7 @@ class VoiceTurnLifecycleService
         ], JSON_THROW_ON_ERROR));
         $now = now();
 
-        $result = DB::transaction(function () use ($user, $session, $turnId, $transcript, $sanitizedTranscript, $context, $route, $fingerprint, $now): array {
+        $result = DB::transaction(function () use ($user, $session, $turnId, $transcript, $sanitizedTranscript, $context, $route, $fingerprint, $now, $clarificationQuestion): array {
             ConversationSession::query()->whereKey($session->id)->lockForUpdate()->firstOrFail();
             $existing = VoiceTurn::query()->where('turn_id', $turnId)->lockForUpdate()->first();
 
@@ -132,14 +143,18 @@ class VoiceTurnLifecycleService
                 'sanitized_transcript' => $sanitizedTranscript,
                 'lane' => $route->lane,
                 'handler' => $route->handler,
-                'state' => VoiceTurnState::Accepted,
+                'state' => $clarificationQuestion === null
+                    ? VoiceTurnState::Accepted
+                    : VoiceTurnState::AwaitingClarification,
                 'version' => 1,
                 'idempotency_key' => $turnId,
                 'acknowledgement_required' => $route->acknowledgementRequired,
                 'acknowledgement_text' => $route->acknowledgementText,
-                'accepted_at' => $now,
-                'hard_deadline_at' => $now->copy()->addSeconds($route->hardDeadlineSeconds),
-                'no_progress_deadline_at' => $route->noProgressDeadlineSeconds === null
+                'accepted_at' => $clarificationQuestion === null ? $now : null,
+                'hard_deadline_at' => $clarificationQuestion === null
+                    ? $now->copy()->addSeconds($route->hardDeadlineSeconds)
+                    : null,
+                'no_progress_deadline_at' => $clarificationQuestion !== null || $route->noProgressDeadlineSeconds === null
                     ? null
                     : $now->copy()->addSeconds($route->noProgressDeadlineSeconds),
                 'side_effect_status' => VoiceTurnSideEffectStatus::None,
@@ -148,6 +163,11 @@ class VoiceTurnLifecycleService
                     'admission_fingerprint' => $fingerprint,
                     'raw_audio_retained' => false,
                     'no_progress_interval_seconds' => $route->noProgressDeadlineSeconds,
+                    ...($clarificationQuestion === null ? [] : [
+                        'clarification_question' => $clarificationQuestion,
+                        'clarification_sequence' => 1,
+                        'clarification_resolutions' => [],
+                    ]),
                 ],
             ]);
 
@@ -166,13 +186,20 @@ class VoiceTurnLifecycleService
             ]);
 
             $turn->update(['user_message_id' => $userMessage->id]);
-            $this->recordEventLocked($turn, 'turn_admitted', null, VoiceTurnState::Accepted, [
+            $this->recordEventLocked($turn, 'turn_admitted', null, $turn->state, [
                 'lane' => $route->lane->value,
                 'handler' => $route->handler,
                 'acknowledgement_required' => $route->acknowledgementRequired,
                 'hard_deadline_at' => $turn->hard_deadline_at?->toIso8601String(),
                 'no_progress_deadline_at' => $turn->no_progress_deadline_at?->toIso8601String(),
+                'clarification_question' => $clarificationQuestion,
             ], 'admission');
+            if ($clarificationQuestion !== null) {
+                $this->recordEventLocked($turn, 'clarification_requested', $turn->state, $turn->state, [
+                    'question' => $clarificationQuestion,
+                    'sequence' => 1,
+                ], 'admission');
+            }
             $session->update(['last_activity_at' => $now]);
 
             return ['turn' => $turn->refresh(), 'conflict' => null, 'created' => true];
@@ -189,6 +216,151 @@ class VoiceTurnLifecycleService
         }
 
         return $turn->load(['userMessage', 'finalAssistantMessage', 'runs']);
+    }
+
+    public function resolveClarification(VoiceTurn $turn, string $answer, string $clarificationId): VoiceTurn
+    {
+        $answer = trim($answer);
+        $clarificationId = trim($clarificationId);
+        if ($answer === '' || $clarificationId === '') {
+            throw new VoiceTurnConflictException('A clarification answer and id are required.');
+        }
+
+        $resolved = DB::transaction(function () use ($turn, $answer, $clarificationId): VoiceTurn {
+            $locked = VoiceTurn::query()->whereKey($turn->id)->lockForUpdate()->firstOrFail();
+            $metadata = is_array($locked->metadata) ? $locked->metadata : [];
+            $resolutions = is_array($metadata['clarification_resolutions'] ?? null)
+                ? $metadata['clarification_resolutions']
+                : [];
+            $answerHash = hash('sha256', $answer);
+
+            if (isset($resolutions[$clarificationId])) {
+                if (! hash_equals((string) $resolutions[$clarificationId], $answerHash)) {
+                    throw new VoiceTurnConflictException('That clarification id was already used for a different answer.');
+                }
+
+                return $locked->refresh();
+            }
+            if ($locked->state !== VoiceTurnState::AwaitingClarification) {
+                throw new VoiceTurnConflictException('That voice request is not waiting for clarification.');
+            }
+
+            $combinedTranscript = $this->combineClarification(
+                $locked->transcript,
+                $answer,
+                (string) data_get($metadata, 'clarification_question', ''),
+            );
+            $hasDefaultLocation = filled(data_get($metadata, 'location_context.label'))
+                || (data_get($metadata, 'location_context.latitude') !== null
+                    && data_get($metadata, 'location_context.longitude') !== null);
+            $question = $this->completeness->clarificationQuestion(
+                $combinedTranscript,
+                $hasDefaultLocation,
+                data_get($metadata, 'timezone'),
+                true,
+                (bool) data_get($metadata, 'prior_context_authorized', false),
+                is_array(data_get($metadata, 'contextual_reference')),
+            );
+            $resolutions[$clarificationId] = $answerHash;
+            $sequence = max(1, (int) ($metadata['clarification_sequence'] ?? 1)) + 1;
+            $metadata = [
+                ...$metadata,
+                'clarification_resolutions' => $resolutions,
+                'clarification_sequence' => $sequence,
+                'clarification_question' => $question,
+                'clarification_deadline_started_at' => null,
+            ];
+            $from = $locked->state;
+
+            if ($question === null) {
+                $route = $this->router->route($combinedTranscript, $metadata);
+                $now = now();
+                // Admission route fields are immutable after acceptance. This
+                // is the single lifecycle-owned seal from clarification draft
+                // to executable request, so bypass the generic model guard.
+                $locked->forceFill([
+                    'transcript' => $combinedTranscript,
+                    'sanitized_transcript' => $this->privacy->sanitizeTranscript($combinedTranscript),
+                    'lane' => $route->lane,
+                    'handler' => $route->handler,
+                    'state' => VoiceTurnState::Accepted,
+                    'version' => $locked->version + 1,
+                    'acknowledgement_required' => $route->acknowledgementRequired,
+                    'acknowledgement_text' => $route->acknowledgementText,
+                    'accepted_at' => $now,
+                    'hard_deadline_at' => $now->copy()->addSeconds($route->hardDeadlineSeconds),
+                    'no_progress_deadline_at' => $route->noProgressDeadlineSeconds === null
+                        ? null
+                        : $now->copy()->addSeconds($route->noProgressDeadlineSeconds),
+                    'metadata' => [
+                        ...$metadata,
+                        'no_progress_interval_seconds' => $route->noProgressDeadlineSeconds,
+                    ],
+                ])->saveQuietly();
+                $locked->userMessage?->update(['content' => $combinedTranscript]);
+                $this->recordEventLocked($locked, 'clarification_resolved', $from, VoiceTurnState::Accepted, [
+                    'clarification_id' => $clarificationId,
+                    'sequence' => $sequence,
+                    'lane' => $route->lane->value,
+                    'handler' => $route->handler,
+                ], 'clarification');
+            } else {
+                $locked->forceFill([
+                    'transcript' => $combinedTranscript,
+                    'sanitized_transcript' => $this->privacy->sanitizeTranscript($combinedTranscript),
+                    'version' => $locked->version + 1,
+                    'hard_deadline_at' => null,
+                    'no_progress_deadline_at' => null,
+                    'metadata' => $metadata,
+                ])->saveQuietly();
+                $locked->userMessage?->update(['content' => $combinedTranscript]);
+                $this->recordEventLocked($locked, 'clarification_requested', $from, $from, [
+                    'clarification_id' => $clarificationId,
+                    'question' => $question,
+                    'sequence' => $sequence,
+                ], 'clarification');
+            }
+
+            return $locked->refresh();
+        }, 3);
+
+        if ($resolved->state === VoiceTurnState::Accepted) {
+            $this->scheduleDeadlines($resolved);
+        }
+
+        return $resolved->load(['userMessage', 'finalAssistantMessage', 'runs']);
+    }
+
+    public function startClarificationDeadline(VoiceTurn $turn, int $seconds = 30): VoiceTurn
+    {
+        $updated = DB::transaction(function () use ($turn, $seconds): VoiceTurn {
+            $locked = VoiceTurn::query()->whereKey($turn->id)->lockForUpdate()->firstOrFail();
+            if ($locked->state !== VoiceTurnState::AwaitingClarification) {
+                return $locked;
+            }
+            $metadata = is_array($locked->metadata) ? $locked->metadata : [];
+            $deadline = now()->addSeconds(max(1, $seconds));
+            $locked->forceFill([
+                'version' => $locked->version + 1,
+                'hard_deadline_at' => $deadline,
+                'metadata' => [
+                    ...$metadata,
+                    'clarification_deadline_started_at' => now()->toIso8601String(),
+                ],
+            ])->saveQuietly();
+            $this->recordEventLocked($locked, 'clarification_deadline_started', $locked->state, $locked->state, [
+                'deadline_at' => $deadline->toIso8601String(),
+            ], 'browser');
+
+            return $locked->refresh();
+        }, 3);
+
+        if ($updated->state === VoiceTurnState::AwaitingClarification && $updated->hard_deadline_at !== null) {
+            EnforceBrowserVoiceTurnDeadline::dispatch($updated->id, $updated->hard_deadline_at->toIso8601String())
+                ->delay($updated->hard_deadline_at);
+        }
+
+        return $updated;
     }
 
     /**
@@ -750,7 +922,11 @@ class VoiceTurnLifecycleService
     public function enforceDeadlines(?int $voiceTurnId = null, ?int $sessionId = null): int
     {
         $query = VoiceTurn::query()
-            ->whereIn('state', [VoiceTurnState::Accepted->value, VoiceTurnState::Running->value]);
+            ->whereIn('state', [
+                VoiceTurnState::AwaitingClarification->value,
+                VoiceTurnState::Accepted->value,
+                VoiceTurnState::Running->value,
+            ]);
         if ($voiceTurnId !== null) {
             $query->whereKey($voiceTurnId);
         }
@@ -788,6 +964,19 @@ class VoiceTurnLifecycleService
             }
             $hardDeadlineExpired = $fresh->hard_deadline_at !== null && $fresh->hard_deadline_at->isPast();
             if (! $noProgressExpired && ! $hardDeadlineExpired) {
+                continue;
+            }
+
+            if ($fresh->state === VoiceTurnState::AwaitingClarification) {
+                try {
+                    $this->cancel($fresh, 'clarification_timeout', [
+                        'deadline_at' => $fresh->hard_deadline_at?->toIso8601String(),
+                    ]);
+                    $failed++;
+                } catch (VoiceTurnConflictException) {
+                    // A clarification answer or cancellation won first.
+                }
+
                 continue;
             }
 
@@ -1406,5 +1595,27 @@ class VoiceTurnLifecycleService
             VoiceTurnLane::External => 'I couldn’t reach that service in time. Would you like me to try again?',
             VoiceTurnLane::ComplexAgent => 'I wasn’t able to finish that work. Would you like me to try again?',
         };
+    }
+
+    private function combineClarification(string $transcript, string $answer, string $question): string
+    {
+        $base = rtrim(trim($transcript), " \t\n\r\0\x0B.!?");
+        $detail = trim($answer);
+        $normalizedQuestion = mb_strtolower(trim($question));
+
+        $joiner = match (true) {
+            str_contains($normalizedQuestion, 'which location') => ' in ',
+            str_contains($normalizedQuestion, 'what should i remind you about') => ' titled ',
+            str_contains($normalizedQuestion, 'what should the note include') => ' with content ',
+            str_contains($normalizedQuestion, 'what task should i create'),
+            str_contains($normalizedQuestion, 'what should i schedule'),
+            str_contains($normalizedQuestion, 'which reminder should i change'),
+            str_contains($normalizedQuestion, 'which task should i change'),
+            str_contains($normalizedQuestion, 'which note should i change'),
+            str_contains($normalizedQuestion, 'which calendar event should i change') => ' titled ',
+            default => ' ',
+        };
+
+        return trim($base.$joiner.$detail);
     }
 }

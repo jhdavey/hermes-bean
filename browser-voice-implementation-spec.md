@@ -1,6 +1,6 @@
 # Browser Voice Implementation Specification
 
-Status: ready to become the implementation goal after product approval  
+Status: implemented local candidate; current verification is recorded in `browser-voice-v2-release-evidence.md`
 Scope: authenticated browser experience only  
 Out of scope: Flutter and other native clients  
 Authoritative behavior: [`bean-voice-rules.md`](bean-voice-rules.md)
@@ -13,7 +13,12 @@ The implementation must replace conflicting ownership. It must not add another c
 
 The browser wake detector is a first-party, self-contained component. It may use bundled open-source runtime code, but it cannot require a proprietary wake provider, cloud inference, an external account, a license key, or an external runtime request. Ordinary same-origin loading of versioned static application/model assets is permitted. Its model, preprocessing, inference, and evaluation path must be reproducible locally from repository-owned scripts and packaged static assets.
 
-## Audit conclusion
+## Original audit conclusion
+
+This section records the diagnosis that motivated Browser Voice v2. It is
+historical context, not a description of the current ownership graph. The
+current implementation and its remaining external verification limits are
+recorded in `browser-voice-v2-release-evidence.md`.
 
 The recurring bugs are not independent transcription, weather, calendar, or wake-word defects. They are different outcomes of the same structural problem: the same voice turn is controlled by several partially independent systems.
 
@@ -59,6 +64,7 @@ Every concern has exactly one authority.
 | Browser conversation state | Browser voice controller | UI renderer, provider adapter |
 | Live activated transcript draft | Browser voice controller | Input renderer |
 | End-of-utterance and clarification timers | Browser voice controller | Transcript/provider adapter |
+| Semantic request completeness and clarification question | Server admission completeness service | Browser voice controller, typed handlers |
 | Request lane and handler | Admission router | Turn lifecycle, job dispatcher |
 | Durable turn lifecycle | Server turn transition service | Browser event projection, admin |
 | Job state and concurrency | Server job scheduler | Working dock, admin |
@@ -194,13 +200,11 @@ No lane silently falls through to another runtime. A typed handler failure is a 
 
 ### 6. Completeness and clarification
 
-The browser closes an utterance after two seconds of silence. It sends the final transcript to a bounded completeness decision that returns only:
+The browser closes an utterance after two seconds of silence. Its only pre-admission guard is a domain-agnostic check for an unmistakably open grammatical boundary, such as an utterance ending in “about” or “for”. That uncertain pause listens silently for up to five seconds and, if speech resumes, admits the combined utterance once.
 
-- complete;
-- clearly incomplete with a specific missing field/question; or
-- uncertain pause.
+The browser must not classify reminder, calendar, task, note, weather, or other application-specific semantic completeness. Every otherwise finalized transcript is admitted exactly once. Server admission is the sole semantic completeness authority because it owns application context and typed-handler requirements.
 
-An uncertain pause listens silently. A clearly incomplete request receives one clarification, and the five-second answer is appended to the same stable turn draft. Only the complete logical request is admitted. Partial utterances never become separate durable jobs.
+A semantically incomplete admitted request remains the same durable turn in `awaiting_clarification`, creates no executable job, and receives one specific clarification question. Its five-second answer is appended through the dedicated clarification endpoint using the same stable turn ID. Partial utterances never become separate durable jobs, and no browser/server completeness decision can conflict.
 
 ### 7. Server job scheduler
 
@@ -388,7 +392,7 @@ Browser voice may replace the current path only when all are true:
 | Activated provider audio boundary | Local activation gate/provider-input adapter | Exact PCM sentinel test proves no sample before the accepted wake/address boundary reaches the provider and ordered catch-up adds no fixed delay |
 | Live partial transcript | Browser controller | Timed synthetic partials update input before final transcript |
 | Two-second utterance closure | Browser controller | Fake-clock boundary tests at 1,999 and 2,000 ms |
-| Incomplete request and five-second clarification | Browser controller/completeness adapter | One stable turn, no premature job, one final |
+| Incomplete request and five-second clarification | Browser endpoint controller/server admission completeness service | One stable turn, no premature job, one final |
 | Fifteen-second follow-up and natural closing | Browser controller | Fake-clock and closing-phrase journeys |
 | Instant lane | Admission router/instant handler | Exact route, no acknowledgement, latency and terminal deadline |
 | Direct app read | Typed read handler | Authoritative result, read bypass, no model fallback |

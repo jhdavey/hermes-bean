@@ -9,6 +9,7 @@ import {
     createOfflineReplayCorpus,
     publicCorpusMetadata,
 } from './voice-v2-replay-corpus.mjs';
+import { withBenchmarkDeadline } from './voice-v2-benchmark-deadline.mjs';
 import { startVoiceV2TestServer } from './voice-v2-static-server.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -210,7 +211,10 @@ async function runTarget(target) {
             wake_replays: wakeReplays,
         });
         await replayPage.click('#run');
-        const prerecordedGate = await replayPage.evaluate(() => window.voiceReplayRun);
+        const prerecordedGate = await withBenchmarkDeadline(
+            replayPage.evaluate(() => window.voiceReplayRun),
+            { timeoutMs: 300_000, label: `${target.id} prerecorded wake replay` },
+        );
         const replayMicrophoneAudit = await readMicrophoneTripwire(replayPage);
         const adapterPage = await context.newPage();
         await installMicrophoneTripwire(adapterPage);
@@ -222,9 +226,12 @@ async function runTarget(target) {
         });
         await adapterPage.goto(`${server.origin}/tests/browser/fixtures/voice-v2-harness.html?reset=1&autoStartPlayback=1`);
         await adapterPage.evaluate(() => window.voiceHarnessReady);
-        const syntheticAdapter = await adapterPage.evaluate(
-            (count) => window.voiceHarness.runSyntheticBenchmarks(count),
-            adapterSamples,
+        const syntheticAdapter = await withBenchmarkDeadline(
+            adapterPage.evaluate(
+                (count) => window.voiceHarness.runSyntheticBenchmarks(count),
+                adapterSamples,
+            ),
+            { timeoutMs: 180_000, label: `${target.id} synthetic adapter benchmark` },
         );
         const userAgent = await adapterPage.evaluate(() => navigator.userAgent);
         const adapterMicrophoneAudit = await readMicrophoneTripwire(adapterPage);

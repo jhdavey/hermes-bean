@@ -38,16 +38,18 @@ import {
     BrowserVoiceSpeechSchedulerV2,
 } from './browserVoiceSpeechV2.js';
 import {
-    assessBrowserVoiceV2Completeness,
     BrowserVoiceAdmissionRegistryV2,
     BrowserVoiceV2Client,
     deliverBrowserVoiceV2ReceiptOnce,
     normalizeVoiceV2Snapshot,
     recoverBrowserVoiceV2Admission,
-    resolveBrowserVoiceV2AdmissionClarification,
 } from './browserVoiceV2Client.js';
 import { BrowserVoiceHttpSpeechTransportV2 } from './browserVoiceHttpSpeechV2.js';
 import { BrowserVoiceRealtimeInputTransportV2 } from './browserVoiceRealtimeInputV2.js';
+import {
+    BROWSER_VOICE_FOLLOW_UP_RELEVANCE,
+    classifyBrowserVoiceFollowUpRelevance,
+} from './browserVoiceFollowUpRelevanceV2.js';
 import {
     BROWSER_VOICE_REALTIME_INGRESS_RESULTS,
     routeBrowserVoiceRealtimeIngressV2,
@@ -270,6 +272,7 @@ export function mountHeyBeanWebApp(mount) {
     const browserVoiceV2TurnVersions = new Map();
     const browserVoiceV2JobStates = new Map();
     const browserVoiceV2AdmissionFailureTurnIds = new Set();
+    const browserVoiceV2ClarificationPromptSequences = new Map();
     const browserVoiceV2RealtimeUsageEventIds = new Set();
     const browserVoiceV2AdmissionRegistry = new BrowserVoiceAdmissionRegistryV2();
     let chatAnnouncementTimer = 0;
@@ -3810,7 +3813,6 @@ export function mountHeyBeanWebApp(mount) {
             ...(options.source ? { source: options.source } : {}),
             ...(options.resolvedByEvent ? { resolvedByEvent: true } : {}),
             ...(options.clientRequestId ? { clientRequestId: options.clientRequestId } : {}),
-            ...(options.voiceQueueId ? { voiceQueueId: options.voiceQueueId } : {}),
         };
         if (existingIndex >= 0) {
             state.beanWorkItems = state.beanWorkItems.map((item, index) => {
@@ -9445,6 +9447,7 @@ export function mountHeyBeanWebApp(mount) {
                 source: 'speech_scheduler',
                 turnId: event.turnId,
                 naturalClosing: Boolean(event.metadata?.naturalClosing),
+                responseExpected: Boolean(event.metadata?.responseExpected),
                 reason: event.reason,
             });
             if (event.reason === 'playback_error') {
@@ -9526,15 +9529,12 @@ export function mountHeyBeanWebApp(mount) {
             render();
             return;
         }
-        if (effect.type === BROWSER_VOICE_EFFECTS.ASSESS_COMPLETENESS) {
-            const assessment = assessBrowserVoiceV2Completeness(effect.transcript, {
-                hasHomeLocation: Boolean(profileHomeCity()),
-            });
-            browserVoiceV2Controller.completenessDecided(assessment.decision, assessment);
-            return;
-        }
         if (effect.type === BROWSER_VOICE_EFFECTS.TURN_READY) {
-            void admitBrowserVoiceV2Turn(effect.turnId, effect.transcript, effect.conversationContext);
+            if (effect.clarificationContinuation) {
+                void clarifyBrowserVoiceV2Turn(effect.turnId, effect.clarificationAnswer);
+            } else {
+                void admitBrowserVoiceV2Turn(effect.turnId, effect.transcript, effect.conversationContext);
+            }
             return;
         }
         if (effect.type === BROWSER_VOICE_EFFECTS.SPEAK_CLARIFICATION) {
@@ -9549,6 +9549,14 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
         if (effect.type === BROWSER_VOICE_EFFECTS.CLARIFICATION_EXPIRED) {
+            if (effect.durable && effect.turnId && state.session?.id) {
+                void browserVoiceV2Client.cancel({
+                    sessionId: state.session.id,
+                    turnId: effect.turnId,
+                }).then((snapshot) => {
+                    applyBrowserVoiceV2Snapshot(normalizeVoiceV2Snapshot(snapshot), { initial: false });
+                }).catch(() => {});
+            }
             state.chatRunState = 'Listening for “Hey Bean”…';
             render();
         }
@@ -9604,7 +9612,10 @@ export function mountHeyBeanWebApp(mount) {
             turnId: turn.turnId,
             text: turn.finalText,
             priority: turn.turnId === controllerTurnId ? 100 : (turn.state === 'failed' ? 15 : 10),
-            metadata: { naturalClosing: isBrowserVoiceV2NaturalClosing(turn.transcript) },
+            metadata: {
+                naturalClosing: isBrowserVoiceV2NaturalClosing(turn.transcript),
+                responseExpected: /\?\s*$/.test(String(turn.finalText || '')),
+            },
         });
         if (scheduled) {
             browserVoiceV2DeferredFinals.delete(turn.turnId);
@@ -9667,8 +9678,6 @@ export function mountHeyBeanWebApp(mount) {
         if (!turnId || !content) return;
         const admissionScope = browserVoiceV2AdmissionRegistry.begin(turnId);
         const admissionStillCurrent = () => browserVoiceV2AdmissionRegistry.isCurrent(admissionScope);
-        const admissionCanClarify = () => admissionStillCurrent()
-            && browserVoiceV2Controller.snapshot().activeTurn?.id === turnId;
         let sessionId = '';
         let admissionInput = null;
         state.chatDraft = '';
@@ -9713,22 +9722,6 @@ export function mountHeyBeanWebApp(mount) {
             const admitted = await browserVoiceV2Client.admit(admissionInput);
             applyBrowserVoiceV2Snapshot(normalizeVoiceV2Snapshot(admitted), { initial: false });
         } catch (error) {
-            const clarification = resolveBrowserVoiceV2AdmissionClarification(error, turnId, state.messages);
-            if (clarification) {
-                if (!admissionCanClarify()) {
-                    failBrowserVoiceV2Admission(turnId, admissionStillCurrent(), error);
-                    return;
-                }
-                state.messages = clarification.messages;
-                browserVoiceV2Controller.admissionClarificationRequired(
-                    clarification.question,
-                    { source: 'server_admission', turnId: clarification.turnId },
-                );
-                state.error = '';
-                state.chatRunState = 'Waiting for your answer…';
-                render();
-                return;
-            }
             if (sessionId && admissionInput) {
                 let recovery;
                 try {
@@ -9754,24 +9747,6 @@ export function mountHeyBeanWebApp(mount) {
                 if (['recovered', 'stale'].includes(recovery.status) && recovery.projection) {
                     return;
                 }
-                if (recovery.status === 'rejected') {
-                    const retryClarification = resolveBrowserVoiceV2AdmissionClarification(
-                        recovery.error,
-                        turnId,
-                        state.messages,
-                    );
-                    if (retryClarification && admissionCanClarify()) {
-                        state.messages = retryClarification.messages;
-                        browserVoiceV2Controller.admissionClarificationRequired(
-                            retryClarification.question,
-                            { source: 'server_admission', turnId: retryClarification.turnId },
-                        );
-                        state.error = '';
-                        state.chatRunState = 'Waiting for your answer…';
-                        render();
-                        return;
-                    }
-                }
                 if (browserVoiceV2TurnStates.has(turnId)) return;
                 failBrowserVoiceV2Admission(
                     turnId,
@@ -9784,6 +9759,65 @@ export function mountHeyBeanWebApp(mount) {
         } finally {
             browserVoiceV2AdmissionRegistry.finish(admissionScope);
         }
+    }
+
+    async function clarifyBrowserVoiceV2Turn(turnId, answer) {
+        const content = String(answer || '').trim();
+        const sessionId = String(state.session?.id || '');
+        if (!turnId || !content || !sessionId) return;
+        const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const clarificationId = `${turnId}:clarification:${suffix}`;
+        updateVoiceWakeDraft(content);
+        state.error = '';
+        state.chatRunState = 'Sending…';
+        render();
+
+        let lastError = null;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+                const response = await browserVoiceV2Client.clarify({
+                    sessionId,
+                    turnId,
+                    answer: content,
+                    clarificationId,
+                    timeoutMs: attempt === 0 ? 8500 : 3000,
+                });
+                updateVoiceWakeDraft('');
+                applyBrowserVoiceV2Snapshot(normalizeVoiceV2Snapshot(response), { initial: false });
+                return;
+            } catch (error) {
+                lastError = error;
+            }
+        }
+
+        try {
+            const snapshot = normalizeVoiceV2Snapshot(await browserVoiceV2Client.snapshot(sessionId, {
+                cursor: 0,
+                timeoutMs: 2500,
+            }));
+            const durableTurn = snapshot.turns.find((turn) => turn.turnId === turnId);
+            if (durableTurn && (durableTurn.transcript.endsWith(content) || durableTurn.state !== 'awaiting_clarification')) {
+                updateVoiceWakeDraft('');
+                applyBrowserVoiceV2Snapshot(snapshot, { initial: false });
+                return;
+            }
+        } catch (error) {
+            lastError = error;
+        }
+
+        state.error = 'I couldn’t save that answer because the connection did not recover. Your words are still in the input so you can try again.';
+        state.chatRunState = 'Waiting for your answer…';
+        const diagnostic = sanitizedLocalWakeFailure(lastError, 'clarification');
+        void api('/assistant/voice/client-failures', {
+            method: 'POST',
+            body: {
+                ...diagnostic,
+                session_id: Number(sessionId),
+                turn_id: turnId,
+            },
+        }).catch(() => {});
+        console.warn('Browser Voice v2 clarification failure', diagnostic);
+        render();
     }
 
     function applyBrowserVoiceV2Snapshot(projection, context = {}) {
@@ -9848,6 +9882,38 @@ export function mountHeyBeanWebApp(mount) {
             const becameTerminal = terminal && previousState && !['completed', 'failed', 'canceled'].includes(previousState);
             const admittedTerminal = terminal && !context.initial && previousState === undefined;
             browserVoiceV2TurnStates.set(turn.turnId, turn.state);
+
+            if (turn.state === 'awaiting_clarification' && turn.clarificationQuestion) {
+                const promptSequence = Math.max(1, Number(turn.clarificationSequence || 1));
+                const promptedSequence = Number(browserVoiceV2ClarificationPromptSequences.get(turn.turnId) || 0);
+                if (promptSequence > promptedSequence) {
+                    const controller = browserVoiceV2Controller.snapshot();
+                    if (controller.activeTurn?.id === turn.turnId
+                        && controller.activeTurn.submitted
+                        && controller.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP) {
+                        browserVoiceV2Controller.admissionClarificationRequired(
+                            turn.clarificationQuestion,
+                            { source: 'durable_voice_turn', turnId: turn.turnId },
+                        );
+                    } else if ([
+                        BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY,
+                        BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP,
+                    ].includes(controller.conversationState)) {
+                        browserVoiceV2Controller.restoreClarification({
+                            turnId: turn.turnId,
+                            transcript: turn.transcript,
+                            question: turn.clarificationQuestion,
+                        });
+                    }
+                    const restored = browserVoiceV2Controller.snapshot();
+                    if (restored.conversationState === BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION
+                        && restored.activeTurn?.id === turn.turnId) {
+                        browserVoiceV2ClarificationPromptSequences.set(turn.turnId, promptSequence);
+                    }
+                }
+            } else {
+                browserVoiceV2ClarificationPromptSequences.delete(turn.turnId);
+            }
 
             if (turn.finalAudioStarted) {
                 browserVoiceV2SpokenFinalTurnIds.add(turn.turnId);
@@ -10685,7 +10751,11 @@ export function mountHeyBeanWebApp(mount) {
         if (browserVoiceV2Controller.snapshot().conversationState === BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION) {
             return normalized.split(' ').filter(Boolean).length >= 1;
         }
-        return /^(?:also\s+)?(?:what|when|where|which|who|why|how|can|could|would|will|do|does|did|is|are|tell|show|check|find|look|create|add|make|set|schedule|remind|delete|remove|change|move|cancel|repeat|say|please\b|i (?:need|want|meant|said|asked|have|would like)\b)/.test(normalized);
+        return classifyBrowserVoiceFollowUpRelevance(content, {
+            final: true,
+            responseExpected: Boolean(browserVoiceV2Speech.snapshot().current?.metadata?.responseExpected),
+        })
+            === BROWSER_VOICE_FOLLOW_UP_RELEVANCE.MEANINGFUL;
     }
 
     function handleRealtimeEvent(event) {

@@ -155,18 +155,19 @@ class BrowserVoiceV2LifecycleTest extends TestCase
         Queue::assertNotPushed(ProcessAssistantRun::class);
     }
 
-    public function test_address_only_transcript_cannot_create_a_turn_or_generic_work(): void
+    public function test_address_only_transcript_is_durably_admitted_for_clarification_without_generic_work(): void
     {
         $token = $this->apiToken('voice-v2-address-only@example.com');
         $sessionId = $this->sessionId($token);
 
         $this->withToken($token)->postJson('/api/assistant/voice/turns',
             $this->payload($sessionId, 'address-only-turn-0001', 'Bean.')
-        )->assertUnprocessable()
-            ->assertJsonPath('code', 'voice_request_incomplete')
-            ->assertJsonPath('question', 'What can I help you with?');
+        )->assertCreated()
+            ->assertJsonPath('data.turn.state', 'awaiting_clarification')
+            ->assertJsonPath('data.turn.clarification.question', 'What can I help you with?');
 
-        $this->assertSame(0, VoiceTurn::where('turn_id', 'address-only-turn-0001')->count());
+        $this->assertSame(1, VoiceTurn::where('turn_id', 'address-only-turn-0001')->count());
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', 'address-only-turn-0001')->where('role', 'user')->count());
         Queue::assertNotPushed(ProcessAssistantRun::class);
     }
 
@@ -974,19 +975,16 @@ class BrowserVoiceV2LifecycleTest extends TestCase
         ];
 
         $this->withToken($token)->postJson('/api/assistant/voice/turns', $payload)
-            ->assertUnprocessable()
-            ->assertJsonPath('code', 'voice_request_incomplete')
-            ->assertJsonPath('question', 'Which location should I check?');
-        $this->assertDatabaseMissing('voice_turns', ['turn_id' => 'weather-location-turn-0001']);
+            ->assertCreated()
+            ->assertJsonPath('data.turn.state', 'awaiting_clarification')
+            ->assertJsonPath('data.turn.clarification.question', 'Which location should I check?');
+        $this->assertDatabaseHas('voice_turns', ['turn_id' => 'weather-location-turn-0001']);
 
-        $this->withToken($token)->postJson('/api/assistant/voice/turns', [
-            ...$payload,
-            'location_context' => [
-                'label' => 'Orlando, Florida',
-                'is_local' => false,
-                'source' => 'spoken',
-            ],
-        ])->assertCreated()
+        $this->withToken($token)->postJson('/api/assistant/voice/turns/weather-location-turn-0001/clarifications', [
+            'session_id' => $sessionId,
+            'answer' => 'In Orlando, Florida.',
+            'clarification_id' => 'weather-location-answer-0001',
+        ])->assertOk()
             ->assertJsonPath('data.turn.handler', 'external.weather');
     }
 
@@ -1030,9 +1028,26 @@ class BrowserVoiceV2LifecycleTest extends TestCase
                 'Can you set a reminder for today at 5 p.m.?',
             ),
             'timezone' => 'America/New_York',
-        ])->assertUnprocessable()
-            ->assertJsonPath('code', 'voice_request_incomplete')
-            ->assertJsonPath('question', 'What should I remind you about?');
+        ])->assertCreated()
+            ->assertJsonPath('data.turn.state', 'awaiting_clarification')
+            ->assertJsonPath('data.turn.clarification.question', 'What should I remind you about?');
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns/typed-for-temporal-only-reminder-0001/clarifications', [
+            'session_id' => $sessionId,
+            'answer' => 'Salt.',
+            'clarification_id' => 'temporal-only-reminder-answer-0001',
+        ])->assertOk()
+            ->assertJsonPath('data.turn.state', 'accepted')
+            ->assertJsonPath('data.turn.handler', 'app.reminder.create');
+        $clarifiedTurn = VoiceTurn::where('turn_id', 'typed-for-temporal-only-reminder-0001')->firstOrFail();
+        (new ProcessAssistantRun($clarifiedTurn->runs()->firstOrFail()->id))->handle(
+            app(HermesRuntimeService::class),
+            app(AssistantRunService::class),
+            app(VoiceTurnLifecycleService::class),
+        );
+        $clarifiedReminder = Reminder::where('metadata->browser_voice_turn_id', $clarifiedTurn->turn_id)->sole();
+        $this->assertSame('Salt', $clarifiedReminder->title);
+        $this->assertSame('2026-07-13 17:00', $clarifiedReminder->remind_at->timezone('America/New_York')->format('Y-m-d H:i'));
 
         $this->withToken($token)->postJson('/api/assistant/voice/turns', [
             ...$this->payload(
@@ -1062,7 +1077,7 @@ class BrowserVoiceV2LifecycleTest extends TestCase
         $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'assistant')->count());
     }
 
-    public function test_date_only_reminder_clarifies_for_a_clock_time_before_admission(): void
+    public function test_date_only_reminder_clarifies_on_one_durable_turn_before_execution(): void
     {
         Carbon::setTestNow('2026-07-11 12:00:00', 'America/New_York');
         $token = $this->apiToken('voice-v2-date-only-reminder@example.com');
@@ -1077,14 +1092,32 @@ class BrowserVoiceV2LifecycleTest extends TestCase
         ];
 
         $this->withToken($token)->postJson('/api/assistant/voice/turns', $payload)
-            ->assertUnprocessable()
-            ->assertJsonPath('code', 'voice_request_incomplete')
-            ->assertJsonPath('question', 'What time should I remind you?');
-        $this->assertDatabaseMissing('voice_turns', ['turn_id' => 'typed-date-only-reminder-0001']);
+            ->assertCreated()
+            ->assertJsonPath('data.turn.state', 'awaiting_clarification')
+            ->assertJsonPath('data.turn.clarification.question', 'What time should I remind you?')
+            ->assertJsonPath('data.messages.0.content', 'Set a reminder titled Call Mom for tomorrow.');
+        $this->assertDatabaseHas('voice_turns', ['turn_id' => 'typed-date-only-reminder-0001']);
+        $this->withToken($token)->getJson("/api/assistant/voice/state?session_id={$sessionId}&cursor=0")
+            ->assertOk()
+            ->assertJsonPath('data.turns.0.state', 'awaiting_clarification')
+            ->assertJsonPath('data.turns.0.clarification.question', 'What time should I remind you?')
+            ->assertJsonPath('data.messages.0.content', 'Set a reminder titled Call Mom for tomorrow.');
 
-        $payload['transcript'] = 'Set a reminder titled Call Mom for tomorrow at 4 p.m.';
-        $this->withToken($token)->postJson('/api/assistant/voice/turns', $payload)->assertCreated();
+        $clarificationPayload = [
+            'session_id' => $sessionId,
+            'answer' => 'At 4 p.m.',
+            'clarification_id' => 'date-only-reminder-answer-0001',
+        ];
+        $this->withToken($token)->postJson('/api/assistant/voice/turns/typed-date-only-reminder-0001/clarifications', $clarificationPayload)
+            ->assertOk()
+            ->assertJsonPath('data.turn.state', 'accepted')
+            ->assertJsonPath('data.turn.handler', 'app.reminder.create')
+            ->assertJsonPath('data.messages.0.content', 'Set a reminder titled Call Mom for tomorrow At 4 p.m.');
+        $this->withToken($token)->postJson('/api/assistant/voice/turns/typed-date-only-reminder-0001/clarifications', $clarificationPayload)
+            ->assertOk()
+            ->assertJsonCount(1, 'data.jobs');
         $turn = VoiceTurn::where('turn_id', 'typed-date-only-reminder-0001')->firstOrFail();
+        $this->assertSame(1, $turn->runs()->count());
         (new ProcessAssistantRun($turn->runs()->firstOrFail()->id))->handle(
             app(HermesRuntimeService::class),
             app(AssistantRunService::class),
@@ -1099,7 +1132,7 @@ class BrowserVoiceV2LifecycleTest extends TestCase
         $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'assistant')->count());
     }
 
-    public function test_date_only_calendar_write_clarifies_for_a_clock_time_before_admission(): void
+    public function test_date_only_calendar_write_clarifies_on_one_durable_turn_before_execution(): void
     {
         Carbon::setTestNow('2026-07-11 12:00:00', 'America/New_York');
         $token = $this->apiToken('voice-v2-date-only-calendar@example.com');
@@ -1112,12 +1145,93 @@ class BrowserVoiceV2LifecycleTest extends TestCase
                 'Schedule dentist tomorrow.',
             ),
             'timezone' => 'America/New_York',
-        ])->assertUnprocessable()
-            ->assertJsonPath('code', 'voice_request_incomplete')
-            ->assertJsonPath('question', 'What time should I schedule it?');
+        ])->assertCreated()
+            ->assertJsonPath('data.turn.state', 'awaiting_clarification')
+            ->assertJsonPath('data.turn.clarification.question', 'What time should I schedule it?');
 
-        $this->assertDatabaseMissing('voice_turns', ['turn_id' => 'typed-date-only-calendar-0001']);
+        $this->assertDatabaseHas('voice_turns', ['turn_id' => 'typed-date-only-calendar-0001']);
         $this->assertDatabaseCount('calendar_events', 0);
+    }
+
+    public function test_durable_clarification_timeout_starts_after_prompt_playback_and_cancels_without_a_job(): void
+    {
+        Carbon::setTestNow('2026-07-13 17:00:00', 'UTC');
+        Queue::fake([EnforceBrowserVoiceTurnDeadline::class]);
+        $token = $this->apiToken('voice-v2-clarification-timeout@example.com');
+        $sessionId = $this->sessionId($token);
+        $turnId = 'durable-clarification-timeout-0001';
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', $this->payload(
+            $sessionId,
+            $turnId,
+            'Create a reminder.',
+        ))->assertCreated()
+            ->assertJsonPath('data.turn.state', 'awaiting_clarification')
+            ->assertJsonPath('data.turn.hard_deadline_at', null);
+
+        $this->withToken($token)->postJson("/api/assistant/voice/turns/{$turnId}/delivery", [
+            'session_id' => $sessionId,
+            'event' => 'playback_finished',
+            'timing' => ['purpose' => 'clarification'],
+        ])->assertOk()
+            ->assertJsonPath('data.turn.state', 'awaiting_clarification')
+            ->assertJsonPath('data.turn.hard_deadline_at', '2026-07-13T17:00:30+00:00');
+
+        Carbon::setTestNow('2026-07-13 17:00:31', 'UTC');
+        $this->withToken($token)->getJson("/api/assistant/voice/state?session_id={$sessionId}&cursor=0")
+            ->assertOk();
+
+        $turn = VoiceTurn::where('turn_id', $turnId)->firstOrFail();
+        $this->assertSame(VoiceTurnState::Canceled, $turn->state);
+        $this->assertSame(0, $turn->runs()->count());
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turnId)->where('role', 'user')->count());
+    }
+
+    public function test_multiple_clarification_answers_update_one_durable_turn_before_one_write(): void
+    {
+        Carbon::setTestNow('2026-07-13 16:00:00', 'America/New_York');
+        $token = $this->apiToken('voice-v2-multi-clarification@example.com');
+        $sessionId = $this->sessionId($token);
+        $turnId = 'multi-clarification-reminder-0001';
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', [
+            ...$this->payload($sessionId, $turnId, 'Create a reminder.'),
+            'timezone' => 'America/New_York',
+        ])->assertCreated()
+            ->assertJsonPath('data.turn.state', 'awaiting_clarification')
+            ->assertJsonPath('data.turn.clarification.sequence', 1);
+
+        $this->withToken($token)->postJson("/api/assistant/voice/turns/{$turnId}/clarifications", [
+            'session_id' => $sessionId,
+            'answer' => 'Salt.',
+            'clarification_id' => 'multi-clarification-answer-0001',
+        ])->assertOk()
+            ->assertJsonPath('data.turn.state', 'awaiting_clarification')
+            ->assertJsonPath('data.turn.clarification.question', 'What time should I remind you?')
+            ->assertJsonPath('data.turn.clarification.sequence', 2)
+            ->assertJsonCount(0, 'data.jobs');
+
+        $this->withToken($token)->postJson("/api/assistant/voice/turns/{$turnId}/clarifications", [
+            'session_id' => $sessionId,
+            'answer' => 'At 5 p.m. today.',
+            'clarification_id' => 'multi-clarification-answer-0002',
+        ])->assertOk()
+            ->assertJsonPath('data.turn.state', 'accepted')
+            ->assertJsonPath('data.turn.handler', 'app.reminder.create')
+            ->assertJsonCount(1, 'data.jobs');
+
+        $turn = VoiceTurn::where('turn_id', $turnId)->firstOrFail();
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turnId)->where('role', 'user')->count());
+        $this->assertSame(1, $turn->runs()->count());
+        (new ProcessAssistantRun($turn->runs()->sole()->id))->handle(
+            app(HermesRuntimeService::class),
+            app(AssistantRunService::class),
+            app(VoiceTurnLifecycleService::class),
+        );
+        $reminder = Reminder::where('metadata->browser_voice_turn_id', $turnId)->sole();
+        $this->assertSame('Salt', $reminder->title);
+        $this->assertSame('2026-07-13 17:00', $reminder->remind_at->timezone('America/New_York')->format('Y-m-d H:i'));
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turnId)->where('role', 'assistant')->count());
     }
 
     public function test_natural_calendar_title_and_time_are_parsed_and_executed_by_the_typed_handler(): void
@@ -1397,7 +1511,7 @@ class BrowserVoiceV2LifecycleTest extends TestCase
         $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'assistant')->count());
     }
 
-    public function test_ambiguous_that_task_reminder_clarifies_without_admitting_or_writing(): void
+    public function test_ambiguous_that_task_reminder_clarifies_on_one_durable_turn_without_writing(): void
     {
         Carbon::setTestNow('2026-07-13 15:19:00', 'America/New_York');
         Queue::fake([EnforceBrowserVoiceTurnDeadline::class]);
@@ -1425,12 +1539,12 @@ class BrowserVoiceV2LifecycleTest extends TestCase
             ...$this->payload($sessionId, 'ambiguous-reminder-follow-up-0001', 'Can you set a reminder at 5 p.m. for that task?'),
             'timezone' => 'America/New_York',
             'conversation_context' => ['mode' => 'contextual_follow_up', 'epoch' => 1],
-        ])->assertUnprocessable()
-            ->assertJsonPath('code', 'voice_request_incomplete')
-            ->assertJsonPath('question', 'What should I remind you about?');
+        ])->assertCreated()
+            ->assertJsonPath('data.turn.state', 'awaiting_clarification')
+            ->assertJsonPath('data.turn.clarification.question', 'What should I remind you about?');
 
-        $this->assertDatabaseMissing('voice_turns', ['turn_id' => 'ambiguous-reminder-follow-up-0001']);
-        $this->assertSame(0, ConversationMessage::where('client_turn_id', 'ambiguous-reminder-follow-up-0001')->count());
+        $this->assertDatabaseHas('voice_turns', ['turn_id' => 'ambiguous-reminder-follow-up-0001']);
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', 'ambiguous-reminder-follow-up-0001')->count());
         $this->assertSame(0, Reminder::where('metadata->browser_voice_turn_id', 'ambiguous-reminder-follow-up-0001')->count());
     }
 

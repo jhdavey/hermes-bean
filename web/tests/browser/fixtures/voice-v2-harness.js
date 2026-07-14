@@ -163,16 +163,22 @@ class PersistentFakeVoiceServer {
             const state = this.read();
             let turn = state.turns.find((item) => item.turn_id === input.turn_id);
             if (!turn) {
+                const needsClarification = input.transcript === 'Create a reminder';
                 turn = {
                     turn_id: input.turn_id,
                     transcript: input.transcript,
-                    state: 'accepted',
+                    state: needsClarification ? 'awaiting_clarification' : 'accepted',
                     version: 1,
                     lane: 'complex_agent',
                     handler: 'agent',
                     acknowledgement_required: false,
                     acknowledgement_text: '',
                     final_text: '',
+                    clarification: needsClarification ? {
+                        question: 'What should I remind you about?',
+                        sequence: 1,
+                        deadline_at: null,
+                    } : null,
                     jobs: [],
                 };
                 state.turns.push(turn);
@@ -185,6 +191,33 @@ class PersistentFakeVoiceServer {
                 state.cursor += 1;
                 this.write(state);
             }
+            return this.snapshot();
+        }
+
+        const clarificationMatch = path.match(/^\/assistant\/voice\/turns\/([^/]+)\/clarifications$/);
+        if (clarificationMatch && options.method === 'POST') {
+            const turnId = decodeURIComponent(clarificationMatch[1]);
+            const state = this.read();
+            const turn = state.turns.find((item) => item.turn_id === turnId);
+            if (!turn) throw new Error(`Unknown clarification turn: ${turnId}`);
+            const answer = String(options.body?.answer || '').trim();
+            turn.transcript = `${turn.transcript} ${answer}`.trim();
+            turn.state = 'completed';
+            turn.version = Number(turn.version || 0) + 1;
+            turn.clarification = null;
+            turn.final_text = 'Done—I created the reminder.';
+            const userMessage = state.messages.find((message) => message.id === `user:${turnId}`);
+            if (userMessage) userMessage.content = turn.transcript;
+            if (!state.messages.some((message) => message.id === `final:${turnId}`)) {
+                state.messages.push({
+                    id: `final:${turnId}`,
+                    role: 'assistant',
+                    turn_id: turnId,
+                    content: turn.final_text,
+                });
+            }
+            state.cursor += 1;
+            this.write(state);
             return this.snapshot();
         }
 
@@ -279,6 +312,7 @@ class VoiceV2BrowserJourneyHarness {
         this.networkErrors = [];
         this.scheduledAcknowledgements = new Set();
         this.scheduledFinals = new Set();
+        this.promptedClarifications = new Map();
         this.currentCursor = 0;
         this.turnCounter = 0;
         this.rehydrating = true;
@@ -384,7 +418,7 @@ class VoiceV2BrowserJourneyHarness {
         return this.snapshot();
     }
 
-    endUtterance(decision = 'complete', detail = {}) {
+    endUtterance() {
         this.controller.speechEnded({ source: 'provider' });
         const snapshot = this.controller.snapshot();
         this.controller.dispatch({
@@ -394,7 +428,6 @@ class VoiceV2BrowserJourneyHarness {
             atMs: snapshot.deadlines.endpointAt,
             source: 'synthetic-endpoint',
         });
-        this.controller.completenessDecided(decision, { source: 'completeness', ...detail });
         return this.snapshot();
     }
 
@@ -457,6 +490,25 @@ class VoiceV2BrowserJourneyHarness {
         this.#renderProjection(projection);
 
         for (const turn of projection.turns) {
+            if (turn.state === 'awaiting_clarification' && turn.clarificationQuestion) {
+                const sequence = Math.max(1, Number(turn.clarificationSequence || 1));
+                if (sequence > Number(this.promptedClarifications.get(turn.turnId) || 0)) {
+                    const controller = this.controller.snapshot();
+                    if (controller.activeTurn?.id === turn.turnId && controller.activeTurn.submitted) {
+                        this.controller.admissionClarificationRequired(turn.clarificationQuestion, { turnId: turn.turnId });
+                    } else if ([
+                        BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY,
+                        BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP,
+                    ].includes(controller.conversationState)) {
+                        this.controller.restoreClarification({
+                            turnId: turn.turnId,
+                            transcript: turn.transcript,
+                            question: turn.clarificationQuestion,
+                        });
+                    }
+                    this.promptedClarifications.set(turn.turnId, sequence);
+                }
+            }
             if (turn.acknowledgementRequired && turn.acknowledgementText
                 && ['accepted', 'running'].includes(turn.state)
                 && !this.scheduledAcknowledgements.has(turn.turnId)) {
@@ -613,17 +665,33 @@ class VoiceV2BrowserJourneyHarness {
             this.dom.input.textContent = effect.text || '';
         }
         if (effect.type === BROWSER_VOICE_EFFECTS.TURN_READY) {
-            const admission = this.client.admit({
-                turnId: effect.turnId,
-                sessionId: SESSION_ID,
-                transcript: effect.transcript,
-                timezone: 'America/New_York',
-                controllerGeneration: this.controller.snapshot().generation,
-                providerConnectionGeneration: this.controller.snapshot().connectionGeneration,
-                conversationContext: effect.conversationContext,
-            }).then((snapshot) => this.applyProjection(snapshot))
+            const request = effect.clarificationContinuation
+                ? this.client.clarify({
+                    turnId: effect.turnId,
+                    sessionId: SESSION_ID,
+                    answer: effect.clarificationAnswer,
+                    clarificationId: `${effect.turnId}:clarification:1`,
+                })
+                : this.client.admit({
+                    turnId: effect.turnId,
+                    sessionId: SESSION_ID,
+                    transcript: effect.transcript,
+                    timezone: 'America/New_York',
+                    controllerGeneration: this.controller.snapshot().generation,
+                    providerConnectionGeneration: this.controller.snapshot().connectionGeneration,
+                    conversationContext: effect.conversationContext,
+                });
+            const admission = request.then((snapshot) => this.applyProjection(snapshot))
                 .finally(() => this.admissions.delete(admission));
             this.admissions.add(admission);
+        }
+        if (effect.type === BROWSER_VOICE_EFFECTS.SPEAK_CLARIFICATION) {
+            this.speech.enqueueSpeech({
+                turnId: effect.turnId,
+                text: effect.text,
+                purpose: 'clarification',
+                id: `${effect.turnId}:clarification`,
+            });
         }
     }
 

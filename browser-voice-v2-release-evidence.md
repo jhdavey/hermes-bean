@@ -1,150 +1,185 @@
 # Browser Voice v2 release evidence
 
-Recorded July 11–12, 2026. This evidence covers the browser implementation only. Flutter and native voice are out of scope.
+Last updated July 13, 2026. This document covers authenticated browser voice
+only. Flutter/native voice is out of scope. `bean-voice-rules.md` is the
+authoritative product contract; this file records implementation and evidence,
+not new product behavior.
 
-## Current release status
+## Current status
 
-The first-party wake model, hardened prerecorded gate, application/service suites, and browser-controller acceptance suites are green under the agreed 95% Bean Voice QA criterion. The July 13 command-tail wake run passed 107 of 108 journeys (99.07%) with zero pre-confirmation PCM, zero runtime errors, 24/24 isolated strict wakes, 6/6 `Hey Bean` plus command releases, 100% ongoing-speech strict-wake accuracy, 23/24 missed-`Hey` address journeys, zero false accepts across 42 negatives, 6/6 reset recoveries, and 490.1 ms p95 wake confirmation. Version 9 assets are ready for deployment; representative physical-microphone/browser testing remains pending. Therefore the broader Browser Voice v2 release is still not certified.
+The audited local candidate satisfies every deterministic repository gate. It
+is not a claim of 100% real-world reliability and is not representative acoustic
+certification. The candidate still needs deployment followed by the owner's
+physical-microphone smoke on the deployed development site. No current local
+result below is presented as evidence that production already contains these
+changes.
 
-Two representative release-certification gates still require execution after deployment:
+Wake assets are runtime v12. The wake detector is first-party and
+self-contained: no external wake service, account, license key, remote
+inference, or runtime network request. Incident phrases are held-out QA inputs
+only; production decision code contains no phrase-specific negative aliases or
+exceptions.
 
-1. representative acoustic and audible-latency samples on current Chrome, Safari, and Edge; and
-2. the owner's authenticated smoke matrix after deployment to the development site.
+## July 13 full-system audit
 
-Neither the prerecorded engine replay nor the synthetic adapter benchmark below is representative release certification or a basis for a `100% reliable` claim.
+The audit followed the complete journeys in `bean-voice-rules.md`, not the last
+reported symptom. It found seven structural defects that could produce the
+repeating wake, follow-up, write, dock, response, and diagnostic inconsistencies:
 
-## Four-hour stop audit: exact work remaining
+1. Browser and server both owned semantic completeness. The browser could split
+   a complete request or ask a generic question before Laravel saw the full
+   transcript.
+2. queue middleware and the transactional voice scheduler both owned v2 job
+   ordering. A run could wait or exhaust attempts outside the durable lifecycle.
+3. the complex runtime could persist a provisional assistant message before the
+   voice finalizer persisted the durable final. Chat and speech could therefore
+   observe different response writers.
+4. task writes had a second time parser independent from the typed reminder and
+   calendar parser, allowing the same spoken clock time to resolve differently;
+5. pre-turn browser failures were written only to the application log, so wake,
+   startup, admission, clarification, connection, and usage-accounting failures
+   could be absent from the admin quality report;
+6. the multi-engine wake runner awaited an in-page replay promise without an
+   enforceable outer deadline, so a stalled browser engine could hang the gate;
+   and
+7. the strict-wake verifier operating point and 100 ms worklet batch had only
+   Chromium evidence. WebKit exposed both insufficient cross-engine recall and
+   inadequate latency headroom against the 500 ms p95 contract.
 
-Recorded at the requested four-hour implementation cutoff on July 12, 2026. The local application architecture, activated-audio transport, durable lifecycle, deterministic acceptance tests, and benchmark tooling are implemented. The goal is **not complete** and Browser Voice v2 must remain release-uncertified (`releaseCertified: false`) until every item below is finished:
+The candidate removes those duplicate owners:
 
-1. **Completed — build and certify Bean's first-party wake model.** The repository-owned temporal CNN is trained from local multi-voice data with near-match negatives, ordinary conversation, procedural noise, music-like interference, echo, rate, and gain variation. Its packaged inference asset requires no account, license key, cloud inference, or runtime network request. The disjoint three-voice held-out split passed 96.50%. A separate validation voice scored 91.95%; this is retained as transparent evidence and was not substituted for the held-out result.
-2. **Completed — integrate the self-contained detector without changing lifecycle ownership.** The model runs behind the existing `LocalWakeGate` worker boundary. It owns strict and missed-`Hey` accept/reject decisions, fails closed, retains dormant PCM locally, and has deterministic model/inference/reset/failure coverage. Bare `Bean` remains a conservative address candidate rather than an unrestricted wake word.
-3. **Completed — pass the final hardened acoustic gate.** The exact July 13 108-journey Chromium local-gate replay passed 107 journeys (99.07%), above the 95% criterion. It passed 24/24 isolated strict wakes, 6/6 strict wake-plus-command releases, 6/6 ongoing-speech strict wakes, 23/24 missed-`Hey` address journeys, all 42 negative/privacy rejections, and all six reset recoveries. No privacy, runtime, duplicate-work, or lifecycle hard failure occurred. Wake p95 was 490.1 ms over 24 timing samples.
-4. **Completed — delete superseded wake assets and audit legacy ownership.** The legacy ASR JavaScript, WASM, model, diagnostic worker, harness path, benchmark switch, and schema field were removed. The retained open-source sherpa KWS files are not a wake-decision owner; they provide only strict-wake timestamp/release-boundary candidates to the first-party classifier. Third-party notices, package documentation, manifest, and `SHA256SUMS` were updated. The audit found one browser controller, one projection poller, and one durable lifecycle/finalizer. The obsolete per-user/release-certification runtime gates were also removed; `BROWSER_VOICE_V2` is the sole activation flag.
-5. **Completed — deploy and enable the development build.** The public site serves the current `app-Cdednccn.js` bundle, v8 wake manifest/worker, Realtime session and usage routes, and `data-browser-voice-v2="true"`. The durable Forge environment at `/home/forge/heybean.org/.env` was updated so future release symlinks retain the flag, Laravel configuration was refreshed, queue workers and the sub-minute scheduler were restarted, migration `2026_07_12_180000` is applied, the production invariant audit passed, and the corrected public preflight passed at `2026-07-12T23:23:07Z`.
-6. **Collect representative browser and provider measurements.** Run real microphone, speaker, provider-network, and audible-playback samples on current Chrome, Safari, and Edge in quiet speech, background music, nearby conversation, and speaker-echo conditions. Record device, browser version, network class, sample count, and every p50/p95/hard-deadline metric from `bean-voice-rules.md`. Playwright Chromium/WebKit proxies do not satisfy this gate, and Microsoft Edge is not currently installed in the test environment.
-7. **Pass the authenticated deployed-development smoke matrix.** Using the owner's account, verify fresh-load first wake, microphone restart, live partials, two-second endpointing, follow-up timeout, missed-`Hey`, background rejection, meaningful/false barge-in, Stop, explicit cancellation, three-job concurrency, read bypass, local/remote weather, complex note creation, provider/worker/transport failures, reload/reconnect recovery, exact-once chat/final delivery, dock recovery, and complete sanitized admin diagnostics.
-8. **Run the final post-deployment audit.** Repeat the full PHP, JavaScript, Playwright, build, checksum, invariant, and fault suites against the deployed assets and update this document. Certification is evidence, not an additional runtime flag. Any acceptance exception requires explicit product approval and a corresponding change to `bean-voice-rules.md`.
+- `BrowserVoiceControllerV2` alone owns browser conversation state, endpointing,
+  live draft visibility, follow-up gating, and interruption transitions.
+- the browser performs only a domain-agnostic check for an unmistakably open
+  grammatical boundary. Laravel is the sole semantic completeness and specific
+  clarification authority.
+- `VoiceTurnLifecycleService` alone owns v2 capacity, priority, dependencies,
+  resource serialization, terminal state, and the final assistant message.
+  `ProcessAssistantRun` uses no `WithoutOverlapping` middleware for a v2 run.
+- the complex runtime returns generated response text without persisting a
+  provisional voice response. The lifecycle finalizer persists exactly one
+  assistant message after the outcome is known.
+- task, reminder, and calendar writes share the typed date/time parser.
+- projected durable final text is the exact input to HTTP speech synthesis; the
+  speech endpoint rejects a text mismatch.
+- Realtime is transcription-only: `create_response=false`,
+  `interrupt_response=false`, no tools, and no provider response authority.
+- one-word conversational answers such as “yes” are accepted without another
+  wake only when Bean's preceding durable response actually asked a question.
+  The same room speech after a normal answer remains private and invisible.
+- the generic acoustic verifier, rather than phrase exceptions, owns every
+  strict-wake candidate decision.
+- sanitized pre-turn client failures are durable admin diagnostic events; the
+  server sanitizes them independently of the browser and owns no lifecycle
+  transition through that telemetry path.
+- each acoustic-engine replay and adapter benchmark now has a tested outer
+  deadline, so the command records an engine failure instead of hanging.
+- the single generic strict-wake verifier is calibrated from held-out
+  cross-engine scores, and the local worklet sends bounded 80 ms batches. No
+  phrase-specific branch was added to recover recall or latency.
 
-### July 12 resumed implementation decision
-
-The product owner rejected Picovoice and all other external wake systems. Browser wake detection must now be entirely self-contained: repository-owned training/evaluation scripts, locally generated or explicitly approved local training inputs, packaged static model assets, in-browser inference, no account, no license key, no remote inference, and no runtime network dependency. Bundled open-source implementation components are permitted, but Bean owns the model behavior and release evidence.
-
-The current machine has Google Chrome and Safari installed; Microsoft Edge is not installed. Forge CLI is installed, but production remains intentionally undeployed because the acoustic release gate is failing. The next implementation is a small discriminative acoustic model behind the existing `LocalWakeGate` worker protocol, so it does not create a second microphone, lifecycle, queue, or response owner.
+Legacy `voice_turn_sequence` metadata remains only in the non-v2 typed/native
+compatibility path. It is not read by Browser Voice v2. No legacy browser work
+queue, provider tool bridge, wake ASR owner, per-user allowlist, or release flag
+exists beside the v2 owners.
 
 ## Contract-to-test traceability
 
-| Contract journey | Primary automated proof |
+| Contract journey | Primary deterministic proof |
 | --- | --- |
-| Fresh-load readiness and first wake | `[BV2-STARTUP-01]`, `[BV2-WAKE-01]`, `[BV2-WAKE-03]`, `[BV2-WAKE-04]`, `[BV2-BROWSER-01]` |
-| Missed `Hey`, third-person mention, continuous-speech wake, repeated re-arm, and wake-only privacy | `localWakeGate.test.mjs` missed-Hey/third-person/fail-closed cases; `[BV2-BROWSER-01]`; six-voice prerecorded replay matrix and `voice-v2-replay-corpus.test.mjs` |
-| Live partial transcription and exact two-second endpoint | `[BV2-TRANSCRIPT-01..04]`, `[BV2-BROWSER-01]` |
-| Incomplete request, silent continuation, and five-second clarification | `[BV2-CLARIFY-01..06]`; `BrowserVoiceV2LifecycleTest` date-only write clarification cases |
-| Fifteen-second follow-up and strict-wake context reset | `[BV2-FOLLOWUP-01..07]`, `[BV2-CONTEXT-01]`, `BrowserVoiceV2ConversationContextTest` |
-| Instant local time/date and natural speech | `BrowserVoiceV2LifecycleTest::test_instant_time_uses_the_client_timezone_and_natural_twelve_hour_speech`; `realtimeVoiceTurn.test.mjs` naturalization case |
-| Typed app reads and read bypass | `BrowserVoiceV2LifecycleTest` typed read, synchronous read, and three-job scheduler cases |
-| Typed app writes and exactly-once receipts | `BrowserVoiceV2LifecycleTest` reminder/calendar write cases; `BrowserVoiceV2WorkControlTest` multi-write and repeated-write cases |
-| Local and remote weather routing/failure | `BrowserVoiceV2LifecycleTest` weather context/provider cases; `BrowserVoiceV2ConversationContextTest` strict-wake weather case |
-| Complex work, generated notes, and bounded model authority | `BrowserVoiceV2RuntimeFailureTest` real complex runtime, no-tools, retry, empty-output, and isolation cases |
-| Per-user subscription usage, admin-unlimited access, feature entitlements, and upgrade recovery | `VoiceChatFeatureTest` Realtime session/usage/idempotency/admin-diagnostic cases; `BrowserVoiceV2RuntimeFailureTest` direct/generated note-limit journeys; `[BV2-USAGE-01..02]`; `PlanLimitEntitlementTest` |
-| Acknowledgement grace and non-overlapping finals | `[BV2-ACK-01..03]`, `[BV2-SPEECH-01..05]` |
-| Meaningful and false barge-in | `[BV2-BARGE-01..04]`, `[BV2-BROWSER-02]` |
-| Playback-only Stop | `[BV2-STOP-01..05]`, `[BV2-BROWSER-03]` |
-| Explicit cancellation and commit reconciliation | `BrowserVoiceV2JobCancellationTest`; `BrowserVoiceV2WorkControlTest` cancellation cases; `BrowserVoiceV2RuntimeFailureTest::test_spoken_whole_turn_cancellation_reports_too_late_when_the_only_generated_note_job_committed` |
-| Three-job concurrency, queue visibility, and resource serialization | `[BV2-BROWSER-03]`; `BrowserVoiceV2LifecycleTest` scheduler cases; `BrowserVoiceV2WorkControlTest` resource-lock/dependency cases |
-| Pending-create dependency and exact resource identity | `BrowserVoiceV2WorkControlTest` immediate, same-turn, completed-create, failed-create, explicit-title, and canonical-lock cases |
-| Out-of-order completion and one combined final | `[BV2-SPEECH-02..03]`; `BrowserVoiceV2MultiRunFinalizerTest` |
-| Reload, reconnect, duplicate, stale, and out-of-order events | `[BV2-RELOAD-01..02]`, `[BV2-RECOVERY-01]`, `[BV2-SEQUENCE-01..02]`, `[BV2-BROWSER-04]`, `[BV2-BROWSER-06]` |
-| Ambiguous admission recovery and delivery retry | `[BV2-ADMISSION-01..08]`, `[BV2-DELIVERY-01]` |
-| Provider, transport, worker, and deadline failures | `[BV2-SPEECH-TRANSPORT-01..05]`, `[BV2-BROWSER-05]`, `BrowserVoiceV2RuntimeFailureTest`, `BrowserVoiceV2LifecycleTest` deadline/watchdog cases |
-| One accepted user message, terminal state, and final | `BrowserVoiceV2LifecycleTest` admission/finalizer/idempotency cases; `BrowserVoiceInvariantAuditCommandTest` |
-| Sanitized admin diagnostics without raw audio | `AdminVoiceQualityReportTest::test_browser_voice_v2_admin_diagnostic_is_complete_sanitized_and_flags_actionable_failures`; `BrowserVoiceV2LifecycleTest::test_raw_audio_is_rejected_and_never_persisted_in_turns_or_events` |
+| Fresh-load readiness and first wake | `[BV2-STARTUP-01..04]`, `[BV2-WAKE-01]`, `[BV2-WAKE-03..04]`, `[BV2-WAKE-08..10]`, `[BV2-BROWSER-01]` |
+| Dormant privacy, missed `Hey`, strict wake, third-person mention, generic near-miss rejection, and re-arm | `[BV2-WAKE-11]`, local-wake gate tests, `[BV2-BROWSER-01]`, v12 prerecorded corpus |
+| Live partials and exact two-second endpoint | `[BV2-TRANSCRIPT-01..04]`, `[BV2-BROWSER-01]` |
+| Silent open-fragment continuation and durable five-second clarification | `[BV2-CLARIFY-01..06]`, `[BV2-BROWSER-14]`, lifecycle clarification journeys |
+| Fifteen-second follow-up, expected one-word answer, ambient rejection, and strict-wake reset | `[BV2-FOLLOWUP-01..08]`, `[BV2-CONTEXT-01]`, `[BV2-BROWSER-08..09]`, `[BV2-BROWSER-13]` |
+| Meaningful/false interruption and playback-only Stop | `[BV2-BARGE-01..04]`, `[BV2-STOP-01..05]`, `[BV2-BROWSER-02..03]` |
+| Natural client-timezone time/date | instant time/date lifecycle tests |
+| Typed calendar/task/reminder/note reads and read bypass | typed-read and three-job scheduler lifecycle journeys |
+| Typed writes, shared temporal parsing, correction, and exactly-once receipt | lifecycle and work-control write journeys; `[BV2-BROWSER-09]` |
+| Local/remote weather routing, retry, and scoped failure | lifecycle weather/provider/context journeys |
+| Complex generated note and exactly one durable response | runtime-failure generated-note journeys; `[BV2-BROWSER-12]` |
+| Three running jobs, visible fourth queue, dependency and resource serialization | work-control scheduler journeys; `[BV2-BROWSER-03]` |
+| Exact chat/speech parity and non-overlapping acknowledgement/final | `[BV2-ACK-01..03]`, `[BV2-SPEECH-01..05]`, `[BV2-SPEECH-TRANSPORT-01..05]` |
+| Reload, reconnect, stale/out-of-order events, and no duplicate/replay | `[BV2-RELOAD-01..02]`, `[BV2-RECOVERY-01]`, `[BV2-SEQUENCE-01..02]`, `[BV2-BROWSER-04..06]` |
+| Ambiguous admission, idempotent recovery, and final-delivery retry | `[BV2-ADMISSION-01..08]`, `[BV2-DELIVERY-01]` |
+| Provider/worker/transport/deadline faults terminate naturally and remain diagnosable | runtime-failure, deadline, diagnostic, and `[BV2-BROWSER-05]` journeys |
+| Per-user plan usage, upgrade response, admin unlimited, and exact-once accounting | voice usage, plan entitlement, runtime limit, and `[BV2-USAGE-01..03]` journeys |
+| One accepted message, one terminal state, one final, no raw audio persistence | lifecycle idempotency and invariant-audit tests |
 
-## Automated gate results
+## Automated gate results for this candidate
 
 | Gate | Result |
 | --- | --- |
-| Full PHP application suite | 425 tests, 4,391 assertions passed with an unlimited test-process memory limit (July 13 command-tail regression gate) |
-| Browser Voice v2 focused PHP set | 136 tests, 1,411 assertions passed (July 12 subscription-enforcement gate) |
-| Subscription and voice-entitlement focused PHP set | 29 tests, 356 assertions passed; Base/Premium/Pro limits, unlimited admin, cross-user isolation, exact-once Realtime usage, admin alert visibility, and direct/generated note limits covered |
-| Complete browser voice JavaScript set | 128 tests passed, 0 skipped (July 13 command-tail regression gate) |
-| Playwright browser journeys | 7/7 journeys passed (July 13 command-tail regression gate) |
-| Hardened replay structure/schema | 3 tests passed; current corpus contains 84 files |
-| Final hardened prerecorded local-wake replay | **Pass:** 107/108 journeys (99.07%); 24/24 isolated strict wakes; 6/6 wake-plus-command releases; 100% ongoing-speech accuracy; 23/24 address accuracy; 0/42 false accepts; 6/6 reset recovery; zero privacy/runtime hard failures; p95 490.1 ms |
-| Wake-plus-command first-party model fine-tune | Seen-synthetic training regression 95.50% across 56,118 samples; independent installed-Chrome journey acceptance is 107/108 (99.07%) |
-| Public production deployment preflight | **Pass:** current bundle, enabled v2 marker, v8 wake assets, and all required authenticated route boundaries present at `2026-07-12T23:23:07Z` |
-| Explicit diagnostics suite | 10 tests, 181 assertions passed; full application suite also passed |
-| Explicit fault/recovery suite | 59 tests, 628 assertions passed; full application suite also passed |
-| Current local database invariant audit | Pass; zero violations (empty local voice dataset, July 12 final local pre-deployment gate) |
-| Production asset build | Pass (`app-CxnLcDUT.js`, `app-BNZ4BLyh.css`) |
-| Composer strict validation | Pass |
-| Browser Voice PHP Pint check | Pass; the optional full-repository scan reports unrelated existing formatting debt outside Browser Voice |
-| Wake asset SHA-256 manifest | Pass |
-| `git diff --check` | Pass |
+| Full PHP application suite | **Pass:** 439/439 tests, 4,579 assertions; direct PHPUnit process with 512 MB limit |
+| Focused Browser Voice PHP audit | **Pass:** 173/173 tests, 1,930 assertions |
+| Explicit diagnostic/admin subset | **Pass:** 23/23 tests, 288 assertions |
+| Explicit fault/recovery subset | **Pass:** 99/99 tests, 1,021 assertions |
+| Browser Voice JavaScript | **Pass:** 130/130 tests |
+| Playwright complete browser journeys | **Pass:** 12/12 journeys |
+| Replay corpus privacy/schema and bounded-runner behavior | **Pass:** 5/5 tests |
+| Default multi-engine wake/adapter replay | **Pass:** 3/3 executed engines; Edge explicitly not installed |
+| Production Vite build | **Pass:** `app-BVJPtKbR.js`, `app-BNZ4BLyh.css` |
+| Wake asset SHA-256 manifest | **Pass:** every listed v12 asset |
+| Changed PHP Pint check | **Pass** |
+| Composer strict validation | **Pass** |
+| `git diff --check` | **Pass** |
+| Local invariant command | **Pass:** zero violations; local database contained zero voice turns, so populated invariant proof comes from deterministic tests |
 
-The local application was also exercised through its real login and session-hydration path with a concurrent local server. The microphone control became enabled in about one second after initial login and again after reload, with no browser console errors. No ambient microphone capture was performed during this smoke, so this is startup evidence rather than an acoustic benchmark.
+The first `php artisan test` invocation inherited Laravel's spawned worker default
+of 128 MB and stopped after 357 passing tests/3,828 assertions in the unrelated
+`TopWorkspaceSwitcherAssetTest`. The direct PHPUnit invocation applied 512 MB to
+the actual test process and completed all 439 tests. This was runner memory
+configuration, not an assertion failure, and is recorded to avoid hiding the
+failed invocation.
 
-## Production deployment preflight
+## Wake-model evidence
 
-Run `npm run preflight:voice:production` from `web/` before beginning the owner's authenticated deployed-development smoke. The command name reflects the public deployment target; it does not imply a customer production rollout or allowlist. The probe is deliberately public and read-only. It verifies the health endpoint, application shell marker, deployed client API boundaries, wake manifest and worker, and that unauthenticated voice-route requests reach authentication rather than a missing route. It does not authenticate, request microphone access, submit a voice turn, or certify latency.
+The v12 manifest records a 119/120 (99.17%) deterministic prerecorded Bean
+Voice QA result against the agreed 95% acceptance threshold independently in
+Playwright Chromium, installed Google Chrome, and Playwright WebKit: 24/24
+isolated strict wakes, 6/6 wake-plus-command releases, 6/6 continuous-speech
+wakes, 23/24 missed-`Hey` address journeys, 0/54 false activations across nine
+privacy families, 6/6 reject/reset/immediate-wake recoveries, zero
+pre-confirmation PCM, complete activated-PCM handoff, and no runtime errors in
+each engine. Wake p95 was 424.9 ms in Chromium, 427.8 ms in installed Chrome,
+and 479 ms in WebKit, all below the 500 ms contract target.
 
-At `2026-07-12T17:41:26Z`, the corrected preflight exposed that the app shell rendered `data-browser-voice-v2="false"` and the deployed bundle/route set lacked `/assistant/voice/realtime/usage`. The earlier preflight had incorrectly passed a `false` shell marker because it checked only for presence. `[BV2-DEPLOY-01..02]` now require the value to be `true`, and the public probe requires the current Realtime usage client boundary and authenticated route.
+The corpus includes the reported incident phrases as held-out negatives, along
+with phonetic near misses, third-person Bean mentions, ordinary conversation,
+and other privacy families. Those strings do not occur in production decision
+code or training negatives. The first-party classifier must reject them by the
+same generic acoustic rule used for all candidates.
 
-After the production environment audit, `BROWSER_VOICE_V2=true` and the current timeout/usage settings were applied to Forge's canonical `/home/forge/heybean.org/.env`, twelve unreferenced legacy variables were removed, Laravel configuration was refreshed, long-lived queue/scheduler processes were restarted, and `/home/forge/heybean.org/.env.backup.20260712T232254Z` was retained. This canonical path matters because each Forge release symlinks its runtime `.env` there; an earlier release-local edit was replaced when `/current` advanced. At `2026-07-12T23:23:07Z`, every corrected public preflight check passed: enabled shell marker, `app-Cdednccn.js` with no missing API boundary, v8 wake manifest/worker, health/app shell, and unauthenticated `401` responses from Realtime session, Realtime usage, capabilities, and state routes. This proves deployment presence only; authenticated acoustic and latency testing remains pending.
+The unchanged default `npm run benchmark:voice:browser` command passed all
+three executed engines. Microsoft Edge was explicitly classified as not
+installed; installed Safari cannot be automated by this Playwright runner. Its
+JSON distinguishes local model/gate evidence from provider/network and
+representative product evidence and never emits raw PCM. Playwright WebKit is an
+engine proxy, not installed Safari; an installed Chrome headless replay is not a
+physical-microphone or audible product certification; Edge is not installed on
+this machine.
 
-## Prerecorded real local-wake replay
+## Deployment and remaining external verification
 
-The hardened benchmark protocol defines 84 offline macOS TTS files across six English system voices: six isolated wakes, six `Hey Bean, what time is it?` wake-plus-command utterances, six wakes embedded after ongoing speech, four missed-`Hey` address forms across every voice (24 files), and seven negative/privacy families across every voice (42 files). The negative matrix explicitly covers `Hey beam`, `Hey Ben`, third-person `Bean` both mid-utterance and at utterance start, `green bean`, `been`, and ordinary ongoing conversation. For each voice, every rejection is followed by a detector reset/re-arm and then an immediate strict wake. The default isolated-wake repetitions provide 24 strict timing samples; command-tail, continuous-speech, address, and privacy files run once each.
+The public development site previously passed deployment-presence preflight for
+an older bundle. That historical result does not certify this local candidate.
+After these changes are reviewed and deployed:
 
-The runner injects prerecorded audio into an in-page `MediaStream` and exercises the production local gate. A pre-navigation tripwire denies and counts any `getUserMedia` attempt. The result retains model decisions, timing, counts, and amplitude aggregates only; it emits no PCM or base64 audio. Metrics distinguish wake-model accuracy, model-confirmation latency, activated-PCM gate handoff, the local Realtime input-append pipeline through the production resampler/encoder and a loopback sender, actual data-channel/provider/network latency (explicitly unmeasured), and representative release certification (always false for prerecorded headless evidence). The superseded legacy ASR diagnostic and its assets have been removed.
+1. run `npm run preflight:voice:production` to confirm the enabled shell marker,
+   current hashed client bundle, v12 manifest/worker, health endpoint, and all
+   authenticated route boundaries;
+2. run the production invariant audit against populated production data;
+3. use the owner's account for fresh-load first wake, microphone restart, live
+   partials, two-second endpoint, expected and ambient follow-ups, background
+   audio rejection, false and meaningful barge-in, playback Stop, explicit job
+   cancellation, three-job concurrency, read bypass, local/remote weather,
+   direct writes, contextual corrections, complex note creation, provider fault,
+   reload/reconnect, exact chat/speech parity, usage-limit upgrade UX, and admin
+   diagnostics; and
+4. record visible/audible Chrome, Safari, and Edge samples in quiet speech,
+   background music, nearby conversation, and speaker-echo conditions with the
+   p50/p95 metrics required by `bean-voice-rules.md`.
 
-The July 13 installed-Chrome run is `/tmp/bean-wake-command-full.json` in this development environment. It passed 107 of 108 journeys (99.07%): 24/24 isolated strict wakes, 6/6 wake-plus-command releases, 6/6 continuous-speech strict wakes, 23/24 missed-`Hey` address journeys, 42/42 negative/privacy rejections, and 6/6 reject-reset-immediate-wake recoveries. The one missed address journey is counted as the failed journey. The 24 wake timing samples produced p50 458.3 ms, p95 490.1 ms, and maximum 490.8 ms. Activated-PCM/provider handoff coverage was 59/59, no runtime error occurred, and zero PCM crossed the activation boundary before confirmation.
-
-The packaged model was fine-tuned from the prior first-party model using repository-generated wake-plus-command windows and hard negatives. Its seen-synthetic training regression scored 95.50% over 56,118 generated samples; the independent browser journey gate above is the acceptance result. This remains prerecorded synthetic/acoustic regression evidence, not representative physical-microphone certification.
-
-The browser inventory for this run was:
-
-| Browser target | Inventory and evidence status |
-| --- | --- |
-| Google Chrome | Version 150.0.7871.115 installed; exercised headlessly for non-acoustic product regression evidence, not representative or audible certification |
-| Apple Safari | Version 26.5 installed; installed Safari was not automated and remote automation was disabled; Playwright WebKit 26.4 is only an engine proxy |
-| Microsoft Edge | Not installed; no Edge evidence was collected and Chromium was not relabeled as Edge |
-| Playwright Chromium | Version 148.0.7778.96 exercised as engine regression evidence only |
-
-Full JSON results are preserved locally under ignored `web/storage/app/voice-benchmarks/`. The reproducible runner and classification are documented in `web/tests/browser/README.md` and validated structurally against `web/tests/browser/voice-v2-benchmark-result.schema.json`.
-
-## Synthetic latency regression benchmark
-
-One hundred Headless Chrome adapter samples passed:
-
-| Synthetic milestone | p50 | p95 | Target |
-| --- | ---: | ---: | ---: |
-| Wake controller to activating | 0 ms | 0.1 ms | p95 ≤ 500 ms |
-| Recognized partial to DOM | 0 ms | 0 ms | p95 ≤ 150 ms |
-| Final ready to synthetic audio start | 0.4 ms | 0.5 ms | p95 ≤ 1,000 ms |
-| Acknowledgement scheduled to synthetic audio start | 352.6 ms | 352.7 ms | p95 ≤ 800 ms |
-| Confirmed barge to playback stop | 0 ms | 0 ms | p95 ≤ 200 ms |
-| Three-job snapshot to DOM | 0 ms | 0.1 ms | p95 ≤ 800 ms |
-
-Classification: `synthetic_browser_adapter_only`. These measurements exclude acoustic recognition, real provider audio, network latency, device load, Safari, and Edge.
-
-## Migration and legacy deletion
-
-- Browser Voice v2 is gated only by `BROWSER_VOICE_V2`; no per-user allowlist or release-certification runtime flag remains.
-- New admissions fail closed when disabled; already-admitted recovery, delivery, and cancellation remain available.
-- The legacy browser `voiceOrchestrator.js` owner and its contradictory test were deleted.
-- The legacy wake ASR runtime/model and test-only ASR diagnostic path were deleted. The retained open-source KWS component supplies strict timing candidates only and has no accept/reject authority.
-- Realtime provider tooling was reduced to transcription and correlated speech playback; application routing, tools, persistence, and lifecycle are server-owned.
-- `BrowserVoiceControllerV2` is the sole browser lifecycle owner, `BrowserVoiceV2Client` the sole v2 projection poller, and `VoiceTurnLifecycleService` the sole durable state/final-message writer. No provider tool bridge or session-wide FIFO voice lock remains.
-- Generic typed-chat and native compatibility paths remain because they are outside the superseded browser voice owner.
-- Deployment restarts queue workers and the sub-minute scheduler; production requires at least three queue workers.
-
-## External certification still required
-
-Before calling the goal complete, record:
-
-- current Chrome, Safari, and Edge acoustic samples in quiet speech, background music, nearby conversation, and speaker-echo conditions;
-- p50/p95, sample count, device, browser, and network class for every target in `bean-voice-rules.md`; and
-- the owner's authenticated deployed-development smoke matrix covering fresh load, first wake, mic restart, follow-up, background work, Stop, explicit cancellation, reload, reconnect, local weather, remote weather, and complex note creation.
-
-Any missed target requires a fix or an explicit product-approved exception in `bean-voice-rules.md`.
+Until that physical deployed-development evidence exists, the accurate status
+is: deterministic local candidate passed; representative release certification
+pending.

@@ -53,12 +53,12 @@ class BrowserVoiceV2ConversationContextTest extends TestCase
             'Delete that reminder.',
             'new_conversation',
             2,
-        ))->assertUnprocessable()
-            ->assertJsonPath('code', 'voice_request_incomplete')
-            ->assertJsonPath('question', 'Which reminder should I change?');
+        ))->assertCreated()
+            ->assertJsonPath('data.turn.state', 'awaiting_clarification')
+            ->assertJsonPath('data.turn.clarification.question', 'Which reminder should I change?');
 
         $this->assertDatabaseHas('reminders', ['id' => $reminder->id]);
-        $this->assertDatabaseMissing('voice_turns', ['turn_id' => 'context-strict-delete-0002']);
+        $this->assertDatabaseHas('voice_turns', ['turn_id' => 'context-strict-delete-0002']);
 
         // A continuation claim with no matching durable epoch anchor also
         // fails closed; the server does not trust the mode flag by itself.
@@ -68,8 +68,9 @@ class BrowserVoiceV2ConversationContextTest extends TestCase
             'Delete that reminder.',
             'contextual_follow_up',
             99,
-        ))->assertUnprocessable()
-            ->assertJsonPath('question', 'Which reminder should I change?');
+        ))->assertCreated()
+            ->assertJsonPath('data.turn.state', 'awaiting_clarification')
+            ->assertJsonPath('data.turn.clarification.question', 'Which reminder should I change?');
         $this->assertDatabaseHas('reminders', ['id' => $reminder->id]);
     }
 

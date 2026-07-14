@@ -214,7 +214,11 @@ class FastDomainWriteService
         if ($title === null) {
             return null;
         }
-        $due = $this->dateTime($turn->transcript, $turn, false);
+        $due = $this->typedWrites->parseScheduledAt(
+            $turn->transcript,
+            $this->timezone($turn),
+            $turn->accepted_at,
+        );
         $task = Task::create([
             ...$this->ownership($turn),
             'conversation_session_id' => $turn->conversation_session_id,
@@ -393,7 +397,11 @@ class FastDomainWriteService
             ));
         }
 
-        $at = $this->dateTime($turn->transcript, $turn, false);
+        $at = $this->typedWrites->parseScheduledAt(
+            $turn->transcript,
+            $this->timezone($turn),
+            $turn->accepted_at,
+        );
         if ($at !== null) {
             $timezone = $this->timezone($turn);
             $candidates = $candidates->filter(function (Model $model) use ($at, $timezone, $turn): bool {
@@ -627,38 +635,6 @@ class FastDomainWriteService
         }
 
         return 'Bean note';
-    }
-
-    private function dateTime(string $text, VoiceTurn $turn, bool $required = true): ?Carbon
-    {
-        $timezone = $this->timezone($turn);
-        $base = now($timezone);
-        if (preg_match('/\btomorrow\b/iu', $text)) {
-            $base = $base->copy()->addDay();
-        } elseif (preg_match('/\b(?:next\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/iu', $text, $weekday) === 1) {
-            $base = $base->copy()->next(ucfirst(mb_strtolower($weekday[1])));
-        } elseif (preg_match('/\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b/iu', $text, $date) === 1) {
-            $base = Carbon::parse($date[1].' '.$date[2].' '.($date[3] ?? $base->year), $timezone);
-        }
-        if (preg_match('/\bnoon\b/iu', $text)) {
-            return $base->copy()->setTime(12, 0);
-        }
-        if (preg_match('/\bmidnight\b/iu', $text)) {
-            return $base->copy()->setTime(0, 0);
-        }
-        if (preg_match('/\b(?:at\s+)?(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*(a\.?m\.?|p\.?m\.?)\b/iu', $text, $match) === 1) {
-            $hour = (int) $match[1] % 12;
-            if (str_starts_with(mb_strtolower((string) $match[3]), 'p')) {
-                $hour += 12;
-            }
-
-            return $base->copy()->setTime($hour, (int) ($match[2] ?? 0), 0);
-        }
-        if (preg_match('/\b(?:at\s+)?([01]?\d|2[0-3]):([0-5]\d)\b/', $text, $match) === 1) {
-            return $base->copy()->setTime((int) $match[1], (int) $match[2], 0);
-        }
-
-        return $required ? null : null;
     }
 
     private function timezone(VoiceTurn $turn): string

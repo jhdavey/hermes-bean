@@ -210,12 +210,17 @@ test('[BV2-TRANSCRIPT-01] live final text replaces its partial and the utterance
     voice.drainEffects();
 
     time.advance(1_999);
-    assert.equal(voice.drainEffects().some((item) => item.type === BROWSER_VOICE_EFFECTS.ASSESS_COMPLETENESS), false);
+    assert.equal(voice.drainEffects().some((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY), false);
     time.advance(1);
     const effects = voice.drainEffects();
     assert.deepEqual(
-        effects.find((item) => item.type === BROWSER_VOICE_EFFECTS.ASSESS_COMPLETENESS),
-        { type: BROWSER_VOICE_EFFECTS.ASSESS_COMPLETENESS, turnId, transcript: 'Create a meal plan note' },
+        effects.find((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY),
+        {
+            type: BROWSER_VOICE_EFFECTS.TURN_READY,
+            turnId,
+            transcript: 'Create a meal plan note',
+            conversationContext: { mode: 'new_conversation', epoch: 1 },
+        },
     );
 });
 
@@ -230,12 +235,12 @@ test('[BV2-TRANSCRIPT-02] speech resuming before two seconds cancels the old end
     voice.speechStarted();
     voice.transcriptFinal('Create a note with my meal plan');
     time.advance(5_000);
-    assert.equal(voice.drainEffects().some((item) => item.type === BROWSER_VOICE_EFFECTS.ASSESS_COMPLETENESS), false);
+    assert.equal(voice.drainEffects().some((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY), false);
 
     voice.speechEnded();
     time.advance(2_000);
     assert.equal(
-        voice.drainEffects().find((item) => item.type === BROWSER_VOICE_EFFECTS.ASSESS_COMPLETENESS).transcript,
+        voice.drainEffects().find((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY).transcript,
         'Create a note with my meal plan',
     );
 });
@@ -249,7 +254,7 @@ test('[BV2-TRANSCRIPT-04] provider-observed two-second silence does not add a se
     time.advance(0);
 
     assert.equal(
-        voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.ASSESS_COMPLETENESS).length,
+        voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY).length,
         1,
     );
 });
@@ -259,7 +264,9 @@ test('[BV2-CLARIFY-01] clarification answer within five seconds remains one stab
     const turnId = beginWakeCapture(voice, 'clarification-turn');
     finishUtterance(voice, time, 'Create a reminder');
     voice.drainEffects();
-    voice.completenessDecided('incomplete', { question: 'What time should I remind you?' });
+    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP);
+    voice.drainEffects();
+    voice.admissionClarificationRequired('What time should I remind you?', { turnId });
     assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION);
     assert.equal(voice.snapshot().activeTurn.id, turnId);
     assert.equal(
@@ -275,13 +282,13 @@ test('[BV2-CLARIFY-01] clarification answer within five seconds remains one stab
     voice.transcriptFinal('At 4 p.m. today');
     voice.speechEnded();
     time.advance(2_000);
-    voice.drainEffects();
-    voice.completenessDecided('complete');
     const ready = voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY);
     assert.deepEqual(ready, [{
         type: BROWSER_VOICE_EFFECTS.TURN_READY,
         turnId,
         transcript: 'Create a reminder At 4 p.m. today',
+        clarificationContinuation: true,
+        clarificationAnswer: 'At 4 p.m. today',
         conversationContext: { mode: 'new_conversation', epoch: 1 },
     }]);
     assert.equal(voice.snapshot().activeTurn.id, turnId);
@@ -292,7 +299,8 @@ test('[BV2-CLARIFY-02] unanswered initial clarification expires at five seconds 
     beginWakeCapture(voice, 'clarification-timeout');
     finishUtterance(voice, time, 'Create a reminder');
     voice.drainEffects();
-    voice.completenessDecided('incomplete', { question: 'What time?' });
+    voice.drainEffects();
+    voice.admissionClarificationRequired('What time?', { turnId: 'clarification-timeout' });
     voice.drainEffects();
     voice.playbackStarted({ turnId: 'clarification-timeout' });
     voice.playbackFinished({ turnId: 'clarification-timeout' });
@@ -302,7 +310,14 @@ test('[BV2-CLARIFY-02] unanswered initial clarification expires at five seconds 
     time.advance(1);
     assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
     assert.equal(voice.snapshot().activeTurn, null);
-    assert.equal(voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.CLARIFICATION_EXPIRED).length, 1);
+    assert.deepEqual(
+        voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.CLARIFICATION_EXPIRED),
+        [{
+            type: BROWSER_VOICE_EFFECTS.CLARIFICATION_EXPIRED,
+            turnId: 'clarification-timeout',
+            durable: true,
+        }],
+    );
 });
 
 test('[BV2-CLARIFY-04] answering over the clarification keeps the original stable turn', () => {
@@ -318,7 +333,8 @@ test('[BV2-CLARIFY-04] answering over the clarification keeps the original stabl
     voice.providerReady();
     const turnId = beginWakeCapture(voice, 'clarify-original');
     finishUtterance(voice, speechHarness.time, 'Create a reminder');
-    voice.completenessDecided('incomplete', { question: 'What time?' });
+    voice.drainEffects();
+    voice.admissionClarificationRequired('What time?', { turnId });
     speechHarness.speech.enqueueSpeech({ turnId, text: 'What time?', purpose: 'clarification' });
     speechHarness.playback.start();
     voice.playbackStarted({ turnId });
@@ -335,8 +351,6 @@ test('[BV2-CLARIFY-05] server admission clarification keeps one stable turn and 
     const { voice, time } = createReadyVoice();
     const turnId = beginWakeCapture(voice, 'server-clarification-turn');
     finishUtterance(voice, time, 'Set a reminder');
-    voice.drainEffects();
-    voice.completenessDecided('complete');
     const firstAdmission = voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY);
     assert.deepEqual(firstAdmission, [{
         type: BROWSER_VOICE_EFFECTS.TURN_READY,
@@ -367,15 +381,14 @@ test('[BV2-CLARIFY-05] server admission clarification keeps one stable turn and 
     voice.transcriptFinal('for 4 p.m. today titled Universal');
     voice.speechEnded({ observedSilenceMs: 2_000 });
     time.advance(0);
-    voice.drainEffects();
-    voice.completenessDecided('complete');
-
     assert.deepEqual(
         voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY),
         [{
             type: BROWSER_VOICE_EFFECTS.TURN_READY,
             turnId,
             transcript: 'Set a reminder for 4 p.m. today titled Universal',
+            clarificationContinuation: true,
+            clarificationAnswer: 'for 4 p.m. today titled Universal',
             conversationContext: { mode: 'new_conversation', epoch: 1 },
         }],
     );
@@ -386,7 +399,6 @@ test('[BV2-FOLLOWUP-01] follow-up expires at fifteen seconds and background even
     beginWakeCapture(voice, 'calendar-turn');
     finishUtterance(voice, time, "What's on my calendar tomorrow?");
     voice.drainEffects();
-    voice.completenessDecided('complete');
     voice.drainEffects();
     voice.playbackStarted({ turnId: 'calendar-turn' });
     voice.playbackFinished({ turnId: 'calendar-turn' });
@@ -406,7 +418,6 @@ test('[BV2-FOLLOWUP-02] meaningful follow-up speech at 14,999 ms opens a new tur
     beginWakeCapture(voice, 'first-turn');
     finishUtterance(voice, time, 'What time is it?');
     voice.drainEffects();
-    voice.completenessDecided('complete');
     voice.playbackFinished({ turnId: 'first-turn' });
     voice.drainEffects();
 
@@ -426,7 +437,6 @@ test('[BV2-FOLLOWUP-03] a second request is accepted while the first submitted j
     const { voice, time } = createReadyVoice();
     const firstTurnId = beginWakeCapture(voice, 'first-background-turn');
     finishUtterance(voice, time, 'Create a three-day meal plan and save it as a note.');
-    voice.completenessDecided('complete');
 
     assert.equal(voice.snapshot().activeTurn.id, firstTurnId);
     assert.equal(voice.snapshot().activeTurn.submitted, true);
@@ -457,6 +467,14 @@ test('[BV2-FOLLOWUP-04] deterministic relevance grammar fails closed for ambient
         classifyBrowserVoiceFollowUpRelevance('Um, yeah.', { final: true }),
         BROWSER_VOICE_FOLLOW_UP_RELEVANCE.REJECTED,
     );
+    assert.equal(
+        classifyBrowserVoiceFollowUpRelevance('Yes', { final: true }),
+        BROWSER_VOICE_FOLLOW_UP_RELEVANCE.REJECTED,
+    );
+    assert.equal(
+        classifyBrowserVoiceFollowUpRelevance('Yes', { final: true, responseExpected: true }),
+        BROWSER_VOICE_FOLLOW_UP_RELEVANCE.MEANINGFUL,
+    );
     for (const meaningful of [
         'Hey Bean',
         'What about today?',
@@ -475,6 +493,10 @@ test('[BV2-FOLLOWUP-04] deterministic relevance grammar fails closed for ambient
         'Tomorrow at 4 p.m.',
         'At noon',
         'And the date?',
+        'Put that on my calendar',
+        'Email me the list',
+        'Open my latest note',
+        'Please organize this for me',
         'Thanks',
     ]) {
         assert.equal(
@@ -483,6 +505,50 @@ test('[BV2-FOLLOWUP-04] deterministic relevance grammar fails closed for ambient
             meaningful,
         );
     }
+    for (const ambient of [
+        'Pretty girl',
+        'Pretty good',
+        'I was telling my dog she is a pretty girl',
+        'The movie was pretty good last night',
+    ]) {
+        assert.equal(
+            classifyBrowserVoiceFollowUpRelevance(ambient, { final: true }),
+            BROWSER_VOICE_FOLLOW_UP_RELEVANCE.REJECTED,
+            ambient,
+        );
+    }
+});
+
+test('[BV2-FOLLOWUP-08] a one-word answer is accepted only when Bean actually asked a question', () => {
+    const { voice, time } = createReadyVoice();
+    beginWakeCapture(voice, 'question-turn');
+    finishUtterance(voice, time, 'What is on my calendar tomorrow?');
+    voice.drainEffects();
+    voice.playbackFinished({ turnId: 'question-turn', responseExpected: true });
+    voice.drainEffects();
+
+    voice.speechStarted({ turnId: 'answer-turn', providerItemId: 'provider-answer' });
+    voice.transcriptFinal('Yes');
+    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.CAPTURING);
+    assert.equal(voice.snapshot().activeTurn.id, 'answer-turn');
+    voice.speechEnded({ observedSilenceMs: 2_000 });
+    time.advance(0);
+    assert.equal(
+        voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY).length,
+        1,
+    );
+
+    voice.playbackFinished({ turnId: 'answer-turn', responseExpected: false });
+    voice.drainEffects();
+    voice.speechStarted({ turnId: 'ambient-yes', providerItemId: 'provider-ambient-yes' });
+    voice.transcriptFinal('Yes');
+    voice.speechEnded({ observedSilenceMs: 2_000 });
+    assert.equal(voice.snapshot().activeTurn, null);
+    assert.equal(voice.snapshot().liveDraft, '');
+    assert.equal(
+        voice.drainEffects().some((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY),
+        false,
+    );
 });
 
 test('[BV2-FOLLOWUP-05] rejected room speech stays invisible and restores only the remaining follow-up time', () => {
@@ -490,7 +556,6 @@ test('[BV2-FOLLOWUP-05] rejected room speech stays invisible and restores only t
     beginWakeCapture(voice, 'initial-answer');
     finishUtterance(voice, time, 'What time is it?');
     voice.drainEffects();
-    voice.completenessDecided('complete');
     voice.playbackFinished({ turnId: 'initial-answer' });
     voice.drainEffects();
 
@@ -531,7 +596,6 @@ test('[BV2-FOLLOWUP-06] strict Hey Bean supersedes a hidden candidate immediatel
     beginWakeCapture(voice, 'initial-turn');
     finishUtterance(voice, time, 'What time is it?');
     voice.drainEffects();
-    voice.completenessDecided('complete');
     voice.playbackFinished({ turnId: 'initial-turn' });
     voice.drainEffects();
 
@@ -553,7 +617,6 @@ test('[BV2-FOLLOWUP-07] provider strict wake reuses its transcript item instead 
     beginWakeCapture(voice, 'initial-turn');
     finishUtterance(voice, time, 'What time is it?');
     voice.drainEffects();
-    voice.completenessDecided('complete');
     voice.playbackFinished({ turnId: 'initial-turn' });
     voice.drainEffects();
 
@@ -573,7 +636,6 @@ test('[BV2-ADMISSION-05] exhausted admission recovery releases the turn and cann
     beginWakeCapture(voice, 'failed-admission-turn');
     finishUtterance(voice, time, 'Create a task called Send RSVP.');
     voice.drainEffects();
-    voice.completenessDecided('complete');
     voice.drainEffects();
 
     const failed = voice.admissionFailed('failed-admission-turn');
@@ -661,7 +723,6 @@ test('[BV2-RECOVERY-01] reconnect uses a new provider generation and preserves t
     beginWakeCapture(voice, 'recovery-turn');
     finishUtterance(voice, time, 'What time is it?');
     voice.drainEffects();
-    voice.completenessDecided('complete');
     voice.playbackFinished({ turnId: 'recovery-turn' });
     voice.drainEffects();
 
@@ -679,23 +740,20 @@ test('[BV2-RECOVERY-01] reconnect uses a new provider generation and preserves t
     assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
 });
 
-test('[BV2-CLARIFY-03] an uncertain pause listens silently and later submits one combined turn', () => {
+test('[BV2-CLARIFY-03] a syntactically open pause listens silently and admits one combined utterance', () => {
     const { voice, time } = createReadyVoice();
     const turnId = beginWakeCapture(voice, 'uncertain-turn');
     finishUtterance(voice, time, 'Create a note about');
-    voice.drainEffects();
-    voice.completenessDecided('uncertain');
+    const pausedEffects = voice.drainEffects();
+    assert.equal(pausedEffects.some((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY), false);
+    assert.equal(pausedEffects.some((item) => item.type === BROWSER_VOICE_EFFECTS.SPEAK_CLARIFICATION), false);
     assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION);
-    assert.equal(voice.drainEffects().some((item) => item.type === BROWSER_VOICE_EFFECTS.SPEAK_CLARIFICATION), false);
 
     time.advance(4_999);
-    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION);
     voice.speechStarted();
     voice.transcriptFinal('the launch checklist');
     voice.speechEnded();
     time.advance(2_000);
-    voice.drainEffects();
-    voice.completenessDecided('complete');
     assert.deepEqual(
         voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY),
         [{
@@ -707,28 +765,32 @@ test('[BV2-CLARIFY-03] an uncertain pause listens silently and later submits one
     );
 });
 
-test('[BV2-CLARIFY-06] an abandoned uncertain fragment expires silently instead of stranding capture', () => {
+test('[BV2-CLARIFY-06] an abandoned syntactically open fragment expires locally without creating durable work', () => {
     const { voice, time } = createReadyVoice();
     const turnId = beginWakeCapture(voice, 'abandoned-uncertain-turn');
     finishUtterance(voice, time, 'Create a');
-    voice.drainEffects();
-    voice.completenessDecided('uncertain');
-
+    const effects = voice.drainEffects();
+    assert.equal(effects.filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY).length, 0);
+    assert.equal(effects.some((item) => item.type === BROWSER_VOICE_EFFECTS.SPEAK_CLARIFICATION), false);
     assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION);
     assert.equal(voice.snapshot().activeTurn.id, turnId);
     time.advance(5_000);
     assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
     assert.equal(voice.snapshot().activeTurn, null);
-    assert.ok(voice.snapshot().closedTurnIds.includes(turnId));
-    assert.equal(voice.drainEffects().some((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY), false);
+    assert.deepEqual(
+        voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.CLARIFICATION_EXPIRED),
+        [{
+            type: BROWSER_VOICE_EFFECTS.CLARIFICATION_EXPIRED,
+            turnId,
+            durable: false,
+        }],
+    );
 });
 
 test('[BV2-CONTEXT-01] follow-ups retain one context epoch while strict wake starts a new one', () => {
     const { voice, time } = createReadyVoice();
     beginWakeCapture(voice, 'context-first');
     finishUtterance(voice, time, 'What reminders do I have?');
-    voice.drainEffects();
-    voice.completenessDecided('complete');
     const first = voice.drainEffects().find((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY);
     assert.deepEqual(first.conversationContext, { mode: 'new_conversation', epoch: 1 });
 
@@ -737,8 +799,6 @@ test('[BV2-CONTEXT-01] follow-ups retain one context epoch while strict wake sta
     voice.transcriptFinal('Delete that reminder');
     voice.speechEnded({ observedSilenceMs: 2_000 });
     time.advance(0);
-    voice.drainEffects();
-    voice.completenessDecided('complete');
     const followUp = voice.drainEffects().find((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY);
     assert.deepEqual(followUp.conversationContext, { mode: 'contextual_follow_up', epoch: 1 });
 
@@ -748,8 +808,6 @@ test('[BV2-CONTEXT-01] follow-ups retain one context epoch while strict wake sta
     voice.transcriptFinal('Delete that reminder');
     voice.speechEnded({ observedSilenceMs: 2_000 });
     time.advance(0);
-    voice.drainEffects();
-    voice.completenessDecided('complete');
     const strictWake = voice.drainEffects().find((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY);
     assert.deepEqual(strictWake.conversationContext, { mode: 'new_conversation', epoch: 2 });
 });
@@ -761,7 +819,6 @@ test('[BV2-STOP-01] Stop is playback-only, preserves finalized text, and has no 
     beginWakeCapture(voice, 'background-turn');
     finishUtterance(voice, time, 'Create a three-day meal plan');
     voice.drainEffects();
-    voice.completenessDecided('complete');
     const beforeStop = voice.snapshot();
     assert.equal(beforeStop.finalizedTranscript, 'Create a three-day meal plan');
     voice.drainEffects();
@@ -778,8 +835,9 @@ test('[BV2-STOP-02] Stop during an explicit clarification keeps the same clarifi
     beginWakeCapture(voice, 'clarifying-turn');
     finishUtterance(voice, time, 'Create a reminder');
     voice.drainEffects();
-    voice.completenessDecided('incomplete', { question: 'What time?' });
     const turnId = voice.snapshot().activeTurn.id;
+    voice.drainEffects();
+    voice.admissionClarificationRequired('What time?', { turnId });
 
     voice.stopPlayback();
     assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION);
@@ -878,7 +936,6 @@ test('[BV2-BARGE-03] the controller coordinates duck, rejection, and one replace
     beginWakeCapture(voice, 'spoken-turn');
     finishUtterance(voice, time, 'Read my calendar');
     voice.drainEffects();
-    voice.completenessDecided('complete');
     voice.playbackStarted({ turnId: 'spoken-turn' });
 
     voice.potentialBargeIn();
@@ -901,7 +958,6 @@ test('[BV2-WAKE-02] a strict wake while Bean is speaking stops playback and begi
     beginWakeCapture(voice, 'old-spoken-turn');
     finishUtterance(voice, time, 'Tell me the weather');
     voice.drainEffects();
-    voice.completenessDecided('complete');
     voice.playbackStarted({ turnId: 'old-spoken-turn' });
 
     voice.wakeConfirmed({ turnId: 'new-wake-turn' });
@@ -941,7 +997,8 @@ test('[BV2-WAKE-06] strict provider wake replaces a capture or clarification wit
     voice.transcriptFinal('Create a reminder');
     voice.speechEnded();
     time.advance(2_000);
-    voice.completenessDecided('incomplete', { question: 'When?' });
+    voice.drainEffects();
+    voice.admissionClarificationRequired('When?', { turnId: 'provider-wake-during-capture' });
     assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION);
     voice.wakeConfirmed({ turnId: 'provider-wake-during-clarification', source: 'provider_strict_wake' });
     assert.equal(voice.snapshot().activeTurn.id, 'provider-wake-during-clarification');

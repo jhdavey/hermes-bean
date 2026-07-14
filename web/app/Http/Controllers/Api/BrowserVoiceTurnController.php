@@ -111,91 +111,55 @@ class BrowserVoiceTurnController extends Controller
             $session,
             (string) $data['transcript'],
         );
-        if (($question = $this->completeness->clarificationQuestion(
+        $question = $this->completeness->clarificationQuestion(
             (string) $data['transcript'],
             $hasDefaultLocation,
             $data['timezone'] ?? null,
             true,
             $contextualFollowUp || $hasActiveReference,
             $contextualReference !== null,
-        )) !== null) {
-            return response()->json([
-                'message' => $question,
-                'code' => 'voice_request_incomplete',
-                'question' => $question,
-                'turn_id' => $data['turn_id'],
-            ], 422);
-        }
+        );
+        $data['_clarification_question'] = $question;
         $existed = $existingTurn !== null;
 
         try {
             $turn = $this->lifecycle->admit($request->user(), $session, $data);
-
-            if ($turn->lane === VoiceTurnLane::Instant && $turn->state === VoiceTurnState::Accepted) {
-                $turn = $this->lifecycle->markProgress($turn, ['handler' => $turn->handler], 'instant_handler');
-                $turn = $this->lifecycle->complete($turn, $this->instantHandler->answer($turn));
-            } elseif ($turn->handler === 'app.voice_work.cancel' && $turn->state === VoiceTurnState::Accepted) {
-                $turn = $this->cancelContextualWork($turn);
-            } elseif ($turn->handler === 'app.voice_work.status' && $turn->state === VoiceTurnState::Accepted) {
-                $turn = $this->lifecycle->markProgress($turn, [
-                    'handler' => $turn->handler,
-                ], 'work_status');
-                $turn = $this->lifecycle->complete($turn, $this->workStatus->answer($turn));
-            } elseif (! $turn->state->isTerminal()) {
-                $plannedJobs = $turn->lane === VoiceTurnLane::ComplexAgent
-                    ? $this->complexPlans->plan($turn)
-                    : [[
-                        'key' => 'primary',
-                        'label' => $this->jobLabel($turn),
-                        'lane' => $turn->lane,
-                        'handler' => $turn->handler,
-                        'input' => $turn->transcript,
-                        'hard_deadline_seconds' => null,
-                        ...$this->jobPolicy->forTurn($turn),
-                        'metadata' => [],
-                    ]];
-                $jobs = collect($plannedJobs)->map(function (array $planned) use ($turn): array {
-                    return $this->lifecycle->createJob(
-                        $turn,
-                        (string) $planned['label'],
-                        (string) $planned['key'],
-                        $planned['resource_lock_key'] ?? null,
-                        (int) ($planned['priority'] ?? 0),
-                        [
-                            ...(is_array($planned['metadata'] ?? null) ? $planned['metadata'] : []),
-                            'scheduling_policy' => [
-                                'priority' => (int) ($planned['priority'] ?? 0),
-                                'resource_lock_key' => $planned['resource_lock_key'] ?? null,
-                            ],
-                        ],
-                        $planned['lane'],
-                        (string) $planned['handler'],
-                        (string) $planned['input'],
-                        isset($planned['hard_deadline_seconds'])
-                            ? (int) $planned['hard_deadline_seconds']
-                            : null,
-                    );
-                });
-                foreach ($jobs as $job) {
-                    if ($this->lifecycle->jobRequiresDispatch($job['run'])) {
-                        if ($this->shouldProcessSynchronously($turn)) {
-                            ProcessAssistantRun::dispatchSync($job['run']->id);
-                        } else {
-                            ProcessAssistantRun::dispatch($job['run']->id);
-                        }
-                        // Mark only after the queue accepted the job. A crash
-                        // before this point causes an idempotent redispatch on
-                        // the stable-turn retry instead of a stranded run.
-                        $this->lifecycle->markJobDispatched($job['run']);
-                    }
-                }
-                $turn = $turn->fresh(['userMessage', 'finalAssistantMessage', 'runs']);
-            }
+            $turn = $this->processAcceptedTurn($turn);
         } catch (VoiceTurnConflictException $exception) {
             return response()->json(['message' => $exception->getMessage()], 409);
         }
 
         return response()->json(['data' => $this->projection->forTurn($turn)], $existed ? 200 : 201);
+    }
+
+    public function clarify(Request $request, string $turnId): JsonResponse
+    {
+        $this->ensureEnabled($request);
+        $this->rejectRawAudio($request->all());
+        $data = $request->validate([
+            'session_id' => ['required', 'integer', 'exists:conversation_sessions,id'],
+            'answer' => ['required', 'string', 'max:12000'],
+            'clarification_id' => ['required', 'string', 'min:8', 'max:160', 'regex:/^[A-Za-z0-9][A-Za-z0-9._:-]+$/'],
+        ]);
+        $session = $this->ownedSession($request, (int) $data['session_id']);
+        $turn = VoiceTurn::query()
+            ->where('user_id', $request->user()->id)
+            ->where('conversation_session_id', $session->id)
+            ->where('turn_id', $turnId)
+            ->firstOrFail();
+
+        try {
+            $turn = $this->lifecycle->resolveClarification(
+                $turn,
+                (string) $data['answer'],
+                (string) $data['clarification_id'],
+            );
+            $turn = $this->processAcceptedTurn($turn);
+        } catch (VoiceTurnConflictException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 409);
+        }
+
+        return response()->json(['data' => $this->projection->forTurn($turn)]);
     }
 
     public function state(Request $request): JsonResponse
@@ -288,7 +252,11 @@ class BrowserVoiceTurnController extends Controller
             VoiceTurn::query()
                 ->where('user_id', $request->user()->id)
                 ->where('conversation_session_id', $session->id)
-                ->whereIn('state', [VoiceTurnState::Accepted->value, VoiceTurnState::Running->value])
+                ->whereIn('state', [
+                    VoiceTurnState::AwaitingClarification->value,
+                    VoiceTurnState::Accepted->value,
+                    VoiceTurnState::Running->value,
+                ])
                 ->orderBy('id')
                 ->get()
                 ->each(function (VoiceTurn $turn) use ($canceledTurns, $reason, &$completedBeforeCancellation): void {
@@ -358,9 +326,91 @@ class BrowserVoiceTurnController extends Controller
             $turn = $this->lifecycle->markAcknowledged($turn, $timing);
         } else {
             $turn = $this->lifecycle->recordBrowserEvent($turn, $data['event'], $timing);
+            if ($turn->state === VoiceTurnState::AwaitingClarification
+                && in_array($data['event'], ['playback_finished', 'playback_stopped'], true)
+                && data_get($timing, 'purpose') === 'clarification') {
+                // The browser owns the five-second conversational timer and
+                // cancels it as soon as speech begins. Keep a wider durable
+                // fallback so an answer that starts at 4.9s can finish its
+                // utterance without racing a server cancellation.
+                $turn = $this->lifecycle->startClarificationDeadline($turn, 30);
+            }
         }
 
         return response()->json(['data' => $this->projection->forTurn($turn)]);
+    }
+
+    private function processAcceptedTurn(VoiceTurn $turn): VoiceTurn
+    {
+        if ($turn->state !== VoiceTurnState::Accepted) {
+            return $turn->load(['userMessage', 'finalAssistantMessage', 'runs']);
+        }
+
+        if ($turn->lane === VoiceTurnLane::Instant) {
+            $turn = $this->lifecycle->markProgress($turn, ['handler' => $turn->handler], 'instant_handler');
+
+            return $this->lifecycle->complete($turn, $this->instantHandler->answer($turn));
+        }
+        if ($turn->handler === 'app.voice_work.cancel') {
+            return $this->cancelContextualWork($turn);
+        }
+        if ($turn->handler === 'app.voice_work.status') {
+            $turn = $this->lifecycle->markProgress($turn, [
+                'handler' => $turn->handler,
+            ], 'work_status');
+
+            return $this->lifecycle->complete($turn, $this->workStatus->answer($turn));
+        }
+
+        $plannedJobs = $turn->lane === VoiceTurnLane::ComplexAgent
+            ? $this->complexPlans->plan($turn)
+            : [[
+                'key' => 'primary',
+                'label' => $this->jobLabel($turn),
+                'lane' => $turn->lane,
+                'handler' => $turn->handler,
+                'input' => $turn->transcript,
+                'hard_deadline_seconds' => null,
+                ...$this->jobPolicy->forTurn($turn),
+                'metadata' => [],
+            ]];
+        $jobs = collect($plannedJobs)->map(function (array $planned) use ($turn): array {
+            return $this->lifecycle->createJob(
+                $turn,
+                (string) $planned['label'],
+                (string) $planned['key'],
+                $planned['resource_lock_key'] ?? null,
+                (int) ($planned['priority'] ?? 0),
+                [
+                    ...(is_array($planned['metadata'] ?? null) ? $planned['metadata'] : []),
+                    'scheduling_policy' => [
+                        'priority' => (int) ($planned['priority'] ?? 0),
+                        'resource_lock_key' => $planned['resource_lock_key'] ?? null,
+                    ],
+                ],
+                $planned['lane'],
+                (string) $planned['handler'],
+                (string) $planned['input'],
+                isset($planned['hard_deadline_seconds'])
+                    ? (int) $planned['hard_deadline_seconds']
+                    : null,
+            );
+        });
+        foreach ($jobs as $job) {
+            if (! $this->lifecycle->jobRequiresDispatch($job['run'])) {
+                continue;
+            }
+            if ($this->shouldProcessSynchronously($turn)) {
+                ProcessAssistantRun::dispatchSync($job['run']->id);
+            } else {
+                ProcessAssistantRun::dispatch($job['run']->id);
+            }
+            // Mark only after the queue accepted the job. A crash before this
+            // point causes an idempotent redispatch on the stable-turn retry.
+            $this->lifecycle->markJobDispatched($job['run']);
+        }
+
+        return $turn->fresh(['userMessage', 'finalAssistantMessage', 'runs']);
     }
 
     private function ensureEnabled(Request $request): void

@@ -1,7 +1,9 @@
 'use strict';
 
 const TARGET_SAMPLE_RATE = 16000;
-const AUDIO_BATCH_SAMPLES = 1600;
+// An 80 ms batch keeps decoder message pressure bounded while preserving
+// headroom under the 500 ms strict-wake p95 contract across browser engines.
+const AUDIO_BATCH_SAMPLES = 1280;
 const MAX_RESAMPLED_SAMPLES_PER_RENDER = 512;
 const ACTIVITY_REPORT_MS = 50;
 const PROCESSOR_NAME = 'hey-bean-gate';

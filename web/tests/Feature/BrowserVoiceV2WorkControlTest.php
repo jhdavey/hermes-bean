@@ -116,7 +116,7 @@ class BrowserVoiceV2WorkControlTest extends TestCase
         }
     }
 
-    public function test_every_typed_subtask_is_complete_before_any_part_of_the_parent_is_admitted(): void
+    public function test_every_typed_subtask_is_complete_before_any_part_of_the_parent_executes(): void
     {
         $token = $this->apiToken('voice-v2-subtask-completeness@example.com');
         $sessionId = $this->sessionId($token);
@@ -125,11 +125,12 @@ class BrowserVoiceV2WorkControlTest extends TestCase
             $sessionId,
             'subtask-completeness-0001',
             'Create a reminder titled Call Mom tomorrow at noon and create a reminder titled RSVP.',
-        ))->assertUnprocessable()
-            ->assertJsonPath('code', 'voice_request_incomplete')
-            ->assertJsonPath('question', 'What time should I remind you?');
+        ))->assertCreated()
+            ->assertJsonPath('data.turn.state', 'awaiting_clarification')
+            ->assertJsonPath('data.turn.clarification.question', 'What time should I remind you?');
 
-        $this->assertSame(0, VoiceTurn::where('turn_id', 'subtask-completeness-0001')->count());
+        $this->assertSame(1, VoiceTurn::where('turn_id', 'subtask-completeness-0001')->count());
+        $this->assertSame(0, VoiceTurn::where('turn_id', 'subtask-completeness-0001')->firstOrFail()->runs()->count());
         $this->assertSame(0, Reminder::count());
     }
 
@@ -194,6 +195,31 @@ class BrowserVoiceV2WorkControlTest extends TestCase
         }
 
         $this->assertSame(1, Reminder::where('title', 'Existing reminder')->count());
+    }
+
+    public function test_spoken_word_times_use_the_same_parser_for_admission_and_task_execution(): void
+    {
+        Carbon::setTestNow('2026-07-11 12:00:00', 'America/New_York');
+        $token = $this->apiToken('voice-v2-spoken-task-time@example.com');
+        $sessionId = $this->sessionId($token);
+        $response = $this->withToken($token)->postJson('/api/assistant/voice/turns', $this->payload(
+            $sessionId,
+            'spoken-task-time-0001',
+            'Create a task titled Salt for tomorrow at five p.m.',
+        ))->assertCreated()
+            ->assertJsonPath('data.turn.handler', 'app.task.create');
+
+        (new ProcessAssistantRun((int) $response->json('data.jobs.0.id')))->handle(
+            app(HermesRuntimeService::class),
+            app(AssistantRunService::class),
+        );
+
+        $task = Task::where('title', 'Salt')->sole();
+        $this->assertSame('2026-07-12 17:00', $task->due_at->timezone('America/New_York')->format('Y-m-d H:i'));
+        $this->assertSame(
+            'Done—I created the task “Salt” for tomorrow at 5 p.m.',
+            VoiceTurn::where('turn_id', 'spoken-task-time-0001')->firstOrFail()->finalAssistantMessage?->content,
+        );
     }
 
     public function test_calendar_read_language_takes_precedence_over_schedule_as_a_noun(): void
@@ -1125,6 +1151,9 @@ class BrowserVoiceV2WorkControlTest extends TestCase
         $this->assertSame($expectedKey, $correction->resource_lock_key);
         $this->assertSame(100, $deletion->priority);
         $this->assertSame(80, $correction->priority);
+        $this->assertSame([], (new ProcessAssistantRun($lowPriority->id))->middleware());
+        $this->assertSame([], (new ProcessAssistantRun($deletion->id))->middleware());
+        $this->assertSame([], (new ProcessAssistantRun($correction->id))->middleware());
 
         $this->assertFalse($lifecycle->claimJobExecution($lowPriority));
         $this->assertNotNull(data_get($lowPriority->fresh()->metadata, 'priority_wait_started_at'));

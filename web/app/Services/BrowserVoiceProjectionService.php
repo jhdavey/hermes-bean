@@ -132,6 +132,11 @@ class BrowserVoiceProjectionService
             'user_message_id' => $turn->user_message_id,
             'final_assistant_message_id' => $turn->final_assistant_message_id,
             'final_text' => $turn->finalAssistantMessage?->content,
+            'clarification' => $turn->state === VoiceTurnState::AwaitingClarification ? [
+                'question' => (string) data_get($turn->metadata, 'clarification_question', ''),
+                'sequence' => (int) data_get($turn->metadata, 'clarification_sequence', 1),
+                'deadline_at' => $turn->hard_deadline_at?->toIso8601String(),
+            ] : null,
             'visible_in_chat' => $turn->state !== VoiceTurnState::Canceled,
             'created_at' => $turn->created_at?->toIso8601String(),
             'updated_at' => $turn->updated_at?->toIso8601String(),

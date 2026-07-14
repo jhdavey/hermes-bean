@@ -428,6 +428,24 @@ class AdminVoiceQualityReportTest extends TestCase
                 'microphone_audio' => 'ACTIVITY-RAW-AUDIO-DO-NOT-EXPOSE',
             ],
         ]);
+        ActivityEvent::create([
+            'user_id' => $admin->id,
+            'workspace_id' => $session->workspace_id,
+            'conversation_session_id' => $session->id,
+            'event_type' => 'browser_voice_v2.client_failure',
+            'tool_name' => 'browser.voice.client',
+            'status' => 'failed',
+            'payload' => [
+                'stage' => 'clarification',
+                'code' => 'AbortError',
+                'message' => 'Bearer abcdefghijklmnopqrstuvwxyz did not recover.',
+                'turn_id' => $failedTurn->turn_id,
+                'cause_chain' => [[
+                    'code' => 'AbortError',
+                    'message' => 'Bearer abcdefghijklmnopqrstuvwxyz did not recover.',
+                ]],
+            ],
+        ]);
 
         $overdueTurn = VoiceTurn::create([
             'turn_id' => 'v2-diagnostic-overdue-0002',
@@ -499,6 +517,10 @@ class AdminVoiceQualityReportTest extends TestCase
             ->assertJsonPath('data.browser_voice_v2.alerts.lifecycle_regression_attempt.count', 1)
             ->assertJsonPath('data.browser_voice_v2.alerts.uncertain_side_effect_state.count', 1)
             ->assertJsonPath('data.browser_voice_v2.alerts.raw_audio_persistence_detected.count', 1)
+            ->assertJsonPath('data.browser_voice_v2.client_failures.count', 1)
+            ->assertJsonPath('data.browser_voice_v2.client_failures.stage_counts.clarification', 1)
+            ->assertJsonPath('data.browser_voice_v2.client_failures.events.0.turn_id', $failedTurn->turn_id)
+            ->assertJsonPath('data.browser_voice_v2.client_failures.events.0.message', 'Bearer [redacted] did not recover.')
             ->assertJsonPath('data.browser_voice_v2.benchmark_gates.external_final_audio_start.status', 'insufficient_data')
             ->assertJsonPath('data.browser_voice_v2.benchmark_gates.external_final_audio_start.sufficient_sample', false)
             ->assertJsonPath('data.browser_voice_v2.privacy.raw_transcript_exposed', false)

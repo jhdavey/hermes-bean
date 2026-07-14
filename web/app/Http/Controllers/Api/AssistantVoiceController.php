@@ -3,11 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ActivityEvent;
+use App\Models\ConversationSession;
 use App\Models\VoiceTurn;
 use App\Services\AgentProfileService;
 use App\Services\AiUsageService;
 use App\Services\OpenAiVoiceService;
 use App\Services\PlanLimitService;
+use App\Services\VoiceTurnPrivacyService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,6 +25,7 @@ class AssistantVoiceController extends Controller
         private readonly WorkspaceService $workspaces,
         private readonly AiUsageService $usage,
         private readonly PlanLimitService $planLimits,
+        private readonly VoiceTurnPrivacyService $privacy,
     ) {}
 
     public function voices(): JsonResponse
@@ -222,21 +226,42 @@ class AssistantVoiceController extends Controller
     public function clientFailure(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'stage' => ['required', 'in:local_wake,startup,admission,usage_accounting'],
+            'stage' => ['required', 'in:local_wake,startup,admission,clarification,connection,usage_accounting'],
             'code' => ['required', 'string', 'max:80'],
             'message' => ['required', 'string', 'max:240'],
             'cause_chain' => ['present', 'array', 'max:4'],
             'cause_chain.*.code' => ['nullable', 'string', 'max:80'],
             'cause_chain.*.message' => ['nullable', 'string', 'max:240'],
+            'session_id' => ['sometimes', 'nullable', 'integer'],
+            'turn_id' => ['sometimes', 'nullable', 'string', 'max:191'],
         ]);
         $user = $request->user();
-        Log::warning('Browser Voice v2 client failure.', [
-            'user_id' => $user->id,
-            'workspace_id' => $user->default_workspace_id,
+        $diagnostic = $this->privacy->sanitizeDiagnosticPayload([
             'stage' => $data['stage'],
             'code' => $data['code'],
             'message' => $data['message'],
             'cause_chain' => $data['cause_chain'],
+            'turn_id' => $data['turn_id'] ?? null,
+        ]);
+        $session = isset($data['session_id'])
+            ? ConversationSession::query()
+                ->where('user_id', $user->id)
+                ->whereKey((int) $data['session_id'])
+                ->first()
+            : null;
+        ActivityEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $session?->workspace_id ?? $user->default_workspace_id,
+            'conversation_session_id' => $session?->id,
+            'event_type' => 'browser_voice_v2.client_failure',
+            'tool_name' => 'browser.voice.client',
+            'status' => 'failed',
+            'payload' => $diagnostic,
+        ]);
+        Log::warning('Browser Voice v2 client failure.', [
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            ...$diagnostic,
         ]);
 
         return response()->json(['data' => ['recorded' => true]]);

@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\ActivityEvent;
 use App\Models\AgentProfile;
 use App\Models\AiUsageAlert;
 use App\Models\AiUsageLog;
+use App\Models\ConversationSession;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -294,12 +296,27 @@ class VoiceChatFeatureTest extends TestCase
         $this->withToken($token)->postJson('/api/assistant/voice/client-failures', [
             'stage' => 'local_wake',
             'code' => 'gate_open_failed',
-            'message' => 'The local wake gate could not open safely.',
+            'message' => 'The local wake gate could not open safely. Bearer secret-client-token',
             'cause_chain' => [
                 ['code' => 'gate_open_failed', 'message' => 'The local wake gate could not open safely.'],
-                ['code' => 'transport_failed', 'message' => 'Realtime transcription disconnected.'],
+                ['code' => 'transport_failed', 'message' => 'Realtime transcription disconnected. sk-secretclienttoken123456789'],
             ],
         ])->assertOk()->assertJsonPath('data.recorded', true);
+
+        $event = ActivityEvent::query()
+            ->where('event_type', 'browser_voice_v2.client_failure')
+            ->latest('id')
+            ->firstOrFail();
+        $this->assertSame('local_wake', data_get($event->payload, 'stage'));
+        $this->assertSame('gate_open_failed', data_get($event->payload, 'code'));
+        $this->assertSame(
+            'The local wake gate could not open safely. Bearer [redacted]',
+            data_get($event->payload, 'message'),
+        );
+        $this->assertSame(
+            'Realtime transcription disconnected. [redacted key]',
+            data_get($event->payload, 'cause_chain.1.message'),
+        );
 
         Log::shouldHaveReceived('warning')->once()->withArgs(
             fn (string $message, array $context): bool => $message === 'Browser Voice v2 client failure.'
@@ -370,6 +387,34 @@ class VoiceChatFeatureTest extends TestCase
                 && $context['stage'] === 'usage_accounting'
                 && $context['code'] === 'usage_transport_failed',
         );
+    }
+
+    public function test_authenticated_browser_can_record_a_durable_clarification_transport_failure(): void
+    {
+        Log::spy();
+        $token = $this->apiToken('voice-clarification-failure@example.com');
+        $user = User::where('email', 'voice-clarification-failure@example.com')->firstOrFail();
+        $session = ConversationSession::where('user_id', $user->id)->firstOrFail();
+
+        $this->withToken($token)->postJson('/api/assistant/voice/client-failures', [
+            'stage' => 'clarification',
+            'code' => 'AbortError',
+            'message' => 'The clarification request did not recover.',
+            'cause_chain' => [[
+                'code' => 'AbortError',
+                'message' => 'The clarification request did not recover.',
+            ]],
+            'session_id' => $session->id,
+            'turn_id' => 'voice-clarification-turn-0001',
+        ])->assertOk()->assertJsonPath('data.recorded', true);
+
+        $event = ActivityEvent::query()
+            ->where('event_type', 'browser_voice_v2.client_failure')
+            ->latest('id')
+            ->firstOrFail();
+        $this->assertSame($session->id, $event->conversation_session_id);
+        $this->assertSame('clarification', data_get($event->payload, 'stage'));
+        $this->assertSame('voice-clarification-turn-0001', data_get($event->payload, 'turn_id'));
     }
 
     private function completedUsage(User $user, float $cost): AiUsageLog

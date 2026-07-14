@@ -184,6 +184,21 @@ test('[BV2-DIAGNOSTIC-03] exhausted durable admission reports a sanitized diagno
     assert.match(admission, /recovery\.error \|\| error/);
 });
 
+test('[BV2-DIAGNOSTIC-04] exhausted clarification transport preserves the draft and reports durable admin telemetry', () => {
+    const start = source.indexOf('async function clarifyBrowserVoiceV2Turn(');
+    const end = source.indexOf('\n    function applyBrowserVoiceV2Snapshot(', start);
+    assert.ok(start >= 0 && end > start, 'the clarification recovery boundary must remain discoverable');
+    const implementation = source.slice(start, end);
+
+    assert.match(implementation, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)/);
+    assert.match(implementation, /snapshot\.turns\.find/);
+    assert.match(implementation, /Your words are still in the input/);
+    assert.match(implementation, /sanitizedLocalWakeFailure\(lastError, 'clarification'\)/);
+    assert.match(implementation, /\/assistant\/voice\/client-failures/);
+    assert.match(implementation, /session_id: Number\(sessionId\)/);
+    assert.match(implementation, /turn_id: turnId/);
+});
+
 test('[BV2-STARTUP-03] startup uses one same-origin SDP owner and fails closed with a natural retry prompt', () => {
     const openStart = source.indexOf('async function openRealtimeSession(');
     const openEnd = source.indexOf('\n    function clearRealtimeDisconnectedTimer(', openStart);

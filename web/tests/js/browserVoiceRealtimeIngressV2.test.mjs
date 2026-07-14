@@ -32,7 +32,6 @@ test('[BV2-BROWSER-11] real provider event order admits the first contextual rem
         connectionGeneration: beforeEndpoint.connectionGeneration,
         source: 'timer:endpoint',
     });
-    controller.completenessDecided('complete');
     controller.playbackStarted({ turnId: 'task-read' });
     controller.playbackFinished({ turnId: 'task-read' });
     controller.drainEffects();
@@ -61,12 +60,6 @@ test('[BV2-BROWSER-11] real provider event order admits the first contextual rem
         connectionGeneration: followUp.connectionGeneration,
         source: 'timer:endpoint',
     });
-    assert.equal(
-        controller.drainEffects().filter((effect) => effect.type === BROWSER_VOICE_EFFECTS.ASSESS_COMPLETENESS).length,
-        1,
-    );
-    controller.completenessDecided('complete');
-
     const admissions = controller.drainEffects()
         .filter((effect) => effect.type === BROWSER_VOICE_EFFECTS.TURN_READY);
     assert.equal(admissions.length, 1);

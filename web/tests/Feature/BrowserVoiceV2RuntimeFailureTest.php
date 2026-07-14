@@ -308,6 +308,18 @@ class BrowserVoiceV2RuntimeFailureTest extends TestCase
         $this->assertSame(VoiceTurnState::Completed, $turn->state);
         $this->assertSame('Done—I created the note “Three-Day Meal Plan”.', $turn->finalAssistantMessage->content);
         $this->assertSame(1, Note::where('metadata->browser_voice_turn_id', $turn->turn_id)->count());
+        $this->assertSame(1, ConversationMessage::query()
+            ->where('conversation_session_id', $turn->conversation_session_id)
+            ->where('role', 'assistant')
+            ->count());
+        $this->assertDatabaseHas('activity_events', [
+            'conversation_session_id' => $turn->conversation_session_id,
+            'event_type' => 'runtime.response_generated',
+        ]);
+        $this->assertDatabaseMissing('activity_events', [
+            'conversation_session_id' => $turn->conversation_session_id,
+            'event_type' => 'runtime.message_completed',
+        ]);
         $this->assertDatabaseMissing('activity_events', ['event_type' => 'runtime.tool_loop_started']);
         Http::assertSentCount(1);
         Http::assertSent(function ($request): bool {

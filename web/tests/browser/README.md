@@ -20,12 +20,13 @@ The preflight exits nonzero when any public deployment check fails. It proves de
 
 The benchmark installs a `getUserMedia` tripwire before application code loads. Any attempted microphone call is denied, counted, and fails that target. It never requests microphone permission, captures ambient audio, or plays audible audio. Generated audio exists only in memory during the run, temporary files are removed before browser execution, activated PCM is consumed synchronously for count/timing aggregates, and no PCM or base64 audio is emitted in the JSON result.
 
-The matrix has 78 unique files across six English system voices:
+The matrix has 96 unique files across six English system voices:
 
 - six isolated `Hey Bean` wakes;
+- six `Hey Bean, what time is it?` wake-plus-command utterances;
 - six `Hey Bean` wakes embedded after ongoing speech;
 - four safe missed-`Hey` address forms across all six voices (24 files); and
-- seven privacy/near-miss families across all six voices (42 files): `Hey beam`, `Hey Ben`, third-person `Bean` both mid-utterance and at utterance start, `green bean`, the `been` homophone, and ongoing conversation without an address.
+- nine privacy/near-miss families across all six voices (54 files): `Hey beam`, `Hey Ben`, third-person `Bean` both mid-utterance and at utterance start, `green bean`, the `been` homophone, ordinary ongoing conversation without an address, and the held-out ambient phrases `pretty girl` and `pretty good`. Those named ambient phrases are QA inputs only; they are not runtime aliases or hard-coded exceptions.
 
 For each voice, the runner presents every negative family, verifies a re-arm after every rejection, and then requires an immediate strict wake. The default four repetitions apply to the six isolated wake files (24 strict-wake samples); wake-plus-command, continuous-speech wake, missed-`Hey`, and unique cross-voice privacy files run once each. `VOICE_V2_WAKE_REPLAYS` increases only isolated-wake repetitions, preserving broad coverage without multiplying the already cross-voice negative matrix.
 
@@ -45,6 +46,10 @@ VOICE_V2_BENCHMARK_OUTPUT=/tmp/bean-voice-v2.json npm run benchmark:voice:browse
 VOICE_V2_BENCHMARK_TARGETS=playwright-chromium,google-chrome npm run benchmark:voice:browser
 VOICE_V2_WAKE_REPLAYS=6 VOICE_V2_BENCHMARK_SAMPLES=200 npm run benchmark:voice:browser
 ```
+
+Each engine's prerecorded replay has a five-minute outer deadline and each
+synthetic adapter run has a three-minute outer deadline. A stalled engine is
+recorded as failed and closed; it cannot hang the benchmark command indefinitely.
 
 Target meanings are deliberately narrow:
 

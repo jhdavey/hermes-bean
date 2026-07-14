@@ -1,13 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-    assessBrowserVoiceV2Completeness,
     BrowserVoiceAdmissionRegistryV2,
     BrowserVoiceV2Client,
     deliverBrowserVoiceV2ReceiptOnce,
     normalizeVoiceV2Snapshot,
     recoverBrowserVoiceV2Admission,
-    resolveBrowserVoiceV2AdmissionClarification,
 } from '../../resources/js/heybean/browserVoiceV2Client.js';
 
 test('[BV2-ADMISSION-07] newer turns do not supersede recovery for an older stable turn', () => {
@@ -94,108 +92,21 @@ test('[BV2-DELIVERY-01] failed final delivery remains retryable and concurrent c
     assert.equal(attempts, 2);
 });
 
-test('[BV2-COMPLETENESS-01] exact fully specified reminder phrase proceeds without clarification', () => {
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('Hey Bean, set a reminder for 4 p.m. today titled Universal.'),
-        { decision: 'complete' },
-    );
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('Can you set a reminder to do the salt at 5pm?'),
-        { decision: 'complete' },
-    );
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('Can you set a reminder for salt for 5pm?'),
-        { decision: 'complete' },
-    );
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('Create a reminder'),
-        { decision: 'incomplete', question: 'What should I remind you about?' },
-    );
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('Create a note'),
-        { decision: 'incomplete', question: 'What should the note include?' },
-    );
-});
-
-test('[BV2-CONTEXT-02] a timed reminder for that task reaches server-owned contextual resolution', () => {
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('Okay, great. Can you set a reminder at 5 p.m. for that task?'),
-        { decision: 'complete' },
-    );
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('Set it for 5 p.m.'),
-        { decision: 'complete' },
-    );
-});
-
-test('[BV2-COMPLETENESS-04] date-only typed writes clarify for a clock time and natural calendar writes proceed', () => {
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('Set a reminder titled Call Mom for tomorrow.'),
-        { decision: 'incomplete', question: 'What time should I remind you?' },
-    );
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('Schedule dentist tomorrow.'),
-        { decision: 'incomplete', question: 'What time should I schedule it?' },
-    );
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('Schedule dentist tomorrow at 4 p.m.'),
-        { decision: 'complete' },
-    );
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('Create a calendar event tomorrow at 4 p.m.'),
-        { decision: 'incomplete', question: 'What should I schedule?' },
-    );
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('Move the reminder called Call Mom to tomorrow.'),
-        { decision: 'incomplete', question: 'What time should I move the reminder to?' },
-    );
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('Reschedule the dentist appointment for tomorrow.'),
-        { decision: 'incomplete', question: 'What time should I move the calendar event to?' },
-    );
-});
-
-test('[BV2-COMPLETENESS-02] incomplete admission removes only its provisional chat row and rejects a stale 422', () => {
-    const messages = [
-        { id: 'older', role: 'user', content: 'Keep me', metadata: { client_turn_id: 'older-turn' } },
-        { id: 'optimistic', role: 'user', content: 'Create a reminder', metadata: { client_turn_id: 'stable-turn' } },
-    ];
-    const error = Object.assign(new Error('What should I remind you about?'), {
-        status: 422,
-        payload: {
-            code: 'voice_request_incomplete',
-            turn_id: 'stable-turn',
-            question: 'What should I remind you about?',
-        },
+test('[BV2-COMPLETENESS-02] clarification continues the same durable turn through its dedicated boundary', async () => {
+    const calls = [];
+    const client = new BrowserVoiceV2Client({ request: async (...args) => calls.push(args) });
+    await client.clarify({
+        sessionId: 41,
+        turnId: 'stable-turn',
+        answer: 'Salt at 5 p.m.',
+        clarificationId: 'stable-turn:clarification:1',
     });
-
-    const clarification = resolveBrowserVoiceV2AdmissionClarification(error, 'stable-turn', messages);
-    assert.equal(clarification.turnId, 'stable-turn');
-    assert.equal(clarification.question, 'What should I remind you about?');
-    assert.deepEqual(clarification.messages.map((message) => message.id), ['older']);
-    assert.equal(resolveBrowserVoiceV2AdmissionClarification(error, 'replacement-turn', messages), null);
-});
-
-test('[BV2-COMPLETENESS-03] weather times are not mistaken for locations', () => {
-    for (const request of [
-        'What is the weather at 5 p.m.?',
-        'What is the forecast for tomorrow?',
-        'Will it rain near me?',
-    ]) {
-        assert.deepEqual(
-            assessBrowserVoiceV2Completeness(request),
-            { decision: 'incomplete', question: 'Which location should I check?' },
-            request,
-        );
-    }
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('What is the weather at Universal Studios at 5 p.m.?'),
-        { decision: 'complete' },
-    );
-    assert.deepEqual(
-        assessBrowserVoiceV2Completeness('What is the forecast for tomorrow?', { hasHomeLocation: true }),
-        { decision: 'complete' },
-    );
+    assert.equal(calls[0][0], '/assistant/voice/turns/stable-turn/clarifications');
+    assert.deepEqual(calls[0][1].body, {
+        session_id: 41,
+        answer: 'Salt at 5 p.m.',
+        clarification_id: 'stable-turn:clarification:1',
+    });
 });
 
 test('admission sends one stable browser turn to the v2 boundary', async () => {

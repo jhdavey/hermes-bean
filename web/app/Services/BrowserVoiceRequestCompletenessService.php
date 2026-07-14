@@ -195,7 +195,7 @@ class BrowserVoiceRequestCompletenessService
     private function hasTime(string $text): bool
     {
         return preg_match('/\b(?:today|tomorrow|tonight|noon|midnight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december)\b/u', $text) === 1
-            || preg_match('/\b(?:[01]?\d|2[0-3])(?::[0-5]\d)?\s*(?:a\.?m\.?|p\.?m\.?)\b/u', $text) === 1;
+            || $this->typedWrites->hasClockTime($text);
     }
 
     private function hasTarget(

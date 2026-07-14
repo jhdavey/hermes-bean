@@ -7,125 +7,6 @@ const ACTIVE_TURN_STATES = new Set([
 
 const ACTIVE_JOB_STATES = new Set(['queued', 'running']);
 
-export function assessBrowserVoiceV2Completeness(transcript, { hasHomeLocation = false } = {}) {
-    const text = stableText(transcript);
-    if (!text) return { decision: 'uncertain' };
-
-    const normalized = text.toLowerCase();
-    const creates = /\b(?:create|add|make|set|schedule|save|book|remind me)\b/.test(normalized);
-    const complexGeneration = /\b(?:plan|draft|brainstorm|generate|pick|random)\b/.test(normalized);
-    const hasClockTime = /\b(?:noon|midnight)\b/.test(normalized)
-        || /\b(?:[01]?\d|2[0-3])(?::[0-5]\d)?\s*(?:a\.?m\.?|p\.?m\.?)\b/.test(normalized)
-        || /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s+(?:fifteen|thirty|forty[ -]?five))?\s*(?:a\.?m\.?|p\.?m\.?)\b/.test(normalized)
-        || /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/.test(normalized);
-
-    if (creates && !complexGeneration && /\b(?:reminder|remind me)\b/.test(normalized)) {
-        const hasSubject = /\bremind me to\s+\S+/.test(normalized)
-            || /\b(?:reminder|remind me)\b.*\b(?:titled|called|named|about|to)\s+\S+/.test(normalized)
-            || /\breminder\b\s+for\s+(?!(?:that|this|the)\s+task\b)(?!(?:today|tomorrow|tonight|next\b|noon|midnight|one\b|two\b|three\b|four\b|five\b|six\b|seven\b|eight\b|nine\b|ten\b|eleven\b|twelve\b|\d))\S(?:.*?\S)?\s+(?:for|on|at|by)\s+/.test(normalized)
-            || /\b(?:for|about|to)\s+(?:that|this|the)\s+task\b/.test(normalized);
-        if (!hasSubject) return { decision: 'incomplete', question: 'What should I remind you about?' };
-        if (!hasClockTime) return { decision: 'incomplete', question: 'What time should I remind you?' };
-        // The reminder parser owns its payload. "Reminder to do the salt"
-        // must not fall through and reinterpret "to do" as a task noun.
-        return { decision: 'complete' };
-    }
-    const calendarCreate = creates
-        && !complexGeneration
-        && !/\b(?:reminder|remind me|task|todo|to do|notes?)\b/.test(normalized)
-        && (/\b(?:calendar|event|meeting|appointment)\b/.test(normalized)
-            || /^(?:(?:can|could|would|will) you\s+)?(?:please\s+)?(?:schedule|book)\b/.test(normalized));
-    if (calendarCreate) {
-        const dateOrClock = '(?:today|tomorrow|tonight|noon|midnight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december|\\d)';
-        const hasSubject = /\b(?:titled|called|named)\s+\S+/.test(normalized)
-            || new RegExp(`\\b(?:create|add|make|set|schedule|save|book)\\s+(?:a |an |the )?(?:calendar )?(?:event|meeting|appointment)\\b\\s+(?!(?:for|on|at)\\b|${dateOrClock})\\S+`).test(normalized)
-            || /\b(?:add|put)\s+\S.+?\s+(?:to|on)\s+(?:my\s+|the\s+)?calendar\b/.test(normalized)
-            || new RegExp(`^(?:(?:can|could|would|will) you\\s+)?(?:please\\s+)?(?:schedule|book)\\s+(?!${dateOrClock})\\S+`).test(normalized);
-        if (!hasSubject) return { decision: 'incomplete', question: 'What should I schedule?' };
-        if (!hasClockTime) return { decision: 'incomplete', question: 'What time should I schedule it?' };
-    }
-    const reschedules = /\b(?:move|reschedule)\b/.test(normalized);
-    if (reschedules && /\b(?:reminder|remind me)\b/.test(normalized) && !hasClockTime) {
-        return { decision: 'incomplete', question: 'What time should I move the reminder to?' };
-    }
-    if (reschedules && /\b(?:calendar|event|meeting|appointment)\b/.test(normalized) && !hasClockTime) {
-        return { decision: 'incomplete', question: 'What time should I move the calendar event to?' };
-    }
-    if (creates && !complexGeneration && /\bnotes?\b/.test(normalized)) {
-        const hasContent = /\b(?:titled|called|named|that says|saying|with (?:the )?(?:text|content))\s+\S+/.test(normalized)
-            || /\b(?:create|add|make|set|save)\s+(?:a |an |the )?note\b\s+(?!for\b|on\b|at\b|today\b|tomorrow\b)\S+/.test(normalized)
-            || /\S+\s+(?:as|into)\s+(?:a |an )?note\b/.test(normalized);
-        if (!hasContent) return { decision: 'incomplete', question: 'What should the note include?' };
-    }
-    if (creates && !complexGeneration && /\b(?:task|todo|to do)\b/.test(normalized)
-        && !/\b(?:titled|called|named)\s+\S+/.test(normalized)
-        && !/\b(?:create|add|make|set)\s+(?:a |an |the )?(?:task|todo|to do)\b\s+\S+/.test(normalized)) {
-        return { decision: 'incomplete', question: 'What task should I create?' };
-    }
-    if (/\b(?:weather|forecast|temperature|rain|storm)\b/.test(normalized)
-        && !hasHomeLocation
-        && !hasExplicitWeatherLocation(normalized)) {
-        return { decision: 'incomplete', question: 'Which location should I check?' };
-    }
-    if (!isIncompleteCommand(text)) return { decision: 'complete' };
-    if (/\b(?:note|notes)\b/.test(normalized)) return { decision: 'incomplete', question: 'What should the note include?' };
-    if (/\bremind(?:er)?\b/.test(normalized)) return { decision: 'incomplete', question: 'What should I remind you about, and when?' };
-    if (/\b(?:calendar|event|meeting|appointment)\b/.test(normalized)) return { decision: 'incomplete', question: 'What should I schedule, and when?' };
-    if (/\b(?:task|todo|to do)\b/.test(normalized)) return { decision: 'incomplete', question: 'What task should I create?' };
-    return { decision: 'uncertain' };
-}
-
-function hasExplicitWeatherLocation(text) {
-    const temporalTokens = new Set([
-        'today', 'tomorrow', 'tonight', 'later', 'now', 'noon', 'midnight',
-        'morning', 'afternoon', 'evening', 'night', 'week', 'weekend',
-    ]);
-    for (const match of String(text || '').matchAll(/\b(in|at|near|around|for)\s+([a-z0-9][a-z0-9'-]*)/g)) {
-        const preposition = match[1];
-        const token = match[2];
-        if (temporalTokens.has(token) || /^(?:a\.?m\.?|p\.?m\.?)$/.test(token)) continue;
-        if (/^\d{1,2}(?:a\.?m\.?|p\.?m\.?)$/.test(token)) continue;
-        if (/^\d+$/.test(token) && !(preposition === 'in' && /^\d{5}(?:-\d{4})?$/.test(token))) continue;
-        if (['me', 'here', 'home'].includes(token)) continue;
-        return true;
-    }
-    return false;
-}
-
-export function resolveBrowserVoiceV2AdmissionClarification(error, expectedTurnId, messages = []) {
-    const turnId = stableText(expectedTurnId);
-    const payloadTurnId = stableText(error?.payload?.turn_id);
-    if (Number(error?.status) !== 422
-        || error?.payload?.code !== 'voice_request_incomplete'
-        || !turnId
-        || (payloadTurnId && payloadTurnId !== turnId)) {
-        return null;
-    }
-
-    return {
-        turnId,
-        question: stableText(error?.payload?.question || error?.message || 'What detail should I use?'),
-        messages: normalizedObjects(messages).filter((message) => {
-            const messageTurnId = stableText(message?.metadata?.client_turn_id || message?.turn_id);
-            return messageTurnId !== turnId;
-        }),
-    };
-}
-
-function isIncompleteCommand(text) {
-    const normalized = stableText(text)
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .replace(/^hey (?:bean|ben|bin|bing|being|beane|beam)\s*/, '');
-    if (!normalized) return true;
-    if (/\b(?:for|with|to|at|on|by|from|about|called|titled|named|containing|saying|that says|and|or)$/.test(normalized)) {
-        return true;
-    }
-    return /^(?:(?:can|could|would|will) you (?:please )?)?(?:create|add|make|set|schedule|write|delete|remove|update|change)(?: (?:a|an|the|my))?$/.test(normalized);
-}
-
 export class BrowserVoiceV2Client {
     constructor(options = {}) {
         if (typeof options.request !== 'function') {
@@ -175,6 +56,25 @@ export class BrowserVoiceV2Client {
                     input.conversationContext || input.conversation_context,
                 ),
                 client_context: input.clientContext || input.client_context || {},
+            },
+            timeoutMs: positiveInteger(input.timeoutMs, 8000),
+        });
+    }
+
+    async clarify(input = {}) {
+        const turnId = stableText(input.turnId || input.turn_id);
+        const sessionId = stableText(input.sessionId || input.session_id || this.sessionId);
+        const answer = stableText(input.answer);
+        const clarificationId = stableText(input.clarificationId || input.clarification_id);
+        if (!turnId || !sessionId || !answer || !clarificationId) {
+            throw new TypeError('Voice clarification requires a session, stable turn, answer, and clarification id.');
+        }
+        return this.request(`/assistant/voice/turns/${encodeURIComponent(turnId)}/clarifications`, {
+            method: 'POST',
+            body: {
+                session_id: numericIdentifier(sessionId),
+                answer,
+                clarification_id: clarificationId,
             },
             timeoutMs: positiveInteger(input.timeoutMs, 8000),
         });
@@ -513,6 +413,9 @@ function normalizeTurn(turn, events = []) {
         ),
         finalDeliveredAt: stableText(turn?.final_delivered_at || turn?.finalDeliveredAt),
         finalAudioStarted,
+        clarificationQuestion: stableText(turn?.clarification?.question || turn?.clarification_question),
+        clarificationSequence: nonNegativeInteger(turn?.clarification?.sequence || turn?.clarification_sequence),
+        clarificationDeadlineAt: stableText(turn?.clarification?.deadline_at || turn?.clarification_deadline_at),
         jobs: normalizedObjects(turn?.jobs).map(normalizeJob),
     };
 }

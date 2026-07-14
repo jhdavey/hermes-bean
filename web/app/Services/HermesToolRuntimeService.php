@@ -984,17 +984,19 @@ class HermesToolRuntimeService implements HermesRuntimeService
     ): array {
         return DB::transaction(function () use ($session, $userMessage, $received, $routed, $runtimeStartedAt, $exception): array {
             $browserVoiceV2 = data_get($userMessage->metadata, 'source') === 'browser_voice_v2';
+            $deferResponsePersistence = data_get($userMessage->metadata, 'defer_response_persistence', false) === true;
+            $assistantContent = 'I couldn’t finish that response because the service didn’t answer in time. Would you like me to try again?';
             $this->lockRunForAssistantPersistence($session, $userMessage);
             $failed = $this->recordEvent($session, 'runtime.fast_response_failed_terminal', [
                 'message_id' => $userMessage->id,
                 'reason' => mb_substr($exception->getMessage(), 0, 500),
                 'duration_ms' => $this->elapsedMs($runtimeStartedAt),
             ], 'hermes.fast_chat', 'failed');
-            $assistantMessage = ConversationMessage::create([
+            $assistantMessage = $deferResponsePersistence ? null : ConversationMessage::create([
                 'user_id' => $session->user_id,
                 'conversation_session_id' => $session->id,
                 'role' => 'assistant',
-                'content' => 'I couldn’t finish that response because the service didn’t answer in time. Would you like me to try again?',
+                'content' => $assistantContent,
                 'metadata' => [
                     ...$this->assistantRunMetadata($userMessage),
                     'runtime' => 'fast_no_tools',
@@ -1002,11 +1004,17 @@ class HermesToolRuntimeService implements HermesRuntimeService
                     'failure_reason' => 'provider_timeout',
                 ],
             ]);
-            $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
-                'message_id' => $assistantMessage->id,
-                'lane' => 'fast_no_tools_terminal_recovery',
-                'first_response_ms' => $this->elapsedMs($runtimeStartedAt),
-            ]);
+            $responseCompleted = $this->recordEvent(
+                $session,
+                $deferResponsePersistence ? 'runtime.response_generated' : 'runtime.message_completed',
+                [
+                    'message_id' => $assistantMessage?->id,
+                    'source_message_id' => $userMessage->id,
+                    'lane' => 'fast_no_tools_terminal_recovery',
+                    'first_response_ms' => $this->elapsedMs($runtimeStartedAt),
+                    'persistence_deferred' => $deferResponsePersistence,
+                ],
+            );
             $session->update(['status' => 'active', 'last_activity_at' => now()]);
 
             return [
@@ -1016,7 +1024,8 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'session' => $session->refresh(),
                 'user_message' => $userMessage,
                 'assistant_message' => $assistantMessage,
-                'events' => collect([$received, $routed, $failed, $messageCompleted]),
+                'assistant_content' => $assistantContent,
+                'events' => collect([$received, $routed, $failed, $responseCompleted]),
                 'usage' => null,
                 'blocker' => $browserVoiceV2 ? ['reason' => 'provider_timeout'] : null,
             ];
@@ -1109,6 +1118,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
         }
 
         $result = DB::transaction(function () use ($session, $userMessage, $received, $routed, $started, $modelRoute, $prompt, $response, $assistantContent, $runtimeStartedAt, $modelCallStartedAt): array {
+            $deferResponsePersistence = data_get($userMessage->metadata, 'defer_response_persistence', false) === true;
             $this->lockRunForAssistantPersistence($session, $userMessage);
             $completed = $this->recordEvent($session, 'runtime.fast_response_completed', [
                 'message_id' => $userMessage->id,
@@ -1118,7 +1128,7 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'tool_count' => 0,
             ], 'hermes.fast_chat', 'succeeded');
 
-            $assistantMessage = ConversationMessage::create([
+            $assistantMessage = $deferResponsePersistence ? null : ConversationMessage::create([
                 'user_id' => $session->user_id,
                 'conversation_session_id' => $session->id,
                 'role' => 'assistant',
@@ -1132,11 +1142,17 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 ],
             ]);
 
-            $messageCompleted = $this->recordEvent($session, 'runtime.message_completed', [
-                'message_id' => $assistantMessage->id,
-                'lane' => $modelRoute['tier'],
-                'first_response_ms' => $this->elapsedMs($runtimeStartedAt),
-            ]);
+            $responseCompleted = $this->recordEvent(
+                $session,
+                $deferResponsePersistence ? 'runtime.response_generated' : 'runtime.message_completed',
+                [
+                    'message_id' => $assistantMessage?->id,
+                    'source_message_id' => $userMessage->id,
+                    'lane' => $modelRoute['tier'],
+                    'first_response_ms' => $this->elapsedMs($runtimeStartedAt),
+                    'persistence_deferred' => $deferResponsePersistence,
+                ],
+            );
 
             $usageLog = $this->usageService->recordCompletion(
                 $session,
@@ -1155,7 +1171,8 @@ class HermesToolRuntimeService implements HermesRuntimeService
                 'session' => $session->refresh(),
                 'user_message' => $userMessage,
                 'assistant_message' => $assistantMessage,
-                'events' => collect([$received, $routed, $started, $completed, $messageCompleted]),
+                'assistant_content' => $assistantContent,
+                'events' => collect([$received, $routed, $started, $completed, $responseCompleted]),
                 'usage' => $usageLog,
                 'blocker' => null,
             ];

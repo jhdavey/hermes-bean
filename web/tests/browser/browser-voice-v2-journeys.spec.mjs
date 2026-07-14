@@ -103,6 +103,45 @@ test('[BV2-BROWSER-07] a released wake fragment stays private until the complete
     await expect(page.locator('#chat [data-role="user"]')).toHaveText('What time is it?');
 });
 
+test('[BV2-BROWSER-14] clarification persists one chat turn, survives the prompt, and resolves without duplication', async ({ page }) => {
+    await boot(page);
+    await markReady(page);
+
+    await page.evaluate(async () => {
+        const harness = window.voiceHarness;
+        harness.wake('durable-clarification-turn');
+        harness.final('Create a reminder');
+        harness.endUtterance('incomplete', { question: 'What should I remind you about?' });
+        await harness.waitForAdmissions();
+    });
+
+    await expect(page.locator('#voice-state')).toHaveAttribute('data-state', 'awaiting_clarification');
+    await expect(page.locator('#chat [data-role="user"]')).toHaveCount(1);
+    await expect(page.locator('#chat [data-role="user"]')).toHaveText('Create a reminder');
+    expect(await page.evaluate(() => window.voiceHarness.snapshot().server.messages
+        .filter((message) => message.role === 'user').length)).toBe(1);
+
+    await page.evaluate(async () => {
+        const harness = window.voiceHarness;
+        harness.startPlayback();
+        harness.finishPlayback();
+        harness.controller.speechStarted({ source: 'provider' });
+        harness.final('Salt at 5 p.m.');
+        harness.endUtterance('complete');
+        await harness.waitForAdmissions();
+    });
+
+    await expect(page.locator('#chat [data-role="user"]')).toHaveCount(1);
+    await expect(page.locator('#chat [data-role="user"]')).toHaveText('Create a reminder Salt at 5 p.m.');
+    await expect(page.locator('#chat [data-role="assistant"]')).toHaveText('Done—I created the reminder.');
+    const snapshot = await page.evaluate(() => window.voiceHarness.snapshot());
+    expect(snapshot.server.turns).toHaveLength(1);
+    expect(snapshot.server.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+    expect(snapshot.server.messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
+    expect(await page.evaluate(() => window.voiceHarness.server.calls
+        .filter((call) => call.path.includes('/clarifications')).length)).toBe(1);
+});
+
 test('[BV2-BROWSER-02] follow-up, false barge, and meaningful barge preserve exact turns and visible answers', async ({ page }) => {
     await boot(page);
     await markReady(page);
