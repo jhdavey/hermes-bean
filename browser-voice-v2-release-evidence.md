@@ -7,10 +7,11 @@ not new product behavior.
 
 ## Current status
 
-The audited candidate satisfies every deterministic repository gate. This is
-not a claim of 100% real-world reliability and is not representative acoustic
-certification. The candidate still needs the owner's physical-microphone and
-audible-response smoke on the deployed site.
+The audited candidate satisfies every deterministic repository gate and was
+deployed to the development production site as commit `0377ac34` on July 14,
+2026. This is not a claim of 100% real-world reliability and is not
+representative acoustic certification. The candidate still needs the owner's
+physical-microphone and audible-response smoke on the deployed site.
 
 Wake assets are runtime v13. The wake detector is first-party and
 self-contained: no external wake service, account, license key, remote
@@ -181,7 +182,7 @@ phrase-specific ignore rule.
 | Populated production invariant command | **Pass:** zero violations across 24 turns, 48 messages, 22 runs, and 233 events |
 | Live TTS first-byte diagnostic | **Pass for sampled target:** 613 ms and 1,281 ms with progressive PCM; representative p95 still requires deployed owner testing |
 | Production TTS first-byte diagnostic | **Pass for sampled request:** first 4 KB of PCM in 1,333 ms using `gpt-4o-mini-tts` |
-| Public production-presence preflight | **Pending for this candidate:** run after v13 deployment |
+| Public production-presence preflight | **Pass:** enabled v2 shell, `app-PZKAlOxq.js`, wake runtime v13 with exact worker checksum, and every authenticated route boundary |
 
 The first `php artisan test` invocation inherited Laravel's spawned worker default
 of 128 MB and stopped after 357 passing tests/3,846 assertions in the unrelated
@@ -220,9 +221,12 @@ this machine.
 
 ## Deployment and remaining external verification
 
-The July 14 v13 wake-privacy candidate is ready for deployment. After deployment,
-the public preflight and populated production invariant audit must be repeated.
-Those checks prove deployed code and durable-data integrity, not a real
+The July 14 v13 wake-privacy candidate is present publicly as commit `0377ac34`.
+The public preflight verified the enabled Browser Voice v2 shell, hashed
+`app-PZKAlOxq.js` client, exact v13 manifest/worker checksum, and every
+authenticated voice route boundary. The populated production invariant audit
+passed with zero violations across 24 turns, 48 messages, 22 runs, and 233
+events. Those checks prove deployed code and durable-data integrity, not a real
 microphone, speaker, or room.
 
 Remaining verification:
