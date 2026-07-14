@@ -82,7 +82,7 @@ class BrowserVoiceJobPolicy
             ];
         }
 
-        $reference = $this->referencedTitle($turn->transcript);
+        $reference = $this->typedWrites->parseMutationTargetTitle($turn->transcript);
         if ($reference !== null) {
             return [
                 'priority' => $priority,
@@ -116,7 +116,7 @@ class BrowserVoiceJobPolicy
         }
 
         $contextual = $this->isContextualMutationReference($turn->handler, $turn->transcript);
-        $explicitTitle = $this->referencedTitle($turn->transcript);
+        $explicitTitle = $this->typedWrites->parseMutationTargetTitle($turn->transcript);
         if (! $contextual && $explicitTitle === null) {
             return null;
         }
@@ -203,7 +203,7 @@ class BrowserVoiceJobPolicy
             }
         }
 
-        $title = $this->referencedTitle($turn->transcript);
+        $title = $this->typedWrites->parseMutationTargetTitle($turn->transcript);
         if ($title !== null) {
             return $title;
         }
@@ -274,7 +274,7 @@ class BrowserVoiceJobPolicy
         }
 
         $candidates = $query->latest('id')->limit(50)->get();
-        $title = $this->referencedTitle($turn->transcript);
+        $title = $this->typedWrites->parseMutationTargetTitle($turn->transcript);
         if ($title !== null) {
             $needle = mb_strtolower($title);
             $candidates = $candidates->filter(fn (Model $candidate): bool => str_contains(
@@ -334,20 +334,5 @@ class BrowserVoiceJobPolicy
         }
 
         return $match[1];
-    }
-
-    private function referencedTitle(string $text): ?string
-    {
-        if (preg_match(
-            '/\b(?:reminder|task|note|(?:calendar )?event|meeting|appointment)\b\s+(?:titled|called|named|labeled|labelled)\s+[“"]?(.+?)(?=[”"]?\s+(?:to|for|on|at|today|tomorrow)\b|[”"]?[.!]*$)/iu',
-            $text,
-            $match,
-        ) !== 1) {
-            return null;
-        }
-
-        $title = trim((string) $match[1], " \t\n\r\0\x0B\"“”");
-
-        return $title !== '' ? $title : null;
     }
 }

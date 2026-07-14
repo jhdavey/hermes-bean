@@ -1554,6 +1554,68 @@ class BrowserVoiceV2LifecycleTest extends TestCase
         $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'assistant')->count());
     }
 
+    public function test_bv2_write_01_named_overdue_task_reschedule_uses_the_destination_as_the_update_not_target_lookup(): void
+    {
+        Carbon::setTestNow('2026-07-14 12:49:00', 'America/New_York');
+        Queue::fake([EnforceBrowserVoiceTurnDeadline::class]);
+        $token = $this->apiToken('voice-v2-explicit-task-reschedule@example.com');
+        $sessionId = $this->sessionId($token);
+        $session = ConversationSession::findOrFail($sessionId);
+        $target = Task::create([
+            'user_id' => $session->user_id,
+            'workspace_id' => $session->workspace_id,
+            'title' => 'Clean Outdoor Grout',
+            'status' => 'open',
+            'due_at' => Carbon::parse('2026-07-11 10:45:00', 'America/New_York')->utc(),
+        ]);
+        $destinationDecoy = Task::create([
+            'user_id' => $session->user_id,
+            'workspace_id' => $session->workspace_id,
+            'title' => 'Prepare patio supplies',
+            'status' => 'open',
+            'due_at' => Carbon::parse('2026-07-18 12:00:00', 'America/New_York')->utc(),
+        ]);
+        $payload = [
+            ...$this->payload(
+                $sessionId,
+                'named-overdue-task-reschedule-0001',
+                'Can you reschedule the overdue maintenance task titled Clean Outdoor Grout to this coming Saturday at 12 p.m.?',
+            ),
+            'timezone' => 'America/New_York',
+            'conversation_context' => ['mode' => 'new_conversation', 'epoch' => 1],
+        ];
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.turn.lane', 'app_write')
+            ->assertJsonPath('data.turn.handler', 'app.task.reschedule')
+            ->assertJsonPath('data.turn.state', 'completed')
+            ->assertJsonPath('data.turn.side_effect_status', 'committed')
+            ->assertJsonPath('data.turn.final_text', 'Done—I moved “Clean Outdoor Grout” to July 18th at 12 p.m.')
+            ->assertJsonPath('data.jobs.0.label', 'Update tasks')
+            ->assertJsonPath('data.jobs.0.status', 'completed');
+
+        $turn = VoiceTurn::where('turn_id', 'named-overdue-task-reschedule-0001')->sole();
+        $this->assertSame('2026-07-18 12:00', $target->fresh()->due_at->timezone('America/New_York')->format('Y-m-d H:i'));
+        $this->assertSame('2026-07-18 12:00', $destinationDecoy->fresh()->due_at->timezone('America/New_York')->format('Y-m-d H:i'));
+        $this->assertSame($target->id, data_get($turn->metadata, 'write_receipt.resource_id'));
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'user')->count());
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'assistant')->count());
+
+        $this->withToken($token)->postJson('/api/assistant/voice/turns', $payload)
+            ->assertOk()
+            ->assertJsonPath('data.turn.id', $turn->id)
+            ->assertJsonPath('data.turn.state', 'completed');
+        $this->withToken($token)->getJson("/api/assistant/voice/state?session_id={$sessionId}")
+            ->assertOk()
+            ->assertJsonCount(1, 'data.turns')
+            ->assertJsonCount(1, 'data.jobs')
+            ->assertJsonCount(2, 'data.messages')
+            ->assertJsonPath('data.turns.0.turn_id', $turn->turn_id);
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'user')->count());
+        $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'assistant')->count());
+    }
+
     public function test_ambiguous_that_task_reminder_clarifies_on_one_durable_turn_without_writing(): void
     {
         Carbon::setTestNow('2026-07-13 15:19:00', 'America/New_York');

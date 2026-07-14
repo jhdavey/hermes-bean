@@ -12,7 +12,7 @@ final class BrowserVoiceTypedWriteParser
 
     private const CALENDAR_NOUN_PATTERN = '(?:calendar\s+)?(?:event|meeting|appointment)';
 
-    private const DATE_WORD_PATTERN = '(?:today|tomorrow|tonight|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?)';
+    private const DATE_WORD_PATTERN = '(?:today|tomorrow|tonight|(?:(?:next|this(?:\s+coming)?|coming)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?)';
 
     private const CLOCK_PATTERN = '(?:noon|midnight|(?:1[0-2]|0?[1-9])(?::[0-5]\d)?\s*(?:a\.?m\.?|p\.?m\.?)|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?:\s+(?:thirty|fifteen|forty[ -]?five))?\s*(?:a\.?m\.?|p\.?m\.?)|(?:[01]?\d|2[0-3]):[0-5]\d)';
 
@@ -69,6 +69,47 @@ final class BrowserVoiceTypedWriteParser
         }
 
         return $this->scheduledAt($text, $timezone, $referenceTime);
+    }
+
+    public function parseRescheduleAt(
+        string $transcript,
+        ?string $timezone = null,
+        ?CarbonInterface $referenceTime = null,
+    ): ?Carbon {
+        $parts = $this->rescheduleParts($transcript);
+
+        return $parts === null
+            ? null
+            : $this->parseScheduledAt($parts['destination'], $timezone, $referenceTime);
+    }
+
+    public function parseMutationTargetAt(
+        string $transcript,
+        ?string $timezone = null,
+        ?CarbonInterface $referenceTime = null,
+    ): ?Carbon {
+        $parts = $this->rescheduleParts($transcript);
+
+        return $parts === null
+            ? $this->parseScheduledAt($transcript, $timezone, $referenceTime)
+            : $this->parseScheduledAt($parts['target'], $timezone, $referenceTime);
+    }
+
+    public function parseMutationTargetTitle(string $transcript): ?string
+    {
+        $parts = $this->rescheduleParts($transcript);
+        $target = $parts['target'] ?? $this->withoutWake($transcript);
+        if (preg_match(
+            '/\b(?:reminder|task|note|(?:calendar\s+)?event|meeting|appointment)\b\s+(?:titled|called|named|labeled|labelled)\s+[“"]?(.+?)[”"]?[.!?]*$/iu',
+            $target,
+            $match,
+        ) !== 1) {
+            return null;
+        }
+
+        $title = trim((string) $match[1], " \t\n\r\0\x0B\"“”.,!?;");
+
+        return $title !== '' ? mb_substr($title, 0, 180) : null;
     }
 
     private function resource(string $text, ?string $handler): ?string
@@ -200,6 +241,44 @@ final class BrowserVoiceTypedWriteParser
         }
 
         return $timezone;
+    }
+
+    /** @return array{target: string, destination: string}|null */
+    private function rescheduleParts(string $transcript): ?array
+    {
+        $text = $this->withoutWake($transcript);
+        foreach (['to', 'for'] as $preposition) {
+            if (preg_match(
+                '/\b(?:move|reschedule|change|set|update)\b(.*)\b'.$preposition.'\s+(.+)$/iu',
+                $text,
+                $match,
+            ) === 1) {
+                return [
+                    'target' => trim((string) $match[1]),
+                    'destination' => trim((string) $match[2]),
+                ];
+            }
+        }
+
+        if (preg_match(
+            '/\b(?:move|reschedule|change|set|update)\b(.*?)((?:on\s+)?'.self::DATE_WORD_PATTERN.'\b.*)$/iu',
+            $text,
+            $match,
+        ) === 1) {
+            return [
+                'target' => trim((string) $match[1]),
+                'destination' => trim((string) $match[2]),
+            ];
+        }
+
+        if (preg_match('/\b(?:move|reschedule|change|set|update)\b(.*?)\bat\s+(.+)$/iu', $text, $match) === 1) {
+            return [
+                'target' => trim((string) $match[1]),
+                'destination' => trim((string) $match[2]),
+            ];
+        }
+
+        return null;
     }
 
     private function withoutWake(string $transcript): string

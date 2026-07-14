@@ -139,6 +139,24 @@ remains invisible and no pre-confirmation PCM or text leaves the browser. The
 reported sentence is a held-out QA input only; production code contains no
 phrase-specific ignore rule.
 
+## July 14 named-reschedule follow-up
+
+Production evidence for a fully specified request to reschedule the overdue
+task titled “Clean Outdoor Grout” showed correct admission to
+`app.task.reschedule`, followed by a typed-executor failure with no committed
+side effect. The write path had conflated two different temporal roles: it used
+the requested destination time both to find the existing target and to update
+it. Its separate title parser also failed when a named target was followed by a
+destination.
+
+The existing `BrowserVoiceTypedWriteParser` now owns named mutation targets,
+current target times, and reschedule destinations as distinct values. Both job
+serialization and authoritative execution consume that same interpretation;
+the duplicate target-title parsers were removed. `[BV2-WRITE-01]` exercises the
+exact production sentence end to end with a decoy task already at the requested
+destination, then verifies the correct resource receipt, final response, replay
+idempotency, dock state, and reload reconstruction.
+
 ## Contract-to-test traceability
 
 | Contract journey | Primary deterministic proof |
@@ -151,7 +169,7 @@ phrase-specific ignore rule.
 | Meaningful/false interruption and playback-only Stop | `[BV2-BARGE-01..04]`, `[BV2-STOP-01..05]`, `[BV2-BROWSER-02..03]` |
 | Natural client-timezone time/date | instant time/date lifecycle tests |
 | Typed calendar/task/reminder/note reads and read bypass | typed-read and three-job scheduler lifecycle journeys |
-| Typed writes, shared temporal parsing, correction, and exactly-once receipt | lifecycle and work-control write journeys; `[BV2-BROWSER-09]` |
+| Typed writes, shared temporal parsing, named-target reschedule, correction, and exactly-once receipt | lifecycle and work-control write journeys; `[BV2-WRITE-01]`; `[BV2-BROWSER-09]` |
 | Local/remote weather routing, retry, and scoped failure | lifecycle weather/provider/context journeys |
 | Complex generated note and exactly one durable response | runtime-failure generated-note journeys; `[BV2-BROWSER-12]` |
 | Three running jobs, visible fourth queue, dependency and resource serialization | work-control scheduler journeys; `[BV2-BROWSER-03]` |
@@ -166,8 +184,8 @@ phrase-specific ignore rule.
 
 | Gate | Result |
 | --- | --- |
-| Full PHP application suite | **Pass:** 439/439 tests, 4,601 assertions; direct PHPUnit process with 512 MB limit |
-| Focused affected Browser Voice PHP journeys | **Pass:** 58/58 tests, 572 assertions |
+| Full PHP application suite | **Pass:** 440/440 tests, 4,625 assertions; direct PHPUnit process with 512 MB limit |
+| Focused affected Browser Voice PHP journeys | **Pass:** 78/78 tests, 829 assertions |
 | Explicit diagnostic/admin/fault subset | **Pass:** 63/63 tests, 756 assertions |
 | Browser Voice JavaScript | **Pass:** 135/135 tests |
 | Playwright complete browser journeys | **Pass:** 12/12 journeys |
@@ -187,7 +205,7 @@ phrase-specific ignore rule.
 The first `php artisan test` invocation inherited Laravel's spawned worker default
 of 128 MB and stopped after 357 passing tests/3,846 assertions in the unrelated
 `TopWorkspaceSwitcherAssetTest`. The direct PHPUnit invocation applied 512 MB to
-the actual test process and completed all 439 tests. This was runner memory
+the actual test process and completed all 440 tests. This was runner memory
 configuration, not an assertion failure, and is recorded to avoid hiding the
 failed invocation.
 

@@ -337,7 +337,7 @@ class FastDomainWriteService
     private function reschedule(VoiceTurn $turn, ?AssistantRun $run = null): ?array
     {
         $target = $this->target($turn, $run);
-        $at = $this->typedWrites->parseScheduledAt(
+        $at = $this->typedWrites->parseRescheduleAt(
             $turn->transcript,
             $this->timezone($turn),
             $turn->accepted_at,
@@ -389,7 +389,7 @@ class FastDomainWriteService
         }
 
         $candidates = $query->latest('id')->limit(50)->get();
-        $title = $this->referencedTitle($turn->transcript);
+        $title = $this->typedWrites->parseMutationTargetTitle($turn->transcript);
         if ($title !== null) {
             $candidates = $candidates->filter(fn (Model $model): bool => str_contains(
                 mb_strtolower((string) $model->getAttribute('title')),
@@ -397,7 +397,7 @@ class FastDomainWriteService
             ));
         }
 
-        $at = $this->typedWrites->parseScheduledAt(
+        $at = $this->typedWrites->parseMutationTargetAt(
             $turn->transcript,
             $this->timezone($turn),
             $turn->accepted_at,
@@ -602,15 +602,6 @@ class FastDomainWriteService
         }
 
         return null;
-    }
-
-    private function referencedTitle(string $text): ?string
-    {
-        if (preg_match('/\b(?:reminder|task|note|event|meeting|appointment)\b\s+(?:titled|called|named|labeled|labelled)\s+[“"]?(.+?)[”"]?[.!]*$/iu', $text, $match) !== 1) {
-            return null;
-        }
-
-        return trim((string) $match[1], " \t\n\r\0\x0B\"“”");
     }
 
     private function noteBody(string $text): string
