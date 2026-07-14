@@ -8,7 +8,7 @@ not new product behavior.
 ## Current status
 
 The audited candidate satisfies every deterministic repository gate and was
-deployed to the development production site as commit `0377ac34` on July 14,
+deployed to the development production site as commit `837dac78` on July 14,
 2026. This is not a claim of 100% real-world reliability and is not
 representative acoustic certification. The candidate still needs the owner's
 physical-microphone and audible-response smoke on the deployed site.
@@ -239,11 +239,12 @@ this machine.
 
 ## Deployment and remaining external verification
 
-The July 14 v13 wake-privacy candidate is present publicly as commit `0377ac34`.
+The July 14 v13 wake-privacy and named-reschedule candidate is present publicly
+as commit `837dac78`.
 The public preflight verified the enabled Browser Voice v2 shell, hashed
 `app-PZKAlOxq.js` client, exact v13 manifest/worker checksum, and every
 authenticated voice route boundary. The populated production invariant audit
-passed with zero violations across 24 turns, 48 messages, 22 runs, and 233
+passed with zero violations across 27 turns, 54 messages, 25 runs, and 261
 events. Those checks prove deployed code and durable-data integrity, not a real
 microphone, speaker, or room.
 
