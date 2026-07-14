@@ -1,5 +1,7 @@
 <?php
 
+use App\Services\OpenAiVoiceService;
+
 $openAiPublicKey = (string) env('OPENAI_PUBLIC_KEY', '');
 $hermesApiBase = env('HERMES_API_BASE') ?: 'https://api.openai.com/v1';
 
@@ -92,7 +94,7 @@ return [
         'server_api_key' => $openAiPublicKey,
         'public_key' => $openAiPublicKey,
         'realtime_model' => env('OPENAI_REALTIME_MODEL', 'gpt-realtime'),
-        'speech_model' => env('OPENAI_SPEECH_MODEL', 'tts-1'),
+        'speech_model' => env('OPENAI_SPEECH_MODEL', OpenAiVoiceService::DEFAULT_SPEECH_MODEL),
         'speech_timeout' => (float) env('OPENAI_SPEECH_TIMEOUT', 20),
         'realtime_session_timeout' => (float) env('OPENAI_REALTIME_SESSION_TIMEOUT', 10),
         'realtime_transcription_model' => env('OPENAI_REALTIME_TRANSCRIPTION_MODEL', 'gpt-4o-mini-transcribe'),

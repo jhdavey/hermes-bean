@@ -16,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
 class AssistantVoiceController extends Controller
@@ -145,7 +146,7 @@ class AssistantVoiceController extends Controller
         ]]);
     }
 
-    public function speech(Request $request): Response|JsonResponse
+    public function speech(Request $request): Response|StreamedResponse|JsonResponse
     {
         $data = $request->validate([
             'workspace_id' => ['sometimes', 'nullable', 'integer', 'exists:workspaces,id'],
@@ -187,7 +188,7 @@ class AssistantVoiceController extends Controller
 
         $profile = app(AgentProfileService::class)->ensureForWorkspace($workspace, $user);
         try {
-            $speech = $this->voice->createSpeech(
+            $speech = $this->voice->createSpeechStream(
                 $profile,
                 $text,
                 hash_hmac('sha256', (string) $user->id, (string) config('app.key')),
@@ -216,11 +217,60 @@ class AssistantVoiceController extends Controller
             ], 502);
         }
 
-        return response($speech['audio'], 200, [
+        $headers = [
             'Content-Type' => $speech['content_type'],
             'Cache-Control' => 'no-store, private',
+            'X-Accel-Buffering' => 'no',
+            'X-Bean-Audio-Encoding' => 'pcm_s16le',
+            'X-Bean-Audio-Sample-Rate' => (string) $speech['sample_rate'],
             'X-Bean-Speech-Text-Sha256' => hash('sha256', $text),
-        ]);
+        ];
+        if ($speech['content_length'] !== null) {
+            $headers['Content-Length'] = (string) $speech['content_length'];
+        }
+
+        return response()->stream(function () use ($speech, $data, $user, $workspace): void {
+            $stream = $speech['stream'];
+            $bytes = 0;
+            try {
+                while (! $stream->eof()) {
+                    $chunk = $stream->read(16_384);
+                    if ($chunk === '') {
+                        if ($stream->eof()) {
+                            break;
+                        }
+
+                        continue;
+                    }
+                    $bytes += strlen($chunk);
+                    echo $chunk;
+                    if (ob_get_level() > 0) {
+                        @ob_flush();
+                    }
+                    flush();
+                }
+                if ($bytes === 0) {
+                    throw new \RuntimeException('OpenAI speech stream ended before returning audio.');
+                }
+            } catch (Throwable $error) {
+                Log::warning('Browser Voice v2 speech stream failed.', [
+                    'user_id' => $user->id,
+                    'workspace_id' => $workspace->id,
+                    'turn_id' => $data['turn_id'],
+                    'speech_item_id' => $data['speech_item_id'],
+                    'purpose' => $data['purpose'],
+                    'bytes_streamed' => $bytes,
+                    'error' => $error->getMessage(),
+                ]);
+                // Do not turn a truncated provider stream into a clean EOF.
+                // Closing the HTTP response exceptionally lets the browser's
+                // single speech transport report playback_error instead of a
+                // false completed delivery receipt.
+                throw $error;
+            } finally {
+                $stream->close();
+            }
+        }, 200, $headers);
     }
 
     public function clientFailure(Request $request): JsonResponse

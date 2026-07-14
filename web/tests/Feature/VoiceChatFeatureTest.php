@@ -8,6 +8,7 @@ use App\Models\AiUsageAlert;
 use App\Models\AiUsageLog;
 use App\Models\ConversationSession;
 use App\Models\User;
+use App\Services\OpenAiVoiceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -19,6 +20,8 @@ class VoiceChatFeatureTest extends TestCase
 
     public function test_auth_me_exposes_default_realtime_voice_settings_and_available_openai_voices(): void
     {
+        $this->assertSame(OpenAiVoiceService::DEFAULT_SPEECH_MODEL, config('services.openai.speech_model'));
+        $this->assertSame('gpt-4o-mini-tts', OpenAiVoiceService::DEFAULT_SPEECH_MODEL);
         $token = $this->apiToken('voice-default@example.com');
 
         $this->withToken($token)->getJson('/api/auth/me')
@@ -147,9 +150,7 @@ class VoiceChatFeatureTest extends TestCase
         config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
         $token = $this->apiToken('voice-speech@example.com');
         $text = 'Done—I created the note “Meal Plans” with five recipes.';
-        Http::fake([
-            'api.openai.test/v1/audio/speech' => Http::response('ID3-fake-mp3', 200, ['Content-Type' => 'audio/mpeg']),
-        ]);
+        Http::fake(fn () => Http::response('ID3-fake-mp3', 200, ['Content-Type' => 'application/octet-stream']));
         $payload = [
             'turn_id' => 'speech-clarification-turn-0001',
             'speech_item_id' => 'speech-clarification-turn-0001:clarification',
@@ -159,15 +160,18 @@ class VoiceChatFeatureTest extends TestCase
 
         $first = $this->withToken($token)->postJson('/api/assistant/voice/speech', $payload);
         $first->assertOk()
-            ->assertHeader('Content-Type', 'audio/mpeg')
+            ->assertHeader('Content-Type', 'audio/pcm')
+            ->assertHeader('X-Accel-Buffering', 'no')
+            ->assertHeader('X-Bean-Audio-Encoding', 'pcm_s16le')
+            ->assertHeader('X-Bean-Audio-Sample-Rate', '24000')
             ->assertHeader('X-Bean-Speech-Text-Sha256', hash('sha256', $text));
-        $this->assertSame('ID3-fake-mp3', $first->getContent());
+        $this->assertSame('ID3-fake-mp3', $first->streamedContent());
         $this->withToken($token)->postJson('/api/assistant/voice/speech', $payload)->assertOk();
 
         Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/audio/speech'
             && $request['model'] === 'tts-1-test'
             && $request['input'] === $text
-            && $request['response_format'] === 'mp3'
+            && $request['response_format'] === 'pcm'
             && $request->hasHeader('Authorization', 'Bearer test-openai-key')
             && $request->hasHeader('OpenAI-Safety-Identifier'));
         $user = User::where('email', 'voice-speech@example.com')->firstOrFail();

@@ -858,6 +858,26 @@ class BrowserVoiceV2LifecycleTest extends TestCase
             ->assertJsonPath('data.turn.version', $finalVersion);
         $this->assertSame(1, VoiceTurnEvent::where('voice_turn_id', $turn->id)->where('event_type', 'final_text_delivered')->count());
         $this->assertNotNull($turn->fresh()->final_delivered_at);
+
+        $this->withToken($token)->postJson("/api/assistant/voice/turns/{$turn->turn_id}/delivery", [
+            'session_id' => $sessionId,
+            'event' => 'playback_finished',
+            'timing' => [
+                'purpose' => 'final',
+                'reason' => 'playback_error',
+                'error_code' => 'voice_playback_error',
+                'error_message' => 'Bean voice audio stream ended before the complete response arrived.',
+            ],
+        ])->assertOk();
+        $playbackFailure = VoiceTurnEvent::where('voice_turn_id', $turn->id)
+            ->where('event_type', 'playback_finished')
+            ->latest('id')
+            ->firstOrFail();
+        $this->assertSame('voice_playback_error', data_get($playbackFailure->payload, 'error_code'));
+        $this->assertSame(
+            'Bean voice audio stream ended before the complete response arrived.',
+            data_get($playbackFailure->payload, 'error_message'),
+        );
     }
 
     public function test_contextual_calendar_follow_up_keeps_the_typed_handler_and_answers_the_first_event(): void
@@ -1439,6 +1459,13 @@ class BrowserVoiceV2LifecycleTest extends TestCase
     {
         Carbon::setTestNow('2026-07-13 14:49:00', 'America/New_York');
         Queue::fake([EnforceBrowserVoiceTurnDeadline::class]);
+        config()->set('services.openai.server_api_key', 'test-openai-key');
+        config()->set('services.openai.speech_model', 'tts-1-test');
+        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+        Http::fake(fn () => Http::response("\x00\x00\x01\x00", 200, [
+            'Content-Type' => 'application/octet-stream',
+            'Content-Length' => '4',
+        ]));
         $token = $this->apiToken('voice-v2-task-reminder-follow-up@example.com');
         $sessionId = $this->sessionId($token);
         $session = ConversationSession::findOrFail($sessionId);
@@ -1481,6 +1508,22 @@ class BrowserVoiceV2LifecycleTest extends TestCase
         $this->assertSame('task', data_get($turn->metadata, 'contextual_reference.domain'));
         $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'user')->count());
         $this->assertSame(1, ConversationMessage::where('client_turn_id', $turn->turn_id)->where('role', 'assistant')->count());
+
+        $finalText = 'Done—I created the reminder “salt” for today at 5 p.m.';
+        $speech = $this->withToken($token)->postJson('/api/assistant/voice/speech', [
+            'turn_id' => $turn->turn_id,
+            'speech_item_id' => $turn->turn_id.':final',
+            'purpose' => 'final',
+            'text' => $finalText,
+        ])->assertOk()
+            ->assertHeader('Content-Type', 'audio/pcm')
+            ->assertHeader('Content-Length', '4')
+            ->assertHeader('X-Accel-Buffering', 'no')
+            ->assertHeader('X-Bean-Speech-Text-Sha256', hash('sha256', $finalText));
+        $this->assertSame("\x00\x00\x01\x00", $speech->streamedContent());
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/audio/speech'
+            && $request['input'] === $finalText
+            && $request['response_format'] === 'pcm');
 
         $this->withToken($token)->postJson('/api/assistant/voice/turns', [
             ...$this->payload($sessionId, 'salt-reminder-correction-0001', 'Set it for 5 p.m.'),

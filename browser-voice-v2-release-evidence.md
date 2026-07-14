@@ -1,6 +1,6 @@
 # Browser Voice v2 release evidence
 
-Last updated July 13, 2026. This document covers authenticated browser voice
+Last updated July 14, 2026. This document covers authenticated browser voice
 only. Flutter/native voice is out of scope. `bean-voice-rules.md` is the
 authoritative product contract; this file records implementation and evidence,
 not new product behavior.
@@ -83,6 +83,39 @@ compatibility path. It is not read by Browser Voice v2. No legacy browser work
 queue, provider tool bridge, wake ASR owner, per-user allowlist, or release flag
 exists beside the v2 owners.
 
+## July 14 speech-delivery follow-up
+
+The first deployed audit candidate exposed a separate response-delivery defect:
+the browser started one 20-second timer before HTTP synthesis and left it armed
+for the full audio duration. Provider generation, two complete HTTP buffers,
+and playback all consumed the same deadline. A response could therefore remain
+silent for several seconds, begin playing, and then be aborted mid-sentence.
+
+The corrected path keeps the same single `BrowserVoiceSpeechSchedulerV2`
+ordering owner and makes only its transport progressive:
+
+- the exact durable acknowledgement or final text remains the only speech
+  input, and the server continues to reject a text mismatch;
+- the server requests headerless 24 kHz signed 16-bit little-endian PCM and
+  streams provider chunks through the authenticated same-origin endpoint with
+  proxy buffering disabled;
+- the browser schedules PCM through one reusable `AudioContext` as chunks
+  arrive, primed synchronously by the Bean-button gesture for autoplay-gated
+  browsers;
+- the start deadline is cleared only when the first audio buffer begins and can
+  never terminate a response already playing;
+- Stop aborts the HTTP reader and audio nodes but does not cancel durable work;
+  late chunks cannot restart speech; and
+- truncated or failed playback records its bounded error code and message on
+  the durable turn for admin diagnostics instead of reporting false completion.
+
+The default speech model changed from `tts-1` to `gpt-4o-mini-tts` after live
+same-machine first-byte checks of comparable short answers measured 1,891 ms
+and 2,434 ms for `tts-1`, versus 613 ms and 1,281 ms for the new default. These
+four observations are diagnostic samples, not a p95 certification. The selected
+model remains configurable through `OPENAI_SPEECH_MODEL`, and speech usage is
+still preflighted and metered once per stable speech item.
+
 ## Contract-to-test traceability
 
 | Contract journey | Primary deterministic proof |
@@ -99,7 +132,7 @@ exists beside the v2 owners.
 | Local/remote weather routing, retry, and scoped failure | lifecycle weather/provider/context journeys |
 | Complex generated note and exactly one durable response | runtime-failure generated-note journeys; `[BV2-BROWSER-12]` |
 | Three running jobs, visible fourth queue, dependency and resource serialization | work-control scheduler journeys; `[BV2-BROWSER-03]` |
-| Exact chat/speech parity and non-overlapping acknowledgement/final | `[BV2-ACK-01..03]`, `[BV2-SPEECH-01..05]`, `[BV2-SPEECH-TRANSPORT-01..05]` |
+| Exact chat/speech parity, progressive playback, no deadline truncation, and non-overlapping acknowledgement/final | `[BV2-ACK-01..03]`, `[BV2-SPEECH-01..05]`, `[BV2-SPEECH-TRANSPORT-01..10]` |
 | Reload, reconnect, stale/out-of-order events, and no duplicate/replay | `[BV2-RELOAD-01..02]`, `[BV2-RECOVERY-01]`, `[BV2-SEQUENCE-01..02]`, `[BV2-BROWSER-04..06]` |
 | Ambiguous admission, idempotent recovery, and final-delivery retry | `[BV2-ADMISSION-01..08]`, `[BV2-DELIVERY-01]` |
 | Provider/worker/transport/deadline faults terminate naturally and remain diagnosable | runtime-failure, deadline, diagnostic, and `[BV2-BROWSER-05]` journeys |
@@ -110,23 +143,23 @@ exists beside the v2 owners.
 
 | Gate | Result |
 | --- | --- |
-| Full PHP application suite | **Pass:** 439/439 tests, 4,579 assertions; direct PHPUnit process with 512 MB limit |
-| Focused Browser Voice PHP audit | **Pass:** 173/173 tests, 1,930 assertions |
-| Explicit diagnostic/admin subset | **Pass:** 23/23 tests, 288 assertions |
-| Explicit fault/recovery subset | **Pass:** 99/99 tests, 1,021 assertions |
-| Browser Voice JavaScript | **Pass:** 130/130 tests |
+| Full PHP application suite | **Pass:** 439/439 tests, 4,601 assertions; direct PHPUnit process with 512 MB limit |
+| Focused affected Browser Voice PHP journeys | **Pass:** 58/58 tests, 572 assertions |
+| Explicit diagnostic/admin/fault subset | **Pass:** 26/26 tests, 335 assertions |
+| Browser Voice JavaScript | **Pass:** 135/135 tests |
 | Playwright complete browser journeys | **Pass:** 12/12 journeys |
 | Replay corpus privacy/schema and bounded-runner behavior | **Pass:** 5/5 tests |
 | Default multi-engine wake/adapter replay | **Pass:** 3/3 executed engines; Edge explicitly not installed |
-| Production Vite build | **Pass:** `app-BVJPtKbR.js`, `app-BNZ4BLyh.css` |
+| Production Vite build | **Pass:** `app-o9GcaJyY.js`, `app-BNZ4BLyh.css` |
 | Wake asset SHA-256 manifest | **Pass:** every listed v12 asset |
 | Changed PHP Pint check | **Pass** |
 | Composer strict validation | **Pass** |
 | `git diff --check` | **Pass** |
 | Local invariant command | **Pass:** zero violations; local database contained zero voice turns, so populated invariant proof comes from deterministic tests |
+| Live TTS first-byte diagnostic | **Pass for sampled target:** 613 ms and 1,281 ms with progressive PCM; representative p95 still requires deployed owner testing |
 
 The first `php artisan test` invocation inherited Laravel's spawned worker default
-of 128 MB and stopped after 357 passing tests/3,828 assertions in the unrelated
+of 128 MB and stopped after 357 passing tests/3,846 assertions in the unrelated
 `TopWorkspaceSwitcherAssetTest`. The direct PHPUnit invocation applied 512 MB to
 the actual test process and completed all 439 tests. This was runner memory
 configuration, not an assertion failure, and is recorded to avoid hiding the

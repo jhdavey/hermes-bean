@@ -300,7 +300,7 @@ class BrowserVoiceTurnController extends Controller
         $data = $request->validate([
             'session_id' => ['required', 'integer', 'exists:conversation_sessions,id'],
             'event' => ['required', 'string', 'in:acknowledgement_started,final_text_delivered,final_audio_started,playback_started,playback_finished,playback_stopped,potential_interruption,interruption_confirmed,interruption_rejected'],
-            'timing' => ['sometimes', 'nullable', 'array:latency_ms,occurred_at_ms,speech_item_id,controller_generation,provider_connection_generation,purpose,reason'],
+            'timing' => ['sometimes', 'nullable', 'array:latency_ms,occurred_at_ms,speech_item_id,controller_generation,provider_connection_generation,purpose,reason,error_code,error_message'],
             'timing.latency_ms' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:600000'],
             'timing.occurred_at_ms' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'timing.speech_item_id' => ['sometimes', 'nullable', 'string', 'max:160'],
@@ -308,6 +308,8 @@ class BrowserVoiceTurnController extends Controller
             'timing.provider_connection_generation' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'timing.purpose' => ['sometimes', 'nullable', 'string', 'max:80'],
             'timing.reason' => ['sometimes', 'nullable', 'string', 'max:160'],
+            'timing.error_code' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'timing.error_message' => ['sometimes', 'nullable', 'string', 'max:240'],
         ]);
         $session = $this->ownedSession($request, (int) $data['session_id']);
         $turn = VoiceTurn::query()

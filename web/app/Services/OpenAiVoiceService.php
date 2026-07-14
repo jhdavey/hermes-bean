@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AgentProfile;
 use Illuminate\Support\Facades\Http;
+use Psr\Http\Message\StreamInterface;
 use RuntimeException;
 
 class OpenAiVoiceService
@@ -12,7 +13,7 @@ class OpenAiVoiceService
 
     public const DEFAULT_REALTIME_MODEL = 'gpt-realtime';
 
-    public const DEFAULT_SPEECH_MODEL = 'tts-1';
+    public const DEFAULT_SPEECH_MODEL = 'gpt-4o-mini-tts';
 
     private const VOICES = [
         'alloy' => 'Alloy',
@@ -135,8 +136,14 @@ class OpenAiVoiceService
         ];
     }
 
-    /** @return array{audio:string,content_type:string,model:string,voice:string,characters:int} */
-    public function createSpeech(
+    /**
+     * Open the provider's raw 24 kHz PCM response without buffering it in PHP.
+     * The controller streams this same body to the browser, where the single
+     * Browser Voice speech owner schedules it for playback as chunks arrive.
+     *
+     * @return array{stream:StreamInterface,content_type:string,content_length:?int,sample_rate:int,model:string,voice:string,characters:int}
+     */
+    public function createSpeechStream(
         AgentProfile $profile,
         string $text,
         ?string $safetyIdentifier = null,
@@ -148,32 +155,39 @@ class OpenAiVoiceService
         $voice = $this->normalizeVoice(data_get($profile->settings ?? [], 'voice.voice'));
         $model = (string) config('services.openai.speech_model', self::DEFAULT_SPEECH_MODEL);
         $response = Http::withToken($this->apiKey())
-            ->accept('audio/mpeg')
+            ->accept('application/octet-stream')
             ->when($safetyIdentifier, fn ($request) => $request->withHeaders([
                 'OpenAI-Safety-Identifier' => $safetyIdentifier,
             ]))
             ->timeout((float) config('services.openai.speech_timeout', 20))
+            ->withOptions(['stream' => true])
             ->post($this->endpoint('/audio/speech'), [
                 'model' => $model,
                 'voice' => $voice,
                 'input' => $input,
-                'response_format' => 'mp3',
+                'response_format' => 'pcm',
             ]);
 
         if (! $response->successful()) {
+            $providerBody = (string) $response->toPsrResponse()->getBody();
             throw new RuntimeException(sprintf(
                 'OpenAI speech request failed with status %d: %s',
                 $response->status(),
-                mb_substr(preg_replace('/\s+/', ' ', $response->body()) ?? '', 0, 500),
+                mb_substr(preg_replace('/\s+/', ' ', $providerBody) ?? '', 0, 500),
             ));
         }
-        if ($response->body() === '') {
+        $stream = $response->toPsrResponse()->getBody();
+        if (! $stream->isReadable()) {
             throw new RuntimeException('OpenAI speech response did not include audio.');
         }
 
+        $contentLength = filter_var($response->header('Content-Length'), FILTER_VALIDATE_INT);
+
         return [
-            'audio' => $response->body(),
-            'content_type' => (string) ($response->header('Content-Type') ?: 'audio/mpeg'),
+            'stream' => $stream,
+            'content_type' => 'audio/pcm',
+            'content_length' => $contentLength === false ? null : (int) $contentLength,
+            'sample_rate' => 24_000,
             'model' => $model,
             'voice' => $voice,
             'characters' => mb_strlen($input),

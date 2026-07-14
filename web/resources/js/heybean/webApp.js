@@ -641,7 +641,7 @@ export function mountHeyBeanWebApp(mount) {
             method: 'POST',
             signal,
             headers: {
-                Accept: 'audio/mpeg, application/json',
+                Accept: 'audio/pcm, application/json',
                 'Content-Type': 'application/json',
                 ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
             },
@@ -668,9 +668,10 @@ export function mountHeyBeanWebApp(mount) {
             }
             throw error;
         }
-        const audio = await response.blob();
-        if (!audio.size) throw new Error('Bean voice playback returned no audio.');
-        return audio;
+        if (!response.body || typeof response.body.getReader !== 'function') {
+            throw new Error('Bean voice playback did not return a readable audio stream.');
+        }
+        return response;
     }
 
     async function apiForm(path, formData, options = {}) {
@@ -9484,6 +9485,8 @@ export function mountHeyBeanWebApp(mount) {
                 provider_connection_generation: controller.connectionGeneration,
                 purpose: event.purpose || null,
                 reason: event.reason || null,
+                error_code: event.errorCode || null,
+                error_message: event.error ? String(event.error).slice(0, 240) : null,
             },
         });
     }
@@ -10878,6 +10881,9 @@ export function mountHeyBeanWebApp(mount) {
             render();
             return;
         }
+        // This must remain synchronous with the button gesture so Safari and
+        // other autoplay-gated browsers permit later streamed PCM playback.
+        browserVoiceV2SpeechTransport.prime();
         const connectionGeneration = browserVoiceV2Controller.start().connectionGeneration;
         realtimeConnectionGeneration = connectionGeneration;
         clearRealtimeVoiceInputFeedback();

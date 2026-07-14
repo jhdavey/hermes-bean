@@ -440,6 +440,7 @@ export class BrowserVoiceSpeechSchedulerV2 {
             purpose: finished.item.purpose,
             reason,
             metadata: finished.item.metadata,
+            errorCode: error ? clean(error?.code) || 'voice_playback_error' : null,
             error: error ? String(error?.message || error) : null,
         });
         this.#pump();
