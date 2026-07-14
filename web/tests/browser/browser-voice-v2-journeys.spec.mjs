@@ -307,7 +307,7 @@ test('[BV2-BROWSER-09] a task read flows through reminder creation and contextua
         .toHaveText('Set it for 5 p.m.');
 });
 
-test('[BV2-BROWSER-13] expired follow-up returns to wake-only and ambient dog-directed speech stays invisible', async ({ page }) => {
+test('[BV2-BROWSER-13] expired follow-up stays private through five minutes of dormancy and rearms for the next strict wake', async ({ page }) => {
     await boot(page);
     await markReady(page);
 
@@ -331,27 +331,44 @@ test('[BV2-BROWSER-13] expired follow-up returns to wake-only and ambient dog-di
             atMs: followUp.deadlines.followUpAt,
             source: 'synthetic-follow-up-expiry',
         });
+        harness.controller.dispatch({
+            type: 'timer_fired',
+            timerKey: 'follow_up',
+            atMs: followUp.deadlines.followUpAt + (5 * 60 * 1000),
+            source: 'stale-follow-up-callback-after-five-minutes',
+        });
 
         const callsBeforeAmbient = harness.server.calls.length;
         const messagesBeforeAmbient = harness.server.read().messages.length;
-        harness.controller.speechStarted({ turnId: 'ambient-pretty-girl', source: 'provider' });
-        harness.controller.transcriptFinal('Pretty good.', { source: 'provider' });
+        harness.controller.speechStarted({ turnId: 'ambient-dog-conversation', source: 'provider' });
+        harness.controller.transcriptFinal('What are you doing, goof? Are you just standing there?', { source: 'provider' });
         harness.controller.speechEnded({ source: 'provider' });
+        await harness.waitForAdmissions();
+
+        const afterAmbient = harness.snapshot();
+        harness.wake('strict-wake-after-dormancy');
+        harness.final('Can you hear me?');
+        harness.endUtterance();
         await harness.waitForAdmissions();
 
         return {
             snapshot: harness.snapshot(),
+            afterAmbient,
             callsBeforeAmbient,
+            callsAfterWake: harness.server.calls.length,
             messagesBeforeAmbient,
         };
     });
 
-    expect(result.snapshot.controller.conversationState).toBe('wake_only');
-    expect(result.snapshot.server.turns).toHaveLength(1);
-    expect(result.snapshot.server.messages).toHaveLength(result.messagesBeforeAmbient);
-    expect(await page.evaluate(() => window.voiceHarness.server.calls.length)).toBe(result.callsBeforeAmbient);
+    expect(result.afterAmbient.controller.conversationState).toBe('wake_only');
+    expect(result.afterAmbient.server.turns).toHaveLength(1);
+    expect(result.afterAmbient.server.messages).toHaveLength(result.messagesBeforeAmbient);
+    expect(result.snapshot.server.turns).toHaveLength(2);
+    expect(result.snapshot.server.turns.at(-1).turn_id).toBe('strict-wake-after-dormancy');
+    expect(result.callsAfterWake).toBe(result.callsBeforeAmbient + 1);
     await expect(page.locator('#voice-input')).toHaveText('');
-    await expect(page.locator('#chat [data-role="user"]')).toHaveCount(1);
+    await expect(page.locator('#chat [data-role="user"]')).toHaveCount(2);
+    await expect(page.locator('#chat')).not.toContainText('goof');
 });
 
 test('[BV2-BROWSER-12] a generated-note request remains one visible turn and speaks the exact durable final', async ({ page }) => {

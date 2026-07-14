@@ -52,6 +52,10 @@ export const NEGATIVE_PRIVACY_CASES = Object.freeze([
         family: 'ongoing_conversation_without_address',
         phrase: 'We should finish the shopping list before dinner.',
     }),
+    Object.freeze({
+        family: 'dog_directed_second_person_conversation',
+        phrase: 'What are you doing, goof? Are you just standing there?',
+    }),
 ]);
 export const MISSED_HEY_ADDRESS_CASES = Object.freeze([
     Object.freeze({ family: 'can_you', phrase: 'Bean, can you help me?' }),

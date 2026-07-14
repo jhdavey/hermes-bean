@@ -34,12 +34,19 @@ const FIRST_PARTY_ADDRESS_MAX_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 2.8);
 const FIRST_PARTY_ADDRESS_INTERVAL_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.3);
 const KEYWORD_ALIAS = 'HEY_BEAN';
 const STRICT_WAKE_ALIAS = 'HEY_BEAN';
-const RUNTIME_VERSION = '12';
+const ADDRESS_WAKE_ALIAS = 'BEAN';
+const RUNTIME_VERSION = '13';
 
 // The timing detector proposes only the product wake phrase. It never embeds
 // incident-specific negative phrases. The first-party classifier below owns
 // the generic acoustic accept/reject decision for every proposed candidate.
 const STRICT_KEYWORDS = 'HH EY1 B IY1 N :1.2 #0.1 @HEY_BEAN';
+// Missed-Hey recovery requires an independently timed local "Bean" candidate
+// before the first-party address classifier may activate. The timing engine is
+// proposal-only: it cannot open the gate without the classifier's separate
+// address decision, and arbitrary speech can no longer activate that classifier
+// by itself.
+const ADDRESS_KEYWORDS = 'B IY1 N :1.2 #0.1 @BEAN';
 
 const assetBaseUrl = new URL('./', self.location.href);
 
@@ -48,6 +55,7 @@ let moduleInstance = null;
 let keywordSpotter = null;
 let beanWakeModel = null;
 let strictStream = null;
+let addressStream = null;
 let ready = false;
 let armed = false;
 let warmDecodeComplete = false;
@@ -63,6 +71,8 @@ let dormantAudioRing = [];
 let streamSourceChunks = [];
 let classificationAudio = new Float32Array(0);
 let nextFirstPartyAddressSample = FIRST_PARTY_ADDRESS_MIN_SAMPLES;
+let addressTimingCandidate = false;
+let addressCandidatePosted = false;
 
 self.addEventListener('message', handleMessage);
 self.addEventListener('error', (event) => {
@@ -346,7 +356,7 @@ function isolatedStrictWakeWindows() {
     });
 }
 
-function classifyFirstPartyAddressPrefix() {
+function classifyFirstPartyAddressPrefix({ addressCandidate = false } = {}) {
     if (!beanWakeModel || classificationAudio.length < FIRST_PARTY_ADDRESS_MIN_SAMPLES) return null;
     const probabilities = beanWakeProbabilities(classificationAudio, beanWakeModel);
     const missedHeyClass = 'missed_hey_confirmation';
@@ -361,7 +371,8 @@ function classifyFirstPartyAddressPrefix() {
     const strictWakeAccepted = silentChunksAfterSpeech >= STRICT_PREFIX_FALLBACK_SILENCE_CHUNKS
         && winningIndex === strictWakeIndex
         && probabilities[strictWakeIndex] >= STRICT_PREFIX_ACCEPTANCE_PROBABILITY;
-    const missedHeyAccepted = winningIndex === missedHeyIndex
+    const missedHeyAccepted = addressCandidate
+        && winningIndex === missedHeyIndex
         && probabilities[missedHeyIndex] >= ADDRESS_ACCEPTANCE_PROBABILITY;
     const expectedClass = strictWakeAccepted ? strictWakeClass : missedHeyClass;
     const expectedIndex = strictWakeAccepted ? strictWakeIndex : missedHeyIndex;
@@ -615,7 +626,7 @@ function dense(input, weights, bias, outputSize) {
 }
 
 function warmKeywordSpotter() {
-    const streams = [keywordSpotter.createStream()];
+    const streams = [keywordSpotter.createStream(), keywordSpotter.createStream(ADDRESS_KEYWORDS)];
     try {
         const silence = new Float32Array(6400);
         for (const stream of streams) stream.acceptWaveform(TARGET_SAMPLE_RATE, silence);
@@ -775,10 +786,20 @@ function handleAudio(message) {
         decodeReadyStreams(keywordStreams(), MAX_DECODES_PER_MESSAGE * keywordStreams().length);
 
         const strictResult = normalizedKeywordResult(keywordSpotter.getResult(strictStream));
+        const addressResult = normalizedKeywordResult(keywordSpotter.getResult(addressStream));
         let decision = keywordDecision({
             strictResult,
+            addressResult,
         });
         let classification = null;
+        if (decision.type === 'address_candidate') {
+            addressTimingCandidate = true;
+            if (!addressCandidatePosted) {
+                addressCandidatePosted = true;
+                postMessage({ type: 'address_candidate', generation: currentGeneration });
+            }
+            decision = { type: 'none', addressRelated: true };
+        }
         const utteranceSamples = Number.isSafeInteger(utteranceOnsetSample)
             ? acceptedSampleCount - utteranceOnsetSample
             : 0;
@@ -786,7 +807,9 @@ function handleAudio(message) {
             && utteranceSamples >= nextFirstPartyAddressSample
             && utteranceSamples <= FIRST_PARTY_ADDRESS_MAX_SAMPLES) {
             nextFirstPartyAddressSample = utteranceSamples + FIRST_PARTY_ADDRESS_INTERVAL_SAMPLES;
-            classification = classifyFirstPartyAddressPrefix();
+            classification = classifyFirstPartyAddressPrefix({
+                addressCandidate: addressTimingCandidate,
+            });
             if (classification?.accepted) {
                 decision = {
                     type: 'address_confirmed',
@@ -845,7 +868,10 @@ function handleAudio(message) {
                 && decision.activation !== 'strict_wake') {
                 // This event contains no audio or text and remains invisible to
                 // the application. It preserves the local confirmation protocol.
-                postMessage({ type: 'address_candidate', generation: currentGeneration });
+                if (!addressCandidatePosted) {
+                    addressCandidatePosted = true;
+                    postMessage({ type: 'address_candidate', generation: currentGeneration });
+                }
             }
             const releaseSample = decision.type === 'strict_wake'
                 ? strictReleaseSample(strictResult)
@@ -914,7 +940,7 @@ function decodeReadyStreams(streams, limit) {
     }
 }
 
-function keywordDecision({ strictResult }) {
+function keywordDecision({ strictResult, addressResult = { keyword: '', timestamps: [] } }) {
     if (strictResult.keyword === STRICT_WAKE_ALIAS) {
         // A deliberate Hey Bean must work even after other sound in the same
         // continuous local utterance. Only the confirmed keyword's short tail
@@ -923,6 +949,10 @@ function keywordDecision({ strictResult }) {
         return { type: 'strict_wake', addressRelated: false };
     }
     if (strictResult.keyword) return { type: 'reject', addressRelated: false };
+    if (addressResult.keyword === ADDRESS_WAKE_ALIAS) {
+        return { type: 'address_candidate', addressRelated: true };
+    }
+    if (addressResult.keyword) return { type: 'reject', addressRelated: true };
 
     return { type: 'none', addressRelated: false };
 }
@@ -1007,6 +1037,7 @@ function handleCancelCandidate(message) {
 function createKeywordStreams() {
     freeKeywordStreams();
     strictStream = keywordSpotter.createStream();
+    addressStream = keywordSpotter.createStream(ADDRESS_KEYWORDS);
     if (keywordStreams().some((stream) => !stream?.handle)) {
         throw new Error('The local keyword streams could not be created.');
     }
@@ -1022,7 +1053,7 @@ function resetKeywordStreams() {
 }
 
 function keywordStreams() {
-    return [strictStream].filter(Boolean);
+    return [strictStream, addressStream].filter(Boolean);
 }
 
 function freeKeywordStreams() {
@@ -1034,6 +1065,7 @@ function freeKeywordStreams() {
         }
     }
     strictStream = null;
+    addressStream = null;
 }
 
 function trackUtteranceActivity(samples) {
@@ -1099,6 +1131,8 @@ function resetUtteranceActivity() {
     streamSourceChunks = [];
     classificationAudio = new Float32Array(0);
     nextFirstPartyAddressSample = FIRST_PARTY_ADDRESS_MIN_SAMPLES;
+    addressTimingCandidate = false;
+    addressCandidatePosted = false;
 }
 
 function normalizeSamples(value) {

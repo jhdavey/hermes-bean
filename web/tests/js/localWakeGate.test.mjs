@@ -34,12 +34,12 @@ test('orchestration protocol matches the packaged same-origin worker and worklet
     assert.match(worker, /type:\s*'address_rejected'/);
     assert.match(worker, /createKws\(moduleInstance,/);
     assert.match(worker, /warmKeywordSpotter\(\)/);
-    assert.match(worker, /classifyFirstPartyAddressPrefix\(\)/);
-    assert.doesNotMatch(worker, /keywordSpotter\.createStream\(ADDRESS_KEYWORDS\)/);
+    assert.match(worker, /classifyFirstPartyAddressPrefix\(\{/);
+    assert.match(worker, /keywordSpotter\.createStream\(ADDRESS_KEYWORDS\)/);
     assert.doesNotMatch(worker, /createOnlineRecognizer/);
 });
 
-test('the packaged KWS worker exposes only strict timing candidates and never dormant text', async () => {
+test('the packaged KWS worker exposes proposal-only wake timing candidates and never dormant text', async () => {
     const source = await readFile(
         new URL('../../public/voice/wake/wake-worker.js', import.meta.url),
         'utf8',
@@ -73,13 +73,18 @@ globalThis.__wakeBoundary = {
     assert.equal(context.__keywordDecision({
         strictResult: none,
     }).type, 'none');
+    assert.equal(context.__keywordDecision({
+        strictResult: none,
+        addressResult: { keyword: 'BEAN', timestamps: [0.08, 0.24] },
+    }).type, 'address_candidate');
 
     assert.match(source, /HH EY1 B IY1 N :1\.2 #0\.1 @HEY_BEAN/);
     assert.match(source, /classification = classification \|\| classifyBeanCandidate/);
     assert.match(source, /releaseBoundary:/);
     assert.match(source, /sourceSequence/);
     assert.match(source, /classifyFirstPartyAddressPrefix/);
-    assert.doesNotMatch(source, /ADDRESS_CAN_YOU|ADDRESS_KEYWORDS|addressStream/);
+    assert.match(source, /const ADDRESS_KEYWORDS = 'B IY1 N/);
+    assert.match(source, /addressCandidate\s*&&\s*winningIndex === missedHeyIndex/);
     assert.doesNotMatch(source, /decoded_text|result\.text|transcript/);
 
     const speech = new Float32Array(1600).fill(0.08);
@@ -886,13 +891,15 @@ test('[BV2-WAKE-10] startup primes a clean consumer-enabled generation before th
     );
 });
 
-test('[BV2-WAKE-11] one generic verifier owns wake acceptance and recovers strict Hey Bean missed by timing', async () => {
+test('[BV2-WAKE-11] independent local timing proposals require one generic verifier before wake acceptance', async () => {
     const worker = await readFile(new URL('../../public/voice/wake/wake-worker.js', import.meta.url), 'utf8');
 
     assert.match(worker, /STRICT_ACCEPTANCE_PROBABILITY = 0\.75/);
     assert.match(worker, /STRICT_PREFIX_ACCEPTANCE_PROBABILITY = 0\.99/);
     assert.doesNotMatch(worker, /STRICT_NEAR_MISS_ALIASES/);
-    assert.deepEqual([...new Set(worker.match(/@[A-Z_]+/g))], ['@HEY_BEAN']);
+    assert.deepEqual([...new Set(worker.match(/@[A-Z_]+/g))], ['@HEY_BEAN', '@BEAN']);
+    assert.match(worker, /missedHeyAccepted = addressCandidate/);
+    assert.match(worker, /addressTimingCandidate = true/);
     assert.match(worker, /strictWakeAccepted = silentChunksAfterSpeech >= STRICT_PREFIX_FALLBACK_SILENCE_CHUNKS/);
     assert.match(worker, /activation: 'missed_hey_confirmation'/);
     assert.match(worker, /decision\.activation !== 'strict_wake'/);

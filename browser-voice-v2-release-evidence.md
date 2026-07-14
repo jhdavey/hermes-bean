@@ -7,13 +7,12 @@ not new product behavior.
 
 ## Current status
 
-The audited candidate satisfies every deterministic repository gate and was
-deployed to the development production site as commit `cb0be007` on July 14,
-2026. This is not a claim of 100% real-world reliability and is not
-representative acoustic certification. The candidate still needs the owner's
-physical-microphone and audible-response smoke on the deployed site.
+The audited candidate satisfies every deterministic repository gate. This is
+not a claim of 100% real-world reliability and is not representative acoustic
+certification. The candidate still needs the owner's physical-microphone and
+audible-response smoke on the deployed site.
 
-Wake assets are runtime v12. The wake detector is first-party and
+Wake assets are runtime v13. The wake detector is first-party and
 self-contained: no external wake service, account, license key, remote
 inference, or runtime network request. Incident phrases are held-out QA inputs
 only; production decision code contains no phrase-specific negative aliases or
@@ -115,12 +114,36 @@ four observations are diagnostic samples, not a p95 certification. The selected
 model remains configurable through `OPENAI_SPEECH_MODEL`, and speech usage is
 still preflighted and metered once per stable speech item.
 
+## July 14 dormant-privacy follow-up
+
+Production durable evidence correlated the reported dog-directed conversation
+to one `new_conversation` turn more than seven minutes after the preceding Bean
+response. That ruled out the 15-second follow-up window and its timers. The
+false turn contained the full ambient sentence, identifying the local
+missed-`Hey` path as the activation source rather than a strict `Hey Bean`
+release.
+
+The defect was an evidence-composition error in the single wake worker: the
+first-party missed-`Hey` classifier could promote arbitrary utterance audio
+without an independent local indication that the user had said “Bean.” Runtime
+v13 retains one decision owner and now requires both signals before opening the
+gate:
+
+- a proposal-only, on-device timing candidate for “Bean”; and
+- acceptance by the existing first-party address classifier.
+
+Neither signal can activate by itself. Strict `Hey Bean` continues to use its
+strict local timing stream and the same first-party verifier. Candidate speech
+remains invisible and no pre-confirmation PCM or text leaves the browser. The
+reported sentence is a held-out QA input only; production code contains no
+phrase-specific ignore rule.
+
 ## Contract-to-test traceability
 
 | Contract journey | Primary deterministic proof |
 | --- | --- |
 | Fresh-load readiness and first wake | `[BV2-STARTUP-01..04]`, `[BV2-WAKE-01]`, `[BV2-WAKE-03..04]`, `[BV2-WAKE-08..10]`, `[BV2-BROWSER-01]` |
-| Dormant privacy, missed `Hey`, strict wake, third-person mention, generic near-miss rejection, and re-arm | `[BV2-WAKE-11]`, local-wake gate tests, `[BV2-BROWSER-01]`, v12 prerecorded corpus |
+| Dormant privacy, missed `Hey`, strict wake, third-person mention, generic near-miss rejection, and re-arm | `[BV2-WAKE-11]`, local-wake gate tests, `[BV2-BROWSER-01]`, `[BV2-BROWSER-13]`, v13 prerecorded corpus |
 | Live partials and exact two-second endpoint | `[BV2-TRANSCRIPT-01..04]`, `[BV2-BROWSER-01]` |
 | Silent open-fragment continuation and durable five-second clarification | `[BV2-CLARIFY-01..06]`, `[BV2-BROWSER-14]`, lifecycle clarification journeys |
 | Fifteen-second follow-up, expected one-word answer, ambient rejection, and strict-wake reset | `[BV2-FOLLOWUP-01..08]`, `[BV2-CONTEXT-01]`, `[BV2-BROWSER-08..09]`, `[BV2-BROWSER-13]` |
@@ -144,13 +167,13 @@ still preflighted and metered once per stable speech item.
 | --- | --- |
 | Full PHP application suite | **Pass:** 439/439 tests, 4,601 assertions; direct PHPUnit process with 512 MB limit |
 | Focused affected Browser Voice PHP journeys | **Pass:** 58/58 tests, 572 assertions |
-| Explicit diagnostic/admin/fault subset | **Pass:** 26/26 tests, 335 assertions |
+| Explicit diagnostic/admin/fault subset | **Pass:** 63/63 tests, 756 assertions |
 | Browser Voice JavaScript | **Pass:** 135/135 tests |
 | Playwright complete browser journeys | **Pass:** 12/12 journeys |
 | Replay corpus privacy/schema and bounded-runner behavior | **Pass:** 5/5 tests |
 | Default multi-engine wake/adapter replay | **Pass:** 3/3 executed engines; Edge explicitly not installed |
-| Production Vite build | **Pass:** `app-o9GcaJyY.js`, `app-Dodk-Dbo.css` |
-| Wake asset SHA-256 manifest | **Pass:** every listed v12 asset |
+| Production Vite build | **Pass:** `app-PZKAlOxq.js`, `app-BNZ4BLyh.css` |
+| Wake asset SHA-256 manifest | **Pass:** every listed v13 asset, including worker and worklet byte counts |
 | Changed PHP Pint check | **Pass** |
 | Composer strict validation | **Pass** |
 | `git diff --check` | **Pass** |
@@ -158,7 +181,7 @@ still preflighted and metered once per stable speech item.
 | Populated production invariant command | **Pass:** zero violations across 24 turns, 48 messages, 22 runs, and 233 events |
 | Live TTS first-byte diagnostic | **Pass for sampled target:** 613 ms and 1,281 ms with progressive PCM; representative p95 still requires deployed owner testing |
 | Production TTS first-byte diagnostic | **Pass for sampled request:** first 4 KB of PCM in 1,333 ms using `gpt-4o-mini-tts` |
-| Public production-presence preflight | **Pass:** enabled v2 shell, `app-o9GcaJyY.js`, wake runtime v12, and every authenticated route boundary |
+| Public production-presence preflight | **Pending for this candidate:** run after v13 deployment |
 
 The first `php artisan test` invocation inherited Laravel's spawned worker default
 of 128 MB and stopped after 357 passing tests/3,846 assertions in the unrelated
@@ -169,17 +192,18 @@ failed invocation.
 
 ## Wake-model evidence
 
-The v12 manifest records a 119/120 (99.17%) deterministic prerecorded Bean
+The v13 manifest records a 125/126 (99.21%) deterministic prerecorded Bean
 Voice QA result against the agreed 95% acceptance threshold independently in
 Playwright Chromium, installed Google Chrome, and Playwright WebKit: 24/24
 isolated strict wakes, 6/6 wake-plus-command releases, 6/6 continuous-speech
-wakes, 23/24 missed-`Hey` address journeys, 0/54 false activations across nine
+wakes, 23/24 missed-`Hey` address journeys, 0/60 false activations across ten
 privacy families, 6/6 reject/reset/immediate-wake recoveries, zero
 pre-confirmation PCM, complete activated-PCM handoff, and no runtime errors in
-each engine. Wake p95 was 424.9 ms in Chromium, 427.8 ms in installed Chrome,
-and 479 ms in WebKit, all below the 500 ms contract target.
+each engine. That is zero false activations across 180 engine/corpus negative
+runs. Wake p95 was 437.9 ms in Chromium, 439.3 ms in installed Chrome, and 487
+ms in WebKit, all below the 500 ms contract target.
 
-The corpus includes the reported incident phrases as held-out negatives, along
+The corpus includes the reported ambient conversation as a held-out negative, along
 with phonetic near misses, third-person Bean mentions, ordinary conversation,
 and other privacy families. Those strings do not occur in production decision
 code or training negatives. The first-party classifier must reject them by the
@@ -196,11 +220,10 @@ this machine.
 
 ## Deployment and remaining external verification
 
-The July 14 deployment is present publicly: commit `cb0be007`, enabled Browser
-Voice v2 shell, hashed `app-o9GcaJyY.js` client, wake manifest/worker v12, and
-all authenticated voice route boundaries passed preflight. The production
-invariant audit also passed against populated data. Those checks prove deployed
-code and durable-data integrity, not a real microphone, speaker, or room.
+The July 14 v13 wake-privacy candidate is ready for deployment. After deployment,
+the public preflight and populated production invariant audit must be repeated.
+Those checks prove deployed code and durable-data integrity, not a real
+microphone, speaker, or room.
 
 Remaining verification:
 
