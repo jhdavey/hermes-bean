@@ -7,12 +7,11 @@ not new product behavior.
 
 ## Current status
 
-The audited local candidate satisfies every deterministic repository gate. It
-is not a claim of 100% real-world reliability and is not representative acoustic
-certification. The candidate still needs deployment followed by the owner's
-physical-microphone smoke on the deployed development site. No current local
-result below is presented as evidence that production already contains these
-changes.
+The audited candidate satisfies every deterministic repository gate and was
+deployed to the development production site as commit `cb0be007` on July 14,
+2026. This is not a claim of 100% real-world reliability and is not
+representative acoustic certification. The candidate still needs the owner's
+physical-microphone and audible-response smoke on the deployed site.
 
 Wake assets are runtime v12. The wake detector is first-party and
 self-contained: no external wake service, account, license key, remote
@@ -150,13 +149,16 @@ still preflighted and metered once per stable speech item.
 | Playwright complete browser journeys | **Pass:** 12/12 journeys |
 | Replay corpus privacy/schema and bounded-runner behavior | **Pass:** 5/5 tests |
 | Default multi-engine wake/adapter replay | **Pass:** 3/3 executed engines; Edge explicitly not installed |
-| Production Vite build | **Pass:** `app-o9GcaJyY.js`, `app-BNZ4BLyh.css` |
+| Production Vite build | **Pass:** `app-o9GcaJyY.js`, `app-Dodk-Dbo.css` |
 | Wake asset SHA-256 manifest | **Pass:** every listed v12 asset |
 | Changed PHP Pint check | **Pass** |
 | Composer strict validation | **Pass** |
 | `git diff --check` | **Pass** |
-| Local invariant command | **Pass:** zero violations; local database contained zero voice turns, so populated invariant proof comes from deterministic tests |
+| Local invariant command | **Pass:** zero violations; local database contained zero voice turns, so populated local invariant proof comes from deterministic tests |
+| Populated production invariant command | **Pass:** zero violations across 24 turns, 48 messages, 22 runs, and 233 events |
 | Live TTS first-byte diagnostic | **Pass for sampled target:** 613 ms and 1,281 ms with progressive PCM; representative p95 still requires deployed owner testing |
+| Production TTS first-byte diagnostic | **Pass for sampled request:** first 4 KB of PCM in 1,333 ms using `gpt-4o-mini-tts` |
+| Public production-presence preflight | **Pass:** enabled v2 shell, `app-o9GcaJyY.js`, wake runtime v12, and every authenticated route boundary |
 
 The first `php artisan test` invocation inherited Laravel's spawned worker default
 of 128 MB and stopped after 357 passing tests/3,846 assertions in the unrelated
@@ -194,25 +196,26 @@ this machine.
 
 ## Deployment and remaining external verification
 
-The public development site previously passed deployment-presence preflight for
-an older bundle. That historical result does not certify this local candidate.
-After these changes are reviewed and deployed:
+The July 14 deployment is present publicly: commit `cb0be007`, enabled Browser
+Voice v2 shell, hashed `app-o9GcaJyY.js` client, wake manifest/worker v12, and
+all authenticated voice route boundaries passed preflight. The production
+invariant audit also passed against populated data. Those checks prove deployed
+code and durable-data integrity, not a real microphone, speaker, or room.
 
-1. run `npm run preflight:voice:production` to confirm the enabled shell marker,
-   current hashed client bundle, v12 manifest/worker, health endpoint, and all
-   authenticated route boundaries;
-2. run the production invariant audit against populated production data;
-3. use the owner's account for fresh-load first wake, microphone restart, live
+Remaining verification:
+
+1. use the owner's account for fresh-load first wake, microphone restart, live
    partials, two-second endpoint, expected and ambient follow-ups, background
    audio rejection, false and meaningful barge-in, playback Stop, explicit job
    cancellation, three-job concurrency, read bypass, local/remote weather,
    direct writes, contextual corrections, complex note creation, provider fault,
    reload/reconnect, exact chat/speech parity, usage-limit upgrade UX, and admin
    diagnostics; and
-4. record visible/audible Chrome, Safari, and Edge samples in quiet speech,
+2. record visible/audible Chrome, Safari, and Edge samples in quiet speech,
    background music, nearby conversation, and speaker-echo conditions with the
    p50/p95 metrics required by `bean-voice-rules.md`.
 
 Until that physical deployed-development evidence exists, the accurate status
-is: deterministic local candidate passed; representative release certification
-pending.
+is: deterministic gates, deployment preflight, populated invariant audit, and
+sampled production TTS first-byte check passed; representative release
+certification pending.
