@@ -85,56 +85,9 @@ class AiUsageService
         return $this->preflightDirect(
             $user,
             $workspaceId,
-            (string) config('services.openai.realtime_model', 'gpt-realtime'),
+            (string) config('services.openai.realtime_model', OpenAiVoiceService::DEFAULT_REALTIME_MODEL),
             estimatedCost: max(0.000001, (float) config('services.ai_usage.realtime_session_minimum_cost_usd', 0.001)),
             requestType: 'voice_realtime',
-        );
-    }
-
-    /** @return array{allowed:bool,reason:?string,input_tokens:int,reserved_output_tokens:int,estimated_cost_usd:float,budget:array<string,mixed>} */
-    public function preflightSpeechSynthesis(User $user, ?int $workspaceId, int $characters): array
-    {
-        $model = (string) config('services.openai.speech_model', OpenAiVoiceService::DEFAULT_SPEECH_MODEL);
-
-        return $this->preflightDirect(
-            $user,
-            $workspaceId,
-            $model,
-            estimatedCost: $this->speechSynthesisCost($characters),
-            requestType: 'voice_speech',
-        );
-    }
-
-    public function recordSpeechSynthesis(
-        User $user,
-        ?int $workspaceId,
-        string $speechItemId,
-        string $model,
-        string $voice,
-        int $characters,
-    ): AiUsageLog {
-        return AiUsageLog::query()->createOrFirst(
-            ['provider_event_id' => hash('sha256', 'voice_speech|'.$user->id.'|'.$speechItemId)],
-            [
-                'user_id' => $user->id,
-                'workspace_id' => $workspaceId,
-                'provider' => 'openai',
-                'model' => $model,
-                'route_tier' => 'voice_speech',
-                'request_type' => 'voice_speech',
-                'status' => 'completed',
-                'input_tokens' => 0,
-                'output_tokens' => 0,
-                'total_tokens' => 0,
-                'tool_call_count' => 0,
-                'estimated_cost_usd' => $this->speechSynthesisCost($characters),
-                'action_types' => ['speech_synthesis'],
-                'metadata' => [
-                    'speech_item_id' => $speechItemId,
-                    'voice' => $voice,
-                    'characters' => max(0, $characters),
-                ],
-            ],
         );
     }
 
@@ -143,7 +96,6 @@ class AiUsageService
         ?int $workspaceId,
         ?string $providerSessionId,
         string $model,
-        string $transcriptionModel,
     ): AiUsageLog {
         return AiUsageLog::create([
             'user_id' => $user->id,
@@ -162,7 +114,6 @@ class AiUsageService
             'action_types' => ['voice_realtime_session'],
             'metadata' => [
                 'provider_session_id' => $providerSessionId,
-                'transcription_model' => $transcriptionModel,
                 'opened_at' => now()->toIso8601String(),
             ],
         ]);
@@ -186,9 +137,7 @@ class AiUsageService
             ->firstOrFail();
         $eventIdentity = hash('sha256', $usageSessionId.'|'.$providerEventId);
         $normalized = $this->normalizedRealtimeUsage($usage);
-        $model = $eventType === 'transcription'
-            ? (string) data_get($sessionLog->metadata, 'transcription_model', config('services.openai.realtime_transcription_model', 'gpt-4o-mini-transcribe'))
-            : (string) $sessionLog->model;
+        $model = (string) $sessionLog->model;
         $cost = $this->estimatedRealtimeCost($model, $eventType, $normalized);
         $existing = AiUsageLog::query()->createOrFirst(
             ['provider_event_id' => $eventIdentity],
@@ -205,7 +154,7 @@ class AiUsageService
                 'total_tokens' => $normalized['total_tokens'],
                 'tool_call_count' => 0,
                 'estimated_cost_usd' => $cost,
-                'action_types' => [$eventType === 'transcription' ? 'realtime_transcription' : 'realtime_speech'],
+                'action_types' => ['realtime_audio_native'],
                 'metadata' => [
                     'usage_session_id' => $sessionLog->usage_session_id,
                     'provider_session_id' => data_get($sessionLog->metadata, 'provider_session_id'),
@@ -254,13 +203,6 @@ class AiUsageService
             'used_usd' => round($used, 6),
             'limit_usd' => $limit === null ? null : (float) $limit,
         ];
-    }
-
-    private function speechSynthesisCost(int $characters): float
-    {
-        $price = max(0.0, (float) config('services.ai_usage.speech_price_per_million_characters', 15.0));
-
-        return round((max(0, $characters) / 1_000_000) * $price, 6);
     }
 
     public function estimatedCost(string $model, int $inputTokens, int $outputTokens): float
@@ -447,14 +389,6 @@ class AiUsageService
     private function estimatedRealtimeCost(string $model, string $eventType, array $usage): float
     {
         $pricing = $this->realtimePricingFor($model);
-        if ($eventType === 'transcription') {
-            return round(
-                (($usage['input_audio_tokens'] / 1_000_000) * ($pricing['audio_input'] ?? 0))
-                + (($usage['output_tokens'] / 1_000_000) * ($pricing['text_output'] ?? 0)),
-                6,
-            );
-        }
-
         $cachedText = min($usage['input_text_tokens'], $usage['cached_text_tokens']);
         $cachedAudio = min($usage['input_audio_tokens'], $usage['cached_audio_tokens']);
         $uncachedText = max(0, $usage['input_text_tokens'] - $cachedText);

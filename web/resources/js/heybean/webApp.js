@@ -9,94 +9,14 @@ import {
     themeModesByKey,
 } from './config.js';
 import {
-    acquireRealtimeMicrophone,
-    RealtimeInputTranscriptBuffer,
-    stageOptimisticUserTurn,
-    buildRealtimeConversationItemDeleteEvent,
-    buildRealtimeTargetedResponseCancellationEvent,
     createVoiceClientFailureNonce,
-    isRealtimeWakeAddressOnly,
-    isRealtimeDuplicateCallConflict,
-    realtimeMicrophoneConstraints,
-    reportVoiceEventReliably,
-    realtimeUsageReportFromProviderEvent,
     sanitizedVoiceClientFailure,
-    shouldDisplayRealtimeTranscriptDraft,
-    stripRealtimeLocalWakePrefix,
     VoiceClientFailureReporter,
     voiceClientFailureId,
     voiceClientFailureIdentityParts,
-} from './realtimeVoiceTurn.js';
-import { LocalWakeGate } from './localWakeGate.js';
-import {
-    BROWSER_VOICE_CONVERSATION_STATES,
-    BROWSER_VOICE_EFFECTS,
-    BrowserVoiceControllerV2,
-} from './browserVoiceControllerV2.js';
-import {
-    BROWSER_VOICE_SPEECH_PURPOSES,
-    BrowserVoicePlaybackAdapterV2,
-    BrowserVoiceSpeechSchedulerV2,
-} from './browserVoiceSpeechV2.js';
-import {
-    BrowserVoiceAdmissionRegistryV2,
-    BrowserVoiceV2Client,
-    deliverBrowserVoiceV2ReceiptOnce,
-    normalizeVoiceV2Snapshot,
-    recoverBrowserVoiceV2Admission,
-} from './browserVoiceV2Client.js';
-import { BrowserVoiceHttpSpeechTransportV2 } from './browserVoiceHttpSpeechV2.js';
-import { BrowserVoiceRealtimeInputTransportV2 } from './browserVoiceRealtimeInputV2.js';
-import {
-    BROWSER_VOICE_REALTIME_INGRESS_RESULTS,
-    BrowserVoiceProviderItemRegistryV2,
-    bindBrowserVoiceProviderSpeechStartedV2,
-    browserVoiceProviderItemBindingIsCurrentV2,
-    browserVoiceProviderItemCapacityExhaustedV2,
-    createBrowserVoiceProviderTurnIdentityV2,
-    currentBrowserVoiceProviderItemBindingV2,
-    routeBrowserVoiceRealtimeIngressV2,
-} from './browserVoiceRealtimeIngressV2.js';
-
-export const BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES = Object.freeze({
-    MISSING_ITEM_ID: 'provider_item_id_missing',
-    ITEM_CAPACITY_EXHAUSTED: 'provider_item_registry_capacity_exhausted',
-    ITEM_TURN_MISMATCH: 'provider_item_turn_identity_mismatch',
-});
-
-const BROWSER_VOICE_PROVIDER_IDENTITY_EVENT_TYPES = new Set([
-    'input_audio_buffer.speech_started',
-    'conversation.item.input_audio_transcription.delta',
-    'conversation.item.input_audio_transcription.completed',
-    'conversation.item.input_audio_transcription.failed',
-]);
-
-export function browserVoiceV2ProviderInputIsActive({ inputTransport } = {}) {
-    const generation = inputTransport?.activeGeneration;
-    return generation !== null
-        && generation !== undefined
-        && Number.isSafeInteger(Number(generation))
-        && Number(generation) >= 0;
-}
-
-export function browserVoiceV2ProviderProtocolFailureForEvent({
-    eventType,
-    providerInputActive = false,
-    providerItemId = '',
-    providerItemCapacityExhausted = false,
-} = {}) {
-    const type = String(eventType || '');
-    if (!BROWSER_VOICE_PROVIDER_IDENTITY_EVENT_TYPES.has(type)) return null;
-    if (!String(providerItemId || '').trim()) {
-        return providerInputActive
-            ? BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.MISSING_ITEM_ID
-            : null;
-    }
-    if (type === 'input_audio_buffer.speech_started' && providerItemCapacityExhausted) {
-        return BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_CAPACITY_EXHAUSTED;
-    }
-    return null;
-}
+} from './beanVoiceBrowserSupport.js';
+import { stageOptimisticUserTurn } from './chatTurn.js';
+import { BeanVoiceRuntime } from './BeanVoiceRuntime.js';
 
 export function captureHeyBeanChatControlFocus(mount) {
     const active = mount?.ownerDocument?.activeElement;
@@ -137,23 +57,6 @@ export function restoreHeyBeanChatControlFocus(mount, snapshot) {
     return true;
 }
 
-export function browserVoiceV2OwnsStopAction({
-    enabled = false,
-    voiceWakeListening = false,
-    voiceProcessing = false,
-    realtimeVoiceActive = false,
-    playbackActive = false,
-    activeWork = false,
-} = {}) {
-    return Boolean(enabled && (
-        voiceWakeListening
-        || voiceProcessing
-        || realtimeVoiceActive
-        || playbackActive
-        || activeWork
-    ));
-}
-
 export function reconcileAllDayEndDateInput(startValue, endValue) {
     const start = String(startValue || '').trim();
     const end = String(endValue || '').trim();
@@ -177,180 +80,6 @@ export function reconcileAllDayEndDateInput(startValue, endValue) {
     const next = new Date(parsedStart);
     next.setUTCDate(next.getUTCDate() + 1);
     return next.toISOString().slice(0, 10);
-}
-
-export function isMeaningfulBrowserVoiceV2Interruption(text) {
-    return String(text || '').trim() !== '';
-}
-
-export function browserVoiceV2LocalWakeMatchesCompletedBarge({
-    snapshot = null,
-    completedBarge = null,
-    connectionGeneration = null,
-    gateGeneration = null,
-    sourceSequence = null,
-} = {}) {
-    const identities = {
-        controllerGeneration: Number(snapshot?.generation),
-        snapshotConnectionGeneration: Number(snapshot?.connectionGeneration),
-        completedControllerGeneration: Number(completedBarge?.controllerGeneration),
-        completedConnectionGeneration: Number(completedBarge?.connectionGeneration),
-        connectionGeneration: Number(connectionGeneration),
-        completedGateGeneration: Number(completedBarge?.gateGeneration),
-        gateGeneration: Number(gateGeneration),
-        detectedSequence: Number(sourceSequence),
-        completedSequence: Number(completedBarge?.throughSourceSequence),
-    };
-    if (!completedBarge?.turnId
-        || sourceSequence === null
-        || sourceSequence === ''
-        || completedBarge?.throughSourceSequence === null
-        || completedBarge?.throughSourceSequence === ''
-        || Object.values(identities).some((value) => !Number.isSafeInteger(value) || value < 0)
-        || identities.detectedSequence > identities.completedSequence) return false;
-
-    return snapshot?.activeTurn?.id === completedBarge.turnId
-        && identities.controllerGeneration === identities.completedControllerGeneration
-        && identities.snapshotConnectionGeneration === identities.completedConnectionGeneration
-        && identities.connectionGeneration === identities.completedConnectionGeneration
-        && identities.gateGeneration === identities.completedGateGeneration;
-}
-
-export function activateBrowserVoiceV2LocalWakeTransport({
-    controller,
-    inputTransport,
-    generation,
-    source = 'local_wake_gate',
-} = {}) {
-    if (typeof inputTransport?.activate !== 'function' || typeof controller?.wakeConfirmed !== 'function') {
-        throw new TypeError('Browser voice local wake activation requires its controller and input transport.');
-    }
-    if (inputTransport.activate({ generation }) !== true) {
-        throw new Error('Realtime transcription did not accept the activated wake transport.');
-    }
-
-    return controller.wakeConfirmed({ source });
-}
-
-export function applyBrowserVoiceV2WakeOnlyPrivacyBoundary({
-    snapshot,
-    previousConversationState,
-    event,
-    inputTransport,
-    localWakeGate,
-} = {}) {
-    const eventType = String(event?.type || '');
-    const enteredWakeOnly = Boolean(previousConversationState)
-        && previousConversationState !== BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY;
-    if (snapshot?.conversationState !== BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY
-        || snapshot?.potentialBargeIn
-        || !browserVoiceV2ProviderInputIsActive({ inputTransport })
-        || !enteredWakeOnly
-        || ['provider_ready', 'start'].includes(eventType)) return false;
-
-    inputTransport?.deactivate?.();
-    localWakeGate?.resetAfterTurn?.();
-    return true;
-}
-
-export function applyBrowserVoiceV2PotentialBargeProofCleanup({
-    effect,
-    registry,
-    transcripts,
-    potentialItems,
-    providerWakeTurnIds,
-    connectionGeneration,
-    clearDraft,
-    sendProviderEvent,
-} = {}) {
-    const providerItemId = String(effect?.providerItemId || '').trim();
-    if (effect?.type !== BROWSER_VOICE_EFFECTS.DISCARD_POTENTIAL_BARGE_IN
-        || !providerItemId
-        || !(registry instanceof BrowserVoiceProviderItemRegistryV2)
-        || typeof transcripts?.discardItem !== 'function'
-        || typeof potentialItems?.delete !== 'function'
-        || typeof providerWakeTurnIds?.delete !== 'function'
-        || typeof clearDraft !== 'function'
-        || typeof sendProviderEvent !== 'function') return false;
-
-    const consumed = registry.consume({ providerItemId, connectionGeneration });
-    const bindingOwned = Boolean(consumed)
-        && !browserVoiceProviderItemCapacityExhaustedV2(consumed);
-    const potentialOwned = potentialItems.delete(providerItemId);
-    const wakeOwned = providerWakeTurnIds.delete(providerItemId);
-    if (!bindingOwned && !potentialOwned && !wakeOwned) return false;
-
-    transcripts.discardItem({ itemId: providerItemId });
-    clearDraft('');
-    sendProviderEvent(buildRealtimeConversationItemDeleteEvent(providerItemId));
-    return true;
-}
-
-export function applyBrowserVoiceV2TranscriptionFailure({
-    controller,
-    payload,
-    binding,
-    action = 'capture',
-    reportFailure,
-} = {}) {
-    if (typeof reportFailure !== 'function') {
-        throw new TypeError('Browser voice transcription failure requires diagnostic reporting.');
-    }
-    if (!browserVoiceProviderItemBindingIsCurrentV2(controller, binding)) return null;
-    reportFailure(payload, binding.providerItemId, binding.turnId);
-
-    if (action === 'discard') return null;
-    if (action === 'reject_barge_in') {
-        return controller?.rejectBargeIn?.('transcription_failed', {
-            source: 'provider_transcript',
-            providerItemId: binding.providerItemId,
-        }) || null;
-    }
-    if (action === 'capture') {
-        return controller?.captureFailed?.('transcription_failed', {
-            source: 'provider_transcript',
-            turnId: binding.turnId,
-        }) || null;
-    }
-    throw new TypeError('Browser voice transcription failure action is invalid.');
-}
-
-export function applyBrowserVoiceV2ProviderProtocolFailure({
-    code,
-    reportFailure,
-    teardown,
-    userMessage = 'Bean voice lost track of transcription. Tap the Bean button to reconnect and try again.',
-} = {}) {
-    const protocolCode = String(code || '').trim();
-    if (!Object.values(BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES).includes(protocolCode)) {
-        throw new TypeError('Browser voice provider protocol failure code is invalid.');
-    }
-    const error = Object.assign(new Error('Browser voice provider protocol failed.'), {
-        code: protocolCode,
-    });
-    return teardownBrowserVoiceV2ProviderFailure({
-        error,
-        providerMessage: protocolCode,
-        userMessage,
-        reportFailure,
-        teardown,
-    });
-}
-
-export function teardownBrowserVoiceV2ProviderFailure({
-    error,
-    providerMessage = '',
-    userMessage = 'Bean voice lost its connection. Tap the Bean button to reconnect.',
-    reportFailure,
-    teardown,
-} = {}) {
-    if (typeof reportFailure !== 'function' || typeof teardown !== 'function') {
-        throw new TypeError('Browser voice provider failure requires reporting and teardown.');
-    }
-
-    reportFailure(error, providerMessage);
-    teardown(userMessage, { reportFailure: false, error });
-    return true;
 }
 
 export function mountHeyBeanWebApp(mount) {
@@ -478,46 +207,6 @@ export function mountHeyBeanWebApp(mount) {
         notice: '',
         modal: null,
     };
-    let realtimePeerConnection = null;
-    let realtimeDataChannel = null;
-    let realtimeRawMicrophoneStream = null;
-    let realtimeLocalWakeGate = null;
-    let realtimeRemoteAudio = null;
-    let realtimeSession = null;
-    let realtimeConnectionGeneration = 0;
-    let realtimeLocalTeardown = Promise.resolve();
-    let realtimeVoiceActive = false;
-    let realtimeDisconnectedTimer = 0;
-    let realtimeMicrophoneMuteTimer = 0;
-    let realtimeVoiceActivityDecayTimer = 0;
-    let realtimeVoiceActivityLevel = 0;
-    const browserVoiceV2PotentialBargeInItems = new Set();
-    const browserVoiceV2ProviderWakeTurnIds = new Map();
-    const browserVoiceV2ProviderItems = new BrowserVoiceProviderItemRegistryV2();
-    // Ordered provider VAD can claim only the immutable local PCM admission
-    // that preceded it. These records correlate identity; the controller still
-    // owns every lifecycle transition and rejects a record after its turn ends.
-    const browserVoiceV2PendingLocalWakeAdmissions = [];
-    let browserVoiceV2CompletedProviderBarge = null;
-    let browserVoiceV2LastProviderInputPcm = null;
-    let browserVoiceV2LastConversationState = BROWSER_VOICE_CONVERSATION_STATES.OFF;
-    const browserVoiceV2TurnStates = new Map();
-    const browserVoiceV2AcknowledgedTurnIds = new Set();
-    const browserVoiceV2FinalDeliveredTurnIds = new Set();
-    const browserVoiceV2FinalAudioDeliveredTurnIds = new Set();
-    const browserVoiceV2FinalTextDeliveryInFlight = new Map();
-    const browserVoiceV2FinalAudioDeliveryInFlight = new Map();
-    const browserVoiceV2PendingFinalAudioDeliveryEvents = new Map();
-    const browserVoiceV2SpokenFinalTurnIds = new Set();
-    const browserVoiceV2DeferredFinals = new Map();
-    const browserVoiceV2ReloadPendingFinals = new Map();
-    const browserVoiceV2TurnVersions = new Map();
-    const browserVoiceV2JobStates = new Map();
-    const browserVoiceV2AdmissionFailureTurnIds = new Set();
-    const browserVoiceV2ClarificationPromptSequences = new Map();
-    const browserVoiceV2RealtimeUsageEventIds = new Set();
-    const browserVoiceV2AppliedStopDirectiveIds = new Set();
-    const browserVoiceV2AdmissionRegistry = new BrowserVoiceAdmissionRegistryV2();
     const browserVoiceV2ClientFailurePageNonce = createVoiceClientFailureNonce();
     const browserVoiceV2ClientFailureReporter = new VoiceClientFailureReporter({
         send: (failure) => api('/assistant/voice/client-failures', {
@@ -536,45 +225,35 @@ export function mountHeyBeanWebApp(mount) {
     let chatAnnouncementSessionId = null;
     let chatAnnouncementSeenKeys = new Set();
     let lastChatAnnouncement = '';
-    const realtimeInputTranscripts = new RealtimeInputTranscriptBuffer();
-    const realtimeMediaRecoveryGraceMs = 5000;
     const beanWorkPollMaxAttempts = 180;
-    const realtimeTurnSessionIds = new Map();
-    let realtimePersistenceSessionCreation = null;
     const chatAnnouncementRegion = persistentChatAnnouncementRegion();
-    const browserVoiceV2SpeechTransport = new BrowserVoiceHttpSpeechTransportV2({
-        requestAudio: requestBrowserVoiceV2SpeechAudio,
+    let beanVoiceView = Object.freeze({
+        mode: 'off',
+        enabled: false,
+        listening: false,
+        recording: false,
+        processing: false,
+        thinking: false,
+        working: false,
+        speaking: false,
+        followUp: false,
+        activityLevel: 0,
+        playbackActive: false,
+        activeTurnId: null,
+        realtimeSessionId: null,
+        error: '',
     });
-    const browserVoiceV2InputTransport = new BrowserVoiceRealtimeInputTransportV2({
-        send: realtimeSend,
-        bufferedAmount: () => Number(realtimeDataChannel?.bufferedAmount || 0),
-        onAppend: ({ generation, sourceSequence }) => {
-            browserVoiceV2LastProviderInputPcm = { generation, sourceSequence };
-        },
-    });
-    const browserVoiceV2Playback = new BrowserVoicePlaybackAdapterV2({
-        play: (item, listeners) => browserVoiceV2SpeechTransport.play(item, listeners),
-        setVolume: (handle, volume) => browserVoiceV2SpeechTransport.setVolume(handle, volume),
-        stop: (handle, reason) => browserVoiceV2SpeechTransport.stop(handle, reason),
-    });
-    const browserVoiceV2Speech = new BrowserVoiceSpeechSchedulerV2({
-        playback: browserVoiceV2Playback,
-        acknowledgementGraceMs: 350,
-        onEvent: handleBrowserVoiceV2SpeechEvent,
-    });
-    const browserVoiceV2Controller = new BrowserVoiceControllerV2({
-        endpointMs: 2000,
-        clarificationMs: 5000,
-        followUpMs: 15000,
-        createTurnId: newBrowserVoiceV2TurnId,
-        speechScheduler: browserVoiceV2Speech,
-        onEffect: handleBrowserVoiceV2ControllerEffect,
-        onStateChange: handleBrowserVoiceV2StateChange,
-    });
-    const browserVoiceV2Client = new BrowserVoiceV2Client({
+    let lastBeanVoiceError = '';
+    const beanVoiceRuntime = new BeanVoiceRuntime({
         request: api,
-        onSnapshot: applyBrowserVoiceV2Snapshot,
-        onError: handleBrowserVoiceV2StateError,
+        openProjectionStream: openBeanVoiceProjectionStream,
+        ensureConversationSession: ensureBeanVoiceConversationSession,
+        openRealtimeSession: openBeanVoiceRealtimeSession,
+        currentWorkspaceId,
+        onViewState: applyBeanVoiceViewState,
+        onWorkProjection: applyBeanVoiceWorkProjection,
+        onDashboardInvalidated: scheduleDashboardRealtimeRefresh,
+        onFailure: reportBeanVoiceFailure,
     });
 
     const guidedSignupPersonalities = [
@@ -885,6 +564,7 @@ export function mountHeyBeanWebApp(mount) {
             method: options.method || 'GET',
             headers,
             body: options.body ? JSON.stringify(options.body) : undefined,
+            signal: options.signal,
         }, options.timeoutMs || 0);
         if (response.status === 204) return null;
         const payload = await response.json().catch(() => ({}));
@@ -899,46 +579,6 @@ export function mountHeyBeanWebApp(mount) {
             throw error;
         }
         return Object.prototype.hasOwnProperty.call(payload, 'data') ? payload.data : payload;
-    }
-
-    async function requestBrowserVoiceV2SpeechAudio(item, { signal } = {}) {
-        const text = String(item?.text || '').trim();
-        if (!text) throw new Error('Bean voice response text is empty.');
-        const response = await fetch('/api/assistant/voice/speech', {
-            method: 'POST',
-            signal,
-            headers: {
-                Accept: 'audio/pcm, application/json',
-                'Content-Type': 'application/json',
-                ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
-            },
-            body: JSON.stringify({
-                workspace_id: currentWorkspaceId() || null,
-                turn_id: String(item.turnId || ''),
-                speech_item_id: String(item.id || ''),
-                purpose: String(item.purpose || ''),
-                // This exact durable text is the only speech input. Never
-                // naturalize, summarize, or ask a second model to rewrite it.
-                text,
-            }),
-        });
-        if (!response.ok) {
-            const payload = await response.json().catch(() => ({}));
-            const error = new Error(String(payload.message || 'Bean voice playback could not be requested.'));
-            error.status = response.status;
-            error.payload = payload;
-            if (response.status === 402) {
-                stopVoiceWakeListening({ clearDraft: true, reason: 'usage_limit' });
-                state.error = error.message;
-                state.chatRunState = 'Upgrade to continue';
-                render();
-            }
-            throw error;
-        }
-        if (!response.body || typeof response.body.getReader !== 'function') {
-            throw new Error('Bean voice playback did not return a readable audio stream.');
-        }
-        return response;
     }
 
     async function apiForm(path, formData, options = {}) {
@@ -1840,11 +1480,18 @@ export function mountHeyBeanWebApp(mount) {
         restoreHeyBeanChatControlFocus(mount, snapshot);
     }
 
+    function messageVisibleInChat(message) {
+        if (!message || message.progress) return false;
+        const metadata = message.metadata && typeof message.metadata === 'object'
+            ? message.metadata
+            : {};
+        return String(message.display_mode || metadata.display_mode || '').toLowerCase() !== 'voice_only'
+            && String(message.origin || metadata.origin || '').toLowerCase() !== 'spoken_voice'
+            && message.visible_in_chat !== false;
+    }
+
     function announceableChatMessages() {
-        return state.messages.filter((message) => {
-            if (!message || message.metadata?.realtime_draft || message.progress) return false;
-            return true;
-        });
+        return state.messages.filter(messageVisibleInChat);
     }
 
     function chatAnnouncementContent(message) {
@@ -4251,20 +3898,10 @@ export function mountHeyBeanWebApp(mount) {
 
     function chatMarkup(options = {}) {
         const working = state.busy && state.chatRunState !== 'Ready';
-        const v2PlaybackActive = browserVoiceV2Enabled() && Boolean(browserVoiceV2Speech.snapshot().current);
-        const v2ActiveWork = state.beanWorkItems.some((item) => (
-            item.source === 'browser_voice_v2' && !beanWorkItemDone(item)
-        ));
-        const v2OwnsStopAction = browserVoiceV2OwnsStopAction({
-            enabled: browserVoiceV2Enabled(),
-            voiceWakeListening: state.voiceWakeListening,
-            voiceProcessing: state.voiceProcessing,
-            realtimeVoiceActive,
-            playbackActive: v2PlaybackActive,
-            activeWork: v2ActiveWork,
-        });
+        const v2PlaybackActive = browserVoiceV2Enabled() && Boolean(beanVoiceView.playbackActive);
+        const v2OwnsStopAction = browserVoiceV2Enabled() && v2PlaybackActive;
         const waking = beanChatWaking();
-        const messages = state.messages;
+        const messages = state.messages.filter(messageVisibleInChat);
         const workStrip = chatDockedWorkStripMarkup();
         const messageListId = options.messageListId || 'hb-chat-messages';
         const inputValue = chatInputValue();
@@ -4272,7 +3909,9 @@ export function mountHeyBeanWebApp(mount) {
         const sendDisabled = inputDisabled ? 'disabled aria-disabled="true"' : '';
         const hearingClass = state.voiceRecording ? 'hb-chat-dock-hearing' : '';
         const voiceHearingClass = state.voiceRecording ? 'hb-chat-voice-button-hearing' : '';
-        const voiceActivityStyle = realtimeVoiceActivityStyle(state.voiceRecording ? realtimeVoiceActivityLevel : 0);
+        const voiceActivityStyle = beanVoiceActivityStyle(
+            state.voiceRecording ? beanVoiceView.activityLevel : 0,
+        );
         return `
             <section class="hb-chat ${options.compact ? 'hb-chat-compact' : ''}">
                 ${errorMarkup(state.error)}
@@ -4287,7 +3926,7 @@ export function mountHeyBeanWebApp(mount) {
                     <form class="hb-chat-dock ${workStrip ? 'hb-chat-dock-with-work' : ''} ${hearingClass}" style="${voiceActivityStyle}" data-action="chat" data-chat-instance="${escapeAttr(messageListId)}">
                         <textarea name="message" data-chat-focus-control="message" placeholder="${escapeAttr(chatInputPlaceholder())}" rows="1" ${inputDisabled ? 'disabled aria-disabled="true"' : ''}>${escapeHtml(inputValue)}</textarea>
                         <span class="hb-chat-action-cluster">
-                            ${(state.busy || v2PlaybackActive) ? `<button class="hb-button-secondary hb-chat-text-send-button hb-chat-text-stop-button" type="button" ${v2OwnsStopAction ? 'data-stop-voice-playback' : 'data-cancel-turn'} data-chat-focus-control="stop" aria-label="Stop Bean speech">${icons.stop}</button>` : ''}
+                            ${(state.busy || v2PlaybackActive) ? `<button class="hb-button-secondary hb-chat-text-send-button hb-chat-text-stop-button" type="button" ${v2OwnsStopAction ? 'data-stop-voice-playback' : 'data-cancel-turn'} data-chat-focus-control="stop" aria-label="Stop Bean">${icons.stop}</button>` : ''}
                             <button class="hb-button-secondary hb-chat-text-send-button" type="submit" data-chat-focus-control="send" aria-label="${escapeAttr(waking ? 'Bean is waking up' : 'Send message')}" ${sendDisabled}>${icons.send}</button>
                             <button class="hb-button-secondary hb-chat-text-send-button hb-chat-voice-button ${state.voiceWakeListening ? 'hb-chat-voice-button-listening' : ''} ${voiceHearingClass} ${(state.busy || state.voiceProcessing) ? 'hb-chat-voice-button-thinking' : ''}" style="${voiceActivityStyle}" type="button" data-voice-toggle data-chat-focus-control="voice" aria-pressed="${state.voiceWakeListening ? 'true' : 'false'}" aria-label="${state.voiceRecording ? 'Microphone is hearing you' : (state.voiceWakeListening ? 'Turn off realtime Bean voice' : 'Turn on realtime Bean voice')}" ${sendDisabled}><span class="hb-chat-voice-button-inner"><img src="${escapeAttr(logoUrl)}" alt="" aria-hidden="true"></span></button>
                         </span>
@@ -5701,7 +5340,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function pushVisibleAssistantMessage(message, content = null) {
-        if (!message) return false;
+        if (!messageVisibleInChat(message)) return false;
         const visibleContent = content ?? String(message.content || '');
         if (!String(visibleContent || '').trim()) return false;
         const assistantId = String(message.id || '');
@@ -9245,293 +8884,128 @@ export function mountHeyBeanWebApp(mount) {
             || state.user?.browserVoiceV2Enabled === true;
     }
 
-    function newBrowserVoiceV2TurnId() {
-        const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        return `browser-voice-v2-${id}`;
-    }
-
-    function handleBrowserVoiceV2SpeechEvent(event) {
-        if (!browserVoiceV2Enabled()) return;
-        if (event.type === 'playback.started') {
-            if (event.purpose === BROWSER_VOICE_SPEECH_PURPOSES.FINAL) {
-                browserVoiceV2SpokenFinalTurnIds.add(event.turnId);
-            }
-            browserVoiceV2Controller.playbackStarted({
-                source: 'speech_scheduler',
-                turnId: event.turnId,
-                naturalClosing: Boolean(event.metadata?.naturalClosing),
-            });
-            if (event.purpose === BROWSER_VOICE_SPEECH_PURPOSES.ACKNOWLEDGEMENT && state.session?.id) {
-                const controller = browserVoiceV2Controller.snapshot();
-                void browserVoiceV2Client.markDelivery({
-                    sessionId: state.session.id,
-                    turnId: event.turnId,
-                    event: 'acknowledgement_started',
-                    timing: {
-                        occurred_at_ms: Date.now(),
-                        speech_item_id: event.itemId,
-                        controller_generation: controller.generation,
-                        provider_connection_generation: controller.connectionGeneration,
-                    },
-                }).catch(() => {});
-            } else if (event.purpose === BROWSER_VOICE_SPEECH_PURPOSES.FINAL) {
-                browserVoiceV2PendingFinalAudioDeliveryEvents.set(event.turnId, event);
-                void markBrowserVoiceV2FinalAudioStarted(event).catch(() => {});
-            } else {
-                void recordBrowserVoiceV2PlaybackEvent(
-                    event,
-                    'playback_started',
-                ).catch(() => {});
-            }
-            state.chatRunState = 'Bean is speaking…';
-            render();
-            return;
-        }
-        if (event.type === 'playback.finished') {
-            void recordBrowserVoiceV2PlaybackEvent(event, 'playback_finished').catch(() => {});
-            browserVoiceV2Controller.playbackFinished({
-                source: 'speech_scheduler',
-                turnId: event.turnId,
-                naturalClosing: Boolean(event.metadata?.naturalClosing),
-                responseExpected: Boolean(event.metadata?.responseExpected),
-                reason: event.reason,
-            });
-            if (event.reason === 'playback_error') {
-                state.error = 'Bean couldn’t play that response, but the full answer is still in chat.';
-            }
-            render();
-            return;
-        }
-        if (event.type === 'playback.ducked') {
-            void recordBrowserVoiceV2PlaybackEvent(event, 'potential_interruption').catch(() => {});
-        }
-        if (event.type === 'playback.volume_restored') {
-            void recordBrowserVoiceV2PlaybackEvent(event, 'interruption_rejected').catch(() => {});
-        }
-        if (event.type === 'playback.stopped') {
-            void recordBrowserVoiceV2PlaybackEvent(
-                event,
-                event.reason === 'meaningful_barge_in' ? 'interruption_confirmed' : 'playback_stopped',
-            ).catch(() => {});
-        }
-    }
-
-    function recordBrowserVoiceV2PlaybackEvent(event, name) {
-        if (!state.session?.id || !event.turnId) return Promise.resolve(false);
-        const controller = browserVoiceV2Controller.snapshot();
-        return browserVoiceV2Client.markDelivery({
-            sessionId: state.session.id,
-            turnId: event.turnId,
-            event: name,
-            timing: {
-                occurred_at_ms: Date.now(),
-                speech_item_id: event.itemId,
-                controller_generation: controller.generation,
-                provider_connection_generation: controller.connectionGeneration,
-                purpose: event.purpose || null,
-                reason: event.reason || null,
-                error_code: event.errorCode || null,
-                error_message: event.error ? String(event.error).slice(0, 240) : null,
+    async function openBeanVoiceProjectionStream(path, { signal } = {}) {
+        return fetch('/api' + path, {
+            method: 'GET',
+            signal,
+            headers: {
+                Accept: 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                ...(state.token ? { Authorization: 'Bearer ' + state.token } : {}),
             },
         });
     }
 
-    function markBrowserVoiceV2FinalAudioStarted(event) {
-        return deliverBrowserVoiceV2ReceiptOnce({
-            key: event.turnId,
-            confirmed: browserVoiceV2FinalAudioDeliveredTurnIds,
-            inFlight: browserVoiceV2FinalAudioDeliveryInFlight,
-            deliver: () => recordBrowserVoiceV2PlaybackEvent(event, 'final_audio_started'),
-        }).then((delivered) => {
-            if (delivered || browserVoiceV2FinalAudioDeliveredTurnIds.has(event.turnId)) {
-                browserVoiceV2PendingFinalAudioDeliveryEvents.delete(event.turnId);
-            }
-            return delivered;
-        });
+    async function ensureBeanVoiceConversationSession() {
+        const workspaceId = String(currentWorkspaceId() || '');
+        const session = await ensureChatSessionForRequest({ workspaceId });
+        if (!session?.id || workspaceId !== String(currentWorkspaceId() || '')) {
+            throw new Error('Bean voice could not establish the current conversation.');
+        }
+        state.session = session;
+        beanVoiceRuntime.attachSession(session.id);
+        loadChatSessions({ resumeToday: false, shouldRender: false })
+            .then(() => render())
+            .catch(() => {});
+        return session;
     }
 
-    function handleBrowserVoiceV2ControllerEffect(effect) {
-        if (!browserVoiceV2Enabled()) return;
-        if (effect.type === BROWSER_VOICE_EFFECTS.DRAFT_CHANGED) {
-            updateVoiceWakeDraft(effect.text || '');
-            return;
+    async function openBeanVoiceRealtimeSession(sdp, context = {}) {
+        const conversationSessionId = Number(context.conversationSessionId);
+        if (!Number.isSafeInteger(conversationSessionId) || conversationSessionId < 1) {
+            throw new Error('Bean voice requires a durable conversation before opening Realtime.');
         }
-        if (effect.type === BROWSER_VOICE_EFFECTS.DISCARD_POTENTIAL_BARGE_IN) {
-            if (applyBrowserVoiceV2PotentialBargeProofCleanup({
-                effect,
-                registry: browserVoiceV2ProviderItems,
-                transcripts: realtimeInputTranscripts,
-                potentialItems: browserVoiceV2PotentialBargeInItems,
-                providerWakeTurnIds: browserVoiceV2ProviderWakeTurnIds,
-                connectionGeneration: realtimeConnectionGeneration,
-                clearDraft: updateVoiceWakeDraft,
-                sendProviderEvent: realtimeSend,
-            })) render();
-            return;
-        }
-        if (effect.type === BROWSER_VOICE_EFFECTS.DISCARD_FOLLOW_UP_CANDIDATE) {
-            if (effect.providerItemId) {
-                browserVoiceV2ProviderItems.consume({
-                    providerItemId: effect.providerItemId,
-                    connectionGeneration: realtimeConnectionGeneration,
-                });
-                browserVoiceV2PotentialBargeInItems.delete(effect.providerItemId);
-                browserVoiceV2ProviderWakeTurnIds.delete(effect.providerItemId);
-                realtimeInputTranscripts.discardItem({ itemId: effect.providerItemId });
-                realtimeSend(buildRealtimeConversationItemDeleteEvent(effect.providerItemId));
-            }
-            updateVoiceWakeDraft('');
-            render();
-            return;
-        }
-        if (effect.type === BROWSER_VOICE_EFFECTS.ACTIVATE_CAPTURE) {
-            state.chatRunState = 'Listening…';
-            queueMicrotask(() => {
-                const controller = browserVoiceV2Controller.snapshot();
-                if (controller.conversationState === BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING
-                    && controller.activeTurn?.id === effect.turnId) {
-                    browserVoiceV2Controller.activationReady({ source: 'local_wake_gate' });
-                }
-            });
-            render();
-            return;
-        }
-        if (effect.type === BROWSER_VOICE_EFFECTS.TURN_READY) {
-            if (effect.clarificationContinuation) {
-                void clarifyBrowserVoiceV2Turn(effect.turnId, effect.clarificationAnswer);
-            } else {
-                void admitBrowserVoiceV2Turn(effect.turnId, effect.transcript, effect.conversationContext);
-            }
-            return;
-        }
-        if (effect.type === BROWSER_VOICE_EFFECTS.SPEAK_CLARIFICATION) {
-            browserVoiceV2Speech.enqueueSpeech({
-                turnId: effect.turnId,
-                text: effect.text,
-                purpose: BROWSER_VOICE_SPEECH_PURPOSES.CLARIFICATION,
-                priority: 20,
-            });
-            state.chatRunState = 'Waiting for your answer…';
-            render();
-            return;
-        }
-        if (effect.type === BROWSER_VOICE_EFFECTS.CLARIFICATION_EXPIRED) {
-            if (effect.durable && effect.turnId && state.session?.id) {
-                // Capture timeout is a UI signal only. Reading the durable
-                // snapshot lets the server enforce its own deadline instead
-                // of turning a browser timer into a second lifecycle owner.
-                void browserVoiceV2Client.snapshot(state.session.id, {
-                    cursor: 0,
-                    timeoutMs: 2500,
-                }).then((snapshot) => {
-                    applyBrowserVoiceV2Snapshot(normalizeVoiceV2Snapshot(snapshot), { initial: false });
-                }).catch(() => {});
-            }
-            state.chatRunState = 'Listening for “Hey Bean”…';
-            render();
-        }
-    }
-
-    function handleBrowserVoiceV2StateChange(snapshot, event = {}) {
-        const previousConversationState = browserVoiceV2LastConversationState;
-        browserVoiceV2LastConversationState = snapshot.conversationState;
-        if (!browserVoiceV2Enabled()) return;
-        if (browserVoiceV2CaptureActive(snapshot)) {
-            browserVoiceV2Speech.captureStarted(`voice_${snapshot.conversationState}`);
-        } else {
-            browserVoiceV2Speech.captureEnded(`voice_${snapshot.conversationState}`, {
-                resume: event.type !== 'stop_playback',
-            });
-        }
-        if (snapshot.conversationState === BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY) {
-            applyBrowserVoiceV2WakeOnlyPrivacyBoundary({
-                snapshot,
-                previousConversationState,
-                event,
-                inputTransport: browserVoiceV2InputTransport,
-                localWakeGate: realtimeLocalWakeGate,
-            });
-            state.chatRunState = 'Listening for “Hey Bean”…';
-        } else if (snapshot.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP) {
-            state.chatRunState = 'Listening for follow-up…';
-        } else if (snapshot.conversationState === BROWSER_VOICE_CONVERSATION_STATES.CAPTURING) {
-            state.chatRunState = 'Listening…';
-        } else if (snapshot.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FAILED) {
-            state.chatRunState = 'Voice unavailable';
-        }
-        if (!browserVoiceV2SpeechBlocked(snapshot)) flushBrowserVoiceV2DeferredFinals();
-    }
-
-    function browserVoiceV2CaptureActive(snapshot = browserVoiceV2Controller.snapshot()) {
-        return Boolean(snapshot.followUpCandidate || snapshot.potentialBargeIn) || [
-            BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING,
-            BROWSER_VOICE_CONVERSATION_STATES.CAPTURING,
-        ].includes(snapshot.conversationState);
-    }
-
-    function browserVoiceV2SpeechBlocked(snapshot = browserVoiceV2Controller.snapshot()) {
-        return Boolean(snapshot.followUpCandidate || snapshot.potentialBargeIn) || [
-            BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING,
-            BROWSER_VOICE_CONVERSATION_STATES.CAPTURING,
-            BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION,
-        ].includes(snapshot.conversationState);
-    }
-
-    function scheduleBrowserVoiceV2Final(turn, controllerTurnId = '') {
-        if (!turn?.turnId || !turn.finalText || browserVoiceV2SpokenFinalTurnIds.has(turn.turnId)) return false;
-        if (browserVoiceV2SpeechBlocked() || !state.voiceWakeListening || !realtimeVoiceActive) {
-            browserVoiceV2DeferredFinals.set(turn.turnId, { turn });
-            return false;
-        }
-        const scheduled = browserVoiceV2Speech.finalReady({
-            turnId: turn.turnId,
-            text: turn.finalText,
-            priority: turn.turnId === controllerTurnId ? 100 : (turn.state === 'failed' ? 15 : 10),
-            metadata: {
-                naturalClosing: Boolean(turn.close_after_response ?? turn.closeAfterResponse ?? false),
-                responseExpected: Boolean(turn.response_expected ?? turn.responseExpected ?? false),
+        return api('/assistant/voice/realtime/session', {
+            method: 'POST',
+            body: {
+                session_id: conversationSessionId,
+                workspace_id: context.workspaceId || null,
+                timezone: resolvedBrowserTimeZone(),
+                controller_generation: Number(context.controllerGeneration) || 0,
+                provider_connection_generation: Number(context.providerConnectionGeneration) || 0,
+                sdp,
             },
+            timeoutMs: 15000,
         });
-        if (scheduled) {
-            browserVoiceV2DeferredFinals.delete(turn.turnId);
-            if (turn.turnId === controllerTurnId) browserVoiceV2Speech.resume();
+    }
+
+    function beanVoiceRunState(view) {
+        return ({
+            starting: 'Starting voice…',
+            wake_only: 'Listening for “Hey Bean”…',
+            pre_admitting: 'Starting voice request…',
+            listening: 'Listening…',
+            thinking: 'Thinking…',
+            working: 'Working…',
+            speaking: 'Bean is speaking…',
+            follow_up: 'Listening…',
+            failed: 'Voice unavailable',
+            off: 'Ready',
+        })[String(view?.mode || '')] || 'Ready';
+    }
+
+    function applyBeanVoiceViewState(view) {
+        beanVoiceView = Object.freeze({ ...view });
+        state.voiceWakeListening = Boolean(view.enabled);
+        state.voiceRecording = Boolean(view.recording);
+        state.voiceProcessing = Boolean(view.processing);
+        const nextVoiceError = String(view.error || '');
+        if (nextVoiceError) {
+            state.error = nextVoiceError;
+            lastBeanVoiceError = nextVoiceError;
+        } else if (lastBeanVoiceError && state.error === lastBeanVoiceError) {
+            state.error = '';
+            lastBeanVoiceError = '';
         }
-        return scheduled;
+        if (!state.busy || view.enabled) state.chatRunState = beanVoiceRunState(view);
+        render();
     }
 
-    function flushBrowserVoiceV2DeferredFinals() {
-        if (browserVoiceV2SpeechBlocked() || !state.voiceWakeListening || !realtimeVoiceActive) return;
-        const controllerTurnId = browserVoiceV2Controller.snapshot().activeTurn?.id || '';
-        [...browserVoiceV2DeferredFinals.values()].forEach(({ turn }) => {
-            scheduleBrowserVoiceV2Final(turn, controllerTurnId);
+    function applyBeanVoiceWorkProjection({ jobs = [], activeJobs = [] } = {}) {
+        const projectedById = new Map();
+        [...activeJobs, ...jobs].forEach((job) => {
+            const key = String(job?.id || `${job?.turnId || 'turn'}:${job?.label || 'work'}`);
+            projectedById.set(key, job);
         });
+        const projected = [...projectedById.values()];
+        const retained = state.beanWorkItems.filter((item) => item.source !== 'bean_voice');
+        const voiceItems = projected.map((job) => ({
+            id: 'voice-job-' + String(job.id || job.turnId || 'active'),
+            label: String(job.label || 'Bean work'),
+            status: String(job.status || 'running'),
+            source: 'bean_voice',
+            turnId: job.turnId || null,
+        }));
+        state.beanWorkItems = [...retained, ...voiceItems];
+        render();
     }
 
-    function removeBrowserVoiceV2ProvisionalMessage(turnId) {
-        const optimisticId = `optimistic-${turnId}`;
-        const before = state.messages.length;
-        state.messages = state.messages.filter((message) => {
-            const messageTurnId = String(message?.metadata?.client_turn_id || '');
-            const provisional = String(message?.id || '') === optimisticId
-                || message?.metadata?.browser_voice_provisional === true;
-            return !(messageTurnId === turnId && provisional);
-        });
-        return state.messages.length !== before;
-    }
-
-    function reportBrowserVoiceV2ClientFailure(error, {
-        stage,
-        identity = [],
-        sessionId = null,
-        turnId = '',
-        label = 'Browser Voice v2 client failure',
-    }) {
-        const stableTurnId = String(turnId || '');
-        const resolvedSessionId = Number(
-            sessionId
-            || realtimeTurnSessionIds.get(stableTurnId)
-            || state.session?.id,
-        );
+    function reportBeanVoiceFailure(error, context = {}) {
+        const requestedStage = String(context.stage || 'connection');
+        const stage = requestedStage === 'playback_authorization'
+            ? 'playback'
+            : [
+                'local_wake',
+                'startup',
+                'admission',
+                'connection',
+                'delivery',
+                'projection',
+                'playback',
+                'realtime_sideband',
+            ].includes(requestedStage)
+                ? requestedStage
+                : 'connection';
+        const sessionId = Number(context.sessionId || state.session?.id);
+        const turnId = String(context.turnId || '');
+        const identity = [
+            requestedStage,
+            turnId,
+            context.realtimeSessionId || '',
+            context.controllerGeneration ?? '',
+            context.providerConnectionGeneration ?? '',
+            error?.code || error?.name || '',
+        ];
         const body = {
             failure_id: voiceClientFailureId(stage, voiceClientFailureIdentityParts(
                 stage,
@@ -9539,417 +9013,16 @@ export function mountHeyBeanWebApp(mount) {
                 browserVoiceV2ClientFailurePageNonce,
             )),
             ...sanitizedVoiceClientFailure(error, stage),
-            ...(Number.isSafeInteger(resolvedSessionId) && resolvedSessionId > 0
-                ? { session_id: resolvedSessionId }
-                : {}),
-            ...(stableTurnId ? { turn_id: stableTurnId } : {}),
+            ...(Number.isSafeInteger(sessionId) && sessionId > 0 ? { session_id: sessionId } : {}),
+            ...(turnId ? { turn_id: turnId } : {}),
         };
         if (browserVoiceV2ClientFailureReporter.enqueue(body)) {
-            console.warn(label, body);
+            console.warn('Bean voice client failure', body);
         }
         return body;
     }
 
-    function failBrowserVoiceV2Admission(turnId, isCurrent, error = null) {
-        removeBrowserVoiceV2ProvisionalMessage(turnId);
-        if (!isCurrent || browserVoiceV2AdmissionFailureTurnIds.has(turnId)) {
-            render();
-            return;
-        }
-
-        browserVoiceV2AdmissionFailureTurnIds.add(turnId);
-        reportBrowserVoiceV2ClientFailure(error, {
-            stage: 'admission',
-            identity: [turnId],
-            turnId,
-            label: 'Browser Voice v2 admission failure',
-        });
-        browserVoiceV2Controller.admissionFailed(turnId, 'admission_recovery_exhausted', {
-            source: 'admission_recovery',
-        });
-        state.error = 'Voice request was not admitted. Check the connection and try again.';
-        render();
-    }
-
-    async function admitBrowserVoiceV2Turn(turnId, transcript, conversationContext = null) {
-        const content = String(transcript || '').trim();
-        if (!turnId || !content) return;
-        const admissionScope = browserVoiceV2AdmissionRegistry.begin(turnId);
-        const admissionStillCurrent = () => browserVoiceV2AdmissionRegistry.isCurrent(admissionScope);
-        let sessionId = '';
-        let admissionInput = null;
-        state.chatDraft = '';
-        state.error = '';
-        if (!state.messages.some((message) => String(message?.metadata?.client_turn_id || '') === turnId)) {
-            state.messages.push({
-                id: `optimistic-${turnId}`,
-                role: 'user',
-                content,
-                metadata: { browser_voice_v2: true, browser_voice_provisional: true, client_turn_id: turnId },
-            });
-        }
-        state.chatRunState = 'Sending…';
-        render();
-        try {
-            const session = await ensureRealtimePersistenceSession(turnId);
-            sessionId = String(session?.id || '');
-            if (!sessionId) throw new Error('Bean could not create a durable conversation.');
-            if (browserVoiceV2Client.sessionId !== sessionId || !browserVoiceV2Client.running) {
-                browserVoiceV2Client.start(sessionId);
-            }
-            const controllerState = browserVoiceV2Controller.snapshot();
-            admissionInput = {
-                turnId,
-                sessionId,
-                transcript: content,
-                // Successful reads still return at their normal low latency. The
-                // wider transport envelope prevents a transient network delay
-                // from aborting an otherwise healthy, deadline-owned server turn.
-                timeoutMs: 8500,
-                timezone: resolvedBrowserTimeZone(),
-                controllerGeneration: controllerState.generation,
-                providerConnectionGeneration: controllerState.connectionGeneration,
-                transcriptTiming: { final_at_ms: Date.now() },
-                conversationContext,
-                clientContext: {
-                    voice_mode_active: Boolean(realtimeVoiceActive && state.voiceWakeListening),
-                    wake_detection_enabled: Boolean(state.voiceWakeListening),
-                    playback_state: String(browserVoiceV2Speech.snapshot().state || 'idle'),
-                },
-                locationContext: profileHomeCity() ? {
-                    label: profileHomeCity(),
-                    is_local: true,
-                    source: 'profile_home_city',
-                } : null,
-            };
-            const admitted = await browserVoiceV2Client.admit(admissionInput);
-            applyBrowserVoiceV2Snapshot(normalizeVoiceV2Snapshot(admitted), { initial: false });
-        } catch (error) {
-            if (sessionId && admissionInput) {
-                let recovery;
-                try {
-                    recovery = await recoverBrowserVoiceV2Admission({
-                        client: browserVoiceV2Client,
-                        turnId,
-                        sessionId,
-                        admissionInput,
-                        initialError: error,
-                        isCurrent: admissionStillCurrent,
-                        deadlineMs: 3000,
-                    });
-                } catch (recoveryError) {
-                    recovery = {
-                        status: admissionStillCurrent() ? 'absent' : 'stale',
-                        projection: null,
-                        error: recoveryError,
-                    };
-                }
-                if (recovery.projection) {
-                    applyBrowserVoiceV2Snapshot(recovery.projection, { initial: false });
-                }
-                if (['recovered', 'stale'].includes(recovery.status) && recovery.projection) {
-                    return;
-                }
-                if (browserVoiceV2TurnStates.has(turnId)) return;
-                failBrowserVoiceV2Admission(
-                    turnId,
-                    admissionStillCurrent() && recovery.status !== 'stale',
-                    recovery.error || error,
-                );
-                return;
-            }
-            failBrowserVoiceV2Admission(turnId, admissionStillCurrent(), error);
-        } finally {
-            browserVoiceV2AdmissionRegistry.finish(admissionScope);
-        }
-    }
-
-    async function clarifyBrowserVoiceV2Turn(turnId, answer) {
-        const content = String(answer || '').trim();
-        const sessionId = String(state.session?.id || '');
-        if (!turnId || !content || !sessionId) return;
-        const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        const clarificationId = `${turnId}:clarification:${suffix}`;
-        updateVoiceWakeDraft(content);
-        state.error = '';
-        state.chatRunState = 'Sending…';
-        render();
-
-        let lastError = null;
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-            try {
-                const response = await browserVoiceV2Client.clarify({
-                    sessionId,
-                    turnId,
-                    answer: content,
-                    clarificationId,
-                    timeoutMs: attempt === 0 ? 8500 : 3000,
-                });
-                updateVoiceWakeDraft('');
-                applyBrowserVoiceV2Snapshot(normalizeVoiceV2Snapshot(response), { initial: false });
-                return;
-            } catch (error) {
-                lastError = error;
-            }
-        }
-
-        try {
-            const snapshot = normalizeVoiceV2Snapshot(await browserVoiceV2Client.snapshot(sessionId, {
-                cursor: 0,
-                timeoutMs: 2500,
-            }));
-            const durableTurn = snapshot.turns.find((turn) => turn.turnId === turnId);
-            if (durableTurn?.resolvedClarificationIds?.includes(clarificationId)) {
-                updateVoiceWakeDraft('');
-                applyBrowserVoiceV2Snapshot(snapshot, { initial: false });
-                return;
-            }
-        } catch (error) {
-            lastError = error;
-        }
-
-        state.error = 'I couldn’t save that answer because the connection did not recover. Your words are still in the input so you can try again.';
-        state.chatRunState = 'Waiting for your answer…';
-        reportBrowserVoiceV2ClientFailure(lastError, {
-            stage: 'clarification',
-            identity: [clarificationId],
-            sessionId,
-            turnId,
-            label: 'Browser Voice v2 clarification failure',
-        });
-        render();
-    }
-
-    function applyBrowserVoiceV2Snapshot(projection, context = {}) {
-        if (!browserVoiceV2Enabled()) return;
-        const acceptedTurns = projection.turns.filter((turn) => {
-            const previousVersion = Number(browserVoiceV2TurnVersions.get(turn.turnId) || 0);
-            if (Number(turn.version || 0) < previousVersion) return false;
-            browserVoiceV2TurnVersions.set(turn.turnId, Math.max(previousVersion, Number(turn.version || 0)));
-            return true;
-        });
-        const turnIds = new Set(acceptedTurns.map((turn) => turn.turnId));
-        const retainedMessages = state.messages.filter((message) => {
-            const turnId = String(message?.metadata?.client_turn_id || message?.turn_id || '');
-            return !turnIds.has(turnId);
-        });
-        const durableMessages = projection.messages
-            .filter((message) => turnIds.has(String(message.turn_id || '')))
-            .filter((message) => message.visible_in_chat !== false)
-            .map((message) => ({
-                id: message.id,
-                role: message.role,
-                content: message.content,
-                metadata: {
-                    browser_voice_v2: true,
-                    client_turn_id: message.turn_id,
-                },
-            }));
-        state.messages = [...retainedMessages, ...durableMessages];
-
-        const statusRanks = { queued: 1, running: 2, finalizing: 3, completed: 4, failed: 4, canceled: 4, cancelled: 4 };
-        const acceptedJobs = projection.jobs
-            .filter((job) => turnIds.has(String(job.turnId || '')))
-            .filter((job) => {
-                const previous = browserVoiceV2JobStates.get(job.id);
-                if (previous && (statusRanks[job.status] || 0) < (statusRanks[previous] || 0)) return false;
-                browserVoiceV2JobStates.set(job.id, job.status);
-                return true;
-            });
-        const acceptedJobUiIds = new Set(acceptedJobs.map((job) => `browser-voice-v2-job-${job.id}`));
-        const retainedWork = state.beanWorkItems.filter((item) => !acceptedJobUiIds.has(String(item.id || '')));
-        const v2Work = acceptedJobs.filter((job) => {
-            if (!['completed', 'failed', 'canceled', 'cancelled'].includes(job.status)) return true;
-            const terminalAt = Date.parse(String(job.updated_at || job.completed_at || ''));
-            return !Number.isFinite(terminalAt) || Date.now() - terminalAt < 3000;
-        }).map((job, order) => ({
-            id: `browser-voice-v2-job-${job.id}`,
-            label: job.label || 'Bean work',
-            status: job.status,
-            source: 'browser_voice_v2',
-            clientRequestId: job.turnId,
-            order,
-        }));
-        state.beanWorkItems = [...retainedWork, ...v2Work];
-
-        const controllerTurnId = browserVoiceV2Controller.snapshot().activeTurn?.id || '';
-        acceptedTurns.forEach((turn) => {
-            const stopDirectiveId = String(turn.stopPlaybackDirectiveId || '').trim();
-            if (turn.stopPlayback && stopDirectiveId
-                && !browserVoiceV2AppliedStopDirectiveIds.has(stopDirectiveId)) {
-                browserVoiceV2AppliedStopDirectiveIds.add(stopDirectiveId);
-                browserVoiceV2Controller.stopPlayback('semantic_spoken_stop');
-                if (state.session?.id) {
-                    const controller = browserVoiceV2Controller.snapshot();
-                    void browserVoiceV2Client.markDelivery({
-                        sessionId: state.session.id,
-                        turnId: turn.turnId,
-                        event: 'playback_stopped',
-                        timing: {
-                            occurred_at_ms: Date.now(),
-                            directive_id: stopDirectiveId,
-                            reason: 'semantic_spoken_stop',
-                            controller_generation: controller.generation,
-                            provider_connection_generation: controller.connectionGeneration,
-                        },
-                    }).catch(() => {});
-                }
-            }
-
-            const previousState = browserVoiceV2TurnStates.get(turn.turnId);
-            const terminal = ['completed', 'failed', 'canceled'].includes(turn.state);
-            const becameTerminal = terminal && previousState && !['completed', 'failed', 'canceled'].includes(previousState);
-            const admittedTerminal = terminal && !context.initial && previousState === undefined;
-            browserVoiceV2TurnStates.set(turn.turnId, turn.state);
-
-            if (turn.state === 'awaiting_clarification' && turn.clarificationQuestion) {
-                const promptSequence = Math.max(1, Number(turn.clarificationSequence || 1));
-                const promptedSequence = Number(browserVoiceV2ClarificationPromptSequences.get(turn.turnId) || 0);
-                if (promptSequence > promptedSequence) {
-                    const controller = browserVoiceV2Controller.snapshot();
-                    if (controller.activeTurn?.id === turn.turnId
-                        && controller.activeTurn.submitted
-                        && controller.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP) {
-                        browserVoiceV2Controller.admissionClarificationRequired(
-                            turn.clarificationQuestion,
-                            { source: 'durable_voice_turn', turnId: turn.turnId },
-                        );
-                    } else if ([
-                        BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY,
-                        BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP,
-                    ].includes(controller.conversationState)) {
-                        browserVoiceV2Controller.restoreClarification({
-                            turnId: turn.turnId,
-                            transcript: turn.transcript,
-                            question: turn.clarificationQuestion,
-                        });
-                    }
-                    const restored = browserVoiceV2Controller.snapshot();
-                    if (restored.conversationState === BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION
-                        && restored.activeTurn?.id === turn.turnId) {
-                        browserVoiceV2ClarificationPromptSequences.set(turn.turnId, promptSequence);
-                    }
-                }
-            } else {
-                browserVoiceV2ClarificationPromptSequences.delete(turn.turnId);
-            }
-
-            if (turn.finalAudioStarted) {
-                browserVoiceV2SpokenFinalTurnIds.add(turn.turnId);
-                browserVoiceV2FinalAudioDeliveredTurnIds.add(turn.turnId);
-                browserVoiceV2PendingFinalAudioDeliveryEvents.delete(turn.turnId);
-                browserVoiceV2ReloadPendingFinals.delete(turn.turnId);
-                browserVoiceV2DeferredFinals.delete(turn.turnId);
-            } else if (browserVoiceV2PendingFinalAudioDeliveryEvents.has(turn.turnId)) {
-                void markBrowserVoiceV2FinalAudioStarted(
-                    browserVoiceV2PendingFinalAudioDeliveryEvents.get(turn.turnId),
-                ).catch(() => {});
-            }
-
-            if (turn.acknowledged_at) browserVoiceV2AcknowledgedTurnIds.add(turn.turnId);
-            if (turn.acknowledgementRequired && turn.acknowledgementText
-                && !browserVoiceV2AcknowledgedTurnIds.has(turn.turnId)
-                && !browserVoiceV2SpeechBlocked()
-                && ['accepted', 'running'].includes(turn.state)) {
-                const scheduled = browserVoiceV2Speech.scheduleAcknowledgement({
-                    turnId: turn.turnId,
-                    text: turn.acknowledgementText,
-                    graceMs: 350,
-                    priority: turn.turnId === controllerTurnId ? 100 : 10,
-                });
-                if (scheduled) browserVoiceV2AcknowledgedTurnIds.add(turn.turnId);
-            }
-
-            if (turn.finalDeliveredAt) {
-                browserVoiceV2FinalDeliveredTurnIds.add(turn.turnId);
-            } else if (turn.finalText && !browserVoiceV2FinalDeliveredTurnIds.has(turn.turnId)
-                && state.session?.id) {
-                void deliverBrowserVoiceV2ReceiptOnce({
-                    key: turn.turnId,
-                    confirmed: browserVoiceV2FinalDeliveredTurnIds,
-                    inFlight: browserVoiceV2FinalTextDeliveryInFlight,
-                    deliver: () => {
-                        const controller = browserVoiceV2Controller.snapshot();
-                        return browserVoiceV2Client.markDelivery({
-                            sessionId: state.session.id,
-                            turnId: turn.turnId,
-                            event: 'final_text_delivered',
-                            timing: {
-                                occurred_at_ms: Date.now(),
-                                controller_generation: controller.generation,
-                                provider_connection_generation: controller.connectionGeneration,
-                            },
-                        });
-                    },
-                }).catch(() => {});
-            }
-
-            if (turn.finalText && ['completed', 'failed'].includes(turn.state)
-                && context.initial && !turn.finalAudioStarted) {
-                browserVoiceV2ReloadPendingFinals.set(turn.turnId, turn);
-            } else if (turn.finalText && ['completed', 'failed'].includes(turn.state)
-                && (becameTerminal || admittedTerminal)) {
-                scheduleBrowserVoiceV2Final(turn, controllerTurnId);
-            }
-        });
-
-        if (!projection.eventPageFull && browserVoiceV2ReloadPendingFinals.size) {
-            [...browserVoiceV2ReloadPendingFinals.entries()].forEach(([turnId, turn]) => {
-                browserVoiceV2ReloadPendingFinals.delete(turnId);
-                if (!browserVoiceV2FinalAudioDeliveredTurnIds.has(turnId)) {
-                    scheduleBrowserVoiceV2Final(turn, controllerTurnId);
-                }
-            });
-        }
-
-        if (projection.activeJobs.length) {
-            state.chatRunState = state.voiceWakeListening ? state.chatRunState : 'Working…';
-        } else if (!browserVoiceV2Controller.snapshot().speechActive
-            && browserVoiceV2Controller.snapshot().conversationState === BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY) {
-            state.chatRunState = state.voiceWakeListening ? 'Listening for “Hey Bean”…' : 'Ready';
-        }
-        if (context.initial && projection.messages.length) scrollChatToBottom();
-        render();
-    }
-
-    function handleBrowserVoiceV2StateError(error, context = {}) {
-        if (!browserVoiceV2Enabled() || Number(context.failureCount || 0) < 3) return;
-        const abortSignature = `${error?.name || ''} ${error?.code || ''} ${error?.message || ''}`;
-        if (/abort/i.test(abortSignature)) return;
-        state.error = friendlyError(error, 'refresh Bean voice work');
-        render();
-    }
-
-    function updateVoiceWakeDraft(text) {
-        state.chatDraft = text;
-        mount.querySelectorAll('textarea[name="message"]').forEach((textarea) => {
-            textarea.value = text;
-            resizeChatInput(textarea);
-        });
-    }
-
-    function applyRealtimeVoiceActivity() {
-        const level = state.voiceRecording ? realtimeVoiceActivityLevel : 0;
-        const properties = realtimeVoiceActivityProperties(level);
-        mount.querySelectorAll('.hb-chat-dock').forEach((dock) => {
-            dock.classList.toggle('hb-chat-dock-hearing', state.voiceRecording);
-            Object.entries(properties).forEach(([name, value]) => dock.style.setProperty(name, value));
-        });
-        mount.querySelectorAll('.hb-chat-voice-button').forEach((button) => {
-            button.classList.toggle('hb-chat-voice-button-hearing', state.voiceRecording);
-            Object.entries(properties).forEach(([name, value]) => button.style.setProperty(name, value));
-            button.setAttribute(
-                'aria-label',
-                state.voiceRecording
-                    ? 'Microphone is hearing you'
-                    : state.voiceWakeListening
-                        ? 'Turn off realtime Bean voice'
-                        : 'Turn on realtime Bean voice',
-            );
-        });
-    }
-
-    function realtimeVoiceActivityProperties(level) {
+    function beanVoiceActivityProperties(level) {
         const normalized = Math.max(0, Math.min(1, Number(level) || 0));
         return {
             '--hb-voice-level': normalized.toFixed(3),
@@ -9957,1085 +9030,42 @@ export function mountHeyBeanWebApp(mount) {
             '--hb-voice-opacity': (0.48 + normalized * 0.5).toFixed(3),
             '--hb-voice-border-opacity': (0.46 + normalized * 0.42).toFixed(3),
             '--hb-voice-glow-opacity': (0.12 + normalized * 0.26).toFixed(3),
-            '--hb-voice-glow-size': `${(5 + normalized * 12).toFixed(1)}px`,
-            '--hb-voice-dock-ring': `${(1 + normalized * 2).toFixed(1)}px`,
+            '--hb-voice-glow-size': (5 + normalized * 12).toFixed(1) + 'px',
+            '--hb-voice-dock-ring': (1 + normalized * 2).toFixed(1) + 'px',
             '--hb-voice-dock-glow-opacity': (0.08 + normalized * 0.18).toFixed(3),
         };
     }
 
-    function realtimeVoiceActivityStyle(level) {
-        return Object.entries(realtimeVoiceActivityProperties(level))
-            .map(([name, value]) => `${name}: ${value}`)
+    function beanVoiceActivityStyle(level) {
+        return Object.entries(beanVoiceActivityProperties(level))
+            .map(([name, value]) => name + ': ' + value)
             .join('; ');
     }
 
-    function updateRealtimeVoiceActivity(level, { decay = true } = {}) {
-        window.clearTimeout(realtimeVoiceActivityDecayTimer);
-        realtimeVoiceActivityDecayTimer = 0;
-        const normalized = Math.max(0, Math.min(1, Number(level) || 0));
-        const microphoneAvailable = Boolean(
-            realtimeLocalWakeGate
-            && state.voiceWakeListening
-            && realtimeVoiceActive,
-        );
-        realtimeVoiceActivityLevel = microphoneAvailable ? normalized : 0;
-        state.voiceRecording = microphoneAvailable && normalized >= 0.055;
-        applyRealtimeVoiceActivity();
-
-        if (state.voiceRecording && decay) {
-            realtimeVoiceActivityDecayTimer = window.setTimeout(() => {
-                updateRealtimeVoiceActivity(0, { decay: false });
-            }, 180);
-        }
-    }
-
-    function clearRealtimeVoiceInputFeedback() {
-        window.clearTimeout(realtimeVoiceActivityDecayTimer);
-        realtimeVoiceActivityDecayTimer = 0;
-        realtimeVoiceActivityLevel = 0;
-        state.voiceRecording = false;
-        realtimeInputTranscripts.clear();
-        browserVoiceV2ProviderItems.clear();
-        browserVoiceV2PotentialBargeInItems.clear();
-        browserVoiceV2ProviderWakeTurnIds.clear();
-        browserVoiceV2PendingLocalWakeAdmissions.length = 0;
-        applyRealtimeVoiceActivity();
-    }
-
-    function realtimeSend(event) {
-        if (!realtimeDataChannel || realtimeDataChannel.readyState !== 'open') return false;
-        realtimeDataChannel.send(JSON.stringify(event));
-        return true;
-    }
-
-    async function openRealtimeSession(sdp) {
-        if (!state.session?.id) {
-            const onboarding = needsBeanOnboarding();
-            state.session = await api('/assistant/sessions', {
-                method: 'POST',
-                body: chatSessionPayload(onboarding),
-            });
-        }
-        return api('/assistant/voice/realtime/session', {
-            method: 'POST',
-            body: {
-                timezone: resolvedBrowserTimeZone(),
-                sdp,
-            },
-            timeoutMs: 15000,
-        });
-    }
-
-    function clearRealtimeDisconnectedTimer() {
-        window.clearTimeout(realtimeDisconnectedTimer);
-        realtimeDisconnectedTimer = 0;
-    }
-
-    function clearRealtimeMicrophoneMuteTimer() {
-        window.clearTimeout(realtimeMicrophoneMuteTimer);
-        realtimeMicrophoneMuteTimer = 0;
-    }
-
-    function clearRealtimeMediaRecoveryTimers() {
-        clearRealtimeDisconnectedTimer();
-        clearRealtimeMicrophoneMuteTimer();
-    }
-
-    function scheduleRealtimeDisconnectedTeardown(peerConnection, connectionIsCurrent) {
-        clearRealtimeDisconnectedTimer();
-        realtimeDisconnectedTimer = window.setTimeout(() => {
-            realtimeDisconnectedTimer = 0;
-            if (!connectionIsCurrent() || peerConnection.connectionState === 'connected') return;
-            handleRealtimeConnectionLoss('Bean voice could not recover its connection. Tap the Bean button to reconnect.');
-        }, realtimeMediaRecoveryGraceMs);
-    }
-
-    function scheduleRealtimeMicrophoneMuteTeardown(audioTrack, connectionIsCurrent) {
-        clearRealtimeMicrophoneMuteTimer();
-        realtimeMicrophoneMuteTimer = window.setTimeout(() => {
-            realtimeMicrophoneMuteTimer = 0;
-            if (!connectionIsCurrent() || !audioTrack.muted || audioTrack.readyState === 'ended') return;
-            handleRealtimeConnectionLoss('Bean could not recover the microphone. Tap the Bean button to reconnect.');
-        }, realtimeMediaRecoveryGraceMs);
-    }
-
-    function localWakeConnectionIsCurrent(gate, connectionGeneration) {
-        return connectionGeneration === realtimeConnectionGeneration
-            && realtimeLocalWakeGate === gate;
-    }
-
-    function handleLocalWakeDetected(gate, connectionGeneration, detection = {}) {
-        if (!localWakeConnectionIsCurrent(gate, connectionGeneration)) return;
-
-        const controller = browserVoiceV2Controller.snapshot();
-        const completingStartup = state.voiceProcessing
-            && realtimeVoiceActive
-            && gate.isConsumerAdmissionReady()
-            && controller.conversationState === BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY;
-        if (!browserVoiceV2Enabled()
-            || !realtimeVoiceActive
-            || (!state.voiceWakeListening && !completingStartup)) {
-            gate.resetAfterTurn();
-            return;
-        }
-
-        if (browserVoiceV2LocalWakeMatchesCompletedBarge({
-            snapshot: controller,
-            completedBarge: browserVoiceV2CompletedProviderBarge,
-            connectionGeneration,
-            gateGeneration: gate.currentGeneration(),
-            sourceSequence: detection.sourceSequence,
-        })) {
-            // This exact local PCM was already accepted as one meaningful
-            // interruption while the conversation was active. The controller
-            // owns that turn now; a delayed detector callback cannot replace it.
-            browserVoiceV2CompletedProviderBarge = null;
-            return;
-        }
-
-        browserVoiceV2CompletedProviderBarge = null;
-        browserVoiceV2LastProviderInputPcm = null;
-        const wake = activateBrowserVoiceV2LocalWakeTransport({
-            controller: browserVoiceV2Controller,
-            inputTransport: browserVoiceV2InputTransport,
-            generation: gate.currentGeneration(),
-        });
-        const admission = createBrowserVoiceProviderTurnIdentityV2(browserVoiceV2Controller, {
-            turnId: wake.state.activeTurn?.id || '',
-            inputGeneration: gate.currentGeneration(),
-            throughSourceSequence: detection.sourceSequence,
-            providerConnectionGeneration: connectionGeneration,
-        });
-        if (!admission) {
-            failBrowserVoiceV2ProviderProtocol(
-                BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_TURN_MISMATCH,
-            );
-            return;
-        }
-        browserVoiceV2PendingLocalWakeAdmissions.push(admission);
-        updateVoiceWakeDraft('');
-        state.chatRunState = 'Listening…';
-        render();
-    }
-
-    function handleLocalWakeDiagnostic(gate, connectionGeneration, diagnostic = {}) {
-        if (!localWakeConnectionIsCurrent(gate, connectionGeneration)) return;
-        // LocalWakeGate exposes only bounded wake-decision metadata—never PCM or
-        // dormant transcript text. Keep local decisions visible during
-        // development without turning diagnostic telemetry into another owner.
-        console.info('Browser Voice v2 local wake decision', diagnostic);
-    }
-
-    function handleLocalWakeFailure(gate, connectionGeneration, error = null) {
-        if (!localWakeConnectionIsCurrent(gate, connectionGeneration)) return;
-        reportBrowserVoiceV2ClientFailure(error, {
-            stage: 'local_wake',
-            identity: [connectionGeneration, gate.currentGeneration()],
-            label: 'Browser Voice v2 local wake failure',
-        });
-        handleRealtimeConnectionLoss(
-            'Private “Hey Bean” detection stopped. Tap the Bean button to reconnect.',
-            { reportFailure: false },
-        );
-    }
-
-    async function waitForLocalWakeReady(gate, connectionGeneration, timeoutMs = 20000) {
-        const deadline = Date.now() + timeoutMs;
-        while (localWakeConnectionIsCurrent(gate, connectionGeneration) && !gate.isReady()) {
-            if (gate.state === 'failed') {
-                throw new Error('Private “Hey Bean” detection could not start.');
-            }
-            if (Date.now() >= deadline) {
-                throw new Error('Private “Hey Bean” detection took too long to start.');
-            }
-            await new Promise((resolve) => window.setTimeout(resolve, 50));
-        }
-        if (!localWakeConnectionIsCurrent(gate, connectionGeneration) || !gate.isReady()) {
-            throw new Error('Realtime voice connection was superseded.');
-        }
-    }
-
-    async function waitForLocalWakeConsumerAdmission(gate, connectionGeneration, timeoutMs = 2000) {
-        const deadline = Date.now() + timeoutMs;
-        while (localWakeConnectionIsCurrent(gate, connectionGeneration)
-            && !gate.isConsumerAdmissionReady()) {
-            if (gate.state === 'failed') {
-                throw new Error('Private “Hey Bean” detection could not become wake-ready.');
-            }
-            if (Date.now() >= deadline) {
-                throw new Error('Private “Hey Bean” detection took too long to become wake-ready.');
-            }
-            await new Promise((resolve) => window.setTimeout(resolve, 20));
-        }
-        if (!localWakeConnectionIsCurrent(gate, connectionGeneration)
-            || !gate.isConsumerAdmissionReady()) {
-            throw new Error('Realtime voice connection was superseded.');
-        }
-    }
-
-    async function disposeRealtimeConnectionAttempt({
-        localWakeGate,
-        rawMicrophoneStream,
-        dataChannel,
-        peerConnection,
-        remoteAudio,
-    } = {}) {
-        if (realtimeLocalWakeGate === localWakeGate) realtimeLocalWakeGate = null;
-        if (realtimeRawMicrophoneStream === rawMicrophoneStream) realtimeRawMicrophoneStream = null;
-        if (realtimeDataChannel === dataChannel) realtimeDataChannel = null;
-        if (realtimePeerConnection === peerConnection) realtimePeerConnection = null;
-        if (realtimeRemoteAudio === remoteAudio) realtimeRemoteAudio = null;
-        realtimeSession = null;
-        try { dataChannel?.close?.(); } catch (_) {}
-        try { peerConnection?.close?.(); } catch (_) {}
-        rawMicrophoneStream?.getTracks?.().forEach((track) => track.stop());
-        browserVoiceV2InputTransport.deactivate();
-        try {
-            remoteAudio?.pause?.();
-            if (remoteAudio) remoteAudio.srcObject = null;
-        } catch (_) {}
-        try { await localWakeGate?.stop?.(); } catch (_) {}
-        clearRealtimeVoiceInputFeedback();
-    }
-
-    async function connectRealtimeVoice(connectionGeneration, duplicateCallRetry = 0) {
-        if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
-            throw new Error('Realtime voice needs microphone and WebRTC support in this browser.');
-        }
-        if (connectionGeneration !== realtimeConnectionGeneration) {
-            throw new Error('Realtime voice connection was superseded.');
-        }
-
-        clearRealtimeMediaRecoveryTimers();
-        const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
-        let preparedAudioContext = null;
-        if (typeof AudioContextConstructor === 'function') {
-            preparedAudioContext = new AudioContextConstructor();
-            if (preparedAudioContext.state === 'suspended' && typeof preparedAudioContext.resume === 'function') {
-                void preparedAudioContext.resume().catch(() => {});
-            }
-        }
-        const localWakeGate = new LocalWakeGate({
-            audioContext: preparedAudioContext,
-            consumerReady: false,
-            onDetected: (event) => handleLocalWakeDetected(localWakeGate, connectionGeneration, event),
-            onActivatedPcm: (event) => {
-                if (!browserVoiceV2InputTransport.append(event)) {
-                    throw new Error('Activated microphone audio was not accepted by transcription.');
-                }
-            },
-            onActivity: ({ level }) => {
-                if (localWakeConnectionIsCurrent(localWakeGate, connectionGeneration)) {
-                    updateRealtimeVoiceActivity(level);
-                }
-            },
-            onDiagnostic: (diagnostic) => handleLocalWakeDiagnostic(
-                localWakeGate,
-                connectionGeneration,
-                diagnostic,
-            ),
-            onError: (error) => handleLocalWakeFailure(localWakeGate, connectionGeneration, error),
-        });
-        realtimeLocalWakeGate = localWakeGate;
-
-        const rawMicrophoneStream = await acquireRealtimeMicrophone(
-            (constraints) => navigator.mediaDevices.getUserMedia(constraints),
-            realtimeMicrophoneConstraints(),
-        );
-        if (connectionGeneration !== realtimeConnectionGeneration) {
-            rawMicrophoneStream.getTracks().forEach((track) => track.stop());
-            throw new Error('Realtime voice connection was superseded.');
-        }
-        const [rawAudioTrack] = rawMicrophoneStream.getAudioTracks();
-        if (!rawAudioTrack) throw new Error('Microphone did not provide an audio track.');
-        realtimeRawMicrophoneStream = rawMicrophoneStream;
-
-        const localWakePromise = localWakeGate.start(rawMicrophoneStream).then(async (localAudio) => {
-            await waitForLocalWakeReady(localWakeGate, connectionGeneration);
-            return localAudio;
-        });
-        const peerConnection = new RTCPeerConnection();
-        const remoteAudio = new Audio();
-        remoteAudio.autoplay = true;
-        realtimePeerConnection = peerConnection;
-        realtimeRemoteAudio = remoteAudio;
-        peerConnection.ontrack = (event) => {
-            if (connectionGeneration !== realtimeConnectionGeneration || realtimePeerConnection !== peerConnection) return;
-            const [stream] = event.streams;
-            if (stream) remoteAudio.srcObject = stream;
-        };
-        peerConnection.addTransceiver('audio', { direction: 'recvonly' });
-
-        realtimeDataChannel = peerConnection.createDataChannel('oai-events');
-        const dataChannel = realtimeDataChannel;
-        let dataChannelReady = false;
-        let mediaReady = false;
-        let resolveTransportReady;
-        let rejectTransportReady;
-        const transportReady = new Promise((resolve, reject) => {
-            resolveTransportReady = resolve;
-            rejectTransportReady = reject;
-        });
-        transportReady.catch(() => {});
-        const markTransportReady = () => {
-            if (dataChannelReady && mediaReady) resolveTransportReady();
-        };
-        const connectionIsCurrent = () => connectionGeneration === realtimeConnectionGeneration
-            && realtimeDataChannel === dataChannel
-            && realtimePeerConnection === peerConnection
-            && realtimeLocalWakeGate === localWakeGate;
-        rawAudioTrack.addEventListener('ended', () => {
-            if (connectionIsCurrent()) handleRealtimeConnectionLoss('Bean lost access to the microphone. Tap the Bean button to reconnect.');
-        });
-        rawAudioTrack.addEventListener('mute', () => {
-            if (connectionIsCurrent()) scheduleRealtimeMicrophoneMuteTeardown(rawAudioTrack, connectionIsCurrent);
-        });
-        rawAudioTrack.addEventListener('unmute', () => {
-            if (connectionIsCurrent()) clearRealtimeMicrophoneMuteTimer();
-        });
-        dataChannel.addEventListener('open', () => {
-            if (!connectionIsCurrent()) return;
-            dataChannelReady = true;
-            markTransportReady();
-        });
-        dataChannel.addEventListener('message', (event) => {
-            if (connectionIsCurrent()) handleRealtimeEvent(event);
-        });
-        dataChannel.addEventListener('close', () => {
-            rejectTransportReady(new Error('Realtime voice data channel closed before it became ready.'));
-            if (connectionIsCurrent()) handleRealtimeConnectionLoss('Bean voice disconnected. Tap the Bean button to reconnect.');
-        });
-        dataChannel.addEventListener('error', () => {
-            rejectTransportReady(new Error('Realtime voice data channel failed before it became ready.'));
-            if (connectionIsCurrent()) handleRealtimeConnectionLoss('Bean voice hit a connection problem. Tap the Bean button to reconnect.');
-        });
-        peerConnection.addEventListener('connectionstatechange', () => {
-            if (!connectionIsCurrent()) return;
-            if (peerConnection.connectionState === 'disconnected') {
-                scheduleRealtimeDisconnectedTeardown(peerConnection, connectionIsCurrent);
-                return;
-            }
-            if (peerConnection.connectionState === 'connected') {
-                mediaReady = true;
-                markTransportReady();
-                clearRealtimeDisconnectedTimer();
-                return;
-            }
-            if (['failed', 'closed'].includes(peerConnection.connectionState)) {
-                rejectTransportReady(new Error('Realtime voice media failed before it became ready.'));
-                clearRealtimeDisconnectedTimer();
-                handleRealtimeConnectionLoss('Bean voice disconnected. Tap the Bean button to reconnect.');
-            }
-        });
-
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        const localOfferSdp = String(peerConnection.localDescription?.sdp || offer.sdp || '');
-        let session;
-        try {
-            const setup = await Promise.all([localWakePromise, openRealtimeSession(localOfferSdp)]);
-            session = setup[1];
-            if (Number(setup[0]?.sampleRate) !== 16000) {
-                throw new Error('Private wake detection did not provide 16 kHz local PCM.');
-            }
-        } catch (error) {
-            if (duplicateCallRetry < 1 && isRealtimeDuplicateCallConflict(error?.status, error?.message)) {
-                await disposeRealtimeConnectionAttempt({
-                    localWakeGate,
-                    rawMicrophoneStream,
-                    dataChannel,
-                    peerConnection,
-                    remoteAudio,
-                });
-                if (connectionGeneration !== realtimeConnectionGeneration) {
-                    throw new Error('Realtime voice connection was superseded.');
-                }
-                return connectRealtimeVoice(connectionGeneration, duplicateCallRetry + 1);
-            }
-            throw error;
-        }
-        if (!localWakeConnectionIsCurrent(localWakeGate, connectionGeneration)) {
-            await localWakeGate.stop();
-            throw new Error('Realtime voice connection was superseded.');
-        }
-        realtimeSession = session;
-        const answerSdp = String(session?.sdp || '');
-        if (!answerSdp.trim()) throw new Error('Realtime voice connection did not include an SDP answer.');
-        if (!connectionIsCurrent()) throw new Error('Realtime voice connection was superseded.');
-        await peerConnection.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-        let transportTimer = null;
-        try {
-            await Promise.race([
-                transportReady,
-                new Promise((_, reject) => {
-                    transportTimer = window.setTimeout(
-                        () => reject(new Error('Realtime voice transport took too long to become ready.')),
-                        10000,
-                    );
-                }),
-            ]);
-        } finally {
-            if (transportTimer !== null) window.clearTimeout(transportTimer);
-        }
-        if (!connectionIsCurrent()) throw new Error('Realtime voice connection was superseded.');
-
-        // Establish a fresh, consumer-enabled local generation only after the
-        // provider can consume the gated track. A generation created while the
-        // consumer is disabled may have already decoded startup audio; merely
-        // raising its sequence floor leaves the user's first utterance doing
-        // the clean re-arm that startup itself must own.
-        localWakeGate.setConsumerReady(true);
-        if (!localWakeGate.resetAfterTurn()) {
-            throw new Error('Private “Hey Bean” detection could not prepare for listening.');
-        }
-        await waitForLocalWakeReady(localWakeGate, connectionGeneration);
-        await waitForLocalWakeConsumerAdmission(localWakeGate, connectionGeneration);
-        if (!connectionIsCurrent()) throw new Error('Realtime voice connection was superseded.');
-
-        return localWakeGate;
-    }
-
-    function reportBrowserVoiceV2ConnectionFailure(error, message) {
-        const controller = browserVoiceV2Controller.snapshot();
-        const turnId = String(controller.followUpCandidate?.id || controller.activeTurn?.id || '');
-        reportBrowserVoiceV2ClientFailure(
-            error || Object.assign(new Error(message), { code: 'provider_connection_error' }),
-            {
-                stage: 'connection',
-                identity: [realtimeConnectionGeneration],
-                turnId,
-                label: 'Browser Voice v2 connection failure',
-            },
-        );
-    }
-
-    function handleRealtimeConnectionLoss(message, { reportFailure = true, error = null } = {}) {
-        if (!realtimeVoiceActive && !state.voiceWakeListening && !state.voiceProcessing) return;
-        if (reportFailure) reportBrowserVoiceV2ConnectionFailure(error, message);
-        browserVoiceV2Controller.dispatch({ type: 'connection_lost', source: 'webrtc', reason: message });
-        stopVoiceWakeListening({ clearDraft: false, reason: 'connection_lost' });
-        state.error = message;
-        render();
-    }
-
-    function reportBrowserVoiceV2ProviderProtocolFailure(error, protocolCode) {
-        const controller = browserVoiceV2Controller.snapshot();
-        const turnId = String(
-            controller.followUpCandidate?.id
-            || controller.activeTurn?.id
-            || controller.potentialBargeIn?.ownerTurnId
-            || '',
-        );
-        reportBrowserVoiceV2ClientFailure(error, {
-            stage: 'connection',
-            identity: [realtimeConnectionGeneration, protocolCode],
-            turnId,
-            label: 'Browser Voice v2 provider protocol failure',
-        });
-    }
-
-    function failBrowserVoiceV2ProviderProtocol(protocolCode) {
-        return applyBrowserVoiceV2ProviderProtocolFailure({
-            code: protocolCode,
-            reportFailure: (error) => reportBrowserVoiceV2ProviderProtocolFailure(error, protocolCode),
-            teardown: handleRealtimeConnectionLoss,
-        });
-    }
-
-    function claimBrowserVoiceV2ProviderItemLocalWakeAdmission(transcriptId) {
-        if (!transcriptId || browserVoiceV2ProviderWakeTurnIds.has(transcriptId)) return null;
-        return browserVoiceV2PendingLocalWakeAdmissions.shift() || null;
-    }
-
-    function rememberBrowserVoiceV2CompletedProviderBarge(turnId) {
-        const controller = browserVoiceV2Controller.snapshot();
-        const gateGeneration = realtimeLocalWakeGate?.currentGeneration();
-        const pcmGeneration = Number(browserVoiceV2LastProviderInputPcm?.generation);
-        const throughSourceSequence = Number(browserVoiceV2LastProviderInputPcm?.sourceSequence);
-        if (!turnId
-            || !Number.isSafeInteger(gateGeneration)
-            || pcmGeneration !== gateGeneration
-            || !Number.isSafeInteger(throughSourceSequence)) {
-            browserVoiceV2CompletedProviderBarge = null;
-            return;
-        }
-
-        browserVoiceV2CompletedProviderBarge = {
-            turnId,
-            controllerGeneration: controller.generation,
-            connectionGeneration: controller.connectionGeneration,
-            gateGeneration,
-            throughSourceSequence,
-        };
-    }
-
-    function isBrowserVoiceV2RealtimeOutputEvent(type) {
-        return type === 'response.created'
-            || type === 'response.done'
-            || type === 'output_audio_buffer.started'
-            || type === 'output_audio_buffer.stopped'
-            || type === 'output_audio_buffer.cleared'
-            || type.startsWith('response.audio_')
-            || type.startsWith('response.output_audio_')
-            || type.startsWith('response.text.')
-            || type.startsWith('response.output_text.');
-    }
-
-    function reportBrowserVoiceV2TranscriptionFailure(payload, transcriptId, turnId) {
-        reportBrowserVoiceV2ClientFailure(payload?.error, {
-            stage: 'transcription',
-            identity: [transcriptId || payload?.event_id || turnId || realtimeConnectionGeneration],
-            turnId,
-            label: 'Browser Voice v2 transcription failure',
-        });
-    }
-
-    function handleBrowserVoiceV2RealtimeEvent(payload) {
-        if (!browserVoiceV2Enabled()) return false;
-        const usageReport = realtimeUsageReportFromProviderEvent(payload);
-        if (usageReport) void reportBrowserVoiceV2RealtimeUsage(usageReport);
-        const type = String(payload?.type || '');
-        if (type === 'response.created') {
-            // Realtime is transcription-only. Any provider-created response is
-            // unowned and must be canceled before remote WebRTC audio can
-            // contradict the durable server final spoken by HTTP synthesis.
-            const targeted = buildRealtimeTargetedResponseCancellationEvent(payload.response?.id);
-            realtimeSend(targeted || { type: 'response.cancel' });
-            realtimeSend({ type: 'output_audio_buffer.clear' });
-            return true;
-        }
-        if (isBrowserVoiceV2RealtimeOutputEvent(type)) return true;
-        const providerItemId = payload?.item_id || payload?.item?.id || '';
-        const knownProviderItem = type === 'input_audio_buffer.speech_started'
-            && providerItemId
-            && browserVoiceV2ProviderItems.has({
-                providerItemId,
-                connectionGeneration: realtimeConnectionGeneration,
-            });
-        const protocolFailure = browserVoiceV2ProviderProtocolFailureForEvent({
-            eventType: type,
-            providerInputActive: browserVoiceV2ProviderInputIsActive({
-                inputTransport: browserVoiceV2InputTransport,
-            }),
-            providerItemId,
-            providerItemCapacityExhausted: type === 'input_audio_buffer.speech_started'
-                && !knownProviderItem
-                && browserVoiceV2ProviderItems.capacityExhausted,
-        });
-        if (protocolFailure) return failBrowserVoiceV2ProviderProtocol(protocolFailure);
-        if (type === 'input_audio_buffer.speech_started') {
-            const transcriptId = providerItemId;
-            if (!transcriptId) return true;
-            if (browserVoiceV2ProviderItems.has({
-                providerItemId: transcriptId,
-                connectionGeneration: realtimeConnectionGeneration,
-            })) return true;
-            updateRealtimeVoiceActivity(Math.max(realtimeVoiceActivityLevel, 0.72));
-            const providerWakeAdmission = claimBrowserVoiceV2ProviderItemLocalWakeAdmission(transcriptId);
-            const { result: ingress, binding, staleTurnIdentity } = bindBrowserVoiceProviderSpeechStartedV2(
-                browserVoiceV2Controller,
-                browserVoiceV2ProviderItems,
-                {
-                    providerItemId: transcriptId,
-                    connectionGeneration: realtimeConnectionGeneration,
-                    turnIdentity: providerWakeAdmission,
-                    inputGeneration: browserVoiceV2InputTransport.activeGeneration,
-                    throughSourceSequence: browserVoiceV2LastProviderInputPcm?.sourceSequence,
-                },
-            );
-            if (ingress === BROWSER_VOICE_REALTIME_INGRESS_RESULTS.CAPACITY_EXHAUSTED) {
-                return failBrowserVoiceV2ProviderProtocol(
-                    BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_CAPACITY_EXHAUSTED,
-                );
-            }
-            if (!binding) {
-                browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
-                if (staleTurnIdentity && browserVoiceV2ProviderInputIsActive({
-                    inputTransport: browserVoiceV2InputTransport,
-                })) {
-                    return failBrowserVoiceV2ProviderProtocol(
-                        BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_TURN_MISMATCH,
-                    );
-                }
-                return true;
-            }
-            if (providerWakeAdmission) {
-                browserVoiceV2ProviderWakeTurnIds.set(transcriptId, binding.turnId);
-            }
-            if (ingress === BROWSER_VOICE_REALTIME_INGRESS_RESULTS.POTENTIAL_BARGE_IN) {
-                browserVoiceV2PotentialBargeInItems.add(transcriptId);
-                browserVoiceV2Controller.potentialBargeIn('potential_speech', {
-                    source: 'provider_vad',
-                    ownerTurnId: binding.turnId,
-                    providerItemId: transcriptId,
-                });
-            }
-            return true;
-        }
-        if (type === 'input_audio_buffer.speech_stopped') {
-            updateRealtimeVoiceActivity(0, { decay: false });
-            return true;
-        }
-        if (type === 'input_audio_buffer.committed'
-            || (type === 'conversation.item.created' && payload.item?.role === 'user')) return true;
-
-        if (type === 'conversation.item.input_audio_transcription.delta') {
-            const transcriptId = providerItemId;
-            const binding = currentBrowserVoiceProviderItemBindingV2(
-                browserVoiceV2ProviderItems,
-                browserVoiceV2Controller,
-                {
-                    providerItemId: transcriptId,
-                    connectionGeneration: realtimeConnectionGeneration,
-                },
-            );
-            if (browserVoiceProviderItemCapacityExhaustedV2(binding)) {
-                return failBrowserVoiceV2ProviderProtocol(
-                    BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_CAPACITY_EXHAUSTED,
-                );
-            }
-            if (!binding) {
-                browserVoiceV2PotentialBargeInItems.delete(transcriptId);
-                browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
-                realtimeInputTranscripts.discardItem({ itemId: transcriptId });
-                return true;
-            }
-            const draft = realtimeInputTranscripts.append({
-                itemId: transcriptId,
-                contentIndex: payload.content_index,
-                delta: payload.delta,
-            });
-            // Realtime can transcribe only PCM released by the local gate. Its
-            // words may strip an already-confirmed wake prefix, but they can
-            // never become a second dormant-activation authority.
-            const wakeConfirmed = browserVoiceV2ProviderWakeTurnIds.has(transcriptId);
-            const potentialBargeIn = browserVoiceV2PotentialBargeInItems.has(transcriptId);
-            const commandDraft = stripRealtimeLocalWakePrefix(draft, { wakeConfirmed }).trim();
-            if (commandDraft && shouldDisplayRealtimeTranscriptDraft(commandDraft)) {
-                if (potentialBargeIn && !wakeConfirmed) {
-                    // A delta is provisional. Show it during the already-active
-                    // conversation while playback stays recoverably ducked;
-                    // stable completion alone may confirm the interruption.
-                    updateVoiceWakeDraft(commandDraft);
-                } else {
-                    routeBrowserVoiceRealtimeIngressV2(browserVoiceV2Controller, {
-                        type: 'transcript_partial',
-                        text: commandDraft,
-                        providerItemId: transcriptId,
-                    });
-                }
-            }
-            return true;
-        }
-
-        if (type === 'conversation.item.input_audio_transcription.completed') {
-            const transcriptId = providerItemId;
-            const binding = currentBrowserVoiceProviderItemBindingV2(
-                browserVoiceV2ProviderItems,
-                browserVoiceV2Controller,
-                {
-                    providerItemId: transcriptId,
-                    connectionGeneration: realtimeConnectionGeneration,
-                    consume: true,
-                },
-            );
-            if (browserVoiceProviderItemCapacityExhaustedV2(binding)) {
-                return failBrowserVoiceV2ProviderProtocol(
-                    BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_CAPACITY_EXHAUSTED,
-                );
-            }
-            if (!binding) {
-                browserVoiceV2PotentialBargeInItems.delete(transcriptId);
-                browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
-                realtimeInputTranscripts.discardItem({ itemId: transcriptId });
-                return true;
-            }
-            const transcript = realtimeInputTranscripts.complete({
-                itemId: transcriptId,
-                contentIndex: payload.content_index,
-                transcript: payload.transcript,
-            });
-            realtimeInputTranscripts.discardItem({ itemId: transcriptId });
-            const wakeConfirmed = browserVoiceV2ProviderWakeTurnIds.has(transcriptId);
-            const potentialBargeIn = browserVoiceV2PotentialBargeInItems.delete(transcriptId);
-            updateRealtimeVoiceActivity(0, { decay: false });
-            if (potentialBargeIn && !isMeaningfulBrowserVoiceV2Interruption(transcript)) {
-                browserVoiceV2Controller.rejectBargeIn('background_or_noise', {
-                    source: 'provider_transcript',
-                    providerItemId: transcriptId,
-                });
-                updateVoiceWakeDraft('');
-                if (transcriptId) realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
-                render();
-                return true;
-            }
-            if (potentialBargeIn) {
-                const controller = browserVoiceV2Controller.snapshot();
-                const pendingBargeMatches = controller.potentialBargeIn?.providerItemId === transcriptId;
-                if (controller.speechActive || pendingBargeMatches) {
-                    const confirmed = browserVoiceV2Controller.confirmBargeIn({
-                        source: 'provider_transcript',
-                        providerItemId: transcriptId,
-                    });
-                    if (confirmed.state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING) {
-                        // The utterance is already complete, so establish the
-                        // controller capture synchronously before routing it.
-                        browserVoiceV2Controller.activationReady({ source: 'provider_transcript' });
-                    }
-                } else if (controller.conversationState === BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING) {
-                    browserVoiceV2Controller.activationReady({ source: 'provider_transcript' });
-                } else if (controller.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP
-                    && !controller.followUpCandidate) {
-                    routeBrowserVoiceRealtimeIngressV2(browserVoiceV2Controller, {
-                        type: 'speech_started',
-                        providerItemId: transcriptId || null,
-                    });
-                }
-            }
-            const command = stripRealtimeLocalWakePrefix(transcript, { wakeConfirmed }).trim();
-            if (isRealtimeWakeAddressOnly(transcript, { wakeConfirmed })) {
-                updateVoiceWakeDraft('');
-                state.chatRunState = 'Listening…';
-                if (transcriptId) realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
-                render();
-                browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
-                return true;
-            }
-            if (!command) {
-                if (browserVoiceV2Controller.snapshot().followUpCandidate) {
-                    browserVoiceV2Controller.rejectFollowUpCandidate('empty_transcript', {
-                        source: 'provider_transcript',
-                        providerItemId: transcriptId || null,
-                    });
-                }
-                updateVoiceWakeDraft('');
-                state.chatRunState = 'Listening…';
-                render();
-                browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
-                return true;
-            }
-            routeBrowserVoiceRealtimeIngressV2(browserVoiceV2Controller, {
-                type: 'transcript_final',
-                text: command,
-                providerItemId: transcriptId || null,
-            });
-            if (potentialBargeIn && !wakeConfirmed) {
-                const controller = browserVoiceV2Controller.snapshot();
-                rememberBrowserVoiceV2CompletedProviderBarge(
-                    controller.followUpCandidate?.id || controller.activeTurn?.id || '',
-                );
-            }
-            browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
-            return true;
-        }
-
-        if (type === 'conversation.item.input_audio_transcription.failed') {
-            const transcriptId = providerItemId;
-            const binding = currentBrowserVoiceProviderItemBindingV2(
-                browserVoiceV2ProviderItems,
-                browserVoiceV2Controller,
-                {
-                    providerItemId: transcriptId,
-                    connectionGeneration: realtimeConnectionGeneration,
-                    consume: true,
-                },
-            );
-            if (browserVoiceProviderItemCapacityExhaustedV2(binding)) {
-                return failBrowserVoiceV2ProviderProtocol(
-                    BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_CAPACITY_EXHAUSTED,
-                );
-            }
-            const potentialBargeIn = browserVoiceV2PotentialBargeInItems.delete(transcriptId);
-            browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
-            realtimeInputTranscripts.discardItem({ itemId: transcriptId });
-            updateRealtimeVoiceActivity(0, { decay: false });
-            if (!binding) return true;
-            if (potentialBargeIn) {
-                // A failed transcript cannot confirm meaningful speech. Restore
-                // the current response when it is still playing, or release the
-                // exact pending proof after its owning playback has ended.
-                applyBrowserVoiceV2TranscriptionFailure({
-                    controller: browserVoiceV2Controller,
-                    payload,
-                    binding,
-                    action: 'reject_barge_in',
-                    reportFailure: reportBrowserVoiceV2TranscriptionFailure,
-                });
-                updateVoiceWakeDraft('');
-                if (transcriptId) realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
-                state.error = '';
-                render();
-                return true;
-            }
-            const followUpCandidate = browserVoiceV2Controller.snapshot().followUpCandidate;
-            if (followUpCandidate) {
-                applyBrowserVoiceV2TranscriptionFailure({
-                    controller: browserVoiceV2Controller,
-                    payload,
-                    binding,
-                    reportFailure: reportBrowserVoiceV2TranscriptionFailure,
-                });
-                state.error = '';
-                render();
-                return true;
-            }
-            applyBrowserVoiceV2TranscriptionFailure({
-                controller: browserVoiceV2Controller,
-                payload,
-                binding,
-                reportFailure: reportBrowserVoiceV2TranscriptionFailure,
-            });
-            state.error = 'Voice transcription failed. Please try again.';
-            render();
-            return true;
-        }
-
-        if (type === 'response.function_call_arguments.delta'
-            || type === 'response.function_call_arguments.done') {
-            // Browser Voice v2 routes once through durable admission. Provider
-            // function calls are ignored so they cannot create a second request.
-            return true;
-        }
-        if (type === 'error') {
-            const providerMessage = String(payload.error?.message || '');
-            if (/cancell?ation failed|no active response|response.*already.*(?:done|cancel)/i.test(providerMessage)) return true;
-            return teardownBrowserVoiceV2ProviderFailure({
-                error: payload.error,
-                providerMessage,
-                reportFailure: reportBrowserVoiceV2ConnectionFailure,
-                teardown: handleRealtimeConnectionLoss,
-            });
-        }
-        return false;
-    }
-
-    async function reportBrowserVoiceV2RealtimeUsage(report) {
-        const usageSessionId = String(realtimeSession?.usage_session_id || '');
-        const eventId = String(report?.providerEventId || '');
-        const connectionGeneration = realtimeConnectionGeneration;
-        if (!usageSessionId || !eventId || browserVoiceV2RealtimeUsageEventIds.has(eventId)) return;
-        browserVoiceV2RealtimeUsageEventIds.add(eventId);
-        try {
-            await reportVoiceEventReliably(report, {
-                send: () => api('/assistant/voice/realtime/usage', {
-                    method: 'POST',
-                    body: {
-                        usage_session_id: usageSessionId,
-                        provider_event_id: eventId,
-                        event_type: report.eventType,
-                        usage: report.usage,
-                    },
-                    // Accounting is asynchronous and idempotent. Allow normal
-                    // production warm-up/network spikes to return their receipt
-                    // instead of disabling an otherwise healthy voice session.
-                    timeoutMs: 10000,
-                }),
-                shouldRetry: (error) => Number(error?.status || 0) !== 402,
-            });
-        } catch (error) {
-            browserVoiceV2RealtimeUsageEventIds.delete(eventId);
-            if (connectionGeneration !== realtimeConnectionGeneration
-                || usageSessionId !== String(realtimeSession?.usage_session_id || '')) return;
-            if (Number(error?.status || 0) !== 402) {
-                reportBrowserVoiceV2ClientFailure(error, {
-                    stage: 'usage_accounting',
-                    identity: [usageSessionId, eventId],
-                    label: 'Browser Voice v2 usage accounting failure',
-                });
-            }
-            stopVoiceWakeListening({ clearDraft: true, reason: Number(error?.status || 0) === 402 ? 'usage_limit' : 'usage_accounting_failed' });
-            state.error = Number(error?.status || 0) === 402
-                ? friendlyError(error, 'continue with Bean voice')
-                : 'Bean couldn’t verify your remaining voice usage. Tap Bean to try again.';
-            state.chatRunState = Number(error?.status || 0) === 402 ? 'Upgrade to continue' : 'Voice unavailable';
-            render();
-        }
-    }
-
-    function handleRealtimeEvent(event) {
-        let payload = null;
-        try {
-            payload = JSON.parse(event.data);
-        } catch (_) {
-            return;
-        }
-        if (!payload?.type) return;
-        handleBrowserVoiceV2RealtimeEvent(payload);
-    }
-
-    async function ensureRealtimePersistenceSession(clientTurnId) {
-        const boundSessionId = realtimeTurnSessionIds.get(clientTurnId);
-        if (boundSessionId) return { id: boundSessionId };
-        if (state.session?.id) {
-            realtimeTurnSessionIds.set(clientTurnId, String(state.session.id));
-            return state.session;
-        }
-
-        const workspaceId = String(currentWorkspaceId() || '');
-        const contextGeneration = chatContextGeneration;
-        const existingCreation = realtimePersistenceSessionCreation;
-        if (!existingCreation
-            || existingCreation.workspaceId !== workspaceId
-            || existingCreation.contextGeneration !== contextGeneration) {
-            const onboarding = needsBeanOnboarding();
-            const promise = api('/assistant/sessions', {
-                method: 'POST',
-                body: chatSessionPayload(onboarding),
-                timeoutMs: 15000,
-            });
-            const creation = { workspaceId, contextGeneration, promise };
-            realtimePersistenceSessionCreation = creation;
-            promise.finally(() => {
-                if (realtimePersistenceSessionCreation === creation) {
-                    realtimePersistenceSessionCreation = null;
-                }
-            }).catch(() => {});
-        }
-
-        const creation = realtimePersistenceSessionCreation;
-        const createdSession = await creation.promise;
-        realtimeTurnSessionIds.set(clientTurnId, String(createdSession.id));
-        if (creation.contextGeneration === chatContextGeneration
-            && creation.workspaceId === String(currentWorkspaceId() || '')
-            && !state.session?.id) {
-            state.session = createdSession;
-        }
-        return createdSession;
-    }
-
-    function warmRealtimePersistenceSession() {
-        if (state.session?.id || realtimePersistenceSessionCreation) return;
-        const warmupId = `voice-warmup-${chatContextGeneration}`;
-        ensureRealtimePersistenceSession(warmupId)
-            .catch(() => {})
-            .finally(() => realtimeTurnSessionIds.delete(warmupId));
+    async function startVoiceWakeListening(event = null) {
+        event?.preventDefault?.();
+        if (!browserVoiceV2Enabled() || beanChatWaking()) return false;
+        state.error = '';
+        beanVoiceRuntime.prime();
+        return beanVoiceRuntime.start();
     }
 
     function stopVoiceWakeListening(options = {}) {
-        const localWakeStopping = realtimeLocalWakeGate?.stop();
-        const precedingTeardown = realtimeLocalTeardown;
-        realtimeLocalTeardown = Promise.allSettled([precedingTeardown, localWakeStopping]).then(() => {});
-        browserVoiceV2InputTransport.deactivate();
-        clearRealtimeVoiceInputFeedback();
-        realtimeLocalWakeGate = null;
-        browserVoiceV2Controller.disable(options.reason || 'voice_stopped');
-        browserVoiceV2Speech.reset(options.reason || 'voice_stopped');
-        browserVoiceV2SpeechTransport.reset(options.reason || 'voice_stopped');
-        realtimeConnectionGeneration += 1;
-        clearRealtimeMediaRecoveryTimers();
-        browserVoiceV2PotentialBargeInItems.clear();
-        browserVoiceV2ProviderWakeTurnIds.clear();
-        browserVoiceV2RealtimeUsageEventIds.clear();
-        browserVoiceV2PendingLocalWakeAdmissions.length = 0;
-        browserVoiceV2CompletedProviderBarge = null;
-        browserVoiceV2LastProviderInputPcm = null;
-        realtimeVoiceActive = false;
-        state.voiceWakeListening = false;
-        state.voiceProcessing = false;
-        if (options.clearDraft !== false) updateVoiceWakeDraft('');
-        try { realtimeDataChannel?.close?.(); } catch (_) {}
-        try { realtimePeerConnection?.close?.(); } catch (_) {}
-        realtimeRawMicrophoneStream?.getTracks?.().forEach((track) => track.stop());
-        realtimeDataChannel = null;
-        realtimePeerConnection = null;
-        realtimeRawMicrophoneStream = null;
-        realtimeSession = null;
-        if (realtimeRemoteAudio) {
-            try {
-                realtimeRemoteAudio.pause();
-                realtimeRemoteAudio.srcObject = null;
-            } catch (_) {}
-        }
-        realtimeRemoteAudio = null;
-        if (!state.busy) {
-            state.chatRunState = state.beanWorkItems.some((item) => item.source === 'browser_voice_v2' && !beanWorkItemDone(item))
-                ? 'Working…'
-                : 'Ready';
-        }
-    }
-
-    function stopRealtimeVoiceForContextChange() {
-        browserVoiceV2Client.stop();
-        if (!realtimeVoiceActive
-            && !state.voiceWakeListening
-            && !state.voiceProcessing
-            && !realtimePeerConnection
-            && !realtimeDataChannel
-            && !realtimeLocalWakeGate) return;
-        stopVoiceWakeListening();
-    }
-
-    async function startVoiceWakeListening(event) {
-        event?.preventDefault?.();
-        if (beanChatWaking() || state.voiceProcessing || realtimeVoiceActive) return;
-        if (!browserVoiceV2Enabled()) {
-            state.error = 'Browser voice is unavailable right now. Please try again later.';
-            state.chatRunState = 'Voice unavailable';
-            render();
-            return;
-        }
-        // This must remain synchronous with the button gesture so Safari and
-        // other autoplay-gated browsers permit later streamed PCM playback.
-        browserVoiceV2SpeechTransport.prime();
-        const connectionGeneration = browserVoiceV2Controller.start().connectionGeneration;
-        realtimeConnectionGeneration = connectionGeneration;
-        clearRealtimeVoiceInputFeedback();
-        state.error = '';
-        state.voiceProcessing = true;
-        state.chatRunState = 'Starting private “Hey Bean” detection…';
-        render();
-        // Hide first-turn session setup behind microphone/WebRTC startup so the
-        // durability gate does not add perceptible latency after transcription.
-        warmRealtimePersistenceSession();
-        try {
-            await realtimeLocalTeardown;
-            if (connectionGeneration !== realtimeConnectionGeneration) return;
-            const readyWakeGate = await connectRealtimeVoice(connectionGeneration);
-            if (connectionGeneration !== realtimeConnectionGeneration) return;
-            if (!localWakeConnectionIsCurrent(readyWakeGate, connectionGeneration)
-                || !readyWakeGate.isReady()
-                || !readyWakeGate.isConsumerAdmissionReady()) {
-                throw new Error('Private “Hey Bean” detection was not ready for listening.');
-            }
-            browserVoiceV2Controller.providerReady({ source: 'webrtc' });
-            realtimeVoiceActive = true;
-            state.voiceWakeListening = true;
-            state.voiceProcessing = false;
-            const controller = browserVoiceV2Controller.snapshot();
-            state.chatRunState = [
-                BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING,
-                BROWSER_VOICE_CONVERSATION_STATES.CAPTURING,
-            ].includes(controller.conversationState)
-                ? 'Listening…'
-                : 'Listening for “Hey Bean”…';
-            updateVoiceWakeDraft('');
-            render();
-        } catch (error) {
-            if (connectionGeneration !== realtimeConnectionGeneration) return;
-            reportBrowserVoiceV2ClientFailure(error, {
-                stage: 'startup',
-                identity: [connectionGeneration],
-                label: 'Browser Voice v2 startup failure',
-            });
-            stopVoiceWakeListening({ clearDraft: false });
-            state.error = Number(error?.status || 0) === 402
-                ? friendlyError(error, 'start realtime Bean voice')
-                : 'Bean couldn’t connect voice right now. Tap Bean to try again.';
-            state.voiceProcessing = false;
-            render();
-        }
+        const reason = String(options.reason || 'voice_stopped');
+        void beanVoiceRuntime.stop(reason);
     }
 
     function toggleVoiceWakeListening(event) {
         event?.preventDefault?.();
-        if (state.voiceWakeListening || realtimeVoiceActive || state.voiceProcessing) {
-            stopVoiceWakeListening();
-            render();
-            return;
-        }
-        startVoiceWakeListening(event);
+        if (!browserVoiceV2Enabled() || beanChatWaking()) return;
+        beanVoiceRuntime.prime();
+        void beanVoiceRuntime.toggle();
     }
 
+    function stopRealtimeVoiceForContextChange() {
+        beanVoiceRuntime.detachSession();
+        void beanVoiceRuntime.stop('context_changed');
+    }
     async function submitChat(event) {
         event.preventDefault();
         if (beanChatWaking()) return;
@@ -11130,10 +9160,7 @@ export function mountHeyBeanWebApp(mount) {
     function stopBrowserVoiceV2Playback(event = null) {
         event?.preventDefault?.();
         event?.stopPropagation?.();
-        browserVoiceV2Controller.stopPlayback('button_stop');
-        updateVoiceWakeDraft('');
-        state.chatRunState = state.voiceWakeListening ? 'Listening for “Hey Bean”…' : 'Ready';
-        render();
+        beanVoiceRuntime.stopPlayback('button_stop');
     }
 
     async function sendChatContent(content, options = {}) {
@@ -11524,14 +9551,12 @@ export function mountHeyBeanWebApp(mount) {
             const session = await api(`/assistant/sessions/${id}`);
             if (contextGeneration !== chatContextGeneration || String(currentWorkspaceId() || '') !== workspaceId) return;
             state.session = session.session || session;
-            state.messages = normalizeList(session.messages);
+            state.messages = normalizeList(session.messages).filter(messageVisibleInChat);
             state.chatRunState = 'Ready';
             state.activity = normalizeList(session.activity_events || session.events).length ? normalizeList(session.activity_events || session.events) : state.activity;
             resumeDurableChatRequests(session);
             if (!options.keepHistoryOpen) state.chatHistoryOpen = false;
-            if (browserVoiceV2Enabled()) {
-                browserVoiceV2Client.start(state.session.id);
-            }
+            beanVoiceRuntime.attachSession(state.session.id);
             render();
             scrollChatToBottom();
         } catch (_) {

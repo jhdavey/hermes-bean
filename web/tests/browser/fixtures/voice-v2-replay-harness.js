@@ -1,5 +1,5 @@
 import { LocalWakeGate } from '/resources/js/heybean/localWakeGate.js';
-import { BrowserVoiceRealtimeInputTransportV2 } from '/resources/js/heybean/browserVoiceRealtimeInputV2.js';
+import { BeanVoicePcmTransport } from '/resources/js/heybean/beanVoicePcmTransport.js';
 
 const WAKE_TARGET_P95_MS = 500;
 const STRICT_COMMAND_MIN_RELEASED_PCM_SAMPLES = 6_400;
@@ -59,7 +59,7 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
     const readyEvents = [];
     let activeTrial = null;
     let preConfirmationActivatedPcmCount = 0;
-    const providerTransport = new BrowserVoiceRealtimeInputTransportV2({
+    const providerTransport = new BeanVoicePcmTransport({
         send(event) {
             // Exercise the exact clear/append event boundary without retaining
             // the base64 audio field or opening a provider/network connection.

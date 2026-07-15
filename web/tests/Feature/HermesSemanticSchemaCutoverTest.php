@@ -195,7 +195,6 @@ class HermesSemanticSchemaCutoverTest extends TestCase
             $table->timestamp('started_at')->nullable();
             $table->timestamp('first_progress_at')->nullable();
             $table->timestamp('terminal_at')->nullable();
-            $table->timestamp('final_delivered_at')->nullable();
             $table->timestamp('hard_deadline_at')->nullable();
             $table->timestamp('no_progress_deadline_at')->nullable();
             $table->timestamps();

@@ -4,6 +4,7 @@ export const LOCAL_WAKE_GATE_PROCESSOR_NAME = 'hey-bean-gate';
 export const LOCAL_WAKE_PCM_SAMPLE_RATE = 16000;
 export const LOCAL_WAKE_PCM_RING_CHUNKS = 80;
 export const LOCAL_WAKE_PCM_ACK_TIMEOUT_MS = 2000;
+export const LOCAL_WAKE_CONSUMER_READY_TIMEOUT_MS = 15000;
 export const LOCAL_WAKE_WORKER_FAILURE_DETAIL_TIMEOUT_MS = 250;
 
 const LOCAL_WAKE_WORKER_FAILURE_CODES = Object.freeze(new Set([
@@ -88,6 +89,15 @@ export class LocalWakeGate {
             ? Math.min(requestedLocalPcmRing, 240)
             : LOCAL_WAKE_PCM_RING_CHUNKS;
         this.onDetected = typeof options.onDetected === 'function' ? options.onDetected : () => {};
+        // A confirmed acoustic wake is still not sufficient to release PCM.
+        // The application may synchronously or asynchronously establish its
+        // durable, sideband-ready turn before this gate opens.
+        this.beforeRelease = typeof options.beforeRelease === 'function'
+            ? options.beforeRelease
+            : () => true;
+        this.onReleaseRejected = typeof options.onReleaseRejected === 'function'
+            ? options.onReleaseRejected
+            : () => {};
         this.onActivatedPcm = typeof options.onActivatedPcm === 'function'
             ? options.onActivatedPcm
             : null;
@@ -114,6 +124,10 @@ export class LocalWakeGate {
         this.pcmAckTimeoutMs = Number.isFinite(requestedPcmAckTimeoutMs)
             ? Math.max(250, Math.min(5000, requestedPcmAckTimeoutMs))
             : LOCAL_WAKE_PCM_ACK_TIMEOUT_MS;
+        const requestedConsumerReadyTimeoutMs = Math.floor(Number(options.consumerReadyTimeoutMs));
+        this.consumerReadyTimeoutMs = Number.isFinite(requestedConsumerReadyTimeoutMs)
+            ? Math.max(1000, Math.min(60000, requestedConsumerReadyTimeoutMs))
+            : LOCAL_WAKE_CONSUMER_READY_TIMEOUT_MS;
         this.state = 'idle';
         this.generation = 0;
         this.workletReady = false;
@@ -123,6 +137,7 @@ export class LocalWakeGate {
         this.gateOpen = false;
         this.readyReportedGeneration = 0;
         this.pendingWakeConfirmation = null;
+        this.pendingReleaseAuthorization = null;
         this.nextPcmSequence = 1;
         this.lastAcknowledgedPcmSequence = 0;
         this.consumerWakeSequenceFloor = this.consumerReady
@@ -134,6 +149,8 @@ export class LocalWakeGate {
         this.pcmAckWatchdogToken = null;
         this.pendingWorkerFailure = null;
         this.workerFailureDetailTimer = null;
+        this.consumerAdmissionWaiters = new Set();
+        this.lastReadinessError = null;
         this.bufferedPcm = [];
         this.localPcmRing = [];
         this.lastSourceSequence = -1;
@@ -192,8 +209,78 @@ export class LocalWakeGate {
             this.pendingWakeConfirmation = null;
             this.#confirmWake(confirmation, this.generation);
         }
+        this.#resolveConsumerAdmissionWaiters(this.generation);
 
         return this.consumerReady;
+    }
+
+    primeConsumerAdmission() {
+        if (!this.worker || !this.workletNode
+            || ['failed', 'failure_pending', 'stopping', 'stopped'].includes(this.state)) return false;
+
+        this.setConsumerReady(true);
+        try {
+            // Startup capture may contain speech recorded before Realtime was
+            // ready. Rotate to one clean, consumer-enabled generation so the
+            // published ready state can only follow fresh local PCM decode.
+            return this.#rearmDormant('consumer_admission');
+        } catch (cause) {
+            this.#fail(new LocalWakeGateError('The local wake detector could not prime consumer admission.', {
+                code: 'consumer_admission_prime_failed',
+                cause,
+            }), this.generation);
+            return false;
+        }
+    }
+
+    waitForConsumerAdmissionReady({
+        generation = this.generation,
+        timeoutMs = this.consumerReadyTimeoutMs,
+    } = {}) {
+        const expectedGeneration = Number(generation);
+        if (!Number.isSafeInteger(expectedGeneration) || expectedGeneration < 0) {
+            return Promise.reject(new LocalWakeGateError(
+                'Consumer admission requires a valid local wake generation.',
+                { code: 'invalid_readiness_generation' },
+            ));
+        }
+        if (['failed', 'failure_pending', 'stopping', 'stopped'].includes(this.state)) {
+            return Promise.reject(this.lastReadinessError || new LocalWakeGateError(
+                'The local wake detector stopped before consumer admission was ready.',
+                { code: 'consumer_admission_stopped' },
+            ));
+        }
+        if (expectedGeneration !== this.generation) {
+            return Promise.reject(new LocalWakeGateError(
+                'The consumer admission generation was superseded.',
+                { code: 'consumer_admission_generation_superseded' },
+            ));
+        }
+        if (this.isConsumerAdmissionReady()) {
+            return Promise.resolve(this.#consumerAdmissionReadyEvent(expectedGeneration));
+        }
+
+        const deadlineMs = Math.max(1000, Math.min(60000, Number(timeoutMs)
+            || this.consumerReadyTimeoutMs));
+        return new Promise((resolve, reject) => {
+            const waiter = {
+                generation: expectedGeneration,
+                resolve,
+                reject,
+                timer: null,
+            };
+            waiter.timer = this.setTimeout(() => {
+                if (!this.consumerAdmissionWaiters.has(waiter)
+                    || waiter.generation !== this.generation) return;
+                const error = new LocalWakeGateError(
+                    'The local wake detector did not complete consumer admission in time.',
+                    { code: 'consumer_admission_timeout' },
+                );
+                this.#fail(error, waiter.generation);
+            }, deadlineMs);
+            this.consumerAdmissionWaiters.add(waiter);
+            this.#resolveConsumerAdmissionWaiters(expectedGeneration);
+        });
     }
 
     async start(rawStream) {
@@ -210,12 +297,14 @@ export class LocalWakeGate {
         const generation = this.generation + 1;
         this.generation = generation;
         this.state = 'starting';
+        this.lastReadinessError = null;
         this.workletReady = false;
         this.audioSinkReady = false;
         this.workerReady = false;
         this.audioFlowReady = false;
         this.readyReportedGeneration = 0;
         this.pendingWakeConfirmation = null;
+        this.pendingReleaseAuthorization = null;
         this.lastAcknowledgedPcmSequence = 0;
         this.consumerWakeSequenceFloor = this.consumerReady
             ? this.nextPcmSequence
@@ -298,6 +387,8 @@ export class LocalWakeGate {
                 });
 
             if (generation === this.generation) {
+                this.lastReadinessError = error;
+                this.#rejectConsumerAdmissionWaiters(error, generation);
                 this.#forceClosed(generation);
                 this.generation += 1;
                 this.state = 'failed';
@@ -306,6 +397,7 @@ export class LocalWakeGate {
                 this.workerReady = false;
                 this.audioFlowReady = false;
                 this.pendingWakeConfirmation = null;
+                this.pendingReleaseAuthorization = null;
                 this.#resetPcmAckWatchdog();
                 this.bufferedPcm = [];
                 this.localPcmRing = [];
@@ -349,8 +441,42 @@ export class LocalWakeGate {
         }
     }
 
+    openContextualCapture({ generation = this.generation } = {}) {
+        const expectedGeneration = Number(generation);
+        if (!Number.isSafeInteger(expectedGeneration)
+            || expectedGeneration !== this.generation
+            || this.gateOpen
+            || this.pendingReleaseAuthorization
+            || !this.consumerReady
+            || !this.isReady()) return false;
+
+        try {
+            // No pre-admission PCM crosses this boundary. Contextual capture
+            // begins from the first live worklet chunk after the durable turn
+            // and Realtime input generation have both been activated.
+            this.bufferedPcm = [];
+            this.localPcmRing = [];
+            this.#postGate(true, expectedGeneration);
+            this.gateOpen = true;
+            this.state = 'open';
+            return true;
+        } catch (cause) {
+            this.#fail(new LocalWakeGateError('The contextual voice gate could not open safely.', {
+                code: 'gate_open_failed',
+                cause,
+            }), expectedGeneration);
+            return false;
+        }
+    }
+
     async stop() {
         this.#reportActivity(0, this.generation);
+        const stoppedError = new LocalWakeGateError(
+            'The local wake detector stopped before consumer admission was ready.',
+            { code: 'consumer_admission_stopped' },
+        );
+        this.lastReadinessError = stoppedError;
+        this.#rejectConsumerAdmissionWaiters(stoppedError);
         const closeError = this.#forceClosed(this.generation);
         if (closeError) this.#reportError(closeError);
 
@@ -362,6 +488,7 @@ export class LocalWakeGate {
         this.workerReady = false;
         this.audioFlowReady = false;
         this.pendingWakeConfirmation = null;
+        this.pendingReleaseAuthorization = null;
         this.bufferedPcm = [];
         this.localPcmRing = [];
         this.lastSourceSequence = -1;
@@ -471,7 +598,7 @@ export class LocalWakeGate {
             try {
                 this.#emitActivatedPcm({ generation, sourceSequence, samples, released: false });
             } catch (cause) {
-                this.#fail(new LocalWakeGateError('Activated microphone audio could not reach transcription.', {
+                this.#fail(new LocalWakeGateError('Activated microphone audio could not reach Realtime input.', {
                     code: 'activated_pcm_delivery_failed',
                     cause,
                 }), generation);
@@ -811,9 +938,7 @@ export class LocalWakeGate {
                     code: 'invalid_release_boundary',
                 });
             }
-            this.pendingWakeConfirmation = null;
-            this.bufferedPcm = [];
-            this.onDetected(Object.freeze({
+            const detection = Object.freeze({
                 type: 'wake_confirmed',
                 generation,
                 keyword: data.keyword,
@@ -821,18 +946,72 @@ export class LocalWakeGate {
                 activation,
                 sourceSequence: detectedSourceSequence,
                 releaseBoundary: Object.freeze({ ...releaseBoundary }),
-            }));
-            if (generation !== this.generation
-                || ['failed', 'failure_pending'].includes(this.state)) return;
-            this.#postGate(true, generation);
-            this.gateOpen = true;
-            this.state = 'open';
-            this.#flushLocalPcm(releaseBoundary, generation);
+            });
+            this.pendingWakeConfirmation = null;
+            const authorizationToken = Object.freeze({ generation, detection });
+            this.pendingReleaseAuthorization = authorizationToken;
+            const authorization = this.beforeRelease(detection);
+            if (authorization && typeof authorization.then === 'function') {
+                this.state = 'admission_pending';
+                Promise.resolve(authorization).then(
+                    (approved) => this.#completeReleaseAuthorization(
+                        authorizationToken,
+                        approved === true,
+                        releaseBoundary,
+                    ),
+                    (error) => this.#completeReleaseAuthorization(
+                        authorizationToken,
+                        false,
+                        releaseBoundary,
+                        error,
+                    ),
+                );
+                return;
+            }
+            this.#completeReleaseAuthorization(
+                authorizationToken,
+                authorization === true,
+                releaseBoundary,
+            );
         } catch (cause) {
             this.#fail(new LocalWakeGateError('The local wake gate could not open safely.', {
                 code: 'gate_open_failed',
                 cause,
             }), generation);
+        }
+    }
+
+    #completeReleaseAuthorization(token, approved, releaseBoundary, error = null) {
+        if (this.pendingReleaseAuthorization !== token
+            || token.generation !== this.generation
+            || this.gateOpen
+            || ['failed', 'failure_pending', 'stopping', 'stopped'].includes(this.state)) return;
+        this.pendingReleaseAuthorization = null;
+        if (!approved) {
+            try {
+                this.onReleaseRejected(Object.freeze({
+                    ...token.detection,
+                    error: error || null,
+                }));
+            } catch (_) {}
+            this.#rearmAfterRejectedDormantAudio(token.generation, 'pre_admission_rejected');
+            return;
+        }
+
+        try {
+            this.bufferedPcm = [];
+            this.onDetected(token.detection);
+            if (token.generation !== this.generation
+                || ['failed', 'failure_pending', 'stopping', 'stopped'].includes(this.state)) return;
+            this.#postGate(true, token.generation);
+            this.gateOpen = true;
+            this.state = 'open';
+            this.#flushLocalPcm(releaseBoundary, token.generation);
+        } catch (cause) {
+            this.#fail(new LocalWakeGateError('The local wake gate could not open safely.', {
+                code: 'gate_open_failed',
+                cause,
+            }), token.generation);
         }
     }
 
@@ -859,11 +1038,50 @@ export class LocalWakeGate {
                 // Readiness observers cannot weaken or open the gate.
             }
         }
+        this.#resolveConsumerAdmissionWaiters(generation);
 
         if (this.pendingWakeConfirmation && this.consumerReady) {
             const confirmation = this.pendingWakeConfirmation;
             this.pendingWakeConfirmation = null;
             this.#confirmWake(confirmation, generation);
+        }
+    }
+
+    #consumerAdmissionReadyEvent(generation) {
+        return Object.freeze({
+            type: 'consumer_admission_ready',
+            generation,
+            barriers: Object.freeze({
+                worklet: true,
+                model: true,
+                warmDecode: true,
+                recognitionStream: true,
+                localPcmCapture: true,
+                liveAudioDecode: true,
+                consumerGeneration: true,
+            }),
+        });
+    }
+
+    #resolveConsumerAdmissionWaiters(generation) {
+        if (generation !== this.generation || !this.isConsumerAdmissionReady()) return;
+        const event = this.#consumerAdmissionReadyEvent(generation);
+        for (const waiter of [...this.consumerAdmissionWaiters]) {
+            if (waiter.generation !== generation) continue;
+            this.consumerAdmissionWaiters.delete(waiter);
+            if (waiter.timer !== null) this.clearTimeout(waiter.timer);
+            waiter.timer = null;
+            waiter.resolve(event);
+        }
+    }
+
+    #rejectConsumerAdmissionWaiters(error, generation = null) {
+        for (const waiter of [...this.consumerAdmissionWaiters]) {
+            if (generation !== null && waiter.generation !== generation) continue;
+            this.consumerAdmissionWaiters.delete(waiter);
+            if (waiter.timer !== null) this.clearTimeout(waiter.timer);
+            waiter.timer = null;
+            waiter.reject(error);
         }
     }
 
@@ -885,6 +1103,11 @@ export class LocalWakeGate {
         if (!this.worker || !this.workletNode
             || ['failed', 'failure_pending'].includes(this.state)) return false;
 
+        const supersededGeneration = this.generation;
+        this.#rejectConsumerAdmissionWaiters(new LocalWakeGateError(
+            'The consumer admission generation was superseded.',
+            { code: 'consumer_admission_generation_superseded' },
+        ), supersededGeneration);
         const generation = this.generation + 1;
         this.generation = generation;
         this.workletReady = false;
@@ -892,6 +1115,7 @@ export class LocalWakeGate {
         this.audioFlowReady = false;
         this.readyReportedGeneration = 0;
         this.pendingWakeConfirmation = null;
+        this.pendingReleaseAuthorization = null;
         this.lastAcknowledgedPcmSequence = 0;
         this.consumerWakeSequenceFloor = this.consumerReady
             ? this.nextPcmSequence
@@ -1065,6 +1289,8 @@ export class LocalWakeGate {
     #fail(error, generation) {
         if (generation !== this.generation || ['failed', 'stopping', 'stopped'].includes(this.state)) return;
 
+        this.lastReadinessError = error;
+        this.#rejectConsumerAdmissionWaiters(error, generation);
         this.#clearPendingWorkerFailure();
         const closeError = this.#forceClosed(generation);
         this.#resetPcmAckWatchdog();
@@ -1074,6 +1300,7 @@ export class LocalWakeGate {
         this.workerReady = false;
         this.audioFlowReady = false;
         this.pendingWakeConfirmation = null;
+        this.pendingReleaseAuthorization = null;
         this.bufferedPcm = [];
         this.localPcmRing = [];
         this.lastSourceSequence = -1;

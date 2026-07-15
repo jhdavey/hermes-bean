@@ -4,16 +4,13 @@ namespace App\Services;
 
 use App\Models\AgentProfile;
 use Illuminate\Support\Facades\Http;
-use Psr\Http\Message\StreamInterface;
 use RuntimeException;
 
 class OpenAiVoiceService
 {
     public const DEFAULT_VOICE = 'alloy';
 
-    public const DEFAULT_REALTIME_MODEL = 'gpt-realtime';
-
-    public const DEFAULT_SPEECH_MODEL = 'gpt-4o-mini-tts';
+    public const DEFAULT_REALTIME_MODEL = 'gpt-realtime-2.1-mini';
 
     private const VOICES = [
         'alloy' => 'Alloy',
@@ -21,11 +18,11 @@ class OpenAiVoiceService
         'ballad' => 'Ballad',
         'coral' => 'Coral',
         'echo' => 'Echo',
-        'fable' => 'Fable',
-        'nova' => 'Nova',
-        'onyx' => 'Onyx',
         'sage' => 'Sage',
         'shimmer' => 'Shimmer',
+        'verse' => 'Verse',
+        'marin' => 'Marin',
+        'cedar' => 'Cedar',
     ];
 
     public function availableVoices(): array
@@ -137,64 +134,6 @@ class OpenAiVoiceService
     }
 
     /**
-     * Open the provider's raw 24 kHz PCM response without buffering it in PHP.
-     * The controller streams this same body to the browser, where the single
-     * Browser Voice speech owner schedules it for playback as chunks arrive.
-     *
-     * @return array{stream:StreamInterface,content_type:string,content_length:?int,sample_rate:int,model:string,voice:string,characters:int}
-     */
-    public function createSpeechStream(
-        AgentProfile $profile,
-        string $text,
-        ?string $safetyIdentifier = null,
-    ): array {
-        $input = trim($text);
-        if ($input === '') {
-            throw new RuntimeException('OpenAI speech input is empty.');
-        }
-        $voice = $this->normalizeVoice(data_get($profile->settings ?? [], 'voice.voice'));
-        $model = (string) config('services.openai.speech_model', self::DEFAULT_SPEECH_MODEL);
-        $response = Http::withToken($this->apiKey())
-            ->accept('application/octet-stream')
-            ->when($safetyIdentifier, fn ($request) => $request->withHeaders([
-                'OpenAI-Safety-Identifier' => $safetyIdentifier,
-            ]))
-            ->timeout((float) config('services.openai.speech_timeout', 20))
-            ->withOptions(['stream' => true])
-            ->post($this->endpoint('/audio/speech'), [
-                'model' => $model,
-                'voice' => $voice,
-                'input' => $input,
-                'response_format' => 'pcm',
-            ]);
-
-        if (! $response->successful()) {
-            $providerBody = (string) $response->toPsrResponse()->getBody();
-            throw new RuntimeException(sprintf(
-                'OpenAI speech request failed with status %d: %s',
-                $response->status(),
-                mb_substr(preg_replace('/\s+/', ' ', $providerBody) ?? '', 0, 500),
-            ));
-        }
-        $stream = $response->toPsrResponse()->getBody();
-        if (! $stream->isReadable()) {
-            throw new RuntimeException('OpenAI speech response did not include audio.');
-        }
-
-        $contentLength = filter_var($response->header('Content-Length'), FILTER_VALIDATE_INT);
-
-        return [
-            'stream' => $stream,
-            'content_type' => 'audio/pcm',
-            'content_length' => $contentLength === false ? null : (int) $contentLength,
-            'sample_rate' => 24_000,
-            'model' => $model,
-            'voice' => $voice,
-            'characters' => mb_strlen($input),
-        ];
-    }
-
-    /**
      * @return array<string, mixed>
      */
     private function realtimeSessionConfiguration(
@@ -207,19 +146,18 @@ class OpenAiVoiceService
             'type' => 'realtime',
             'model' => $model,
             'instructions' => $this->realtimeInstructions($profile, $context),
+            'output_modalities' => ['audio'],
+            'reasoning' => [
+                'effort' => (string) config('services.openai.realtime_reasoning_effort', 'low'),
+            ],
             'audio' => [
                 'input' => [
-                    // Browser Voice v2 appends activated microphone PCM over
+                    // Realtime browser voice appends activated microphone PCM over
                     // the data channel. WebRTC remains receive-only so dormant
                     // room audio has no provider media path.
                     'format' => [
                         'type' => 'audio/pcm',
                         'rate' => 24000,
-                    ],
-                    'transcription' => [
-                        'model' => (string) config('services.openai.realtime_transcription_model', 'gpt-4o-mini-transcribe'),
-                        'language' => 'en',
-                        'prompt' => 'The user speaks US English. Transcribe only words actually spoken. Do not insert words for silence, music, or background noise. Product names may include Bean and HeyBean.',
                     ],
                     'turn_detection' => [
                         'type' => 'server_vad',
@@ -262,7 +200,7 @@ class OpenAiVoiceService
     {
         $beanName = trim((string) ($profile->display_name ?: 'Bean')) ?: 'Bean';
 
-        return trim("You are the US English transcription and speech surface for {$beanName} browser voice. The application owns wake detection, conversation state, request routing, tools, persistence, Stop, cancellation, and final response text. Never call tools or independently answer microphone input. Transcribe only words actually spoken, and do not invent speech from silence, music, background noise, or your own output. When the application explicitly asks you to speak supplied Bean text, speak it exactly, naturally, and without adding facts, questions, or tasks. Keep dates and times naturally spoken in US English.");
+        return trim("You are the audio-native semantic and speech surface for {$beanName} browser voice. Understand the user's spoken request directly from audio, including conversational references, corrections, multiple clauses, and temporal meaning. The application server owns wake admission, execution, persistence, subscription safety, cancellation, and durable final delivery. Automatic responses are disabled: wait for the server's explicit response.create commands. Use only the server-configured Hermes planning and finalization tools, ask a natural clarification when required information is missing, and never claim an operation succeeded before its function result confirms it. Speak only server-authorized final or clarification responses in concise, natural US English.");
     }
 
     private function realtimeModel(): string

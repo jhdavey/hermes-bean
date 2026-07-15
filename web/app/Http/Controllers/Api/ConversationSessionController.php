@@ -36,7 +36,7 @@ class ConversationSessionController extends Controller
             ->where('user_id', $request->user()->id)
             ->where('session_kind', ConversationSessionKind::Conversation->value)
             ->with('latestMessage')
-            ->withCount('messages');
+            ->withCount(['messages' => fn ($query) => $query->where('display_mode', 'chat')]);
 
         if (! empty($data['workspace_id'])) {
             $query->where('workspace_id', $data['workspace_id']);
@@ -103,7 +103,8 @@ class ConversationSessionController extends Controller
             ->load([
                 'messages' => function ($query) use ($request): void {
                     $cutoff = $this->history->cutoffFor($request->user());
-                    $query->when($cutoff !== null, fn ($query) => $query->where('created_at', '>=', $cutoff))
+                    $query->where('display_mode', 'chat')
+                        ->when($cutoff !== null, fn ($query) => $query->where('created_at', '>=', $cutoff))
                         ->orderBy('id');
                 },
                 'activityEvents' => function ($query) use ($request): void {

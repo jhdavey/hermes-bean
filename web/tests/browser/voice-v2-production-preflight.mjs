@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
-import { browserVoiceV2ShellCheck } from './voice-v2-production-preflight-core.mjs';
+import {
+    browserVoiceV2BundleCheck,
+    browserVoiceV2ShellCheck,
+} from './voice-v2-production-preflight-core.mjs';
 
 const baseUrl = new URL(process.env.VOICE_V2_PRODUCTION_URL || 'https://heybean.org');
 const timeoutMs = Math.max(1_000, Number(process.env.VOICE_V2_PREFLIGHT_TIMEOUT_MS || 15_000));
@@ -117,21 +120,13 @@ try {
 
     if (assetPath !== null) {
         const appAsset = await request(assetPath);
-        const routeMarkers = [
-            '/assistant/voice/realtime/session',
-            '/assistant/voice/realtime/usage',
-            '/assistant/voice/speech',
-            '/assistant/voice/turns',
-            '/assistant/voice/state',
-            '/assistant/voice/cancellations',
-        ];
-        const missingMarkers = routeMarkers.filter((marker) => !appAsset.body.includes(marker));
-        record('v2_client_bundle', appAsset.status === 200 && missingMarkers.length === 0, {
+        const bundleCheck = browserVoiceV2BundleCheck(appAsset.body);
+        record('v2_client_bundle', appAsset.status === 200 && bundleCheck.pass, {
             status: appAsset.status,
             bytes: Buffer.byteLength(appAsset.body),
             sha256: sha256(appAsset.body),
-            missing_markers: missingMarkers,
-        }, 'current bundle contains every Browser Voice v2 API boundary');
+            ...bundleCheck.actual,
+        }, bundleCheck.expected);
     }
 
     const wakeManifestResponse = await request('/voice/wake/manifest.json');
@@ -237,13 +232,23 @@ try {
 
     for (const probe of [
         { path: '/api/assistant/voice/realtime/session', method: 'POST' },
-        { path: '/api/assistant/voice/realtime/usage', method: 'POST' },
-        { path: '/api/assistant/voice/speech', method: 'POST' },
+        { path: '/api/assistant/voice/client-failures', method: 'POST' },
         { path: '/api/assistant/voice/capabilities', method: 'GET' },
+        { path: '/api/assistant/voice/turns', method: 'POST' },
         { path: '/api/assistant/voice/state?session_id=1', method: 'GET' },
+        { path: '/api/assistant/voice/stream?session_id=1', method: 'GET' },
+        { path: '/api/assistant/voice/cancellations', method: 'POST' },
     ]) {
         const response = await request(probe.path, { method: probe.method, headers: { Accept: 'application/json' } });
         record(`route:${probe.path.split('?')[0]}`, response.status === 401, response.status, 'HTTP 401 (route exists; authentication required)');
+    }
+
+    for (const path of [
+        '/api/assistant/voice/realtime/usage',
+        '/api/assistant/voice/speech',
+    ]) {
+        const response = await request(path, { method: 'POST', headers: { Accept: 'application/json' } });
+        record(`legacy-route-removed:${path}`, response.status === 404, response.status, 'HTTP 404 (legacy route removed)');
     }
 } catch (error) {
     checks.push({

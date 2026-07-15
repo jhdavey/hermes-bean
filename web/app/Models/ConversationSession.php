@@ -28,7 +28,9 @@ class ConversationSession extends Model
 
     public function latestMessage(): HasOne
     {
-        return $this->hasOne(ConversationMessage::class)->latestOfMany();
+        return $this->hasOne(ConversationMessage::class)
+            ->where('display_mode', 'chat')
+            ->latestOfMany();
     }
 
     public function workspace(): BelongsTo
@@ -49,6 +51,11 @@ class ConversationSession extends Model
     public function voiceTurns(): HasMany
     {
         return $this->hasMany(VoiceTurn::class);
+    }
+
+    public function voiceRealtimeSessions(): HasMany
+    {
+        return $this->hasMany(VoiceRealtimeSession::class);
     }
 
     public function blockers(): HasMany

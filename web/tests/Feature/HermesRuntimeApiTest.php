@@ -11,7 +11,6 @@ use App\Jobs\ProcessAssistantRun;
 use App\Models\AssistantRun;
 use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
-use App\Models\ConversationSession;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\AgentProfileService;
@@ -19,7 +18,6 @@ use App\Services\AssistantRunService;
 use App\Services\HermesRuntimeService;
 use App\Services\HermesSemanticInterpreter;
 use App\Services\HermesSemanticRuntimeService;
-use App\Services\VoiceTurnLifecycleService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Queue;
@@ -267,60 +265,6 @@ class HermesRuntimeApiTest extends TestCase
             ->assertJsonFragment(['content' => 'Old answer.'])
             ->assertJsonFragment(['content' => 'Plan tomorrow'])
             ->assertJsonFragment(['content' => 'Updated answer.']);
-    }
-
-    public function test_branching_from_a_completed_voice_turn_preserves_voice_messages_and_every_lifecycle_pointer(): void
-    {
-        $this->bindSemanticFake([$this->respond('Updated voice request.')]);
-        $token = $this->apiToken('voice-history-branch@example.com');
-        $user = User::where('email', 'voice-history-branch@example.com')->firstOrFail();
-        $sessionId = (int) $this->withToken($token)->postJson('/api/assistant/sessions')
-            ->assertCreated()
-            ->json('data.id');
-        $session = ConversationSession::findOrFail($sessionId);
-        $lifecycle = app(VoiceTurnLifecycleService::class);
-        $turn = $lifecycle->admit($user, $session, [
-            'turn_id' => 'voice-history-branch-turn-0001',
-            'transcript' => 'Plan today by voice.',
-            'conversation_context' => ['mode' => 'new_conversation', 'epoch' => 1],
-        ]);
-        $turn = $lifecycle->complete($turn, 'The original literal voice final.');
-        $voiceUserMessageId = $turn->user_message_id;
-        $voiceFinalMessageId = $turn->final_assistant_message_id;
-        $voiceRunIds = $turn->runs()->pluck('id')->all();
-
-        $response = $this->withToken($token)->postJson(
-            "/api/assistant/sessions/{$sessionId}/messages/{$voiceUserMessageId}/branch",
-            [
-                'content' => 'Plan tomorrow by chat instead.',
-                'metadata' => [
-                    'source' => 'web',
-                    'client_request_id' => 'voice-history-branch-edit-0001',
-                    'edited_from_message_id' => 999999,
-                    'edited_message_id' => 999999,
-                ],
-            ],
-        )->assertCreated()
-            ->assertJsonPath('data.user_message.metadata.edited_from_message_id', $voiceUserMessageId)
-            ->assertJsonMissingPath('data.user_message.metadata.edited_message_id');
-        $branchRun = $this->executeRun((int) $response->json('data.run.id'));
-
-        $turn->refresh();
-        $this->assertSame($voiceUserMessageId, $turn->user_message_id);
-        $this->assertSame($voiceFinalMessageId, $turn->final_assistant_message_id);
-        $this->assertSame($voiceRunIds, $turn->runs()->pluck('id')->all());
-        foreach ($turn->runs as $voiceRun) {
-            $this->assertSame($voiceUserMessageId, $voiceRun->user_message_id);
-            $this->assertSame($voiceFinalMessageId, $voiceRun->assistant_message_id);
-        }
-        $this->assertSame($voiceUserMessageId, $branchRun->metadata['edited_from_message_id'] ?? null);
-
-        $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}")
-            ->assertOk()
-            ->assertJsonFragment(['content' => 'Plan today by voice.'])
-            ->assertJsonFragment(['content' => 'The original literal voice final.'])
-            ->assertJsonFragment(['content' => 'Plan tomorrow by chat instead.'])
-            ->assertJsonFragment(['content' => 'Updated voice request.']);
     }
 
     public function test_hermes_assistant_copy_is_preserved_when_serialized(): void

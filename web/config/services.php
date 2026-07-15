@@ -85,14 +85,32 @@ return [
     'openai' => [
         'server_api_key' => $openAiPublicKey,
         'public_key' => $openAiPublicKey,
-        'realtime_model' => env('OPENAI_REALTIME_MODEL', 'gpt-realtime'),
-        'speech_model' => env('OPENAI_SPEECH_MODEL', OpenAiVoiceService::DEFAULT_SPEECH_MODEL),
-        'speech_timeout' => (float) env('OPENAI_SPEECH_TIMEOUT', 20),
+        'realtime_model' => env('OPENAI_REALTIME_MODEL', OpenAiVoiceService::DEFAULT_REALTIME_MODEL),
+        'realtime_sideband_url' => env('OPENAI_REALTIME_SIDEBAND_URL', 'wss://api.openai.com/v1/realtime'),
+        'realtime_reasoning_effort' => env('OPENAI_REALTIME_REASONING_EFFORT', 'low'),
         'realtime_session_timeout' => (float) env('OPENAI_REALTIME_SESSION_TIMEOUT', 10),
-        'realtime_transcription_model' => env('OPENAI_REALTIME_TRANSCRIPTION_MODEL', 'gpt-4o-mini-transcribe'),
         'realtime_vad_threshold' => (float) env('OPENAI_REALTIME_VAD_THRESHOLD', 0.5),
         'realtime_vad_prefix_padding_ms' => (int) env('OPENAI_REALTIME_VAD_PREFIX_PADDING_MS', 300),
         'realtime_vad_silence_duration_ms' => (int) env('OPENAI_REALTIME_VAD_SILENCE_DURATION_MS', 2000),
+    ],
+
+    'voice_realtime' => [
+        'operation_queue' => env('VOICE_REALTIME_OPERATION_QUEUE', 'voice-high'),
+        'lease_seconds' => max(2, (int) env('VOICE_REALTIME_LEASE_SECONDS', 15)),
+        'heartbeat_seconds' => max(1, (int) env('VOICE_REALTIME_HEARTBEAT_SECONDS', 5)),
+        'connect_timeout_seconds' => max(1, (float) env('VOICE_REALTIME_CONNECT_TIMEOUT_SECONDS', 10)),
+        'scan_interval_ms' => max(20, (int) env('VOICE_REALTIME_SCAN_INTERVAL_MS', 100)),
+        'command_interval_ms' => max(10, (int) env('VOICE_REALTIME_COMMAND_INTERVAL_MS', 25)),
+        'admission_ready_timeout_ms' => max(0, (int) env('VOICE_REALTIME_ADMISSION_READY_TIMEOUT_MS', 1200)),
+        'playback_authorization_grace_ms' => max(250, (int) env('VOICE_REALTIME_PLAYBACK_AUTHORIZATION_GRACE_MS', 350)),
+        'max_reconnect_attempts' => max(0, (int) env('VOICE_REALTIME_MAX_RECONNECT_ATTEMPTS', 3)),
+        'reconnect_delay_ms' => max(0, (int) env('VOICE_REALTIME_RECONNECT_DELAY_MS', 250)),
+        'session_batch' => max(1, (int) env('VOICE_REALTIME_SESSION_BATCH', 25)),
+        'command_batch' => max(1, (int) env('VOICE_REALTIME_COMMAND_BATCH', 20)),
+        'event_batch' => max(1, (int) env('VOICE_REALTIME_EVENT_BATCH', 20)),
+        'event_max_attempts' => max(1, (int) env('VOICE_REALTIME_EVENT_MAX_ATTEMPTS', 3)),
+        'event_retry_delay_ms' => max(0, (int) env('VOICE_REALTIME_EVENT_RETRY_DELAY_MS', 100)),
+        'once_grace_ms' => max(50, (int) env('VOICE_REALTIME_ONCE_GRACE_MS', 500)),
     ],
 
     'firebase' => [
@@ -143,7 +161,6 @@ return [
 
     'ai_usage' => [
         'realtime_session_minimum_cost_usd' => (float) env('AI_USAGE_REALTIME_SESSION_MINIMUM_COST_USD', 0.001),
-        'speech_price_per_million_characters' => (float) env('AI_USAGE_SPEECH_PRICE_PER_MILLION_CHARACTERS', 15.0),
         'pricing_per_million' => [
             'gpt-5.6-luna' => ['input' => 1.00, 'output' => 6.00],
             'gpt-5-nano' => ['input' => 0.05, 'output' => 0.40],
@@ -153,6 +170,22 @@ return [
             'gpt-5.4-mini' => ['input' => 0.75, 'output' => 4.50],
         ],
         'realtime_pricing_per_million' => [
+            'gpt-realtime-2.1-mini' => [
+                'text_input' => 0.60,
+                'cached_text_input' => 0.06,
+                'audio_input' => 10.00,
+                'cached_audio_input' => 0.30,
+                'text_output' => 2.40,
+                'audio_output' => 20.00,
+            ],
+            'gpt-realtime-2.1' => [
+                'text_input' => 4.00,
+                'cached_text_input' => 0.40,
+                'audio_input' => 32.00,
+                'cached_audio_input' => 0.40,
+                'text_output' => 24.00,
+                'audio_output' => 64.00,
+            ],
             'gpt-realtime' => [
                 'text_input' => 4.00,
                 'cached_text_input' => 0.40,
@@ -160,10 +193,6 @@ return [
                 'cached_audio_input' => 0.40,
                 'text_output' => 16.00,
                 'audio_output' => 64.00,
-            ],
-            'gpt-4o-mini-transcribe' => [
-                'audio_input' => 1.25,
-                'text_output' => 5.00,
             ],
         ],
         'limits' => [

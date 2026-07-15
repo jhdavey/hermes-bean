@@ -1,6 +1,6 @@
 # Bean Voice Rules
 
-This is the authoritative product contract for Bean voice. It records the expected user-visible behavior agreed during the July 11, 2026 voice interview. Implementation details may change; these rules may not be silently changed to fit an implementation.
+This is the authoritative product contract for Bean voice. It records the expected behavior agreed during the July 11, 2026 voice interview and the July 15, 2026 voice-only experience update. Implementation details may change; these rules may not be silently changed to fit an implementation.
 
 Every future voice change must begin by reading this document. If the intended product behavior changes, update this document in the same change before modifying code. Every regression must add an acceptance scenario that maps back to a rule here.
 
@@ -10,13 +10,13 @@ Bean voice should feel like a fast, attentive human assistant:
 
 - Wake reliably when addressed.
 - Ignore room conversation when not addressed.
-- Show the user's words live only after activation.
+- Pass activated audio directly to the single audio-native Hermes interpretation session without requiring a separate speech-to-text product path, transcript draft, spoken-request bubble, or spoken-response text in the ordinary chat UI.
 - Respond at Alexa-like conversational speed.
 - Never overlap, truncate, duplicate, or lose spoken turns.
 - Keep background work independent from speech playback.
 - Make accepted work durable and recoverable across reloads.
 - Never remain indefinitely in a thinking, listening, queued, running, or speaking state.
-- Send every activated spoken request through one Hermes semantic interpretation path. Hermes owns meaning, completeness, conversational reference resolution, operation selection, work decomposition, and natural response language; deterministic application code owns validation, execution, lifecycle, and safety.
+- Send every activated spoken request through one Hermes semantic interpretation path. Hermes owns meaning, completeness, conversational reference resolution, operation selection, work decomposition, and natural conversational language; deterministic application code owns validation, execution, lifecycle, safety, and the narrowly defined receipt-grounded final templates for simple successful CRUD operations.
 
 No implementation is considered correct merely because its happy path works. Stop, interruption, follow-up, timeout, reload, duplicate-event, provider-failure, and concurrent-work behavior are part of the primary contract.
 
@@ -27,7 +27,7 @@ No implementation is considered correct merely because its happy path works. Sto
 - `browser_voice_v2` remains the operational kill switch for new browser-voice admissions.
 - Release-certification state records whether the evidence gates in this document passed; it is not an access-control mechanism and must not prevent the owner from testing an uncertified development build.
 - During the current single-owner development phase, `origin/main` is the branch deployed to the live production environment, and that environment is an uncertified owner-test surface rather than a commercially certified release. A recorded proposal-coverage or recall failure must remain visible, keep every certification flag false, and continue to block commercial certification, but it does not by itself block the owner from pushing an otherwise operational build there for live testing.
-- Owner testing never waives invariants 6, 11, 13, or 15. Dormant privacy, stale/duplicate-event safety, visible terminal failure diagnostics, and no raw-microphone retention remain hard requirements across `[BV2-FIRST-WAKE-01:A–E]`, `[BV2-WAKE-01]`, `[BV2-WAKE-11]`, `[BV2-TRANSCRIPT-03]`, `[BV2-DIAGNOSTIC-03]`, `[BV2-PRIVACY-PCM-03]`, `[BV2-BARGE-04]`, and `[BV2-FOLLOWUP-01]` even in an uncertified owner test.
+- Owner testing never waives invariants 6, 11, 13, or 15. Dormant privacy, stale/duplicate-event safety, terminal failure diagnostics, and no raw-microphone retention remain hard requirements across `[BV2-FIRST-WAKE-01:A–E]`, `[BV2-WAKE-01]`, `[BV2-WAKE-11]`, `[BV2-AUDIO-NATIVE-01]`, `[BV2-SIDEBAND-01]`, `[BV2-DIAGNOSTIC-03]`, `[BV2-PRIVACY-PCM-03]`, `[BV2-BARGE-04]`, and `[BV2-FOLLOWUP-01]` even in an uncertified owner test.
 - A deployed development build must still pass the read-only deployment preflight before authenticated voice testing so stale assets or missing routes are caught explicitly.
 - Broader-user rollout controls are out of scope until the product actually has outside users.
 
@@ -35,8 +35,8 @@ No implementation is considered correct merely because its happy path works. Sto
 
 - Browser voice uses the same per-user subscription limits as every other application surface. Voice may not bypass a plan limit through semantic interpretation or any typed or external operation.
 - Admin accounts are unlimited and bypass subscription usage and feature limits.
-- Every activated spoken request incurs the configured Hermes semantic-interpretation model usage and is metered to the authenticated user that incurred it. Typed reads or writes do not add AI cost by themselves, while provider-backed transcription, speech, additional model reasoning, and external calls remain metered.
-- Realtime transcription and speech usage is recorded idempotently from provider usage events. A duplicate, late, or replayed provider event may not be charged twice.
+- Every activated spoken request incurs the configured audio-native Realtime Hermes usage and is metered to the authenticated user that incurred it. Typed reads or writes do not add AI cost by themselves, while additional model reasoning and external calls remain metered.
+- Realtime input, reasoning, tool-selection, composition, and output-audio usage is recorded idempotently by the server sideband from provider usage events. A duplicate, late, client-reported, or replayed provider event may not be charged twice.
 - The server checks the authenticated user's remaining budget before issuing a Realtime voice session and after recording each provider usage event. A client may display usage state, but it is never the quota owner.
 - Resource and feature entitlements, including note access and note-count limits, apply identically to direct voice writes and model-generated voice writes.
 - When a non-admin user reaches a plan limit, Bean stops admitting additional affected work, explains the limit in plain language, preserves already accepted work, and presents an explicit `View plans` upgrade action. A limit response is not described as a provider or technical failure.
@@ -48,7 +48,8 @@ No implementation is considered correct merely because its happy path works. Sto
 - **Active conversation:** Bean has accepted a wake and may accept contextual follow-ups without another wake phrase.
 - **Utterance:** One continuous segment of user speech bounded by end-of-speech silence.
 - **Logical request:** The complete user intent, including any continuation or clarification. Several utterances may form one logical request.
-- **Semantic interpretation:** The single Hermes-owned step that determines what an activated utterance means, whether information is missing, which typed operations are required, how conversational references resolve, and what Bean should say.
+- **Semantic interpretation:** The single Hermes-owned audio-native Realtime step that determines what an activated utterance means, whether information is missing, which typed operations are required, how conversational references resolve, and what Bean should say.
+- **Realtime sideband:** The authenticated Laravel-owned server connection to the same provider session as the browser WebRTC media connection. It is the only connection allowed to configure semantic tools, accept plans, submit receipts, authorize responses, or invoke application execution.
 - **Typed operation:** A schema-validated application, work-control, or provider operation executed by deterministic code after Hermes selects it and supplies structured arguments.
 - **Background job:** Work that continues independently of speech playback.
 - **Acknowledgement:** A short spoken confirmation that Bean heard or queued a request. It is not a success claim.
@@ -59,7 +60,7 @@ No implementation is considered correct merely because its happy path works. Sto
 ## Non-negotiable invariants
 
 1. One logical user request has one stable turn ID from first accepted speech through its terminal outcome.
-2. Every accepted request appears in chat immediately and exactly once.
+2. Every activated request is durably pre-admitted with its stable turn identity before provider interpretation or response and exactly once. A spoken request may contain no transcript; it is marked `voice_only` and is not rendered in the ordinary chat timeline.
 3. Every accepted request reaches exactly one terminal state: completed, failed, or canceled.
 4. Every non-canceled request receives exactly one final Bean message.
 5. Acknowledgements and provisional speech are never stored as final responses.
@@ -68,12 +69,12 @@ No implementation is considered correct merely because its happy path works. Sto
 8. Explicit cancellation never leaves the canceled item executing.
 9. A final response never cuts off its acknowledgement, and an acknowledgement never cuts off another Bean response.
 10. A meaningful user interruption never cancels background work unless the user explicitly asks to cancel it.
-11. Duplicate, late, stale, or out-of-order events never create duplicate work, duplicate chat messages, or lifecycle regression.
+11. Duplicate, late, stale, or out-of-order events never create duplicate work, duplicate durable messages, duplicate speech, or lifecycle regression.
 12. A reload reconstructs active work from server-owned state without losing or duplicating a request.
-13. A provider or worker failure always becomes a terminal user-visible result and an admin diagnostic.
+13. A provider or worker failure always becomes a terminal user-perceivable voice result, a non-transcript status when needed, and an admin diagnostic.
 14. Bean never claims a write succeeded until the authoritative application operation succeeded.
 15. Raw microphone audio is not retained by default.
-16. A durable Hermes final is preserved literally through storage, reload projection, visible chat, TTS verification, and playback; neither the model layer nor a client rewrites, unwraps, or suppresses its content.
+16. Laravel persists one approved final before it authorizes the bound Realtime audio response. Only that server-authorized response may become audible. The stored final is authoritative; provider output text is verified when available and material divergence is canceled and diagnosed, while harmless acoustic delivery variation does not require a separate TTS pass. Spoken-turn finals are excluded from ordinary chat rendering, while an explicitly enabled accessibility/debug mode may reveal the exact stored text without changing it.
 
 ## Wake behavior
 
@@ -133,21 +134,21 @@ While wake-only:
 - Background work does not keep the conversational window open.
 - `Hey Bean` always begins a new turn regardless of the current conversation or work state.
 
-## Live transcription and end of speech
+## Audio-native semantic input and end of speech
 
-- Live transcription appears in the input as the activated user speaks.
-- The transcript must update continuously rather than appearing only after speech ends.
-- Two seconds of silence ends the current utterance.
-- Speech that resumes before two seconds remains part of the same utterance.
-- Wake-only or rejected speech never appears temporarily in the input.
-- Final recognized text replaces the draft without duplication.
+- Bean uses the configured audio-native Realtime model for speech understanding and speech output. Browser voice has no separate transcription request, transcript buffer, transcript-admission route, or HTTP text-to-speech request.
+- An optional provider input or output transcript is diagnostic evidence only. It is never required to interpret or execute the turn, never rendered in the composer or ordinary chat UI, never trusted as a tool result, and never becomes a second semantic path.
+- After local wake confirmation, the browser durably pre-admits the stable turn and waits for the authenticated server sideband to be ready before activated PCM may reach the provider.
+- Two seconds of silence ends the current utterance. Speech that resumes before two seconds remains part of the same utterance.
+- Provider end-of-speech creates an input item bound to the pre-admitted stable turn. Only the sideband may request a tool-required, no-audio Hermes interpretation response for that item.
+- Wake-only, wake-address-only, or rejected speech never appears in a user-facing surface, reaches the conversational provider, or becomes persisted semantic work.
 
 ## Incomplete requests and clarification
 
-- At the end of an utterance, the Hermes semantic interpreter determines whether the logical request is actionable.
+- At the end of an utterance, the audio-native Hermes semantic interpreter determines whether the logical request is actionable.
 - A complete request proceeds immediately.
 - A clearly incomplete request receives one short, specific clarification question.
-- Two seconds of silence always closes the current utterance and durably admits every non-empty activated transcript to Hermes. The browser does not classify grammar, extend capture from phrase shape, decide completeness, or enter semantic clarification on its own.
+- Two seconds of silence always closes the current activated audio item and sends it through the same sideband-controlled Hermes interpretation step. The browser does not transcribe or classify grammar, extend capture from phrase shape, decide completeness, or enter semantic clarification on its own.
 - If Hermes is uncertain whether required information is missing, it asks one specific clarification rather than inventing work.
 - The user does not need another wake phrase to continue the request.
 - Bean waits five seconds for the clarification answer.
@@ -159,6 +160,8 @@ While wake-only:
 
 Every activated spoken logical request uses the same Hermes semantic interpretation path. There is no local or deterministic intent shortcut for time, date, voice-state questions, application reads, application writes, weather, conversational replies, Stop, or cancellation.
 
+A basic conversational audibility check such as `can you hear me?` may be answered directly by Hermes after it successfully understands the admitted live audio. That direct Hermes response is the semantic path itself; it is not a browser/server voice-state shortcut and does not require an application operation whose only evidence would be the same received turn.
+
 Hermes owns:
 
 - The meaning of the user's complete request.
@@ -166,7 +169,7 @@ Hermes owns:
 - Resolving references such as `that task`, `move it`, `the first one`, or a correction to prior work.
 - Selecting one or more typed operations and producing their schema-valid arguments.
 - Decomposing multi-clause and multi-domain requests into meaningful work items.
-- Producing acknowledgement, clarification, failure, and final-response language grounded in actual typed-operation results.
+- Producing acknowledgement, clarification, failure, conversational-answer, ambiguity, partial-failure, sensitive, external-lookup, and complex/mixed-operation final language grounded in actual typed-operation results.
 
 Deterministic application code owns:
 
@@ -177,7 +180,10 @@ Deterministic application code owns:
 
 Additional rules:
 
-- One configurable, low-latency backend model may be selected specifically for voice semantic interpretation. Selecting a faster model changes neither the tool boundary nor lifecycle ownership.
+- One configurable low-latency audio-native Realtime model is the Hermes interpreter and response-language engine for browser voice. Selecting a faster Realtime model changes neither the tool boundary nor lifecycle ownership.
+- The browser owns only local wake/privacy gating and media transport. It never exposes application tools, relays a provider tool call to application execution, sends `response.create`, or decides whether provider audio is authorized.
+- The Laravel sideband exposes only the narrow structured Hermes-plan and grounded-finalization tools. Realtime selects structured application operations; Laravel validates and executes them. Raw CRUD/database tools are never exposed directly to the browser or provider.
+- Automatic provider responses remain disabled. Interpretation is a tool-required, no-audio response requested only after stable-turn pre-admission and input-item binding. Acknowledgement, clarification, or final audio is requested only after its durable text and playback identity exist.
 - The model may not write application state directly, claim an unverified side effect, invent a tool result, or become the owner of a queue, turn, job, or delivery state.
 - A typed operation executes only after its arguments pass deterministic schema, authorization, entitlement, and safety checks. Deterministic code may reject a missing or contradictory tool payload, but it never decides what the user meant or whether conversational information is sufficient; that rejection returns to Hermes for repair or one specific clarification.
 - Voice operations have one canonical argument shape. Execution adapters may translate validated canonical values into an application or provider API, but they may not accept semantic aliases, parse transcript prose, infer omitted meaning, silently select a named resource, or reinterpret a temporal value after Hermes.
@@ -194,7 +200,9 @@ Additional rules:
 - An expected typed-operation rejection discovered after staging—such as duplicate prevention or a target that changed concurrently—terminalizes as a machine-readable negative receipt and still reaches Hermes composition. The operation exception and lifecycle contain no clarification or conversational failure copy; Hermes alone explains the result or asks the follow-up.
 - A semantically identified read-only operation may bypass unrelated background execution after interpretation. No request bypasses semantic interpretation.
 - A multi-step logical request may create several typed jobs but receives one combined final response after all required jobs terminalize.
-- If Hermes itself is unavailable or produces no valid final after the one allowed same-model retry, deterministic lifecycle code may persist one fixed, content-neutral operational failure fallback solely to satisfy the terminal-state and exactly-one-final invariants. That last-resort fallback never interprets the transcript, selects work, invents a result, or claims an unverified side effect; all ordinary validation, operation, and partial-success failures return to Hermes for grounded language.
+- A single unambiguous task, reminder, calendar, or note create, update, or delete may skip a second model composition call only after one authoritative committed receipt exists. Deterministic code may then select a concise operation-specific response template populated exclusively from that receipt. It may not infer meaning, reuse unverified model success prose, or claim success before commit.
+- Ambiguous targets, partial failures, multiple operations, mixed receipts, external lookups, sensitive/error cases, and conversational or nuanced responses always return to Hermes composition. Deterministic receipt finalization is not an intent shortcut and never runs before the common semantic interpretation path.
+- If Hermes itself is unavailable or produces no valid final after the one allowed same-model retry, deterministic lifecycle code may persist one fixed, content-neutral operational failure fallback solely to satisfy the terminal-state and exactly-one-final invariants. That last-resort fallback never interprets user audio or text, selects work, invents a result, or claims an unverified side effect; all ordinary validation, operation, and partial-success failures return to Hermes for grounded language.
 - Hermes owns the sole semantic retry budget. A terminal provider, validation, or composition failure is never requeued as a fresh whole semantic run; lifecycle recovery may replace only a stale/crashed worker generation behind the same durable identity and idempotency receipts.
 - Generic-versus-voice lifecycle ownership is determined only by the server-owned durable voice-turn relationship. Client metadata and diagnostic source labels can never create, impersonate, route, or mutate a voice run.
 
@@ -209,6 +217,35 @@ Additional rules:
 - Once acknowledgement playback starts, the final response waits for it to finish.
 - Bean never speaks two responses simultaneously.
 
+## Voice-only display and server projection
+
+- Every admitted spoken turn and its durable user/final messages carry server-owned metadata equivalent to `origin: spoken_voice` and `display_mode: voice_only`.
+- The ordinary composer and chat timeline never render spoken transcript drafts, spoken user bubbles, spoken assistant-final bubbles, reload-restored spoken text, or `You said` transcript surfaces.
+- Typed chat remains visible text chat and is unaffected by the spoken-turn display policy.
+- The working dock may render concise non-transcript states such as `Thinking`, `Creating reminder`, `Working`, `Failed`, or `Canceled`; it may not display the user's spoken words.
+- An accessibility/debug transcript mode, if present, is explicit opt-in, is off by default, and reveals only the exact sanitized durable text scoped to the authenticated user and workspace.
+- Hiding ordinary chat text never suppresses acknowledgement/final audio, delivery receipts, dashboard projection updates, admin diagnostics, or reload recovery.
+- Authenticated, user/workspace-scoped, resumable server push is the primary browser projection transport. Each event has a stable cursor and durable identity; reconnect resumes after the last applied cursor.
+- The state endpoint remains recovery fallback only. Push and fallback may overlap, but shared durable event/turn identities make projection, speech scheduling, and delivery acknowledgement exactly once.
+- Server push never emits spoken transcript text as an ordinary user-facing payload. Internal text needed for exact approved speech remains protected by the same authenticated voice-only projection policy.
+
+## Hot voice lane and latency telemetry
+
+- Browser voice semantic interpretation, receipt-grounded composition, and response authorization run through one warm Laravel-owned Realtime sideband daemon. They do not enter the generic HTTP-model queue and do not execute through a second lifecycle owner.
+- The sideband uses durable provider-session leases, an idempotent inbound-event ledger, and a durable outbound-command ledger so reconnect, daemon restart, reload, and duplicate provider events resume the same identities instead of creating work again.
+- Short deterministic typed operations use one dedicated high-priority `voice-high` queue served by warm workers. `VoiceTurnLifecycleService`, the durable turn and runs, their claims/locks, and hard deadlines remain authoritative; the sideband and queue are transports, never state owners.
+- Configuration and tests must prove the canonical sideband and typed-operation lane. Superseded inline dispatch, HTTP voice interpretation/composition, transcription admission, HTTP speech, generic-queue voice routing, polling-only, and alternate semantic paths are removed rather than retained as dormant compatibility code.
+- Every turn records sanitized timestamps for wake detection, capture start, pre-admission requested/admitted, first accepted audio, provider end-of-speech/input-item binding, sideband interpretation requested/started/completed, acknowledgement published/audio authorized/first audio, operation staged/queued/started/committed, composition requested/started/completed, final ready/audio authorized/first sample/completed, dashboard projection update, and terminalization when those milestones apply.
+- Per-turn diagnostics derive sideband wait, provider semantic execution, operation queue wait, worker execution, acknowledgement first-audio, final first-audio, projection, and total latency from those server/client milestones. Telemetry contains no raw audio, secrets, or ordinary-chat transcript payload.
+
+## Approved speech transport
+
+- The same Realtime session performs audio understanding and output speech, but automatic responses are disabled. Realtime may interpret through the sideband's narrow Hermes tools; it may not execute application tools, mutate application state, claim an unverified write, own lifecycle state, or create durable assistant messages.
+- Laravel durably approves acknowledgement, clarification, or final text and a single-use playback capability before the sideband requests its audio response. Each response is bound to the authenticated Realtime session, stable turn ID, speech item ID, purpose, controller generation, approved-text hash, and provider response ID.
+- The remote audio element starts fail-closed. Missing, stale, replayed, duplicate, or mismatched authorization stays muted and causes only the targeted provider response to be canceled and diagnosed; it cannot speak, execute work, or regress delivery state.
+- Bean's own playback is excluded from capture, and meaningful barge-in retains the same deterministic playback behavior regardless of speech transport.
+- Browser voice has no HTTP TTS or separate STT fallback. If the native Realtime session or sideband fails, the turn terminalizes through the same lifecycle with one content-neutral user-perceivable failure instead of silently stacking another voice pipeline.
+
 ## Performance and deadlines
 
 These are user-audible service-level objectives. They are initial release targets and must be measured on representative browsers, devices, networks, and background-noise conditions.
@@ -216,9 +253,9 @@ These are user-audible service-level objectives. They are initial release target
 | Behavior | Target | Hard behavior |
 | --- | --- | --- |
 | Wake recognition | At least 95% Bean Voice QA journey pass rate and p95 within 500 ms after the wake phrase completes | Never expose dormant speech while deciding |
-| Live transcript update | p95 within 150 ms of recognized partial text | Never wait until utterance end to show all text |
-| Semantic interpretation | p50 ≤ 500 ms; p95 ≤ 1,000 ms after final transcript | Terminal interpretation failure by 2 seconds; never fall back to heuristic routing |
-| Semantic no-tool final audio | p50 ≤ 800 ms; p95 ≤ 1,500 ms after final transcript | Terminal failure by 3 seconds |
+| Stable-turn pre-admission | p95 within 250 ms after local activation | Activated PCM never reaches the provider before durable admission and sideband readiness |
+| Semantic interpretation | p50 ≤ 500 ms; p95 ≤ 1,000 ms after provider end-of-speech | Terminal interpretation failure by 2 seconds; never fall back to heuristic routing |
+| Semantic no-tool final audio | p50 ≤ 800 ms; p95 ≤ 1,500 ms after provider end-of-speech | Terminal failure by 3 seconds |
 | Typed read final audio | p50 ≤ 1,000 ms; p95 ≤ 2,000 ms | Terminal failure by 4 seconds |
 | Typed write acceptance/dock | p95 ≤ 1,000 ms | Terminal failure or explicit background state by 2 seconds |
 | Simple typed write final | p95 ≤ 4 seconds | Terminal failure by 6 seconds |
@@ -248,7 +285,7 @@ No request may display an unchanged `Thinking` or `Working` state beyond its no-
 - Background noise alone does not confirm an interruption.
 - Meaningful speech confirms the interruption without requiring `Hey Bean` during an active conversation.
 - On confirmed interruption, Bean permanently stops the current playback and handles the new utterance exactly once.
-- The interrupted answer remains fully visible in chat.
+- The interrupted answer remains durably complete and eligible for explicit replay or opt-in transcript display; it remains hidden from the ordinary voice-only chat timeline.
 - Associated background work continues unless explicitly canceled.
 - If potential speech is rejected as noise or unrelated conversation, Bean restores normal playback volume and continues the current audio. It does not restart or replay speech.
 - Bean never automatically resumes or restarts audio after a confirmed meaningful interruption. The user may ask Bean to repeat the answer.
@@ -280,7 +317,7 @@ Saying `Stop`:
 - Is admitted and interpreted through the same Hermes semantic path as every other activated utterance; there is no local phrase shortcut.
 - On meaningful barge-in, the current playback has already stopped under the interruption rule while semantic interpretation determines whether the user meant playback Stop, task cancellation, or something else.
 - Hermes must select the typed playback-Stop operation for an unqualified request to stop Bean speaking. Deterministic code executes that operation.
-- Receives exactly one durable literal Hermes final like every other non-canceled semantic turn. That final remains visible and is eligible for normal non-overlapping speech delivery after the prior speech item stops; the client may not suppress it.
+- Receives exactly one durable literal Hermes final like every other non-canceled semantic turn. That final remains hidden from the ordinary chat timeline and is eligible for normal non-overlapping speech delivery after the prior speech item stops; the client may not suppress its audio.
 
 In either form, playback Stop:
 
@@ -291,7 +328,7 @@ In either form, playback Stop:
 - Keeps microphone wake detection enabled.
 - Returns voice interaction to wake-only mode unless an explicit active clarification requires otherwise.
 - Does not delete the accepted request or its eventual final text.
-- Keeps the stopped speech item's complete final text visible. A physical Stop adds no new final; a semantic spoken Stop delivers its separate Hermes-produced final normally.
+- Keeps the stopped speech item's complete final text durable but hidden from the ordinary chat timeline. A physical Stop adds no new final; a semantic spoken Stop delivers its separate Hermes-produced final normally.
 
 If the user later asks `Did you finish that?`, Bean reports the actual task state: still working, completed, failed, or explicitly canceled. It must not claim Stop canceled background work.
 
@@ -315,21 +352,21 @@ Rules:
 
 ## Chat and working dock
 
-- Live activated speech appears in the input during recognition.
-- Every accepted request appears in chat immediately.
+- Live or final spoken transcripts never appear in the composer or ordinary chat timeline.
+- Every accepted spoken request and its final are stored exactly once as `voice_only`; typed user and assistant messages continue to appear in chat normally.
 - Every job appears in the dock immediately with its real state.
 - Queued, running, completed, failed, and canceled states are server-owned.
 - Completed dock items may clear after a short visible confirmation.
-- Canceled items briefly show canceled, then disappear along with their normal-chat request.
-- Interrupted answers remain visible.
+- Canceled items briefly show canceled, then disappear; their hidden spoken-turn audit records remain internal.
+- Interrupted spoken answers remain durable but hidden from ordinary chat.
 - Exactly one final Bean message is stored per logical request.
-- Reload restores chat, active jobs, order, state, and eventual delivery without duplication or loss.
+- Reload restores typed chat, active jobs, order, state, and eventual voice delivery without duplication, loss, or disclosure of hidden spoken text.
 - The browser never becomes the sole owner of a request or queue.
 
 ## Failure experience
 
 - A timeout, provider outage, permission failure, transport loss, worker crash, or reconciliation failure must terminalize the affected request.
-- Bean gives one natural response that explains the failure at a high level and asks whether it should try again.
+- Bean gives one natural spoken response that explains the failure at a high level and asks whether it should try again; its durable text remains hidden from ordinary chat for a voice-only turn.
 - Bean does not expose stack traces, provider jargon, HTTP codes, Laravel, OpenAI internals, or raw schemas to the user.
 - Failure clears indefinite thinking/speaking state and returns to the correct follow-up or wake-only mode.
 - If a write may have committed, Bean reconciles authoritative application state before offering a retry.
@@ -339,11 +376,11 @@ Rules:
 Every failed, timed-out, abandoned, canceled, or unusually slow turn must be visible in the admin dashboard with:
 
 - User and workspace identifiers
-- Sanitized transcript
-- Stable turn ID and run/job IDs
-- Selected lane and handler for every durable run/job
-- Wake, transcription, durable-admission, acknowledgement, first-progress, final-response, and playback latency
-- Provider and typed tool calls
+- Optional sanitized semantic summary when the provider supplied one; a transcript is neither required nor collected by a separate STT path
+- Stable turn ID, Realtime session/call/input-item/response IDs, and run/job IDs
+- Selected sideband session, command, lane, and handler for every durable run/job
+- Wake, pre-admission, first-audio, end-of-speech, sideband interpretation, acknowledgement, first-progress, final-response, and playback latency
+- Sideband Hermes-plan/finalization calls and deterministic typed operations
 - Retry attempts
 - Complete lifecycle transition history
 - Final internal error and user-facing message
@@ -355,11 +392,11 @@ Raw microphone audio is not retained by default. Diagnostic audio collection wou
 
 ## Ideal reference interaction
 
-1. The user turns on the microphone. Bean shows wake-only readiness. Room conversation remains invisible.
-2. The user says, `Hey Bean, what's on my calendar tomorrow?` The words appear live after wake activation. Two seconds of silence closes the utterance, and the request is durably admitted before interpretation.
-3. Hermes interprets the request, selects the typed calendar read, and supplies structured arguments. The authoritative read finishes quickly, so Bean skips acknowledgement and Hermes produces the grounded final answer.
+1. The user turns on the microphone. Bean shows wake-only readiness only after Realtime and a clean consumer-enabled local wake generation have completed the worklet, model, recognition-stream, local-capture, and live-decode barriers. A bounded startup failure stays visible and tears capture down; room conversation remains invisible.
+2. The user says, `Hey Bean, what's on my calendar tomorrow?` Local wake confirmation pre-admits the stable voice turn and waits for sideband readiness before releasing activated audio. The UI shows listening/thinking state without transcript text. Two seconds of silence closes the utterance and binds the provider input item to that turn.
+3. Realtime Hermes returns the required structured plan to the Laravel sideband without speaking. Laravel validates and executes the typed calendar read. The authoritative read finishes quickly, so Bean skips acknowledgement, persists the grounded final, authorizes one bound Realtime response, and only then unmutes its audio.
 4. After Bean finishes, the 15-second follow-up window begins. The user asks, `What time is the first one?` without a wake phrase. Hermes resolves `the first one` from prior durable context, selects any required typed read, and answers directly.
-5. While Bean is speaking, the user begins a meaningful new request. Playback may briefly lower while speech is evaluated; after speech is confirmed, the old audio stops permanently, its full text remains visible, and the new utterance is accepted once.
+5. While Bean is speaking, the user begins a meaningful new request. Playback may briefly lower while speech is evaluated; after speech is confirmed, the old audio stops permanently, its full text remains durable and hidden from ordinary chat, and the new utterance is accepted once.
 6. The user asks for a meal plan note. Bean acknowledges within 800 ms, creates visible dock items, and begins background work.
 7. While that work runs, the user asks for the current time. The request still crosses the Hermes semantic path, receives trusted current-time context, and bypasses unrelated background execution only after interpretation.
 8. The user adds a reminder request. Hermes selects the typed reminder operation; Bean acknowledges without claiming success, shows a second dock item, and runs it when one of the three background slots is available.
@@ -371,11 +408,12 @@ Raw microphone audio is not retained by default. Diagnostic audio collection wou
 
 Before commercial certification or broader-user release, deterministic and representative-device tests must cover:
 
-- First wake immediately after microphone startup
+- First wake immediately after microphone startup, including Realtime becoming ready before a cold local wake model and the UI waiting for the clean current-generation live-decode barrier before publishing wake-only readiness
 - Exact `Hey Bean` and contract-approved acoustically close `Hey` + `Bean` renderings crossing the same single three-class acoustic decision and safe release boundary after exactly 160 ms of local tail, including a strict proposal paired with either learned addressed positive class, with a KWS proposal alone releasing no audio
 - Missed `Hey` recovery and third-person `Bean` mentions
 - Wake-only privacy and invisible background speech
-- Live partial transcription and two-second utterance closure
+- Audio-native understanding with no separate STT/TTS request, no browser transcript buffer or admission, no composer/chat/ARIA disclosure, and two-second utterance closure
+- Stable-turn pre-admission and sideband readiness before the first activated PCM reaches the provider
 - Incomplete request, five-second clarification, and one logical turn
 - Syntactically incomplete fragments reaching durable Hermes admission at the normal two-second endpoint without any browser phrase rule
 - Fifteen-second follow-up timeout and natural closing phrases
@@ -383,10 +421,10 @@ Before commercial certification or broader-user release, deterministic and repre
 - No client, admission, runtime, or typed-service heuristic shortcut that can answer or route an activated spoken request before Hermes interpretation
 - Explicit remember, memory search/read, correction/update, and forget/delete journeys using canonical memory fields and exact authorized targets
 - Ambiguous or incomplete memory requests producing one Hermes clarification on the original stable turn with zero speculative memory writes
-- Duplicate delivery and reload during a memory mutation producing one memory side effect, one accepted user message, and one durable final Bean response
+- Duplicate delivery and reload during a memory mutation producing one memory side effect, one hidden accepted user message, one hidden durable final Bean response, and one final speech delivery
 - A duplicate-memory or stale-target race discovered during execution producing zero speculative writes, one structured negative receipt with no application-authored question, and one literal Hermes-composed response or follow-up
 - `I prefer`, `I am`, and similar conversational transcript prose producing idempotent activity accounting but no durable memory unless the user explicitly asks to persist it and Hermes selects the corresponding typed memory operation
-- Configurable fast semantic model selection, usage enforcement, timeout, same-model retry, and terminal failure without heuristic or second-model fallback
+- Configurable fast Realtime semantic model selection, server-side usage enforcement, timeout, same-model retry, and terminal failure without heuristic, HTTP-model, STT, TTS, or second-model fallback
 - Structured tool selection and argument validation for reads, writes, weather, work status, playback Stop, single-job cancellation, and all-job cancellation
 - Ambiguous named-location provider results returning bounded candidates to Hermes for a natural follow-up, with no first-result geocoding guess or unrelated provider fallback
 - Incidental task, reminder, calendar, folder, category, and blocker create fields using documented application defaults without a semantic retry, while genuinely missing meaning such as a reminder time or calendar start returns to Hermes for one clarification before any write
@@ -394,6 +432,12 @@ Before commercial certification or broader-user release, deterministic and repre
 - Ambiguous and incomplete model output returning through Hermes for one Hermes-authored clarification journey on the original stable turn, with deterministic complete-journey coverage
 - Fast-result acknowledgement skipping
 - Slow-result acknowledgement followed by non-overlapping final speech
+- Voice-only create/read/update/delete success and failure with no spoken transcript or assistant text rendered before or after reload, while typed chat remains visible
+- Receipt-grounded simple single-operation CRUD finalization only after authoritative commit, with ambiguous, partial, multi-operation, external, and nuanced results returning to Hermes composition
+- Authenticated resumable server push, cursor resume, polling fallback, SSE/poll overlap dedupe, and exactly-once final speech/delivery
+- Warm leased sideband takeover/reconnect, provider-event and outbound-command dedupe, dedicated `voice-high` typed-operation queue selection, queue-wait/worker-execution metrics, and provider/worker failure terminalization through the same lifecycle owner
+- Per-turn wake-to-first-audio and final-audio telemetry serialization without raw audio, secrets, or ordinary-chat transcript exposure
+- Browser voice orchestration delegated from `webApp.js` to one dedicated runtime while preserving wake, follow-up, barge-in, Stop, cancellation, recovery, and teardown
 - Meaningful barge-in, false barge-in, and permanent playback stop after confirmation
 - Spoken semantic Stop and visible-control Stop during acknowledgement, final speech, and background work
 - Explicit single-job and all-job cancellation
@@ -401,12 +445,14 @@ Before commercial certification or broader-user release, deterministic and repre
 - Read-only bypass while background work is active
 - Out-of-order job completion with clearly identified results
 - Reload during capture, queued work, running work, acknowledgement, and final delivery
-- Literal Hermes final preservation through durable storage, reload, visible text, verified TTS, and delivery
+- Durable approved-final preservation before server-authorized native Realtime audio, fail-closed browser playback authorization, optional provider output-text verification, exactly-once delivery, and optional explicit transcript mode without ordinary-chat rendering
+- Missing, stale, replayed, duplicate, or mismatched playback capabilities and provider response IDs remaining muted and producing no delivery-state transition
+- Browser-observed function calls, unsolicited provider responses, or client-generated `response.create` attempts producing no application operation or audible response
 - Duplicate and out-of-order provider/browser events
 - Provider timeout, transport failure, worker crash, and ambiguous write reconciliation
-- Exactly one accepted user message and one final Bean message
+- Exactly one hidden accepted spoken user message, one hidden durable final Bean message, and one final audio delivery; typed messages remain normally visible
 - Admin diagnostic completeness without raw audio
-- Base, Premium, and Pro voice usage enforcement; unlimited admin behavior; idempotent Realtime usage reporting; direct and generated note-limit enforcement; and a visible upgrade action
+- Base, Premium, and Pro voice usage enforcement; unlimited admin behavior; idempotent server-side Realtime usage reporting with no browser usage authority; direct and generated note-limit enforcement; and a visible upgrade action
 
 ## Change-control rule
 

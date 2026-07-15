@@ -237,7 +237,6 @@ return new class extends Migration
                 'started_at',
                 'first_progress_at',
                 'terminal_at',
-                'final_delivered_at',
                 'hard_deadline_at',
                 'no_progress_deadline_at',
                 'created_at',

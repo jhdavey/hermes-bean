@@ -7,17 +7,16 @@ regression journey. It generates the exact `Hey Bean, can you hear me?` fixture
 with the temporary offline-TTS corpus builder, replays that PCM through the
 production `LocalWakeGate`, AudioWorklet, worker, and packaged model, and
 permits only the gate's real detection callback to activate the controller.
-Simulated provider partial/final events then prove the browser's admission
-request, exactly-once projection, delivery reporting, and reload behavior. The
-test asserts that the synthetic `wake()` helper was never called and that no
-PCM escaped before confirmation.
+Simulated Realtime and durable projection events then prove safe PCM release,
+admission, server-authorized audio delivery, reporting, and reload behavior.
+The test asserts that the synthetic `wake()` helper was never called and that
+no PCM escaped before confirmation.
 
-`BrowserVoiceSemanticCompleteJourneyTest::test_first_acoustic_hearing_check_reaches_hermes_and_reloads_one_durable_final`
-is the real-server half for that exact provider-final transcript. It crosses
-durable admission, one Hermes interpretation, acknowledgement policy, one
-literal final, idempotent re-admission, and two reload projections. Neither
-layer substitutes for the other. Actual provider transcription and a physical
-microphone remain outside deterministic coverage.
+The paired server journey sends that admitted audio through one leased OpenAI
+Realtime sideband, one Hermes planning path, deterministic execution, one
+receipt-grounded response authorization, and reload-safe durable projection.
+Neither layer substitutes for the other. Actual provider/network behavior and
+a physical microphone remain outside deterministic coverage.
 
 `npm run preflight:voice:production` checks whether the publicly deployed development site contains the Browser Voice v2 shell marker, client API boundaries, current wake manifest, integrity-verified wake assets, proposal-only worker, one three-class model, and authenticated voice routes. Run it from `web/` before the owner's authenticated smoke test. No user allowlist is required:
 

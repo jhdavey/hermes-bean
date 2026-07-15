@@ -14,6 +14,7 @@ use App\Models\MemoryEvent;
 use App\Models\User;
 use App\Services\AssistantRunService;
 use App\Services\HermesRuntimeService;
+use App\Services\RealtimeVoiceSessionService;
 use App\Services\VoiceTurnLifecycleService;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -99,7 +100,7 @@ class AssistantRunLifecycleTest extends TestCase
 
         $this->withToken($token)->postJson("/api/assistant/sessions/{$session->id}/runs", [
             'content' => 'Try to spoof a voice run.',
-            'source' => 'browser_voice_v2',
+            'source' => 'browser_voice_realtime',
             'metadata' => $this->metadata('reserved-source-top-level'),
         ])->assertUnprocessable()->assertJsonValidationErrors(['source']);
 
@@ -107,7 +108,7 @@ class AssistantRunLifecycleTest extends TestCase
             'content' => 'Queue one ordinary generic run.',
             'metadata' => [
                 ...$this->metadata('reserved-source-metadata'),
-                'source' => 'browser_voice_v2',
+                'source' => 'browser_voice_realtime',
             ],
         ])->assertCreated();
 
@@ -123,7 +124,7 @@ class AssistantRunLifecycleTest extends TestCase
                 $session->fresh(),
                 'Defensive service boundary.',
                 $this->metadata('reserved-source-service'),
-                'browser_voice_v2',
+                'browser_voice_realtime',
             );
             $this->fail('A generic service caller must not use the reserved voice source.');
         } catch (\InvalidArgumentException $exception) {
@@ -169,6 +170,29 @@ class AssistantRunLifecycleTest extends TestCase
         $user = User::findOrFail($session->user_id);
         $runs = app(AssistantRunService::class);
         $voice = app(VoiceTurnLifecycleService::class);
+        $realtimeSessions = app(RealtimeVoiceSessionService::class);
+        $realtime = $realtimeSessions->createPending(
+            $user,
+            $session,
+            'gpt-realtime-test',
+            'alloy',
+            1,
+        );
+        $realtime = $realtimeSessions->bindProviderCall(
+            $realtime,
+            'cross-mode-test-call',
+        );
+        $realtime = $realtimeSessions->markReady(
+            $realtimeSessions->acquireLease($realtime, 'cross-mode-test-daemon', 30),
+            'cross-mode-test-daemon',
+        );
+        $voiceInput = static fn (string $turnId): array => [
+            'turn_id' => $turnId,
+            'controller_generation' => 1,
+            'provider_connection_generation' => 1,
+            'input_generation' => 0,
+            'conversation_context' => ['mode' => 'new_conversation', 'epoch' => 1],
+        ];
 
         $runs->queueRun(
             $session,
@@ -177,21 +201,23 @@ class AssistantRunLifecycleTest extends TestCase
             'web_chat',
         );
         try {
-            $voice->admit($user, $session->fresh(), [
-                'turn_id' => 'cross-mode-chat-first',
-                'transcript' => 'Voice must not reuse it.',
-                'timezone' => 'America/New_York',
-            ]);
+            $voice->preAdmitRealtime(
+                $user,
+                $session->fresh(),
+                $realtime,
+                $voiceInput('cross-mode-chat-first'),
+            );
             $this->fail('Voice admission should conflict with an existing chat identity.');
         } catch (VoiceTurnConflictException $exception) {
             $this->assertSame('That stable turn ID is already owned by a chat request.', $exception->getMessage());
         }
 
-        $voice->admit($user, $session->fresh(), [
-            'turn_id' => 'cross-mode-voice-first',
-            'transcript' => 'Voice owns this identity.',
-            'timezone' => 'America/New_York',
-        ]);
+        $voice->preAdmitRealtime(
+            $user,
+            $session->fresh(),
+            $realtime,
+            $voiceInput('cross-mode-voice-first'),
+        );
         try {
             $runs->queueRun(
                 $session->fresh(),
@@ -204,7 +230,7 @@ class AssistantRunLifecycleTest extends TestCase
             $this->assertSame('That client_request_id is already owned by a voice turn.', $exception->getMessage());
         }
 
-        $this->assertDatabaseCount('assistant_runs', 2);
+        $this->assertDatabaseCount('assistant_runs', 1);
         $this->assertDatabaseCount('voice_turns', 1);
     }
 
@@ -592,7 +618,7 @@ class AssistantRunLifecycleTest extends TestCase
             'status' => 'completed',
             'cancelled_before_queue' => true,
             'cancellation_requested_at' => now()->toIso8601String(),
-            'source' => 'browser_voice_v2',
+            'source' => 'browser_voice_realtime',
             'execution_generation' => 999,
             'queued_at' => '1999-01-01T00:00:00Z',
             'request_fingerprint' => 'forged',

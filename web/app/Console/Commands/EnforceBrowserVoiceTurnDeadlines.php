@@ -9,7 +9,7 @@ class EnforceBrowserVoiceTurnDeadlines extends Command
 {
     protected $signature = 'browser-voice:enforce-deadlines {--turn-id=}';
 
-    protected $description = 'Terminalize Browser Voice v2 turns that exceeded progress or hard deadlines';
+    protected $description = 'Terminalize Realtime browser voice turns that exceeded progress or hard deadlines';
 
     public function handle(VoiceTurnLifecycleService $lifecycle): int
     {
@@ -18,7 +18,7 @@ class EnforceBrowserVoiceTurnDeadlines extends Command
             is_numeric($turnId) ? (int) $turnId : null,
         );
 
-        $this->info("Terminalized {$failed} overdue Browser Voice v2 turn(s).");
+        $this->info("Terminalized {$failed} overdue Realtime browser voice turn(s).");
 
         return self::SUCCESS;
     }

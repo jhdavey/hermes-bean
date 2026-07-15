@@ -7,6 +7,7 @@ import { runInNewContext } from 'node:vm';
 import {
     LOCAL_WAKE_GATE_PROCESSOR_NAME,
     LOCAL_WAKE_GATE_PROCESSOR_URL,
+    LOCAL_WAKE_CONSUMER_READY_TIMEOUT_MS,
     LOCAL_WAKE_PCM_ACK_TIMEOUT_MS,
     LOCAL_WAKE_PCM_SAMPLE_RATE,
     LOCAL_WAKE_WORKER_FAILURE_DETAIL_TIMEOUT_MS,
@@ -1016,10 +1017,13 @@ test('a newer dormant generation erases rejected candidate audio before a later 
 
 function createHarness({
     addModuleError = null,
+    beforeRelease = null,
+    consumerReadyTimeoutMs = LOCAL_WAKE_CONSUMER_READY_TIMEOUT_MS,
     maxInFlightPcm = 2,
     maxBufferedPcm = 80,
     consumerReady = true,
     onDetected = null,
+    onReleaseRejected = null,
     pcmAckTimeoutMs = LOCAL_WAKE_PCM_ACK_TIMEOUT_MS,
 } = {}) {
     const order = [];
@@ -1200,6 +1204,7 @@ function createHarness({
     const diagnostics = [];
     const errors = [];
     const detections = [];
+    const releaseRejections = [];
     const readiness = [];
     const activatedPcm = [];
     const gate = new LocalWakeGate({
@@ -1210,6 +1215,8 @@ function createHarness({
         maxInFlightPcm,
         maxBufferedPcm,
         consumerReady,
+        consumerReadyTimeoutMs,
+        beforeRelease: beforeRelease || (() => true),
         pcmAckTimeoutMs,
         setTimeout,
         clearTimeout,
@@ -1226,6 +1233,10 @@ function createHarness({
             order.push('detected');
             detections.push(detection);
             onDetected?.(detection);
+        },
+        onReleaseRejected: (event) => {
+            releaseRejections.push(event);
+            onReleaseRejected?.(event);
         },
     });
 
@@ -1259,6 +1270,7 @@ function createHarness({
         rawTrack,
         emitPcm,
         readiness,
+        releaseRejections,
         timers,
         workers,
         worklets,
@@ -1415,6 +1427,109 @@ test('startup readiness waits for worklet, model, local PCM sink, and live decod
             liveAudioDecode: true,
         },
     });
+});
+
+test('[BV2-FIRST-WAKE-01:A-E][BV2-WAKE-01] consumer admission waits for one clean current-generation live decode', async () => {
+    const harness = createHarness({ consumerReady: false });
+    await harness.gate.start(harness.rawStream);
+    const startupGeneration = harness.gate.currentGeneration();
+    const consumerGeneration = harness.gate.primeConsumerAdmission();
+
+    assert.equal(consumerGeneration, startupGeneration + 1);
+    assert.deepEqual(harness.workers[0].messages.at(-1).message, {
+        type: 'reset',
+        generation: consumerGeneration,
+        reason: 'consumer_admission',
+    });
+    let settled = false;
+    const readiness = harness.gate.waitForConsumerAdmissionReady({
+        generation: consumerGeneration,
+    }).then((event) => {
+        settled = true;
+        return event;
+    });
+
+    harness.worklets[0].port.emit({ type: 'processor_ready', generation: startupGeneration });
+    harness.workers[0].emit(workerReadyMessage(startupGeneration));
+    await Promise.resolve();
+    assert.equal(settled, false, 'stale startup readiness cannot publish consumer admission');
+
+    completeReadinessBarrier(harness, consumerGeneration);
+    assert.deepEqual(await readiness, {
+        type: 'consumer_admission_ready',
+        generation: consumerGeneration,
+        barriers: {
+            worklet: true,
+            model: true,
+            warmDecode: true,
+            recognitionStream: true,
+            localPcmCapture: true,
+            liveAudioDecode: true,
+            consumerGeneration: true,
+        },
+    });
+    assert.equal(harness.gate.isConsumerAdmissionReady(), true);
+    assert.equal(harness.timers.size, 0);
+});
+
+test('[BV2-WAKE-01][BV2-DIAGNOSTIC-03] superseded and failed readiness barriers reject and release their timers', async () => {
+    const harness = createHarness({ consumerReady: false });
+    await harness.gate.start(harness.rawStream);
+    const firstGeneration = harness.gate.primeConsumerAdmission();
+    const staleBarrier = assert.rejects(
+        harness.gate.waitForConsumerAdmissionReady({ generation: firstGeneration }),
+        (error) => error?.code === 'consumer_admission_generation_superseded',
+    );
+
+    const secondGeneration = harness.gate.resetAfterTurn();
+    await staleBarrier;
+    assert.equal(secondGeneration, firstGeneration + 1);
+    assert.equal(harness.timers.size, 0);
+
+    const failedBarrier = assert.rejects(
+        harness.gate.waitForConsumerAdmissionReady({ generation: secondGeneration }),
+        (error) => error?.code === 'initialization_failed',
+    );
+    harness.workers[0].emit({
+        type: 'error',
+        generation: secondGeneration,
+        code: 'initialization_failed',
+        message: 'wake model unavailable',
+    });
+    await failedBarrier;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(harness.gate.state, 'failed');
+    assert.equal(harness.gate.isOpen(), false);
+    assert.equal(harness.rawTrack.stopped, true);
+    assert.equal(harness.workers[0].terminated, true);
+    assert.equal(harness.timers.size, 0);
+});
+
+test('[BV2-WAKE-01][BV2-DIAGNOSTIC-03] consumer admission timeout fails closed and tears down cold-start capture', async () => {
+    const harness = createHarness({
+        consumerReady: false,
+        consumerReadyTimeoutMs: 1000,
+    });
+    await harness.gate.start(harness.rawStream);
+    const generation = harness.gate.primeConsumerAdmission();
+    const timedOut = assert.rejects(
+        harness.gate.waitForConsumerAdmissionReady({ generation }),
+        (error) => error?.code === 'consumer_admission_timeout',
+    );
+
+    harness.advance(999);
+    assert.equal(harness.gate.state, 'listening');
+    harness.advance(1);
+    await timedOut;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(harness.gate.state, 'failed');
+    assert.equal(harness.gate.isOpen(), false);
+    assert.equal(harness.rawTrack.stopped, true);
+    assert.equal(harness.workers[0].terminated, true);
+    assert.equal(harness.errors.at(-1)?.code, 'consumer_admission_timeout');
+    assert.equal(harness.timers.size, 0);
 });
 
 test('[BV2-WAKE-04] wake audio spoken during local model warm-up is retained and decoded in order', async () => {
@@ -2412,4 +2527,109 @@ test('unsupported or failed startup rejects and stops raw capture instead of pas
     assert.equal(failed.rawTrack.stopped, true);
     assert.equal(failed.contexts[0].closed, true);
     assert.equal(failed.errors.length, 1);
+});
+
+test('[BV-PRIVACY-01] confirmed wake PCM stays memory-only until durable pre-admission approves release', async () => {
+    let approve;
+    const admission = new Promise((resolve) => { approve = resolve; });
+    const harness = createHarness({ beforeRelease: () => admission });
+    await harness.gate.start(harness.rawStream);
+    const generation = harness.gate.currentGeneration();
+    completeReadinessBarrier(harness, generation);
+    harness.emitPcm({ generation, samples: new Float32Array(1600).fill(0.25) });
+    const candidate = harness.workers[0].messages
+        .filter(({ message }) => message.type === 'audio' && message.generation === generation)
+        .at(-1).message;
+    harness.workers[0].emit({
+        type: 'ack',
+        generation,
+        sequence: candidate.sequence,
+        accepted: true,
+    });
+    harness.workers[0].emit(wakeMessage(harness, generation));
+
+    assert.equal(harness.gate.state, 'admission_pending');
+    assert.equal(harness.gate.isOpen(), false);
+    assert.equal(harness.detections.length, 0);
+    assert.equal(harness.activatedPcm.length, 0);
+    assert.equal(
+        harness.worklets[0].port.messages.filter(({ message }) => message.type === 'activate').length,
+        0,
+    );
+
+    harness.emitPcm({ generation, samples: new Float32Array(1600).fill(0.5) });
+    assert.equal(harness.activatedPcm.length, 0, 'live PCM must remain private while admission is pending');
+    approve(true);
+    await admission;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(harness.gate.isOpen(), true);
+    assert.equal(harness.detections.length, 1);
+    assert.ok(harness.activatedPcm.length >= 2);
+    assert.ok(harness.activatedPcm.every((event) => event.released === true));
+    assert.equal(
+        harness.worklets[0].port.messages.filter(({ message }) => message.type === 'activate').length,
+        1,
+    );
+});
+
+test('[BV-PRIVACY-02] rejected pre-admission releases no PCM and rearms a fresh wake generation', async () => {
+    let rejectAdmission;
+    let attempts = 0;
+    const firstAdmission = new Promise((resolve) => { rejectAdmission = resolve; });
+    const harness = createHarness({
+        beforeRelease: () => {
+            attempts += 1;
+            return attempts === 1 ? firstAdmission : true;
+        },
+    });
+    await harness.gate.start(harness.rawStream);
+    const firstGeneration = harness.gate.currentGeneration();
+    completeReadinessBarrier(harness, firstGeneration);
+    harness.workers[0].emit(wakeMessage(harness, firstGeneration));
+    rejectAdmission(false);
+    await firstAdmission;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const secondGeneration = harness.gate.currentGeneration();
+    assert.equal(secondGeneration, firstGeneration + 1);
+    assert.equal(harness.gate.isOpen(), false);
+    assert.equal(harness.detections.length, 0);
+    assert.equal(harness.activatedPcm.length, 0);
+    assert.equal(harness.releaseRejections.length, 1);
+    assert.deepEqual(harness.workers[0].messages.at(-1).message, {
+        type: 'reset',
+        generation: secondGeneration,
+        reason: 'pre_admission_rejected',
+    });
+
+    completeReadinessBarrier(harness, secondGeneration);
+    harness.workers[0].emit(wakeMessage(harness, secondGeneration));
+    assert.equal(harness.gate.isOpen(), true);
+    assert.deepEqual(harness.detections.map(({ generation }) => generation), [secondGeneration]);
+});
+
+test('[BV-FOLLOW-UP-01] contextual capture starts at a fresh live boundary without releasing pre-admission PCM', async () => {
+    const harness = createHarness();
+    await harness.gate.start(harness.rawStream);
+    const generation = harness.gate.currentGeneration();
+    completeReadinessBarrier(harness, generation);
+    harness.emitPcm({ generation, samples: new Float32Array(1600).fill(0.2) });
+    const pending = harness.workers[0].messages
+        .filter(({ message }) => message.type === 'audio' && message.generation === generation)
+        .at(-1).message;
+    harness.workers[0].emit({
+        type: 'ack',
+        generation,
+        sequence: pending.sequence,
+        accepted: true,
+    });
+
+    assert.equal(harness.gate.openContextualCapture({ generation }), true);
+    assert.equal(harness.gate.isOpen(), true);
+    assert.equal(harness.activatedPcm.length, 0, 'dormant PCM is discarded at contextual admission');
+    harness.emitPcm({ generation, samples: new Float32Array(1600).fill(0.4) });
+    assert.equal(harness.activatedPcm.length, 1);
+    assert.equal(harness.activatedPcm[0].released, false);
+    assert.equal(harness.activatedPcm[0].sourceSequence, 2);
 });

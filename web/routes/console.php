@@ -80,3 +80,4 @@ Schedule::command('reminders:send-due-notifications')->everyMinute();
 // request. A blocked provider/queue worker therefore cannot strand a voice
 // turn beyond its hard or rolling no-progress deadline.
 Schedule::command('browser-voice:enforce-deadlines')->everySecond()->withoutOverlapping(1);
+Schedule::command('voice:reconcile-realtime-work')->everySecond()->withoutOverlapping(1);

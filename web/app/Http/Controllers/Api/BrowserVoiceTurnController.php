@@ -6,14 +6,16 @@ use App\Enums\VoiceTurnSideEffectStatus;
 use App\Enums\VoiceTurnState;
 use App\Exceptions\VoiceTurnConflictException;
 use App\Http\Controllers\Controller;
-use App\Jobs\ProcessAssistantRun;
 use App\Models\AssistantRun;
 use App\Models\ConversationSession;
+use App\Models\VoiceRealtimeCommand;
+use App\Models\VoiceRealtimeSession;
 use App\Models\VoiceTurn;
 use App\Models\VoiceTurnEvent;
-use App\Rules\ClientTimezone;
 use App\Services\BrowserVoiceProjectionService;
 use App\Services\BrowserVoiceV2Gate;
+use App\Services\RealtimeVoiceApplicationEventHandler;
+use App\Services\RealtimeVoiceSessionService;
 use App\Services\VoiceTurnLifecycleService;
 use App\Services\VoiceTurnPrivacyService;
 use Illuminate\Http\JsonResponse;
@@ -27,6 +29,8 @@ class BrowserVoiceTurnController extends Controller
         private readonly VoiceTurnLifecycleService $lifecycle,
         private readonly BrowserVoiceProjectionService $projection,
         private readonly VoiceTurnPrivacyService $privacy,
+        private readonly RealtimeVoiceApplicationEventHandler $realtime,
+        private readonly RealtimeVoiceSessionService $realtimeSessions,
     ) {}
 
     public function capabilities(Request $request): JsonResponse
@@ -43,30 +47,35 @@ class BrowserVoiceTurnController extends Controller
         $data = $request->validate([
             'turn_id' => ['required', 'string', 'min:8', 'max:120', 'regex:/^[A-Za-z0-9][A-Za-z0-9._:-]+$/'],
             'session_id' => ['required', 'integer', 'exists:conversation_sessions,id'],
-            'transcript' => ['required', 'string', 'max:12000'],
-            'timezone' => ['sometimes', 'nullable', 'string', 'max:80', new ClientTimezone],
-            'location_context' => ['sometimes', 'nullable', 'array:label,latitude,longitude,is_local,source'],
-            'location_context.label' => ['sometimes', 'nullable', 'string', 'max:180'],
-            'location_context.latitude' => ['sometimes', 'nullable', 'numeric', 'between:-90,90'],
-            'location_context.longitude' => ['sometimes', 'nullable', 'numeric', 'between:-180,180'],
-            'location_context.is_local' => ['sometimes', 'boolean'],
-            'location_context.source' => ['sometimes', 'nullable', 'string', 'max:80'],
-            'transcript_timing' => ['sometimes', 'nullable', 'array:started_at_ms,final_at_ms,duration_ms,partial_count'],
-            'transcript_timing.started_at_ms' => ['sometimes', 'nullable', 'integer', 'min:0'],
-            'transcript_timing.final_at_ms' => ['sometimes', 'nullable', 'integer', 'min:0'],
-            'transcript_timing.duration_ms' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:600000'],
-            'transcript_timing.partial_count' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:10000'],
-            'controller_generation' => ['sometimes', 'nullable', 'integer', 'min:0'],
-            'provider_connection_generation' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'realtime_session_id' => ['required', 'uuid'],
+            'controller_generation' => ['required', 'integer', 'min:0'],
+            'provider_connection_generation' => ['required', 'integer', 'min:0'],
+            'input_generation' => ['required', 'integer', 'min:0'],
+            'wake_detected_at_ms' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'client_milestones' => ['sometimes', 'array:wake_detected_at_ms,pre_admission_started_at_ms,capture_started_at_ms'],
+            'client_milestones.wake_detected_at_ms' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'client_milestones.pre_admission_started_at_ms' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'client_milestones.capture_started_at_ms' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'conversation_context' => ['sometimes', 'array:mode,epoch'],
             'conversation_context.mode' => ['required_with:conversation_context', 'string', 'in:new_conversation,contextual_follow_up'],
             'conversation_context.epoch' => ['required_with:conversation_context', 'integer', 'min:1'],
-            'client_context' => ['sometimes', 'array:voice_mode_active,wake_detection_enabled,playback_state'],
-            'client_context.voice_mode_active' => ['sometimes', 'boolean'],
-            'client_context.wake_detection_enabled' => ['sometimes', 'boolean'],
-            'client_context.playback_state' => ['sometimes', 'string', 'max:80'],
         ]);
         $session = $this->ownedSession($request, (int) $data['session_id']);
+        $realtimeSession = VoiceRealtimeSession::query()
+            ->where('public_id', $data['realtime_session_id'])
+            ->where('user_id', $request->user()->id)
+            ->where('conversation_session_id', $session->id)
+            ->firstOrFail();
+        $realtimeSession = $this->realtimeSessions->awaitReady(
+            $realtimeSession,
+            (int) config('services.voice_realtime.admission_ready_timeout_ms', 1200),
+        );
+        if (! $realtimeSession instanceof VoiceRealtimeSession) {
+            return response()->json([
+                'message' => 'Bean is still connecting. Please try again.',
+                'code' => 'voice_sideband_not_ready',
+            ], 503);
+        }
         $existingTurn = VoiceTurn::query()
             ->where('user_id', $request->user()->id)
             ->where('turn_id', $data['turn_id'])
@@ -74,44 +83,18 @@ class BrowserVoiceTurnController extends Controller
         $existed = $existingTurn !== null;
 
         try {
-            $turn = $this->lifecycle->admit($request->user(), $session, $data);
-            $turn = $this->processAcceptedTurn($turn);
+            $turn = $this->lifecycle->preAdmitRealtime($request->user(), $session, $realtimeSession, $data);
         } catch (VoiceTurnConflictException $exception) {
             return response()->json(['message' => $exception->getMessage()], 409);
         }
 
-        return response()->json(['data' => $this->projection->forTurn($turn)], $existed ? 200 : 201);
-    }
-
-    public function clarify(Request $request, string $turnId): JsonResponse
-    {
-        $this->ensureEnabled($request);
-        $this->rejectRawAudio($request->all());
-        $data = $request->validate([
-            'session_id' => ['required', 'integer', 'exists:conversation_sessions,id'],
-            'answer' => ['required', 'string', 'max:12000'],
-            'clarification_id' => ['required', 'string', 'min:8', 'max:160', 'regex:/^[A-Za-z0-9][A-Za-z0-9._:-]+$/'],
-        ]);
-        $session = $this->ownedSession($request, (int) $data['session_id']);
-        $this->lifecycle->enforceDeadlines(sessionId: $session->id);
-        $turn = VoiceTurn::query()
-            ->where('user_id', $request->user()->id)
-            ->where('conversation_session_id', $session->id)
-            ->where('turn_id', $turnId)
-            ->firstOrFail();
-
-        try {
-            $turn = $this->lifecycle->resolveClarification(
-                $turn,
-                (string) $data['answer'],
-                (string) $data['clarification_id'],
-            );
-            $turn = $this->processAcceptedTurn($turn);
-        } catch (VoiceTurnConflictException $exception) {
-            return response()->json(['message' => $exception->getMessage()], 409);
-        }
-
-        return response()->json(['data' => $this->projection->forTurn($turn)]);
+        return response()->json(['data' => [
+            'turn_id' => $turn->turn_id,
+            'state' => $turn->state->value,
+            'version' => $turn->version,
+            'realtime_session_id' => $realtimeSession->public_id,
+            'sideband_ready' => $realtimeSession->status->value === 'ready',
+        ]], $existed ? 200 : 201);
     }
 
     public function state(Request $request): JsonResponse
@@ -123,8 +106,6 @@ class BrowserVoiceTurnController extends Controller
         ]);
         $session = $this->ownedSession($request, (int) $data['session_id']);
         $this->lifecycle->enforceDeadlines(sessionId: $session->id);
-        $this->lifecycle->ensureMissingSemanticInterpretationJobsForSession($session->id);
-        $this->redispatchQueuedJobs($session->id);
         $cursor = (int) ($data['cursor'] ?? 0);
         $waitSeconds = (int) ($data['wait'] ?? 0);
         $waitUntil = microtime(true) + $waitSeconds;
@@ -249,7 +230,7 @@ class BrowserVoiceTurnController extends Controller
         $this->rejectRawAudio($request->all());
         $data = $request->validate([
             'session_id' => ['required', 'integer', 'exists:conversation_sessions,id'],
-            'event' => ['required', 'string', 'in:acknowledgement_started,final_text_delivered,final_audio_started,playback_started,playback_finished,playback_stopped,potential_interruption,interruption_confirmed,interruption_rejected'],
+            'event' => ['required', 'string', 'in:acknowledgement_started,final_audio_started,playback_started,playback_finished,playback_stopped,potential_interruption,interruption_confirmed,interruption_rejected'],
             'timing' => ['sometimes', 'nullable', 'array:latency_ms,occurred_at_ms,speech_item_id,controller_generation,provider_connection_generation,purpose,reason,directive_id,error_code,error_message'],
             'timing.latency_ms' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:600000'],
             'timing.occurred_at_ms' => ['sometimes', 'nullable', 'integer', 'min:0'],
@@ -271,22 +252,34 @@ class BrowserVoiceTurnController extends Controller
         $timing = $data['timing'] ?? [];
 
         try {
-            if ($data['event'] === 'final_text_delivered') {
-                $turn = $this->lifecycle->markFinalDelivered($turn, $timing);
-            } elseif ($data['event'] === 'acknowledgement_started'
-                || ($data['event'] === 'playback_started' && data_get($timing, 'purpose') === 'acknowledgement')) {
-                $turn = $this->lifecycle->markAcknowledged($turn, $timing);
-            } elseif ($data['event'] === 'final_audio_started'
-                || ($data['event'] === 'playback_started' && data_get($timing, 'purpose') === 'final')) {
-                $turn = $this->lifecycle->markFinalAudioStarted($turn, $data['event'], $timing);
-            } elseif ($data['event'] === 'playback_stopped' && filled($timing['directive_id'] ?? null)) {
+            $directiveStop = $data['event'] === 'playback_stopped'
+                && filled($timing['directive_id'] ?? null);
+            if ($directiveStop) {
+                $this->assertDirectiveBrowserGeneration($turn, $timing);
                 $turn = $this->lifecycle->acknowledgePlaybackStopDirective(
                     $turn,
                     (string) $timing['directive_id'],
                     $timing,
                 );
             } else {
+                $this->assertAuthorizedPlayback($turn, (string) $data['event'], $timing);
+            }
+
+            if ($directiveStop) {
+                // The semantic Stop turn owns the directive, while the
+                // stopped speech item belongs to the turn it interrupted.
+            } elseif ($data['event'] === 'acknowledgement_started'
+                || ($data['event'] === 'playback_started' && data_get($timing, 'purpose') === 'acknowledgement')) {
+                $turn = $this->lifecycle->markAcknowledged($turn, $timing);
+            } elseif ($data['event'] === 'final_audio_started'
+                || ($data['event'] === 'playback_started' && data_get($timing, 'purpose') === 'final')) {
+                $turn = $this->lifecycle->markFinalAudioStarted($turn, $data['event'], $timing);
+            } else {
                 $turn = $this->lifecycle->recordBrowserEvent($turn, $data['event'], $timing);
+                if (in_array($data['event'], ['playback_finished', 'playback_stopped'], true)
+                    && data_get($timing, 'purpose') === 'acknowledgement') {
+                    $this->realtime->releaseFinalAfterAcknowledgement($turn);
+                }
                 if ($turn->state === VoiceTurnState::AwaitingClarification
                     && in_array($data['event'], ['playback_finished', 'playback_stopped'], true)
                     && data_get($timing, 'purpose') === 'clarification') {
@@ -301,36 +294,6 @@ class BrowserVoiceTurnController extends Controller
         }
 
         return response()->json(['data' => $this->projection->forTurn($turn)]);
-    }
-
-    private function processAcceptedTurn(VoiceTurn $turn): VoiceTurn
-    {
-        if ($turn->state !== VoiceTurnState::Accepted) {
-            return $turn->load(['userMessage', 'finalAssistantMessage', 'runs']);
-        }
-
-        $run = $this->lifecycle->ensureSemanticInterpretationJob($turn);
-        if ($this->lifecycle->jobRequiresDispatch($run)) {
-            $this->dispatchRun($run);
-        }
-
-        return $turn->fresh(['userMessage', 'finalAssistantMessage', 'runs']);
-    }
-
-    private function redispatchQueuedJobs(int $sessionId): void
-    {
-        foreach ($this->lifecycle->undispatchedJobsForSession($sessionId) as $run) {
-            $this->dispatchRun($run);
-        }
-    }
-
-    private function dispatchRun(AssistantRun $run): void
-    {
-        ProcessAssistantRun::dispatch($run->id);
-        // Mark only after the queue accepted the job. A crash between these
-        // writes may enqueue a duplicate delivery, which the durable run claim
-        // safely deduplicates on reload.
-        $this->lifecycle->markJobDispatched($run);
     }
 
     private function ensureEnabled(Request $request): void
@@ -349,9 +312,30 @@ class BrowserVoiceTurnController extends Controller
         }
 
         try {
+            return $this->lifecycle->abandonPendingRealtimeInput($fresh, $reason);
+        } catch (VoiceTurnConflictException) {
+            // Provider input or durable work already owns this turn.
+        }
+
+        try {
             return $this->lifecycle->cancel($fresh, $reason, $metadata);
         } catch (VoiceTurnConflictException) {
             return $fresh->fresh() ?? $fresh;
+        }
+    }
+
+    /** @param array<string, mixed> $timing */
+    private function assertDirectiveBrowserGeneration(VoiceTurn $turn, array $timing): void
+    {
+        $controllerGeneration = (int) data_get($turn->metadata, 'controller_generation', -1);
+        $providerGeneration = (int) data_get($turn->metadata, 'provider_connection_generation', -1);
+        if ($controllerGeneration < 0
+            || $providerGeneration < 0
+            || $controllerGeneration !== (int) data_get($timing, 'controller_generation', -2)
+            || $providerGeneration !== (int) data_get($timing, 'provider_connection_generation', -2)) {
+            throw new VoiceTurnConflictException(
+                'That playback Stop directive does not belong to this browser generation.',
+            );
         }
     }
 
@@ -360,6 +344,38 @@ class BrowserVoiceTurnController extends Controller
         return ConversationSession::query()
             ->where('user_id', $request->user()->id)
             ->findOrFail($sessionId);
+    }
+
+    /** @param array<string, mixed> $timing */
+    private function assertAuthorizedPlayback(VoiceTurn $turn, string $event, array $timing): void
+    {
+        if (! in_array($event, [
+            'acknowledgement_started',
+            'final_audio_started',
+            'playback_started',
+            'playback_finished',
+            'playback_stopped',
+        ], true)) {
+            return;
+        }
+        $purpose = trim((string) data_get($timing, 'purpose'));
+        $speechItemId = trim((string) data_get($timing, 'speech_item_id'));
+        if (! in_array($purpose, ['acknowledgement', 'clarification', 'final'], true)
+            || $speechItemId === '') {
+            throw new VoiceTurnConflictException('Playback delivery requires its authorized speech binding.');
+        }
+        $command = VoiceRealtimeCommand::query()
+            ->where('voice_turn_id', $turn->id)
+            ->where('speech_item_id', $speechItemId)
+            ->where('purpose', $purpose)
+            ->whereIn('status', ['sending', 'sent', 'acknowledged'])
+            ->first();
+        if (! $command instanceof VoiceRealtimeCommand
+            || (int) $command->controller_generation !== (int) data_get($timing, 'controller_generation', -1)
+            || (int) data_get($command->payload, 'response.metadata.provider_connection_generation', -2)
+                !== (int) data_get($timing, 'provider_connection_generation', -1)) {
+            throw new VoiceTurnConflictException('That speech item is not authorized for this browser generation.');
+        }
     }
 
     /** @param array<string, mixed> $payload */

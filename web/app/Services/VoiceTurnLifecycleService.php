@@ -13,6 +13,7 @@ use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Models\User;
+use App\Models\VoiceRealtimeSession;
 use App\Models\VoiceTurn;
 use App\Models\VoiceTurnEvent;
 use Illuminate\Support\Carbon;
@@ -40,81 +41,123 @@ class VoiceTurnLifecycleService
     ) {}
 
     /**
+     * Durably reserve the stable voice turn before any activated PCM reaches
+     * the conversational provider. No semantic text is accepted at this
+     * boundary; Realtime Hermes supplies a structured plan through sideband.
+     *
      * @param  array<string, mixed>  $input
      */
-    public function admit(User $user, ConversationSession $session, array $input): VoiceTurn
-    {
-        $transcript = trim((string) $input['transcript']);
-        $sanitizedTranscript = $this->privacy->sanitizeTranscript($transcript);
-        $turnId = trim((string) $input['turn_id']);
+    public function preAdmitRealtime(
+        User $user,
+        ConversationSession $session,
+        VoiceRealtimeSession $realtimeSession,
+        array $input,
+    ): VoiceTurn {
+        $turnId = trim((string) ($input['turn_id'] ?? ''));
+        $controllerGeneration = max(0, (int) ($input['controller_generation'] ?? 0));
+        $providerGeneration = max(0, (int) ($input['provider_connection_generation'] ?? 0));
+        $inputGeneration = max(0, (int) ($input['input_generation'] ?? 0));
         $conversationContext = [
             'mode' => data_get($input, 'conversation_context.mode') === 'contextual_follow_up'
                 ? 'contextual_follow_up'
                 : 'new_conversation',
             'epoch' => max(0, (int) data_get($input, 'conversation_context.epoch', 0)),
         ];
-        $inputContext = [
-            'timezone' => $input['timezone'] ?? null,
-            'location_context' => $input['location_context'] ?? null,
-            'transcript_timing' => $input['transcript_timing'] ?? null,
-            'controller_generation' => $input['controller_generation'] ?? null,
-            'provider_connection_generation' => $input['provider_connection_generation'] ?? null,
-            'conversation_context' => $conversationContext,
-            'client_context' => $input['client_context'] ?? null,
-        ];
-        $inputContext = array_filter($inputContext, static fn (mixed $value): bool => $value !== null);
-        // Only client-supplied, immutable admission facts participate in the
-        // stable-turn fingerprint. Server-observed authorization may change as
-        // earlier concurrent admissions settle, but an idempotent retry must
-        // still resolve to the originally admitted turn.
-        $fingerprintContext = $inputContext;
         $priorTurn = $this->contextAuthorization->priorTurn($user, $session, $input);
-        $inputContext['prior_context_authorized'] = $priorTurn instanceof VoiceTurn;
-        $context = [
-            ...$inputContext,
-            ...($priorTurn instanceof VoiceTurn ? [
-                'prior_turn_id' => $priorTurn->turn_id,
-            ] : []),
-        ];
         $fingerprint = hash('sha256', json_encode([
             'session_id' => (int) $session->id,
-            'transcript' => $transcript,
-            'context' => $fingerprintContext,
+            'realtime_session_id' => (string) $realtimeSession->public_id,
+            'turn_id' => $turnId,
         ], JSON_THROW_ON_ERROR));
         $now = now();
 
-        $result = DB::transaction(function () use ($user, $session, $turnId, $transcript, $sanitizedTranscript, $context, $fingerprint, $now): array {
+        $result = DB::transaction(function () use (
+            $user,
+            $session,
+            $realtimeSession,
+            $input,
+            $turnId,
+            $controllerGeneration,
+            $providerGeneration,
+            $inputGeneration,
+            $conversationContext,
+            $priorTurn,
+            $fingerprint,
+            $now,
+        ): array {
             ConversationSession::query()->whereKey($session->id)->lockForUpdate()->firstOrFail();
+            $lockedRealtime = VoiceRealtimeSession::query()->whereKey($realtimeSession->id)->lockForUpdate()->firstOrFail();
+            if ((int) $lockedRealtime->user_id !== (int) $user->id
+                || (int) $lockedRealtime->conversation_session_id !== (int) $session->id
+                || $lockedRealtime->status->value !== 'ready'
+                || $lockedRealtime->lease_owner === null
+                || $lockedRealtime->lease_expires_at === null
+                || ! $lockedRealtime->lease_expires_at->isFuture()) {
+                throw new VoiceTurnConflictException('That Realtime voice session is not active for this conversation.');
+            }
+
             if (AssistantRun::query()
                 ->where('conversation_session_id', $session->id)
                 ->whereNull('voice_turn_id')
                 ->where('client_request_id', $turnId)
                 ->exists()) {
-                return [
-                    'turn' => null,
-                    'conflict' => 'That stable turn ID is already owned by a chat request.',
-                    'created' => false,
-                ];
+                throw new VoiceTurnConflictException('That stable turn ID is already owned by a chat request.');
             }
-            $existing = VoiceTurn::query()->where('turn_id', $turnId)->lockForUpdate()->first();
 
+            $existing = VoiceTurn::query()->where('turn_id', $turnId)->lockForUpdate()->first();
             if ($existing instanceof VoiceTurn) {
                 $sameOwner = (int) $existing->user_id === (int) $user->id
-                    && (int) $existing->conversation_session_id === (int) $session->id;
-                $sameAdmission = hash_equals((string) data_get($existing->metadata, 'admission_fingerprint', ''), $fingerprint);
-
+                    && (int) $existing->conversation_session_id === (int) $session->id
+                    && (int) $existing->realtime_session_id === (int) $lockedRealtime->id;
+                $sameAdmission = hash_equals(
+                    (string) data_get($existing->metadata, 'pre_admission_fingerprint', ''),
+                    $fingerprint,
+                );
                 if (! $sameOwner || ! $sameAdmission) {
-                    return [
-                        'turn' => $existing,
-                        'conflict' => 'That stable turn ID has already been admitted with different request data.',
-                    ];
+                    throw new VoiceTurnConflictException('That stable turn ID belongs to a different voice admission.');
                 }
 
-                $this->recordEventLocked($existing, 'admission_deduplicated', $existing->state, $existing->state, [
-                    'idempotency_key' => $existing->idempotency_key,
-                ], 'admission');
+                $existingMetadata = is_array($existing->metadata) ? $existing->metadata : [];
+                $pendingGeneration = (int) ($existingMetadata['pending_input_generation'] ?? -1);
+                $lastBoundGeneration = (int) ($existingMetadata['last_bound_input_generation'] ?? -1);
+                $pending = ($existingMetadata['awaiting_provider_input'] ?? false) === true;
+                if ($pending && $pendingGeneration !== $inputGeneration) {
+                    throw new VoiceTurnConflictException('That stable turn already has a different activated input awaiting the provider.');
+                }
+                if (! $pending
+                    && $inputGeneration !== $lastBoundGeneration
+                    && $existing->state === VoiceTurnState::AwaitingClarification) {
+                    $existing->forceFill([
+                        'version' => $existing->version + 1,
+                        'metadata' => [
+                            ...$existingMetadata,
+                            'awaiting_provider_input' => true,
+                            'pending_input_generation' => $inputGeneration,
+                            'pre_admission_reopened_at' => now()->toIso8601String(),
+                        ],
+                    ])->save();
+                }
 
-                return ['turn' => $existing->refresh(), 'conflict' => null, 'created' => false];
+                $this->recordEventLocked(
+                    $existing,
+                    'pre_admission_deduplicated',
+                    $existing->state,
+                    $existing->state,
+                    ['realtime_session_id' => $lockedRealtime->public_id],
+                    'admission',
+                );
+
+                return ['turn' => $existing->refresh(), 'created' => false];
+            }
+
+            $pendingOtherTurn = VoiceTurn::query()
+                ->where('realtime_session_id', $lockedRealtime->id)
+                ->whereNull('provider_input_item_id')
+                ->whereIn('state', [VoiceTurnState::Accepted->value, VoiceTurnState::AwaitingClarification->value])
+                ->lockForUpdate()
+                ->first();
+            if ($pendingOtherTurn instanceof VoiceTurn) {
+                throw new VoiceTurnConflictException('That voice session already has an activated turn awaiting provider audio.');
             }
 
             $turn = VoiceTurn::create([
@@ -122,10 +165,11 @@ class VoiceTurnLifecycleService
                 'user_id' => $user->id,
                 'workspace_id' => $session->workspace_id,
                 'conversation_session_id' => $session->id,
-                'source' => 'browser_voice_v2',
+                'realtime_session_id' => $lockedRealtime->id,
+                'source' => 'browser_voice_realtime',
                 'client_kind' => 'browser_voice',
-                'transcript' => $transcript,
-                'sanitized_transcript' => $sanitizedTranscript,
+                'display_mode' => 'voice_only',
+                'semantic_input' => null,
                 'state' => VoiceTurnState::Accepted,
                 'version' => 1,
                 'idempotency_key' => $turnId,
@@ -136,15 +180,30 @@ class VoiceTurnLifecycleService
                 'no_progress_deadline_at' => $now->copy()->addSeconds(self::TURN_NO_PROGRESS_DEADLINE_SECONDS),
                 'side_effect_status' => VoiceTurnSideEffectStatus::None,
                 'metadata' => [
-                    ...$context,
-                    'admission_fingerprint' => $fingerprint,
+                    'origin' => 'spoken_voice',
+                    'display_mode' => 'voice_only',
+                    'pre_admission_fingerprint' => $fingerprint,
+                    'controller_generation' => $controllerGeneration,
+                    'provider_connection_generation' => $providerGeneration,
+                    'input_generation' => $inputGeneration,
+                    'conversation_context' => $conversationContext,
+                    'client_context' => [
+                        'voice_mode_active' => true,
+                        'wake_detection_enabled' => true,
+                        'playback_state' => 'unknown',
+                    ],
+                    'prior_context_authorized' => $priorTurn instanceof VoiceTurn,
+                    'prior_turn_id' => $priorTurn?->turn_id,
+                    'client_milestones' => $this->privacy->sanitizeDiagnosticPayload(
+                        is_array($input['client_milestones'] ?? null) ? $input['client_milestones'] : [],
+                    ),
+                    'provider_input_item_ids' => [],
+                    'awaiting_provider_input' => true,
+                    'pending_input_generation' => $inputGeneration,
+                    'last_bound_input_generation' => null,
                     'raw_audio_retained' => false,
                     'no_progress_interval_seconds' => self::TURN_NO_PROGRESS_DEADLINE_SECONDS,
                     'semantic_sequence' => 1,
-                    'semantic_utterances' => [[
-                        'kind' => 'request',
-                        'text' => $sanitizedTranscript,
-                    ]],
                     'clarification_question' => null,
                     'clarification_sequence' => 0,
                     'clarification_resolutions' => [],
@@ -158,141 +217,203 @@ class VoiceTurnLifecycleService
                 'role' => 'user',
             ], [
                 'user_id' => $user->id,
-                'content' => $transcript,
+                'origin' => 'spoken_voice',
+                'display_mode' => 'voice_only',
+                'content' => '',
                 'metadata' => [
-                    'source' => 'browser_voice_v2',
+                    'source' => 'browser_voice_realtime',
                     'voice_turn_id' => $turn->id,
                     'stable_turn_id' => $turnId,
+                    'origin' => 'spoken_voice',
+                    'display_mode' => 'voice_only',
                 ],
             ]);
 
             $turn->update(['user_message_id' => $userMessage->id]);
-            $this->recordEventLocked($turn, 'turn_admitted', null, $turn->state, [
-                'acknowledgement_required' => false,
-                'hard_deadline_at' => $turn->hard_deadline_at?->toIso8601String(),
-                'no_progress_deadline_at' => $turn->no_progress_deadline_at?->toIso8601String(),
-                'semantic_sequence' => 1,
+            $this->recordEventLocked($turn, 'turn_pre_admitted', null, $turn->state, [
+                'realtime_session_id' => $lockedRealtime->public_id,
+                'controller_generation' => $controllerGeneration,
+                'provider_connection_generation' => $providerGeneration,
+                'input_generation' => $inputGeneration,
+                'sideband_ready' => $lockedRealtime->status->value === 'ready',
             ], 'admission');
             $session->update(['last_activity_at' => $now]);
 
-            return ['turn' => $turn->refresh(), 'conflict' => null, 'created' => true];
+            return ['turn' => $turn->refresh(), 'created' => true];
         }, 3);
-
-        if (is_string($result['conflict'])) {
-            throw new VoiceTurnConflictException($result['conflict']);
-        }
 
         /** @var VoiceTurn $turn */
         $turn = $result['turn'];
         if ($result['created']) {
             $this->scheduleDeadlines($turn);
         }
-        if ($turn->state === VoiceTurnState::Accepted) {
-            $this->ensureSemanticInterpretationJob($turn);
-        }
 
         return $turn->load(['userMessage', 'finalAssistantMessage', 'runs']);
     }
 
-    public function resolveClarification(VoiceTurn $turn, string $answer, string $clarificationId): VoiceTurn
-    {
-        $answer = trim($answer);
-        $clarificationId = trim($clarificationId);
-        if ($answer === '' || $clarificationId === '') {
-            throw new VoiceTurnConflictException('A clarification answer and id are required.');
+    public function bindRealtimeInputItem(
+        VoiceTurn $turn,
+        VoiceRealtimeSession $realtimeSession,
+        string $providerInputItemId,
+        ?string $providerEventId = null,
+    ): VoiceTurn {
+        $providerInputItemId = trim($providerInputItemId);
+        if ($providerInputItemId === '') {
+            throw new VoiceTurnConflictException('A provider input item ID is required.');
         }
 
-        $result = DB::transaction(function () use ($turn, $answer, $clarificationId): array {
+        return DB::transaction(function () use ($turn, $realtimeSession, $providerInputItemId, $providerEventId): VoiceTurn {
             $locked = VoiceTurn::query()->whereKey($turn->id)->lockForUpdate()->firstOrFail();
+            if ((int) $locked->realtime_session_id !== (int) $realtimeSession->id || $locked->state->isTerminal()) {
+                throw new VoiceTurnConflictException('That provider input item does not belong to the active voice turn.');
+            }
             $metadata = is_array($locked->metadata) ? $locked->metadata : [];
-            $resolutions = is_array($metadata['clarification_resolutions'] ?? null)
-                ? $metadata['clarification_resolutions']
-                : [];
-            $answerHash = hash('sha256', $answer);
+            $itemIds = array_values(array_unique(array_filter(array_map(
+                'strval',
+                is_array($metadata['provider_input_item_ids'] ?? null) ? $metadata['provider_input_item_ids'] : [],
+            ))));
+            if (in_array($providerInputItemId, $itemIds, true)) {
+                $this->recordEventLocked($locked, 'provider_input_item_deduplicated', $locked->state, $locked->state, [
+                    'provider_input_item_id' => $providerInputItemId,
+                    'provider_event_id' => $providerEventId,
+                ], 'realtime_sideband');
 
-            if (isset($resolutions[$clarificationId])) {
-                if (! hash_equals((string) $resolutions[$clarificationId], $answerHash)) {
-                    throw new VoiceTurnConflictException('That clarification id was already used for a different answer.');
-                }
-
-                return ['turn' => $locked->refresh(), 'resumed' => false];
+                return $locked->refresh();
             }
-            if ($locked->state !== VoiceTurnState::AwaitingClarification) {
-                throw new VoiceTurnConflictException('That voice request is not waiting for clarification.');
-            }
-
-            $sanitizedAnswer = $this->privacy->sanitizeTranscript($answer);
-            $question = $this->privacy->sanitizeTranscript((string) data_get($metadata, 'clarification_question', ''));
-            $combinedTranscript = $this->appendClarificationUtterance($locked->transcript, $answer);
-            $resolutions[$clarificationId] = $answerHash;
-            $clarificationSequence = max(1, (int) ($metadata['clarification_sequence'] ?? 1));
-            $semanticSequence = max(1, (int) ($metadata['semantic_sequence'] ?? 1)) + 1;
-            $utterances = is_array($metadata['semantic_utterances'] ?? null)
-                ? $metadata['semantic_utterances']
-                : [];
-            $utterances[] = [
-                'kind' => 'clarification_answer',
-                'text' => $sanitizedAnswer,
-                'clarification_id' => $clarificationId,
-                'clarification_sequence' => $clarificationSequence,
-            ];
-            $history = is_array($metadata['semantic_clarification_history'] ?? null)
-                ? $metadata['semantic_clarification_history']
-                : [];
-            $history[] = [
-                'clarification_id' => $clarificationId,
-                'question' => $question,
-                'answer' => $sanitizedAnswer,
-                'sequence' => $clarificationSequence,
-                'answered_at' => now()->toIso8601String(),
-            ];
-            $metadata = [
-                ...$metadata,
-                'clarification_resolutions' => $resolutions,
-                'clarification_question' => null,
-                'clarification_deadline_started_at' => null,
-                'semantic_sequence' => $semanticSequence,
-                'semantic_utterances' => $utterances,
-                'semantic_clarification_history' => $history,
-                'semantic_awaiting_run_id' => null,
-            ];
-            $from = $locked->state;
-            $now = now();
-            // Clarification adds another utterance to the same logical request.
-            // Meaning remains wholly owned by the next semantic run; lifecycle
-            // code only resumes the stable turn and assigns its next sequence.
+            $itemIds[] = $providerInputItemId;
+            $inputGeneration = (int) ($metadata['pending_input_generation'] ?? 0);
             $locked->forceFill([
-                'transcript' => $combinedTranscript,
-                'sanitized_transcript' => $this->privacy->sanitizeTranscript($combinedTranscript),
-                'state' => VoiceTurnState::Accepted,
+                'provider_input_item_id' => $locked->provider_input_item_id ?: $providerInputItemId,
                 'version' => $locked->version + 1,
-                'hard_deadline_at' => $now->copy()->addSeconds(120),
-                'no_progress_deadline_at' => $now->copy()->addSeconds(10),
                 'metadata' => [
                     ...$metadata,
-                    'no_progress_interval_seconds' => 10,
+                    'provider_input_item_ids' => $itemIds,
+                    'awaiting_provider_input' => false,
+                    'last_bound_input_generation' => $inputGeneration,
                 ],
-            ])->saveQuietly();
-            $locked->userMessage?->update(['content' => $combinedTranscript]);
-            $this->recordEventLocked($locked, 'clarification_resolved', $from, VoiceTurnState::Accepted, [
-                'clarification_id' => $clarificationId,
-                'clarification_sequence' => $clarificationSequence,
-                'semantic_sequence' => $semanticSequence,
-            ], 'clarification');
+            ])->save();
+            $this->recordEventLocked($locked, 'provider_input_item_bound', $locked->state, $locked->state, [
+                'provider_input_item_id' => $providerInputItemId,
+                'provider_event_id' => $providerEventId,
+            ], 'realtime_sideband');
 
-            return ['turn' => $locked->refresh(), 'resumed' => true];
+            return $locked->refresh();
+        }, 3);
+    }
+
+    /**
+     * Cancel a speculative pre-admission that never crossed the provider
+     * audio boundary. This is deliberately narrower than normal cancellation:
+     * once an input item or run exists, the ordinary terminal lifecycle owns
+     * the request and must produce its contractually required outcome.
+     */
+    public function abandonPendingRealtimeInput(
+        VoiceTurn $turn,
+        string $reason = 'activated_audio_abandoned',
+    ): VoiceTurn {
+        return DB::transaction(function () use ($turn, $reason): VoiceTurn {
+            $locked = VoiceTurn::query()->whereKey($turn->id)->lockForUpdate()->firstOrFail();
+            if ($locked->state === VoiceTurnState::Canceled) {
+                return $locked->refresh();
+            }
+
+            $metadata = is_array($locked->metadata) ? $locked->metadata : [];
+            $providerItemIds = is_array($metadata['provider_input_item_ids'] ?? null)
+                ? array_values(array_filter($metadata['provider_input_item_ids']))
+                : [];
+            if ($locked->state !== VoiceTurnState::Accepted
+                || ($metadata['awaiting_provider_input'] ?? false) !== true
+                || $locked->provider_input_item_id !== null
+                || $providerItemIds !== []
+                || AssistantRun::query()->where('voice_turn_id', $locked->id)->exists()) {
+                throw new VoiceTurnConflictException(
+                    'Only a pre-admitted voice turn with no provider input or durable work may be abandoned.',
+                );
+            }
+
+            return $this->terminalize(
+                $locked,
+                VoiceTurnState::Canceled,
+                null,
+                VoiceTurnSideEffectStatus::None,
+                null,
+                null,
+                [
+                    'reason' => trim($reason) ?: 'activated_audio_abandoned',
+                    'abandoned_before_provider_input' => true,
+                ],
+            );
+        }, 3);
+    }
+
+    /**
+     * Accept only the sanitized semantic summary accompanying a validated
+     * Realtime Hermes plan. This is not a transcript and cannot execute work.
+     */
+    public function prepareRealtimeInterpretation(
+        VoiceTurn $turn,
+        string $semanticInput,
+        string $providerInputItemId,
+        string $providerResponseId,
+    ): AssistantRun {
+        $semanticInput = $this->privacy->sanitizeTranscript($semanticInput);
+        if ($semanticInput === '') {
+            throw new VoiceTurnConflictException('Realtime Hermes must provide a non-empty semantic summary.');
+        }
+
+        $prepared = DB::transaction(function () use ($turn, $semanticInput, $providerInputItemId, $providerResponseId): VoiceTurn {
+            $locked = VoiceTurn::query()->whereKey($turn->id)->lockForUpdate()->firstOrFail();
+            if ($locked->state->isTerminal()) {
+                throw new VoiceTurnConflictException('A terminal voice turn cannot accept another semantic plan.');
+            }
+            $itemIds = is_array(data_get($locked->metadata, 'provider_input_item_ids'))
+                ? data_get($locked->metadata, 'provider_input_item_ids')
+                : [];
+            if (! in_array($providerInputItemId, $itemIds, true)) {
+                throw new VoiceTurnConflictException('The Realtime semantic plan is not bound to this voice turn input.');
+            }
+
+            $metadata = is_array($locked->metadata) ? $locked->metadata : [];
+            $semanticSequence = max(1, (int) ($metadata['semantic_sequence'] ?? 1));
+            if ($locked->state === VoiceTurnState::AwaitingClarification) {
+                $semanticSequence++;
+                $history = is_array($metadata['semantic_clarification_history'] ?? null)
+                    ? $metadata['semantic_clarification_history']
+                    : [];
+                $history[] = [
+                    'sequence' => $semanticSequence,
+                    'question' => $metadata['clarification_question'] ?? null,
+                    'resolved_by_input_item_id' => $providerInputItemId,
+                ];
+                $metadata['semantic_clarification_history'] = $history;
+                $metadata['clarification_question'] = null;
+                $locked->state = VoiceTurnState::Accepted;
+                $locked->started_at = null;
+            }
+            $metadata['semantic_sequence'] = $semanticSequence;
+            $metadata['latest_provider_response_id'] = $providerResponseId;
+            $metadata['semantic_input_kind'] = 'provider_summary';
+            $locked->forceFill([
+                'semantic_input' => $semanticInput,
+                'version' => $locked->version + 1,
+                'metadata' => $metadata,
+            ])->save();
+
+            ConversationMessage::query()->whereKey($locked->user_message_id)->update([
+                'content' => $semanticInput,
+                'origin' => 'spoken_voice',
+                'display_mode' => 'voice_only',
+            ]);
+            $this->recordEventLocked($locked, 'realtime_semantic_plan_received', $locked->state, $locked->state, [
+                'provider_input_item_id' => $providerInputItemId,
+                'provider_response_id' => $providerResponseId,
+                'semantic_sequence' => $semanticSequence,
+            ], 'realtime_sideband');
+
+            return $locked->refresh();
         }, 3);
 
-        /** @var VoiceTurn $resolved */
-        $resolved = $result['turn'];
-        if ($result['resumed'] && $resolved->state === VoiceTurnState::Accepted) {
-            $this->scheduleDeadlines($resolved);
-        }
-        if ($resolved->state === VoiceTurnState::Accepted) {
-            $this->ensureSemanticInterpretationJob($resolved);
-        }
-
-        return $resolved->load(['userMessage', 'finalAssistantMessage', 'runs']);
+        return $this->ensureSemanticInterpretationJob($prepared);
     }
 
     /**
@@ -311,7 +432,7 @@ class VoiceTurnLifecycleService
         $turn = DB::transaction(function () use ($run, $question, $metadata): VoiceTurn {
             $voiceTurnId = (int) ($run->voice_turn_id ?? 0);
             if ($voiceTurnId <= 0) {
-                throw new VoiceTurnConflictException('Only Browser Voice v2 semantic runs can request clarification.');
+                throw new VoiceTurnConflictException('Only Realtime browser voice semantic runs can request clarification.');
             }
 
             $lockedTurn = VoiceTurn::query()->whereKey($voiceTurnId)->lockForUpdate()->firstOrFail();
@@ -512,24 +633,14 @@ class VoiceTurnLifecycleService
             function (VoiceTurn $locked): void {
                 if (! $locked->acknowledgement_required
                     || blank($locked->acknowledgement_text)
-                    || ! in_array($locked->state, [VoiceTurnState::Accepted, VoiceTurnState::Running], true)
-                    || $locked->final_assistant_message_id !== null) {
+                    || ! in_array($locked->state, [
+                        VoiceTurnState::Accepted,
+                        VoiceTurnState::Running,
+                        VoiceTurnState::Completed,
+                    ], true)) {
                     throw new VoiceTurnConflictException('The acknowledgement is not eligible for playback.');
                 }
             },
-        );
-    }
-
-    /** @param array<string, mixed> $payload */
-    public function markFinalDelivered(VoiceTurn $turn, array $payload = [], string $source = 'browser'): VoiceTurn
-    {
-        return $this->recordTimestampOnce(
-            $turn,
-            'final_delivered_at',
-            'final_text_delivered',
-            $payload,
-            $source,
-            fn (VoiceTurn $locked) => $this->assertDurableFinalReady($locked, 'text'),
         );
     }
 
@@ -619,7 +730,7 @@ class VoiceTurnLifecycleService
         $turn = DB::transaction(function () use ($run, $closeAfterResponse, $responseExpected): VoiceTurn {
             $voiceTurnId = (int) ($run->voice_turn_id ?? 0);
             if ($voiceTurnId <= 0) {
-                throw new VoiceTurnConflictException('Only Browser Voice v2 semantic runs can publish response directives.');
+                throw new VoiceTurnConflictException('Only Realtime browser voice semantic runs can publish response directives.');
             }
 
             $lockedTurn = VoiceTurn::query()->whereKey($voiceTurnId)->lockForUpdate()->firstOrFail();
@@ -806,7 +917,7 @@ class VoiceTurnLifecycleService
         return DB::transaction(function () use ($run, $reason, $metadata): VoiceTurn {
             $voiceTurnId = (int) ($run->voice_turn_id ?? 0);
             if ($voiceTurnId <= 0) {
-                throw new VoiceTurnConflictException('Only Browser Voice v2 jobs can be canceled through this lifecycle.');
+                throw new VoiceTurnConflictException('Only Realtime browser voice jobs can be canceled through this lifecycle.');
             }
 
             $lockedTurn = VoiceTurn::query()->whereKey($voiceTurnId)->lockForUpdate()->firstOrFail();
@@ -870,7 +981,7 @@ class VoiceTurnLifecycleService
         return DB::transaction(function () use ($run, $status, $finalText, $failureCategory, $internalDetail, $userFacingFailure, $sideEffectStatus, $metadata): VoiceTurn {
             $voiceTurnId = (int) ($run->voice_turn_id ?? 0);
             if ($voiceTurnId <= 0) {
-                throw new VoiceTurnConflictException('Only Browser Voice v2 runs participate in the turn finalizer barrier.');
+                throw new VoiceTurnConflictException('Only Realtime browser voice runs participate in the turn finalizer barrier.');
             }
 
             $lockedTurn = VoiceTurn::query()->whereKey($voiceTurnId)->lockForUpdate()->firstOrFail();
@@ -1156,7 +1267,7 @@ class VoiceTurnLifecycleService
                     'workspace_id' => $lockedTurn->workspace_id,
                     'conversation_session_id' => $lockedTurn->conversation_session_id,
                     'user_message_id' => $lockedTurn->user_message_id,
-                    'source' => 'browser_voice_v2',
+                    'source' => 'browser_voice_realtime',
                     'lane' => $lane->value,
                     'handler' => HermesSemanticOperationExecutor::OPERATION_HANDLER,
                     'label' => mb_substr(trim((string) ($spec['label'] ?? 'Run operation')), 0, 180),
@@ -1222,7 +1333,7 @@ class VoiceTurnLifecycleService
                 'workspace_id' => $lockedTurn->workspace_id,
                 'conversation_session_id' => $lockedTurn->conversation_session_id,
                 'user_message_id' => $lockedTurn->user_message_id,
-                'source' => 'browser_voice_v2',
+                'source' => 'browser_voice_realtime',
                 'lane' => VoiceTurnLane::Semantic->value,
                 'handler' => HermesSemanticOperationExecutor::COMPOSITION_HANDLER,
                 'label' => 'Prepare response',
@@ -1411,22 +1522,11 @@ class VoiceTurnLifecycleService
                     'resource_lock_key' => null,
                 ],
             ],
-            input: $turn->transcript,
+            input: $turn->semantic_input,
             hardDeadlineSeconds: self::INTERPRETATION_HARD_DEADLINE_SECONDS,
         );
 
         return $job['run'];
-    }
-
-    public function ensureMissingSemanticInterpretationJobsForSession(int $sessionId): void
-    {
-        VoiceTurn::query()
-            ->where('conversation_session_id', $sessionId)
-            ->where('state', VoiceTurnState::Accepted->value)
-            ->orderBy('id')
-            ->limit(200)
-            ->get()
-            ->each(fn (VoiceTurn $turn) => $this->ensureSemanticInterpretationJob($turn));
     }
 
     /**
@@ -1460,7 +1560,7 @@ class VoiceTurnLifecycleService
                 'workspace_id' => $locked->workspace_id,
                 'conversation_session_id' => $locked->conversation_session_id,
                 'user_message_id' => $locked->user_message_id,
-                'source' => 'browser_voice_v2',
+                'source' => 'browser_voice_realtime',
                 'lane' => $lane->value,
                 'handler' => $handler,
                 'label' => mb_substr(trim($label), 0, 180),
@@ -1471,7 +1571,7 @@ class VoiceTurnLifecycleService
                     : now()->addSeconds(max(1, $hardDeadlineSeconds)),
                 'last_progress_at' => null,
                 'status' => 'queued',
-                'input' => trim((string) ($input ?? $locked->transcript)),
+                'input' => trim((string) ($input ?? $locked->semantic_input ?? '')),
                 'metadata' => $this->privacy->sanitizeDiagnosticPayload([
                     ...$metadata,
                     'required' => data_get($metadata, 'required', true) !== false,
@@ -1639,24 +1739,6 @@ class VoiceTurnLifecycleService
 
             return $directive;
         }, 3);
-    }
-
-    /** @return Collection<int, AssistantRun> */
-    public function undispatchedJobsForSession(int $sessionId): Collection
-    {
-        return AssistantRun::query()
-            ->where('conversation_session_id', $sessionId)
-            ->whereNotNull('voice_turn_id')
-            ->where('status', 'queued')
-            ->whereNull('dispatch_requested_at')
-            ->whereHas('voiceTurn', fn ($query) => $query->whereIn('state', [
-                VoiceTurnState::Accepted->value,
-                VoiceTurnState::Running->value,
-            ]))
-            ->orderByDesc('priority')
-            ->orderBy('id')
-            ->limit(200)
-            ->get();
     }
 
     public function claimJobExecution(AssistantRun $run): bool
@@ -2068,12 +2150,16 @@ class VoiceTurnLifecycleService
                     'role' => 'assistant',
                 ], [
                     'user_id' => $locked->user_id,
+                    'origin' => 'spoken_voice',
+                    'display_mode' => 'voice_only',
                     'content' => (string) $finalText,
                     'metadata' => [
-                        'source' => 'browser_voice_v2',
+                        'source' => 'browser_voice_realtime',
                         'voice_turn_id' => $locked->id,
                         'stable_turn_id' => $locked->turn_id,
                         'final_response' => true,
+                        'origin' => 'spoken_voice',
+                        'display_mode' => 'voice_only',
                     ],
                 ]);
             }
@@ -2456,10 +2542,5 @@ class VoiceTurnLifecycleService
         if ($afterCommit) {
             $dispatch->afterCommit();
         }
-    }
-
-    private function appendClarificationUtterance(string $transcript, string $answer): string
-    {
-        return trim(trim($transcript)."\n".trim($answer));
     }
 }

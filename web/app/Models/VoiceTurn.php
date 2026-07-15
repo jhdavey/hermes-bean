@@ -18,12 +18,14 @@ class VoiceTurn extends Model
         'user_id',
         'workspace_id',
         'conversation_session_id',
+        'realtime_session_id',
+        'provider_input_item_id',
         'user_message_id',
         'final_assistant_message_id',
         'source',
         'client_kind',
-        'transcript',
-        'sanitized_transcript',
+        'display_mode',
+        'semantic_input',
         'state',
         'version',
         'idempotency_key',
@@ -34,7 +36,6 @@ class VoiceTurn extends Model
         'started_at',
         'first_progress_at',
         'terminal_at',
-        'final_delivered_at',
         'hard_deadline_at',
         'no_progress_deadline_at',
         'failure_category',
@@ -55,8 +56,6 @@ class VoiceTurn extends Model
                 'conversation_session_id',
                 'source',
                 'client_kind',
-                'transcript',
-                'sanitized_transcript',
                 'idempotency_key',
                 'acknowledgement_required',
                 'acknowledgement_text',
@@ -85,7 +84,6 @@ class VoiceTurn extends Model
             'started_at' => 'datetime',
             'first_progress_at' => 'datetime',
             'terminal_at' => 'datetime',
-            'final_delivered_at' => 'datetime',
             'hard_deadline_at' => 'datetime',
             'no_progress_deadline_at' => 'datetime',
             'metadata' => 'array',
@@ -105,6 +103,11 @@ class VoiceTurn extends Model
     public function session(): BelongsTo
     {
         return $this->belongsTo(ConversationSession::class, 'conversation_session_id');
+    }
+
+    public function realtimeSession(): BelongsTo
+    {
+        return $this->belongsTo(VoiceRealtimeSession::class, 'realtime_session_id');
     }
 
     public function userMessage(): BelongsTo

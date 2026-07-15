@@ -115,7 +115,7 @@ class AssistantRunService
             $metadata['edited_from_message_id'] = $editedFromMessageId;
         }
         $source = trim($source) ?: 'http';
-        if ($source === 'browser_voice_v2') {
+        if ($source === 'browser_voice_realtime') {
             throw new \InvalidArgumentException('The Browser Voice source is reserved for lifecycle-owned voice runs.');
         }
         $clientRequestId = trim((string) data_get($metadata, 'client_request_id'));

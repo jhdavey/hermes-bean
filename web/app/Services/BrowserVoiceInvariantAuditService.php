@@ -67,7 +67,7 @@ class BrowserVoiceInvariantAuditService
         };
 
         VoiceTurn::query()
-            ->where('source', 'browser_voice_v2')
+            ->where('source', 'browser_voice_realtime')
             ->select([
                 'id', 'turn_id', 'conversation_session_id', 'user_message_id', 'final_assistant_message_id',
                 'state', 'terminal_at', 'hard_deadline_at', 'no_progress_deadline_at', 'metadata',
@@ -129,7 +129,7 @@ class BrowserVoiceInvariantAuditService
             }, 'id');
 
         AssistantRun::query()
-            ->where('source', 'browser_voice_v2')
+            ->where('source', 'browser_voice_realtime')
             ->select([
                 'id', 'voice_turn_id', 'lane', 'handler', 'status', 'metadata', 'result', 'completed_at', 'cancelled_at',
             ])
@@ -146,7 +146,7 @@ class BrowserVoiceInvariantAuditService
                         continue;
                     }
                     if ($run->voice_turn_id === null || ! $existingTurnIds->has($run->voice_turn_id)) {
-                        $violation('orphan_voice_run', 'Browser Voice v2 run has no matching voice turn.', null, $run);
+                        $violation('orphan_voice_run', 'Realtime browser voice run has no matching voice turn.', null, $run);
                     }
                     $this->auditRunLifecycle($run, $violation);
                     $this->auditRawAudioKeys($run->metadata, 'run.metadata', function (string $path) use ($violation, $run): void {
@@ -255,13 +255,13 @@ class BrowserVoiceInvariantAuditService
     {
         $lane = trim((string) $run->lane);
         if ($lane === '' || VoiceTurnLane::tryFrom($lane) === null) {
-            $violation('voice_run_lane_missing_or_invalid', 'Browser Voice v2 run has no explicit valid lane.', null, $run);
+            $violation('voice_run_lane_missing_or_invalid', 'Realtime browser voice run has no explicit valid lane.', null, $run);
         }
         if (trim((string) $run->handler) === '') {
-            $violation('voice_run_handler_missing', 'Browser Voice v2 run has no explicit handler.', null, $run);
+            $violation('voice_run_handler_missing', 'Realtime browser voice run has no explicit handler.', null, $run);
         }
         if (! in_array($run->status, [...self::ACTIVE_RUN_STATUSES, ...self::TERMINAL_RUN_STATUSES], true)) {
-            $violation('unknown_voice_run_status', "Browser Voice v2 run has unsupported status {$run->status}.", null, $run);
+            $violation('unknown_voice_run_status', "Realtime browser voice run has unsupported status {$run->status}.", null, $run);
 
             return;
         }

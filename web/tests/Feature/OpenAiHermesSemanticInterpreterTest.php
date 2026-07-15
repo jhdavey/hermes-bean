@@ -13,6 +13,7 @@ use App\Models\AiUsageLog;
 use App\Models\User;
 use App\Services\AiUsageService;
 use App\Services\HermesSemanticInterpreter;
+use App\Services\HermesSemanticProtocol;
 use App\Services\OpenAiHermesSemanticInterpreter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
@@ -268,7 +269,7 @@ class OpenAiHermesSemanticInterpreterTest extends TestCase
                 && $status === 'blocked'
                 && is_string($providerEventId))
             ->andReturn(new AiUsageLog);
-        $service = new OpenAiHermesSemanticInterpreter($usage);
+        $service = new OpenAiHermesSemanticInterpreter($usage, new HermesSemanticProtocol);
 
         try {
             $service->interpret($this->interpretationRequest($user));

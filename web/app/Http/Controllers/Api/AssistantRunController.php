@@ -49,7 +49,7 @@ class AssistantRunController extends Controller
             ->where('turn_id', $clientRequestId)
             ->exists()) {
             return response()->json([
-                'message' => 'This stable turn ID is owned by Browser Voice v2.',
+                'message' => 'This stable turn ID is owned by Realtime browser voice.',
             ], 409);
         }
 

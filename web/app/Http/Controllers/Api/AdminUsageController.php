@@ -776,7 +776,7 @@ class AdminUsageController extends Controller
         return match ((string) $log->request_type) {
             'external_lookup', 'web_search' => 'Live external lookup',
             'semantic_interpretation', 'semantic_response_composition' => 'Bean conversation',
-            'realtime_transcription', 'voice_speech' => 'Bean voice',
+            'voice_realtime', 'voice_realtime_session' => 'Bean voice',
             default => 'General Bean request',
         };
     }

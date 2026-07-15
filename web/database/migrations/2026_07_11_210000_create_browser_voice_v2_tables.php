@@ -16,10 +16,8 @@ return new class extends Migration
             $table->foreignId('conversation_session_id')->constrained()->cascadeOnDelete();
             $table->foreignId('user_message_id')->nullable()->unique()->constrained('conversation_messages')->nullOnDelete();
             $table->foreignId('final_assistant_message_id')->nullable()->unique()->constrained('conversation_messages')->nullOnDelete();
-            $table->string('source', 40)->default('browser_voice_v2');
+            $table->string('source', 40)->default('browser_voice_realtime');
             $table->string('client_kind', 40)->default('browser_voice');
-            $table->text('transcript');
-            $table->text('sanitized_transcript');
             $table->string('state', 40)->default('accepted')->index();
             $table->unsignedInteger('version')->default(1);
             $table->string('idempotency_key', 120);
@@ -30,7 +28,6 @@ return new class extends Migration
             $table->timestamp('started_at', 6)->nullable();
             $table->timestamp('first_progress_at', 6)->nullable();
             $table->timestamp('terminal_at', 6)->nullable();
-            $table->timestamp('final_delivered_at', 6)->nullable();
             $table->timestamp('hard_deadline_at', 6)->nullable();
             $table->timestamp('no_progress_deadline_at', 6)->nullable();
             $table->string('failure_category', 80)->nullable();
