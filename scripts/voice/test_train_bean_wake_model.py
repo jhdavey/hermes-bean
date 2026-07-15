@@ -347,24 +347,40 @@ process.stdout.write(JSON.stringify({observed, latched}));
         with self.assertRaises(RuntimeError):
             trainer.load_artifact(extra_threshold)
 
-    def test_metrics_enforce_proposal_class_compatibility(self):
+    def test_metrics_accept_either_positive_class_for_strict_but_not_address_proposals(self):
         probabilities = np.asarray([
             [0.01, 0.98, 0.01],
-            [0.01, 0.01, 0.98],
+            [0.001, 0.019, 0.98],
+            [0.001, 0.004, 0.995],
             [0.01, 0.98, 0.01],
-            [0.01, 0.01, 0.98],
+            [0.01, 0.98, 0.01],
+            [0.05, 0.01, 0.94],
         ], dtype=np.float32)
-        targets = np.asarray([1, 2, 0, 0], dtype=np.int64)
-        rows = metadata(["strict", "address", "address", "strict"])
+        targets = np.asarray([1, 1, 2, 2, 0, 0], dtype=np.int64)
+        rows = metadata(["strict", "strict", "address", "address", "address", "strict"])
         metrics = trainer.exact_metrics(
             probabilities, targets, rows,
-            {"strict_wake": 0.95, "missed_hey_confirmation": 0.95},
+            {"strict_wake": 0.95, "missed_hey_confirmation": 0.99},
         )
         self.assertEqual(metrics["per_class"]["strict_wake"]["recall"], 1.0)
         self.assertEqual(
-            metrics["per_class"]["missed_hey_confirmation"]["recall"], 1.0,
+            metrics["per_class"]["missed_hey_confirmation"]["recall"], 0.5,
         )
         self.assertEqual(metrics["false_accept_rows"], 0)
+
+    def test_calibration_applies_address_class_wins_on_strict_rejects_to_strict_threshold(self):
+        probabilities = np.asarray([[0.001, 0.009, 0.99]], dtype=np.float32)
+        thresholds, evidence = trainer.calibrate_acceptance_thresholds(
+            probabilities, np.asarray([0]), metadata(["strict"]),
+            np.asarray([[1.0, 0.0, 0.0]], dtype=np.float32),
+            np.asarray([0]), metadata(["strict"]),
+        )
+        self.assertEqual(thresholds["strict_wake"], 0.9900001)
+        self.assertEqual(thresholds["missed_hey_confirmation"], 0.95)
+        self.assertEqual(
+            evidence["strict_wake"]["fit_compatible_winning_reject_rows"],
+            1,
+        )
 
     def test_calibrated_thresholds_clear_serialized_fit_and_kathy_rejects(self):
         fit_probabilities = np.asarray([
@@ -441,21 +457,27 @@ process.stdout.write(JSON.stringify({observed, latched}));
         selected = trainer.select_development_checkpoint(candidates)
         self.assertEqual(selected["epoch"], 3)
 
-    def test_per_class_threshold_boundary_is_inclusive(self):
+    def test_proposal_routed_threshold_boundary_is_inclusive(self):
         thresholds = {"strict_wake": 0.97, "missed_hey_confirmation": 0.98}
         strict_below = float(np.nextafter(np.float32(0.97), np.float32(0)))
         address_below = float(np.nextafter(np.float32(0.98), np.float32(0)))
         probabilities = np.asarray([
             [0.01, 0.97, 0.02],
             [0.01, strict_below, 0.02],
+            [0.01, 0.02, 0.97],
+            [0.01, 0.02, strict_below],
             [0.01, 0.01, 0.98],
             [0.01, 0.01, address_below],
+            [0.001, 0.999, 0.0],
         ], dtype=np.float64)
         decisions = trainer.compatible_decisions(
-            probabilities, metadata(["strict", "strict", "address", "address"]),
+            probabilities,
+            metadata(["strict", "strict", "strict", "strict", "address", "address", "address"]),
             thresholds,
         )
-        np.testing.assert_array_equal(decisions, [True, False, True, False])
+        np.testing.assert_array_equal(
+            decisions, [True, False, True, False, True, False, False],
+        )
 
     def test_proposal_harvest_cache_is_atomic_and_input_keyed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -502,18 +524,25 @@ process.stdout.write(JSON.stringify({observed, latched}));
         raw = np.stack([
             np.linspace(-1, 1, trainer.FEATURE_SIZE, dtype=np.float32),
             np.linspace(1, -1, trainer.FEATURE_SIZE, dtype=np.float32),
-            np.zeros(trainer.FEATURE_SIZE, dtype=np.float32),
         ])
         mean = np.zeros(trainer.FEATURE_SIZE, dtype=np.float32)
         deviation = np.ones(trainer.FEATURE_SIZE, dtype=np.float32)
         state = zero_state()
+        state["dense2.bias"] = np.log(
+            np.asarray([0.01, 0.02, 0.97], dtype=np.float32)
+        )
         values = trainer.normalize_features(raw, mean, deviation)
         probabilities = trainer.predict_probabilities(state, values)
-        targets = np.asarray([0, 1, 2], dtype=np.int64)
+        targets = np.asarray([1, 2], dtype=np.int64)
+        rows = metadata(["strict", "address"])
+        thresholds = {"strict_wake": 0.95, "missed_hey_confirmation": 0.98}
+        np.testing.assert_array_equal(
+            trainer.compatible_decisions(probabilities, rows, thresholds),
+            [True, False],
+        )
         parity = trainer.node_parity(
             state, mean, deviation, raw, probabilities, targets,
-            metadata(["strict", "strict", "address"]),
-            {"strict_wake": 0.95, "missed_hey_confirmation": 0.95},
+            rows, thresholds,
         )
         self.assertTrue(parity["passes"], parity)
         self.assertEqual(parity["threshold_decision_mismatches"], 0)

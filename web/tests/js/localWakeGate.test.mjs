@@ -89,7 +89,7 @@ test('packaged wake manifest and checksum inventory match every distributed byte
     assert.match(manifest.firstPartyWakeModel.sha256, /^[a-f0-9]{64}$/);
     assert.deepEqual(manifest.firstPartyWakeModel, {
         id: 'bean-first-party-wake-v2',
-        path: '/voice/wake/bean-wake-model-v2.json?v=16',
+        path: '/voice/wake/bean-wake-model-v2.json?v=17',
         bytes: manifest.firstPartyWakeModel.bytes,
         sha256: manifest.firstPartyWakeModel.sha256,
         available: true,
@@ -341,7 +341,8 @@ test('the packaged worker has one classifier acceptance owner and no dormant sem
     assert.match(source, /B IY1 N :3\.0 #0\.01 @BEAN/);
     assert.match(source, /PROPOSAL_TAIL_SAMPLES = Math\.round\(TARGET_SAMPLE_RATE \* 0\.16\)/);
     assert.match(source, /const classification = classifyWakeProposal\(pendingProposal\)/);
-    assert.match(source, /winningIndex === compatibleIndex/);
+    assert.match(source, /compatiblePositive/);
+    assert.match(source, /beanWakeModel\.thresholds\[activationClass\]/);
     assert.match(source, /type: 'classification_decision'/);
     assert.match(source, /type: 'wake_confirmed'/);
     assert.doesNotMatch(source, /decoded_text|result\.text|transcript/);
@@ -444,6 +445,10 @@ test('[BV2-FIRST-WAKE-01:A] strict proposal waits for exactly 160 ms then the sh
 
 test('[BV2-MISSED-HEY-01] address-only proposal gets one grace step and one shared-classifier decision', async () => {
     const { context, messages } = await createWakeWorkerHarness();
+    context.__setThresholds({
+        strict_wake: 0.95,
+        missed_hey_confirmation: 0.99,
+    });
     context.__setProbabilities([0.001, 0.001, 0.998]);
     context.__queueProposal('address');
 
@@ -470,7 +475,7 @@ test('[BV2-MISSED-HEY-01] address-only proposal gets one grace step and one shar
         accepted: true,
         winningClass: 'missed_hey_confirmation',
         probability: 0.998,
-        threshold: 0.95,
+        threshold: 0.99,
         sampleCount: 21_760,
         tailSamples: 2_560,
     }]);
@@ -502,6 +507,48 @@ test('[BV2-MISSED-HEY-01] address-only proposal gets one grace step and one shar
         accepted: false,
         reason: 'activation_pending',
     });
+});
+
+// This wake-decision regression pairs with the deterministic browser
+// [BV2-FIRST-WAKE-01:C–E] journey for provider PCM, transcript, durable
+// admission, final delivery, and reload coverage.
+test('[BV2-FIRST-WAKE-01:A–B] strict proposal plus learned address-positive class completes one safe strict wake', async () => {
+    const { context, messages } = await createWakeWorkerHarness();
+    context.__setThresholds({
+        strict_wake: 0.95,
+        missed_hey_confirmation: 0.99,
+    });
+    context.__setProbabilities([0.001, 0.011, 0.988]);
+    context.__queueProposal('strict');
+
+    context.__send(7, 1, 30, 0.11);
+    context.__send(7, 2, 31, 0.22);
+    context.__send(7, 3, 32, 0.33);
+
+    assert.deepEqual(messages.filter(({ type }) => type === 'classification_decision'), [{
+        type: 'classification_decision',
+        generation: 7,
+        proposalType: 'strict',
+        accepted: true,
+        winningClass: 'missed_hey_confirmation',
+        probability: 0.988,
+        threshold: 0.95,
+        sampleCount: 21_760,
+        tailSamples: 2_560,
+    }]);
+    assert.deepEqual(messages.filter(({ type }) => type === 'wake_confirmed'), [{
+        type: 'wake_confirmed',
+        keyword: 'HEY_BEAN',
+        variant: 'HEY BEAN',
+        activation: 'strict_wake',
+        generation: 7,
+        sourceSequence: 32,
+        releaseBoundary: {
+            sourceSequence: 30,
+            sampleOffset: 0,
+            policy: 'post_address_tail',
+        },
+    }]);
 });
 
 test('[BV2-FIRST-WAKE-01:B] address at N and strict at N+2 coalesce before one strict decision', async () => {
@@ -610,10 +657,10 @@ test('a late-observed address with an existing tail gets exactly one following-b
     assert.equal(messages.find(({ type }) => type === 'classification_decision').proposalType, 'strict');
 });
 
-test('[BV2-MISSED-HEY-02] proposal/class mismatch rejects, rearms, ignores stale audio, then allows the next wake', async () => {
+test('[BV2-MISSED-HEY-02] address proposal with strict-only class rejects, rearms, ignores stale audio, then allows the next wake', async () => {
     const { context, messages } = await createWakeWorkerHarness();
-    context.__setProbabilities([0.001, 0.001, 0.998]);
-    context.__queueProposal('strict');
+    context.__setProbabilities([0.001, 0.998, 0.001]);
+    context.__queueProposal('address');
     context.__send(7, 1, 40);
     context.__send(7, 2, 41);
     context.__send(7, 3, 42);
@@ -662,46 +709,47 @@ test('[BV2-WAKE-ALIAS-01] Hey Beam uses the same proposal and classifier path as
     assert.doesNotMatch(source, /HEY BEAM|HEY_BEAM/);
 });
 
-test('[BV2-WAKE-MODEL-02] exact per-class artifact threshold accepts and the value below rejects', async () => {
-    const acceptedHarness = await createWakeWorkerHarness();
-    acceptedHarness.context.__setThresholds({
+test('[BV2-WAKE-MODEL-02] exact proposal-routed artifact thresholds accept and the values below reject', async () => {
+    const thresholds = {
         strict_wake: 0.9876543,
         missed_hey_confirmation: 0.9654321,
-    });
-    acceptedHarness.context.__setProbabilities([0.01, 0.9876543, 0.0023457]);
-    acceptedHarness.context.__queueProposal('strict');
-    acceptedHarness.context.__send(7, 1, 80);
-    acceptedHarness.context.__send(7, 2, 81);
-    acceptedHarness.context.__send(7, 3, 82);
-    const acceptedDecision = acceptedHarness.messages.find(
-        ({ type }) => type === 'classification_decision',
-    );
-    assert.equal(acceptedDecision.accepted, true);
-    assert.equal(acceptedDecision.threshold, 0.9876543);
-    assert.equal(
-        acceptedHarness.messages.filter(({ type }) => type === 'wake_confirmed').length,
-        1,
-    );
+    };
+    const decisionFor = async (proposalType, probabilities, sequence) => {
+        const harness = await createWakeWorkerHarness();
+        harness.context.__setThresholds(thresholds);
+        harness.context.__setProbabilities(probabilities);
+        harness.context.__queueProposal(proposalType);
+        harness.context.__send(7, 1, sequence);
+        harness.context.__send(7, 2, sequence + 1);
+        harness.context.__send(7, 3, sequence + 2);
+        return {
+            decision: harness.messages.find(({ type }) => type === 'classification_decision'),
+            confirmations: harness.messages.filter(({ type }) => type === 'wake_confirmed'),
+        };
+    };
 
-    const rejectedHarness = await createWakeWorkerHarness();
-    rejectedHarness.context.__setThresholds({
-        strict_wake: 0.9876543,
-        missed_hey_confirmation: 0.9654321,
-    });
-    rejectedHarness.context.__setProbabilities([0.01, 0.9876542, 0.0023458]);
-    rejectedHarness.context.__queueProposal('strict');
-    rejectedHarness.context.__send(7, 1, 90);
-    rejectedHarness.context.__send(7, 2, 91);
-    rejectedHarness.context.__send(7, 3, 92);
-    const rejectedDecision = rejectedHarness.messages.find(
-        ({ type }) => type === 'classification_decision',
-    );
-    assert.equal(rejectedDecision.accepted, false);
-    assert.equal(rejectedDecision.threshold, 0.9876543);
-    assert.equal(
-        rejectedHarness.messages.some(({ type }) => type === 'wake_confirmed'),
-        false,
-    );
+    const strictAtThreshold = await decisionFor('strict', [0.01, 0.0023457, 0.9876543], 80);
+    assert.equal(strictAtThreshold.decision.accepted, true);
+    assert.equal(strictAtThreshold.decision.winningClass, 'missed_hey_confirmation');
+    assert.equal(strictAtThreshold.decision.threshold, thresholds.strict_wake);
+    assert.equal(strictAtThreshold.confirmations.length, 1);
+    assert.equal(strictAtThreshold.confirmations[0].activation, 'strict_wake');
+
+    const strictBelowThreshold = await decisionFor('strict', [0.01, 0.0023458, 0.9876542], 90);
+    assert.equal(strictBelowThreshold.decision.accepted, false);
+    assert.equal(strictBelowThreshold.decision.threshold, thresholds.strict_wake);
+    assert.equal(strictBelowThreshold.confirmations.length, 0);
+
+    const addressAtThreshold = await decisionFor('address', [0.02, 0.0145679, 0.9654321], 100);
+    assert.equal(addressAtThreshold.decision.accepted, true);
+    assert.equal(addressAtThreshold.decision.threshold, thresholds.missed_hey_confirmation);
+    assert.equal(addressAtThreshold.confirmations.length, 1);
+    assert.equal(addressAtThreshold.confirmations[0].activation, 'missed_hey_confirmation');
+
+    const addressBelowThreshold = await decisionFor('address', [0.02, 0.014568, 0.965432], 110);
+    assert.equal(addressBelowThreshold.decision.accepted, false);
+    assert.equal(addressBelowThreshold.decision.threshold, thresholds.missed_hey_confirmation);
+    assert.equal(addressBelowThreshold.confirmations.length, 0);
 });
 
 test('[BV2-WORKER-FAIL-01] malformed KWS output fails closed without a confirmation', async () => {

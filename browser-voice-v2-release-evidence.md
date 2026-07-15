@@ -21,22 +21,25 @@ than retained as compatibility paths. Its previously recorded tests remain
 semantic/lifecycle evidence; they do not certify the wake cutover described
 below. Deployed-device and representative latency evidence are still pending.
 
-Wake runtime v16 is being cut over to one proposal-and-classification pipeline.
+Wake runtime v17 uses one proposal-and-classification pipeline.
 The bundled, pinned, same-origin KWS runtime supplies only high-recall
 `HEY_BEAN`/`BEAN` proposals and timestamps. Exactly one Bean-authored model,
 `bean-wake-model-v2.json`, evaluates each coalesced proposal with fixed local
 context and exactly 2,560 samples (160 ms) of local tail. Its only classes are
 `reject`, `strict_wake`, and `missed_hey_confirmation`; it is the sole acoustic
 acceptance authority. Exact `Hey Bean` and the contract-approved `Hey beam`
-pronunciation cross that same three-class decision. An accepted class must be
-compatible with the proposal type before deterministic code may establish a
-safe release boundary. A proposal alone releases no audio.
+pronunciation cross that same three-class decision. A strict proposal accepts
+either learned addressed positive at the strict proposal threshold and preserves
+strict activation; an address-only proposal accepts only
+`missed_hey_confirmation` at the address threshold. A compatible
+classifier positive and a proposal are both required before deterministic code
+may establish a safe release boundary. A proposal alone releases no audio.
 
-The uncertified v2 development artifact is present: 538,914 bytes with SHA-256
-`176455f94dc53d5921b1a0f8dfb45220250fbe5f942da54e87721d69a8c8867c`.
+The uncertified v2 development artifact is present: 538,933 bytes with SHA-256
+`4d3b86d4bf67d6c5ee581c598a39262a65dc2f62722f69496562f8d2438fd154`.
 Its fit evaluation accepted 2,788/3,132 proposal-conditioned strict rows and
 1,163/3,784 missed-`Hey` rows, with zero false accepts across 5,588 fit reject
-rows and 12 Kathy reject rows. The 212 JavaScript voice tests, 13 complete
+rows and 12 Kathy reject rows. The 213 JavaScript voice tests, 13 complete
 Playwright journeys, production build, package checksums, and enabled local
 deployment preflight pass. Representative physical-microphone and cross-engine
 acoustic evidence remain pending, so `wakeModelQaCertified` and
@@ -52,6 +55,27 @@ accepted live testing with the proposal failures recorded below. Those failures
 do not block an otherwise operational owner-test push, but they remain failures,
 keep both certification flags false, and continue to block commercial
 certification or broader-user release.
+
+## July 15 owner-recording wake regression
+
+The owner's live browser recording showed microphone activity but no transcript,
+admission, diagnostic, or response after “Hey Bean, can you hear me?” Replaying
+that recording through the shipped local gate isolated the drop before provider
+audio: the KWS emitted exactly one strict proposal, while the three-class model
+selected the other valid addressed positive, `missed_hey_confirmation`, at
+`0.988`. Runtime v16 required the strict proposal's winning label to be exactly
+`strict_wake`; applying the address-only `0.991` operating threshold to that
+alternate label would still reject the owner's strict proposal. Both paths
+correctly released no dormant PCM, but neither admitted the intended wake.
+
+Runtime v17 removes that invalid label coupling without adding another wake
+owner. A strict proposal may pair with either learned addressed positive at the
+strict proposal threshold and still produces strict activation with the strict timestamp boundary. An
+address-only proposal still cannot pair with a strict-only classifier result,
+and `reject` can never activate. The owner's recording now produces one accepted
+strict wake in the real worker replay, with zero PCM before confirmation and
+activated PCM crossing the ordinary provider bridge afterward. No recording or
+derived acoustic feature is retained in the repository.
 
 ## July 13 full-system audit
 
@@ -247,7 +271,7 @@ passed. Those narrower passes do not offset the acoustic/privacy failures. The
 benchmark is retained only as honest evidence for rejecting the experiment and
 does not certify the replacement architecture.
 
-Runtime v16 now targets the contract's single three-class path. The KWS emits a
+Runtime v17 implements the contract's single three-class path. The KWS emits a
 sanitized `wake_proposal`; `bean-wake-model-v2.json` classifies the coalesced
 proposal after exactly 160 ms of local tail and emits one sanitized
 `classification_decision`. A compatible accepted class may then produce
@@ -262,8 +286,8 @@ The complete-journey audit also found three independent ways the browser could
 show microphone activity and then remain silent. A post-readiness worker that
 stopped acknowledging PCM had no deadline, a failed first-wake transcription
 could retain an unbounded capture state, and a provider error reported UI state
-without tearing down the local gate and microphone graph. Runtime v16 closes all
-three paths without adding another lifecycle owner:
+without tearing down the local gate and microphone graph. Runtime v17 retains all
+three protections without adding another lifecycle owner:
 
 - `LocalWakeGate` enforces one generation-scoped, FIFO two-second deadline for
   the oldest unacknowledged PCM chunk. A timeout or invalid acknowledgement

@@ -702,10 +702,13 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
             && proposal?.required_tail_samples === 2_560
         );
         const classifierDecision = trial.classifierDecisions[0] || null;
+        const compatibleAcceptedClass = entry.expected === 'strict_wake'
+            ? ['strict_wake', 'missed_hey_confirmation'].includes(classifierDecision?.winning_class)
+            : classifierDecision?.winning_class === entry.expected;
         const finalClassifierDecisionAccepted = acceptedWakeExpected
             && trial.classifierDecisions.length === 1
             && classifierDecision?.proposal_type === expectedProposalType
-            && classifierDecision?.winning_class === entry.expected
+            && compatibleAcceptedClass
             && classifierDecision?.accepted === true
             && Number.isFinite(classifierDecision?.probability)
             && Number.isFinite(classifierDecision?.threshold)

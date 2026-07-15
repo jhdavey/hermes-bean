@@ -141,8 +141,8 @@ try {
     } catch {
         // The recorded check below owns the failure without leaking a response body.
     }
-    record('wake_manifest_v16', wakeManifestResponse.status === 200
-        && wakeManifest?.version === 16
+    record('wake_manifest_v17', wakeManifestResponse.status === 200
+        && wakeManifest?.version === 17
         && wakeManifest?.detector === 'bundled-local-kws-proposals-with-first-party-three-class-confirmation'
         && typeof wakeManifest?.wakeModelQaCertified === 'boolean'
         && typeof wakeManifest?.releaseCertified === 'boolean'
@@ -154,7 +154,7 @@ try {
         && wakeManifest?.runtimeDecision?.kwsMayActivate === false
         && wakeManifest?.firstPartyWakeModel?.available === true
         && wakeManifest?.firstPartyWakeModel?.id === 'bean-first-party-wake-v2'
-        && wakeManifest?.firstPartyWakeModel?.path === '/voice/wake/bean-wake-model-v2.json?v=16'
+        && wakeManifest?.firstPartyWakeModel?.path === '/voice/wake/bean-wake-model-v2.json?v=17'
         && wakeManifest?.firstPartyWakeModel?.schemaVersion === '2.0.0'
         && wakeManifest?.firstPartyWakeModel?.architecture === 'temporal_conv1d_v1'
         && wakeManifest?.firstPartyWakeModel?.inputSamples === 21760
@@ -171,7 +171,7 @@ try {
         acceptance_authority: wakeManifest?.runtimeDecision?.acceptanceAuthority ?? null,
         wake_model_available: wakeManifest?.firstPartyWakeModel?.available ?? null,
         tail_ms: wakeManifest?.firstPartyWakeModel?.tailMs ?? null,
-    }, 'v16 proposal-only KWS with one available three-class model over exactly 160 ms of tail; certification fields are booleans');
+    }, 'v17 proposal-only KWS with one available three-class model over exactly 160 ms of tail; certification fields are booleans');
 
     const vendorAssets = Array.isArray(wakeManifest?.vendorAssets) ? wakeManifest.vendorAssets : [];
     record('wake_vendor_assets_declared', vendorAssets.length > 0, {
@@ -181,7 +181,7 @@ try {
 
     const manifestAssets = [
         {
-            id: 'wake_worker_v16_integrity',
+            id: 'wake_worker_v17_integrity',
             asset: {
                 path: wakeManifest?.worker,
                 bytes: wakeManifest?.workerBytes,
@@ -189,7 +189,7 @@ try {
             },
         },
         {
-            id: 'wake_audio_worklet_v16_integrity',
+            id: 'wake_audio_worklet_v17_integrity',
             asset: {
                 path: wakeManifest?.audioWorklet,
                 bytes: wakeManifest?.audioWorkletBytes,
@@ -197,11 +197,11 @@ try {
             },
         },
         {
-            id: 'wake_first_party_model_v16_integrity',
+            id: 'wake_first_party_model_v17_integrity',
             asset: wakeManifest?.firstPartyWakeModel,
         },
         ...vendorAssets.map((asset, index) => ({
-            id: `wake_vendor_asset_v16_${index + 1}_integrity`,
+            id: `wake_vendor_asset_v17_${index + 1}_integrity`,
             asset,
         })),
     ];
@@ -227,13 +227,13 @@ try {
         && workerSource.includes("'reject'")
         && workerSource.includes("'strict_wake'")
         && workerSource.includes("'missed_hey_confirmation'");
-    record('wake_worker_v16', workerResult?.pass === true
+    record('wake_worker_v17', workerResult?.pass === true
         && proposalOnlyKws
         && singleThreeClassModel, {
         integrity_pass: workerResult?.pass === true,
         proposal_only_kws: proposalOnlyKws,
         single_three_class_model: singleThreeClassModel,
-    }, 'integrity-verified v16 worker with proposal-only KWS and one three-class classifier over 160 ms of tail');
+    }, 'integrity-verified v17 worker with proposal-only KWS and one three-class classifier over 160 ms of tail');
 
     for (const probe of [
         { path: '/api/assistant/voice/realtime/session', method: 'POST' },
@@ -260,8 +260,8 @@ const report = {
     observed_at: new Date().toISOString(),
     pass: checks.length > 0 && checks.every((check) => check.pass),
     certification: {
-        wake_model_qa_certified: checks.find((check) => check.id === 'wake_manifest_v16')?.actual?.wake_model_qa_certified ?? null,
-        release_certified: checks.find((check) => check.id === 'wake_manifest_v16')?.actual?.release_certified ?? null,
+        wake_model_qa_certified: checks.find((check) => check.id === 'wake_manifest_v17')?.actual?.wake_model_qa_certified ?? null,
+        release_certified: checks.find((check) => check.id === 'wake_manifest_v17')?.actual?.release_certified ?? null,
     },
     checks,
     limitation: 'This preflight proves development deployment presence and asset integrity only. Certification flags may remain false. It does not authenticate, request microphone access, execute work, or certify acoustic latency.',

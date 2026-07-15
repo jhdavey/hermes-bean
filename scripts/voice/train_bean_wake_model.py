@@ -987,12 +987,19 @@ def compatible_winning_reject_probabilities(
             or len(metadata) != labels.size
             or class_name not in ACCEPTED_CLASSES):
         raise RuntimeError("Wake calibration received incompatible arrays.")
-    class_index = CLASSES.index(class_name)
-    proposal_type = STRICT_PROPOSAL if class_name == "strict_wake" else ADDRESS_PROPOSAL
     winning = np.argmax(values, axis=1)
+    if class_name == "strict_wake":
+        mask = np.asarray([
+            labels[index] == 0
+            and item["proposal_type"] == STRICT_PROPOSAL
+            and winning[index] in (1, 2)
+            for index, item in enumerate(metadata)
+        ], dtype=bool)
+        return values[np.flatnonzero(mask), winning[mask]]
+    class_index = CLASSES.index("missed_hey_confirmation")
     mask = np.asarray([
         labels[index] == 0
-        and item["proposal_type"] == proposal_type
+        and item["proposal_type"] == ADDRESS_PROPOSAL
         and winning[index] == class_index
         for index, item in enumerate(metadata)
     ], dtype=bool)
@@ -1246,14 +1253,46 @@ function predict(rawRow) {
 
 const probabilities = input.rows.map(predict);
 const accepted = probabilities.map((values, index) => {
-  const className = input.proposal_types[index] === 'strict'
-    ? 'strict_wake' : 'missed_hey_confirmation';
-  const classIndex = className === 'strict_wake' ? 1 : 2;
+  const strictProposal = input.proposal_types[index] === 'strict';
   const winningIndex = values.indexOf(Math.max(...values));
-  return winningIndex === classIndex && values[classIndex] >= input.thresholds[className];
+  const winningClass = input.classes[winningIndex];
+  const compatiblePositive = strictProposal
+    ? winningClass === 'strict_wake' || winningClass === 'missed_hey_confirmation'
+    : winningClass === 'missed_hey_confirmation';
+  const thresholdClass = strictProposal ? 'strict_wake' : 'missed_hey_confirmation';
+  return compatiblePositive && values[winningIndex] >= input.thresholds[thresholdClass];
 });
 process.stdout.write(JSON.stringify({probabilities, accepted}));
 """
+
+
+def proposal_acceptance_decisions(
+    probabilities: np.ndarray, metadata: list[dict], thresholds: dict[str, float],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    values = np.asarray(probabilities, dtype=np.float64)
+    if values.ndim != 2 or values.shape[1] != len(CLASSES) or len(metadata) != values.shape[0]:
+        raise RuntimeError("Wake decisions received incompatible arrays.")
+    accepted_thresholds = validate_thresholds(thresholds)
+    winning = np.argmax(values, axis=1)
+    strict_proposal = np.asarray([
+        item["proposal_type"] == STRICT_PROPOSAL for item in metadata
+    ], dtype=bool)
+    compatible_positive = (
+        strict_proposal & np.isin(winning, [1, 2])
+    ) | (
+        ~strict_proposal & (winning == 2)
+    )
+    fallback = np.where(strict_proposal, 1, 2)
+    decision_indices = np.where(compatible_positive, winning, fallback)
+    row_thresholds = np.where(
+        strict_proposal,
+        accepted_thresholds["strict_wake"],
+        accepted_thresholds["missed_hey_confirmation"],
+    ).astype(np.float64)
+    accepted = compatible_positive & (
+        values[np.arange(values.shape[0]), decision_indices] >= row_thresholds
+    )
+    return accepted, decision_indices, row_thresholds
 
 
 def exact_metrics(
@@ -1263,18 +1302,8 @@ def exact_metrics(
     values = np.asarray(probabilities, dtype=np.float64)
     if values.shape != (targets.size, len(CLASSES)) or len(metadata) != targets.size:
         raise RuntimeError("Wake metrics received incompatible arrays.")
-    accepted_thresholds = validate_thresholds(thresholds)
-    winning = np.argmax(values, axis=1)
-    compatible = np.asarray([
-        CLASSES.index("strict_wake") if item["proposal_type"] == STRICT_PROPOSAL
-        else CLASSES.index("missed_hey_confirmation")
-        for item in metadata
-    ], dtype=np.int64)
-    row_thresholds = np.asarray([
-        accepted_thresholds[CLASSES[index]] for index in compatible
-    ], dtype=np.float64)
-    accepted = (winning == compatible) & (
-        values[np.arange(values.shape[0]), compatible] >= row_thresholds
+    accepted, decision_indices, row_thresholds = proposal_acceptance_decisions(
+        values, metadata, thresholds,
     )
     false_indices = np.flatnonzero(accepted & (targets == CLASSES.index("reject")))
     false_groups = {
@@ -1298,26 +1327,31 @@ def exact_metrics(
         "false_accept_rows": int(false_indices.size),
         "false_accept_groups": len(false_groups),
         "closest_probability_to_threshold": float(np.min(
-            np.abs(values[np.arange(values.shape[0]), compatible] - row_thresholds)
+            np.abs(values[np.arange(values.shape[0]), decision_indices] - row_thresholds)
         )),
     }
 
 
 def parity_probe_indices(
-    probabilities: np.ndarray, targets: np.ndarray, thresholds: dict[str, float],
+    probabilities: np.ndarray, targets: np.ndarray, metadata: list[dict],
+    thresholds: dict[str, float],
 ) -> np.ndarray:
     values = np.asarray(probabilities, dtype=np.float32)
-    accepted_thresholds = validate_thresholds(thresholds)
+    if values.shape != (targets.size, len(CLASSES)) or len(metadata) != targets.size:
+        raise RuntimeError("Wake parity probes received incompatible arrays.")
+    _, decision_indices, row_thresholds = proposal_acceptance_decisions(
+        values, metadata, thresholds,
+    )
+    decision_probabilities = values[np.arange(values.shape[0]), decision_indices]
     selected: list[int] = []
     for target in range(len(CLASSES)):
         indices = np.flatnonzero(targets == target)
         if indices.size == 0:
             continue
-        for class_index in range(1, len(CLASSES)):
-            probability = values[indices, class_index]
-            threshold = accepted_thresholds[CLASSES[class_index]]
-            ordered = indices[np.argsort(np.abs(probability - threshold))[:4]]
-            selected.extend(int(index) for index in ordered)
+        ordered = indices[np.argsort(np.abs(
+            decision_probabilities[indices] - row_thresholds[indices]
+        ))[:8]]
+        selected.extend(int(index) for index in ordered)
         selected.extend(int(index) for index in indices[:2])
     return np.asarray(list(dict.fromkeys(selected)), dtype=np.int64)
 
@@ -1325,18 +1359,10 @@ def parity_probe_indices(
 def compatible_decisions(
     probabilities: np.ndarray, metadata: list[dict], thresholds: dict[str, float],
 ) -> np.ndarray:
-    values = np.asarray(probabilities, dtype=np.float64)
-    accepted_thresholds = validate_thresholds(thresholds)
-    winning = np.argmax(values, axis=1)
-    compatible = np.asarray([
-        1 if item["proposal_type"] == STRICT_PROPOSAL else 2 for item in metadata
-    ], dtype=np.int64)
-    row_thresholds = np.asarray([
-        accepted_thresholds[CLASSES[index]] for index in compatible
-    ], dtype=np.float64)
-    return (winning == compatible) & (
-        values[np.arange(values.shape[0]), compatible] >= row_thresholds
+    accepted, _, _ = proposal_acceptance_decisions(
+        probabilities, metadata, thresholds,
     )
+    return accepted
 
 
 def node_parity(
@@ -1350,7 +1376,9 @@ def node_parity(
     thresholds: dict[str, float],
 ) -> dict:
     accepted_thresholds = validate_thresholds(thresholds)
-    indices = parity_probe_indices(probabilities, targets, accepted_thresholds)
+    indices = parity_probe_indices(
+        probabilities, targets, metadata, accepted_thresholds,
+    )
     payload = {
         "mean": np.asarray(mean, dtype=np.float32).tolist(),
         "deviation": np.asarray(deviation, dtype=np.float32).tolist(),
@@ -1361,6 +1389,7 @@ def node_parity(
         "rows": np.asarray(raw_values[indices], dtype=np.float32).tolist(),
         "proposal_types": [metadata[int(index)]["proposal_type"] for index in indices],
         "thresholds": accepted_thresholds,
+        "classes": list(CLASSES),
     }
     result = subprocess.run(
         ["node", "-e", NODE_PARITY_SOURCE],
@@ -1807,7 +1836,7 @@ def train_wake_model(args: argparse.Namespace) -> None:
         "proposal_keywords_threshold": 0.01,
         "proposal_max_active_paths": 4,
         "proposal_trailing_blanks": 0,
-        "threshold_policy": "fit_next_float32_then_serialized_kathy_safety",
+        "threshold_policy": "proposal_routed_fit_next_float32_then_serialized_kathy_safety",
         "seed": DEFAULT_SEED,
         "epochs": DEFAULT_EPOCHS,
         "learning_rate": DEFAULT_LEARNING_RATE,

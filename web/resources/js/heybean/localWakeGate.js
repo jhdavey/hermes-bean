@@ -1,5 +1,5 @@
-export const LOCAL_WAKE_GATE_PROCESSOR_URL = '/voice/wake/gate-processor.js?v=16';
-export const LOCAL_WAKE_WORKER_URL = '/voice/wake/wake-worker.js?v=16';
+export const LOCAL_WAKE_GATE_PROCESSOR_URL = '/voice/wake/gate-processor.js?v=17';
+export const LOCAL_WAKE_WORKER_URL = '/voice/wake/wake-worker.js?v=17';
 export const LOCAL_WAKE_GATE_PROCESSOR_NAME = 'hey-bean-gate';
 export const LOCAL_WAKE_PCM_SAMPLE_RATE = 16000;
 export const LOCAL_WAKE_PCM_RING_CHUNKS = 80;

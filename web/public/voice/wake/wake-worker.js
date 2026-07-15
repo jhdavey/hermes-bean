@@ -31,7 +31,7 @@ const MIN_WAKE_ACCEPTANCE_PROBABILITY = 0.95;
 const KEYWORD_ALIAS = 'HEY_BEAN';
 const STRICT_WAKE_ALIAS = 'HEY_BEAN';
 const ADDRESS_WAKE_ALIAS = 'BEAN';
-const RUNTIME_VERSION = '16';
+const RUNTIME_VERSION = '17';
 
 // These general graphs are high-recall proposal and timestamp sources only.
 // Neither graph can accept a wake or release dormant audio.
@@ -347,20 +347,25 @@ function classifyWakeProposal(proposal) {
 
     const samples = proposalClassificationWindow(proposal.candidateEndSample);
     const probabilities = beanWakeProbabilities(samples, beanWakeModel);
-    const compatibleClass = proposal.proposalType === 'strict'
+    const strictProposal = proposal.proposalType === 'strict';
+    const activationClass = strictProposal
         ? 'strict_wake'
         : 'missed_hey_confirmation';
-    const compatibleIndex = beanWakeModel.classes.indexOf(compatibleClass);
     const winningIndex = probabilities.indexOf(Math.max(...probabilities));
-    const threshold = beanWakeModel.thresholds[compatibleClass];
+    const winningClass = beanWakeModel.classes[winningIndex] || 'reject';
+    const compatiblePositive = strictProposal
+        ? winningClass === 'strict_wake' || winningClass === 'missed_hey_confirmation'
+        : winningClass === 'missed_hey_confirmation';
+    const decisionClass = compatiblePositive ? winningClass : activationClass;
+    const decisionIndex = beanWakeModel.classes.indexOf(decisionClass);
+    const threshold = beanWakeModel.thresholds[activationClass];
 
     return Object.freeze({
-        accepted: winningIndex === compatibleIndex
-            && probabilities[compatibleIndex] >= threshold,
-        activation: compatibleClass,
+        accepted: compatiblePositive && probabilities[decisionIndex] >= threshold,
+        activation: activationClass,
         proposalType: proposal.proposalType,
-        winningClass: beanWakeModel.classes[winningIndex] || 'reject',
-        probability: probabilities[compatibleIndex],
+        winningClass,
+        probability: probabilities[decisionIndex],
         threshold,
         sampleCount: samples.length,
         tailSamples: PROPOSAL_TAIL_SAMPLES,
