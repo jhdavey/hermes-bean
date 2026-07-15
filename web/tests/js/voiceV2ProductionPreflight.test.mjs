@@ -22,7 +22,6 @@ test('[BV2-AUDIO-NATIVE-01] production preflight requires the new Realtime bound
     const requiredBundle = [
         '/assistant/voice/realtime/session',
         '/assistant/voice/client-failures',
-        '/assistant/voice/capabilities',
         '/assistant/voice/turns',
         '/assistant/voice/state',
         '/assistant/voice/stream',

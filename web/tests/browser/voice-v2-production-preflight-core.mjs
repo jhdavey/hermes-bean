@@ -13,7 +13,6 @@ export function browserVoiceV2BundleCheck(source) {
     const required = [
         '/assistant/voice/realtime/session',
         '/assistant/voice/client-failures',
-        '/assistant/voice/capabilities',
         '/assistant/voice/turns',
         '/assistant/voice/state',
         '/assistant/voice/stream',
