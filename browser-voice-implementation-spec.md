@@ -1,6 +1,6 @@
 # Browser Voice Implementation Specification
 
-Status: implemented local candidate; current verification is recorded in `browser-voice-v2-release-evidence.md`
+Status: uncertified single-owner development cutover; `origin/main` deploys to the live owner-test environment, while final wake-model and runtime certification evidence remains open in `browser-voice-v2-release-evidence.md`
 Scope: authenticated browser experience only  
 Out of scope: Flutter and other native clients  
 Authoritative behavior: [`bean-voice-rules.md`](bean-voice-rules.md)
@@ -13,7 +13,7 @@ The implementation must replace conflicting ownership. It must not add another c
 
 Every activated spoken request follows one semantic path. Hermes owns meaning, completeness, conversational references, typed-operation selection and natural language. Deterministic code owns wake/privacy gates, admission, schemas, authorization, execution, lifecycle, deadlines, recovery and exact-once delivery. Time, date, voice-state, reads, writes, weather, conversational replies, spoken Stop and cancellation have no pre-Hermes shortcut.
 
-The browser wake detector is a first-party, self-contained component. It may use bundled open-source runtime code, but it cannot require a proprietary wake provider, cloud inference, an external account, a license key, or an external runtime request. Ordinary same-origin loading of versioned static application/model assets is permitted. Its model, preprocessing, inference, and evaluation path must be reproducible locally from repository-owned scripts and packaged static assets.
+The browser wake detector is a first-party, self-contained component. It may use bundled open-source runtime code, but it cannot require a proprietary wake provider, cloud inference, an external account, a license key, or an external runtime request. Ordinary same-origin loading of versioned static application/model assets is permitted. Its models, preprocessing, inference, and evaluation path must be reproducible locally from repository-owned scripts and packaged static assets.
 
 ## Original audit conclusion
 
@@ -61,7 +61,7 @@ Every concern has exactly one authority.
 
 | Concern | Sole authority | Consumers |
 | --- | --- | --- |
-| Dormant microphone privacy and wake detection | Local wake gate | Browser voice controller |
+| Dormant microphone privacy, proposal collection, and final wake classification | Local wake gate | Browser voice controller |
 | Activated microphone audio release and provider input | Browser provider-input adapter, gated by the local wake decision | Realtime transcription provider |
 | Browser conversation state | Browser voice controller | UI renderer, provider adapter |
 | Live activated transcript draft | Browser voice controller | Input renderer |
@@ -84,16 +84,13 @@ Every concern has exactly one authority.
 
 ### 1. Local activation gate
 
-Retain the fail-closed raw-microphone boundary and worker warm-up. Extend the local worker with two outputs:
+Retain the fail-closed raw-microphone boundary and worker warm-up. The bundled local keyword spotter is only a high-recall proposal and timestamp source for `HEY_BEAN` and `BEAN`. It emits `wake_proposal`; it cannot open the privacy gate, release audio, or produce the final wake class.
 
-- `wake_confirmed` for a strict `Hey Bean` acoustic match, including when it occurs after other room speech.
-- `address_candidate` for `Bean` at the start of an utterance.
+The worker coalesces each proposal with fixed local context and exactly 2,560 samples (160 ms) of local tail, then evaluates exactly one Bean-authored model: `bean-wake-model-v2.json`. That model has schema `2.0.0`, model ID `bean-first-party-wake-v2`, an input size of 21,760 samples, and exactly three classes: `reject`, `strict_wake`, and `missed_hey_confirmation`. Exact `Hey Bean` and the approved acoustically close `Hey beam` pronunciation cross this same decision; neither is implemented with a phrase-specific exception.
 
-An address candidate opens a short local-only confirmation state. A small local grammar/classifier may confirm obvious second-person address patterns such as `Bean, can you …` and reject third-person patterns. No candidate audio or text crosses the provider boundary before confirmation. Ambiguous candidates expire silently within three seconds. The model and remote transcription service never decide dormant activation.
+An accepted class must be compatible with its proposal type. Only then may deterministic code use the proposal timestamp to establish the safe release boundary and emit `wake_confirmed`. A rejection returns silently to wake-only. Strict wake releases no audio from before the addressed wake phrase; missed-`Hey` confirmation releases from the locally established utterance onset. No candidate audio or text crosses the provider boundary while the classifier decides. The remote transcription service never decides dormant activation.
 
-Every confirmed decision carries a monotonic local-audio boundary. Strict wake releases no audio from before the addressed wake phrase; missed-`Hey` confirmation releases from the locally established address onset. An implementation may retain a bounded memory-only PCM ring, but it may not release an arbitrary fixed duration of history or persist that ring. Rejected and stale generations erase their rings.
-
-The gate reports readiness only after the worklet, model, recognizer, local audio flow, and warm decode are ready. The mic UI must not show wake-ready before this barrier. Failure is visible and fail-closed.
+An implementation may retain a bounded memory-only PCM ring, but it may not release an arbitrary fixed duration of history or persist that ring. Rejected and stale generations erase their rings. The gate reports readiness only after the worklet, keyword spotter, classifier, recognition stream, local audio flow, and warm decode are ready. The mic UI must not show wake-ready before this barrier. Failure is visible and fail-closed.
 
 ### 2. Activated provider audio transport
 
@@ -323,8 +320,8 @@ Explicit non-voice task cancellation and direct resource APIs remain. Determinis
 5. Implement snapshot hydration and reload recovery.
 6. Add complete browser journey tests and representative-device latency collection.
 7. Remove the superseded browser/server voice entry points, metadata bridges, commands, schedules, and contradictory tests. Do not retain shadow or dual execution.
-8. Enable v2 in the owner's development environment with the operational flag; no user allowlist exists.
-9. Pass the release gate with only the replacement architecture reachable for new voice work.
+8. Enable v2 in the owner's development environment with the operational flag; no user allowlist exists. During this phase, `origin/main` may be pushed to the live production environment for owner testing with certification flags false, provided the build is operational and passes the read-only deployment preflight.
+9. Pass the commercial release gate with only the replacement architecture reachable for new voice work before representing the build as certified or making it available beyond the owner.
 10. Keep the flag as an operational kill switch. Disabling it stops new admissions while already admitted jobs continue to their deterministic terminal states.
 
 Only the replacement architecture may execute a browser voice request. A stable turn ID and unique constraints enforce this at the server boundary.
@@ -357,7 +354,7 @@ Dashboard alerts:
 ### Deterministic unit and service tests
 
 - Pure browser reducer with fake clock and generated event permutations.
-- Local wake/address matcher with noise, accents, missed-Hey, and third-person corpora.
+- Local proposal/three-class wake pipeline with noise, accents, approved `Hey beam` pronunciation, missed-Hey, and third-person corpora.
 - Local-audio boundary and provider-input tests proving no pre-address samples cross the gate, ordered catch-up adds no permanent delay, and overflow or transport loss fails closed.
 - Turn transition service with optimistic version conflicts and terminal idempotency.
 - Semantic-path fixtures proving every activated request reaches Hermes, plus structured-plan validation for every typed operation.
@@ -376,12 +373,20 @@ Functional fakes cannot certify latency. Test current supported Chrome, Safari, 
 
 Publish p50, p95, sample count, device/browser/network class, and pass/fail for every product target. No `100% reliable` claim is permitted; release requires zero deterministic journey failures plus the agreed statistical latency/error thresholds over a sufficient sample.
 
-## Release gate
+## Development owner-test push versus commercial certification
+
+The live production environment is currently the owner's development test environment. Proposal coverage, classifier recall, representative-browser latency, or other commercial-gate failures must remain recorded and must keep `wakeModelQaCertified` and `releaseCertified` false. They do not by themselves prevent a push to `origin/main` for owner testing. Such a push is not release evidence and may not be described as certified.
+
+The frozen proposal run currently fails its commercial thresholds: fit strict coverage is 794/1,100 (72.18%) against 95%, fit missed-`Hey` address coverage is 946/1,300 (72.77%) against 95%, Kathy strict coverage is 4/44 (9.09%) against 80%, and Kathy address coverage is 0/52 (0%) against 80%. These results remain visible until superseded by a separately authorized run; they are not converted into passes by an owner-test deployment. `Hey beam` remains an acoustic pronunciation positive through the same proposal and three-class path as `Hey Bean`, never a text alias or runtime exception.
+
+Rules 6, 11, 13, and 15 remain hard in the owner-test environment. The complete affected journeys are `[BV2-FIRST-WAKE-01:A–E]`, `[BV2-WAKE-01]`, `[BV2-WAKE-11]`, `[BV2-TRANSCRIPT-03]`, `[BV2-DIAGNOSTIC-03]`, `[BV2-PRIVACY-PCM-03]`, `[BV2-BARGE-04]`, and `[BV2-FOLLOWUP-01]`.
+
+## Commercial release gate
 
 Browser voice may replace the current path only when all are true:
 
 - Every acceptance scenario in `bean-voice-rules.md` has a deterministic test mapping.
-- A dedicated wake model reaches at least a 95% pass rate across the executed Bean Voice QA journeys covering cross-voice strict, continuous-speech, missed-`Hey`, near-miss, third-person, music, echo, cold-start, and repeated reset; a general ASR prefix or permissive phonetic alias is not accepted as release evidence. Raw-audio/privacy-boundary, runtime-error, duplicate-work, and lifecycle-integrity checks remain hard gates.
+- The single `bean-wake-model-v2.json` three-class classifier, evaluated after exactly 160 ms of local tail, reaches at least a 95% pass rate across all executed Bean Voice QA journeys covering cross-voice exact and approved acoustic strict wakes, continuous-speech wake, missed-`Hey`, near-miss, third-person, music, echo, cold-start, and repeated reset. A keyword proposal alone must release zero audio. Raw-audio/privacy-boundary, runtime-error, duplicate-work, and lifecycle-integrity checks remain hard gates.
 - Provider-input evidence proves exact wake-only silence, an utterance-bounded release, no permanent pre-roll delay, and the published end-to-end transcript latency on each representative browser.
 - Stop, cancellation, interruption, clarification, three-job concurrency, resource serialization, reload, and provider failure pass end to end.
 - No accepted turn remains nonterminal after its deadline in fault-injection tests.
@@ -396,10 +401,10 @@ Browser voice may replace the current path only when all are true:
 
 | Required journey | Primary owner | Required proof |
 | --- | --- | --- |
-| First wake after fresh microphone startup | Local activation gate | Browser test waits for readiness barrier, speaks first wake once, and observes one accepted turn |
-| Missed `Hey` and third-person mention | Local activation gate | Local corpus plus browser privacy assertions |
-| Wake-only privacy | Local activation gate | Assert no UI draft, network audio/transcript, message, turn, or job |
-| Activated provider audio boundary | Local activation gate/provider-input adapter | Exact PCM sentinel test proves no sample before the accepted wake/address boundary reaches the provider and ordered catch-up adds no fixed delay |
+| First wake after fresh microphone startup | Local activation gate | Browser test waits for the keyword spotter and three-class model readiness barrier, speaks first wake once, and observes one accepted turn after the 160 ms tail |
+| Exact `Hey Bean`, approved `Hey beam`, missed `Hey`, and third-person mention | Local activation gate | Every positive crosses the single three-class classifier; local corpus and browser assertions prove correct class/proposal compatibility and rejection privacy |
+| Wake-only privacy | Local activation gate | A proposal by itself yields no UI draft, network audio/transcript, message, turn, job, or released PCM |
+| Activated provider audio boundary | Local activation gate/provider-input adapter | Exact PCM sentinel test proves no sample before the classifier-accepted proposal boundary reaches the provider and ordered catch-up adds no fixed delay |
 | Live partial transcript | Browser controller | Timed synthetic partials update input before final transcript |
 | Two-second utterance closure | Browser controller | Fake-clock boundary tests at 1,999 and 2,000 ms |
 | Incomplete request and five-second clarification | Hermes interpreter/browser controller | One stable turn, one specific semantic clarification, no premature job, one final |

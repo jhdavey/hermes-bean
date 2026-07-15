@@ -1224,15 +1224,54 @@ test('[BV2-SPEECH-03] a background final cannot strand a different live capture'
     assert.equal(voice.snapshot().speechActive, false);
 });
 
-test('[BV2-TRANSCRIPT-03] a provider transcription failure releases capture without admitting work', () => {
+test('[BV2-TRANSCRIPT-03] a first-wake transcription failure releases capture directly to wake-only', () => {
     const { voice } = createReadyVoice();
     beginWakeCapture(voice, 'failed-capture-turn');
     voice.transcriptPartial('Create a');
     voice.captureFailed('transcription_failed');
 
-    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP);
+    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
     assert.equal(voice.snapshot().activeTurn, null);
     assert.equal(voice.snapshot().liveDraft, '');
+    assert.deepEqual(voice.snapshot().deadlines, {
+        endpointAt: null,
+        clarificationAt: null,
+        followUpAt: null,
+    });
     assert.ok(voice.snapshot().closedTurnIds.includes('failed-capture-turn'));
     assert.equal(voice.drainEffects().some((effect) => effect.type === BROWSER_VOICE_EFFECTS.TURN_READY), false);
+});
+
+test('[BV2-TRANSCRIPT-03] a provider failure during first-wake activation cannot strand ACTIVATING', () => {
+    const { voice } = createReadyVoice();
+    voice.wakeConfirmed({ turnId: 'failed-activation-turn' });
+    const failed = voice.captureFailed('transcription_failed');
+
+    assert.equal(failed.state.conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
+    assert.equal(failed.state.activeTurn, null);
+    assert.ok(failed.state.closedTurnIds.includes('failed-activation-turn'));
+    assert.equal(failed.effects.some((effect) => effect.type === BROWSER_VOICE_EFFECTS.TURN_READY), false);
+});
+
+test('[BV2-TRANSCRIPT-03] a failed contextual follow-up retains one bounded fifteen-second window', () => {
+    const { voice, time } = createReadyVoice();
+    beginWakeCapture(voice, 'completed-turn');
+    finishUtterance(voice, time, 'What is on my calendar?');
+    voice.playbackFinished({ turnId: 'completed-turn', source: 'speech_scheduler' });
+    voice.drainEffects();
+
+    voice.speechStarted({ turnId: 'failed-follow-up', providerItemId: 'provider-follow-up' });
+    voice.transcriptPartial('And tomorrow');
+    const failed = voice.captureFailed('transcription_failed');
+
+    assert.equal(failed.state.conversationState, BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP);
+    assert.equal(failed.state.activeTurn, null);
+    assert.equal(failed.state.deadlines.followUpAt, time.now + 15_000);
+    assert.equal(failed.effects.filter((effect) => effect.type === BROWSER_VOICE_EFFECTS.SCHEDULE_TIMER).length, 1);
+    assert.equal(failed.effects.find((effect) => effect.type === BROWSER_VOICE_EFFECTS.SCHEDULE_TIMER)?.timerKey, 'follow_up');
+
+    time.advance(14_999);
+    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP);
+    time.advance(1);
+    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
 });

@@ -1,6 +1,6 @@
 # Browser Voice v2 release evidence
 
-Last updated July 14, 2026. This document covers authenticated browser voice
+Last updated July 15, 2026. This document covers authenticated browser voice
 only. Flutter/native voice is out of scope. `bean-voice-rules.md` is the
 authoritative product contract; this file records implementation and evidence,
 not new product behavior.
@@ -11,21 +11,47 @@ The previously audited deterministic-routing candidate was deployed to the
 development site as commit `837dac78` on July 14, 2026. Its gate counts below
 are historical and do not certify the current single-semantic-path cutover.
 
-The current development candidate admits every activated spoken request to
+The current semantic development candidate admits every activated spoken request to
 `agent.semantic`. Hermes owns meaning, completeness, references, typed-operation
 selection, decomposition, and response language. Deterministic code owns
 validated execution, lifecycle, scheduling, receipts, cancellation, deadlines,
 recovery, and the sole durable final. The superseded instant, typed-router,
 work-status-parser, and complex-runtime expectations have been removed rather
-than retained as compatibility paths. The local repository gates now pass as
-recorded below; deployed-device and representative latency evidence are still
-pending.
+than retained as compatibility paths. Its previously recorded tests remain
+semantic/lifecycle evidence; they do not certify the wake cutover described
+below. Deployed-device and representative latency evidence are still pending.
 
-Wake assets are runtime v13. The wake detector is first-party and
-self-contained: no external wake service, account, license key, remote
-inference, or runtime network request. Incident phrases are held-out QA inputs
-only; production decision code contains no phrase-specific negative aliases or
-exceptions.
+Wake runtime v16 is being cut over to one proposal-and-classification pipeline.
+The bundled, pinned, same-origin KWS runtime supplies only high-recall
+`HEY_BEAN`/`BEAN` proposals and timestamps. Exactly one Bean-authored model,
+`bean-wake-model-v2.json`, evaluates each coalesced proposal with fixed local
+context and exactly 2,560 samples (160 ms) of local tail. Its only classes are
+`reject`, `strict_wake`, and `missed_hey_confirmation`; it is the sole acoustic
+acceptance authority. Exact `Hey Bean` and the contract-approved `Hey beam`
+pronunciation cross that same three-class decision. An accepted class must be
+compatible with the proposal type before deterministic code may establish a
+safe release boundary. A proposal alone releases no audio.
+
+The uncertified v2 development artifact is present: 538,914 bytes with SHA-256
+`176455f94dc53d5921b1a0f8dfb45220250fbe5f942da54e87721d69a8c8867c`.
+Its fit evaluation accepted 2,788/3,132 proposal-conditioned strict rows and
+1,163/3,784 missed-`Hey` rows, with zero false accepts across 5,588 fit reject
+rows and 12 Kathy reject rows. The 212 JavaScript voice tests, 13 complete
+Playwright journeys, production build, package checksums, and enabled local
+deployment preflight pass. Representative physical-microphone and cross-engine
+acoustic evidence remain pending, so `wakeModelQaCertified` and
+`releaseCertified` remain false. The flags record evidence state; they do not
+block the owner from testing this integrity-complete development deployment. No
+external wake service, account, key, remote inference, or runtime network
+request is used.
+
+For the current private development phase, `origin/main` is deployed to the live
+production environment, and that environment is the owner's single-user test
+surface rather than a commercially certified release. The owner has explicitly
+accepted live testing with the proposal failures recorded below. Those failures
+do not block an otherwise operational owner-test push, but they remain failures,
+keep both certification flags false, and continue to block commercial
+certification or broader-user release.
 
 ## July 13 full-system audit
 
@@ -80,16 +106,17 @@ The current cutover removes those duplicate owners:
 - one-word conversational answers such as “yes” are accepted without another
   wake only when Bean's preceding durable response actually asked a question.
   The same room speech after a normal answer remains private and invisible.
-- the generic acoustic verifier, rather than phrase exceptions, owns every
-  strict-wake candidate decision.
+- the bundled KWS graph supplies proposals and timestamps only. The one
+  three-class `bean-wake-model-v2.json` classifier owns both strict and
+  missed-`Hey` acceptance after exactly 160 ms of local tail, and `Hey beam`
+  crosses the same strict decision as `Hey Bean`.
 - sanitized pre-turn client failures are durable admin diagnostic events; the
   server sanitizes them independently of the browser and owns no lifecycle
   transition through that telemetry path.
 - each acoustic-engine replay and adapter benchmark now has a tested outer
   deadline, so the command records an engine failure instead of hanging.
-- the single generic strict-wake verifier is calibrated from held-out
-  cross-engine scores, and the local worklet sends bounded 80 ms batches. No
-  phrase-specific branch was added to recover recall or latency.
+- the local worklet sends bounded 80 ms batches. Final three-class cross-engine
+  replay is pending; no earlier wake architecture is reused as v2 evidence.
 
 ## July 14 speech-delivery follow-up
 
@@ -126,7 +153,7 @@ four observations are diagnostic samples, not a p95 certification. The selected
 model remains configurable through `OPENAI_SPEECH_MODEL`, and speech usage is
 still preflighted and metered once per stable speech item.
 
-## July 14 dormant-privacy follow-up
+## Historical July 14 dormant-privacy follow-up
 
 Production durable evidence correlated the reported dog-directed conversation
 to one `new_conversation` turn more than seven minutes after the preceding Bean
@@ -136,19 +163,20 @@ missed-`Hey` path as the activation source rather than a strict `Hey Bean`
 release.
 
 The defect was an evidence-composition error in the single wake worker: the
-first-party missed-`Hey` classifier could promote arbitrary utterance audio
+then-current missed-`Hey` classifier could promote arbitrary utterance audio
 without an independent local indication that the user had said “Bean.” Runtime
-v13 retains one decision owner and now requires both signals before opening the
-gate:
+v13 historically fixed that superseded path by requiring both signals before
+opening the gate:
 
 - a proposal-only, on-device timing candidate for “Bean”; and
-- acceptance by the existing first-party address classifier.
+- acceptance by the then-current two-class classifier.
 
-Neither signal can activate by itself. Strict `Hey Bean` continues to use its
-strict local timing stream and the same first-party verifier. Candidate speech
-remains invisible and no pre-confirmation PCM or text leaves the browser. The
-reported sentence is a held-out QA input only; production code contains no
-phrase-specific ignore rule.
+In that historical runtime neither missed-Hey signal could activate by itself,
+while strict `Hey Bean` used the bundled KWS result. That architecture and its
+evidence do not certify the current three-class model. Candidate speech remained
+invisible and no pre-confirmation PCM or text left the browser. The reported
+sentence was a QA input only; production code contained no phrase-specific
+ignore rule.
 
 ## July 14 single-semantic-path cutover
 
@@ -192,12 +220,77 @@ rejected or absent from the voice path. Acknowledgement publication is part of
 the validated-plan staging transaction, so invalid plans cannot speak before
 Hermes repairs or clarifies them.
 
+## July 14 first-wake regression follow-up
+
+The deployed browser opened Realtime sessions but released no PCM, recorded no
+transcription usage, and admitted no voice turn for the owner's first test. That
+evidence localizes the drop to the dormant local wake gate. Runtime v14 exposed
+neither the bundled KWS outcome nor the superseded classifier outcome, so the
+available owner test cannot identify which of those two owners dropped the wake.
+
+An intermediate runtime-v15 experiment made an exact `HEY_BEAN` KWS result the
+strict acceptance authority. The permitted fixed-tail benchmark proved that
+design was not commercially adequate and therefore blocks reuse of that design:
+
+| Engine | Bean Voice QA | False wakes | Wake p95 | Reset/re-arm |
+| --- | ---: | ---: | ---: | ---: |
+| Playwright Chromium | 204/248 (82.2581%) | 27/163 privacy trials | 636.4 ms | 0/6 |
+| Installed Google Chrome | 216/248 (87.0968%) | 19/163 privacy trials | 610.8 ms | 0/6 |
+| Playwright WebKit | 212/248 (85.4839%) | 20/163 privacy trials | 600.0 ms | 0/6 |
+
+All three real-gate engine runs failed the 95% aggregate target, the 500 ms p95
+target, and privacy/reset expectations. Every false wake released PCM and caused
+provider append events. The accepted-wake transport mechanics themselves kept
+zero callbacks before local confirmation, used the selected release boundaries,
+and completed without runtime errors; all three synthetic adapter-only runs also
+passed. Those narrower passes do not offset the acoustic/privacy failures. The
+benchmark is retained only as honest evidence for rejecting the experiment and
+does not certify the replacement architecture.
+
+Runtime v16 now targets the contract's single three-class path. The KWS emits a
+sanitized `wake_proposal`; `bean-wake-model-v2.json` classifies the coalesced
+proposal after exactly 160 ms of local tail and emits one sanitized
+`classification_decision`. A compatible accepted class may then produce
+`wake_confirmed`; a proposal by itself releases no PCM. `Hey beam` is an approved
+acoustic strict positive through that same model, while unaddressed and disallowed
+near matches remain privacy negatives. The development artifact and its
+deterministic first-wake, safe-release, reset/re-arm, and package-integrity
+journeys pass. Cross-engine acoustic replay and representative microphone
+results remain pending and must not be inferred from the failed experiment.
+
+The complete-journey audit also found three independent ways the browser could
+show microphone activity and then remain silent. A post-readiness worker that
+stopped acknowledging PCM had no deadline, a failed first-wake transcription
+could retain an unbounded capture state, and a provider error reported UI state
+without tearing down the local gate and microphone graph. Runtime v16 closes all
+three paths without adding another lifecycle owner:
+
+- `LocalWakeGate` enforces one generation-scoped, FIFO two-second deadline for
+  the oldest unacknowledged PCM chunk. A timeout or invalid acknowledgement
+  closes first, tears down capture, and records the controlled
+  `pcm_ack_timeout` or `invalid_pcm_ack_sequence` code.
+- `BrowserVoiceControllerV2` returns a failed initial activation directly to
+  wake-only. A failed contextual follow-up retains only its existing bounded
+  fifteen-second window.
+- the production provider-error bridge performs one connection-wide,
+  fail-closed teardown, so no later PCM can cross the provider adapter.
+
+Client failures now use a per-user durable outbox and stable incident identity.
+Offline and reload delivery is idempotent, normal logout preserves unsent
+records for the same user's next login, storage failure is explicitly visible,
+and the server independently neutralizes messages and allowlists controlled
+local codes. No transcript, PCM, provider body, or dormant candidate content is
+stored in this path. The production-bridge regression covers activation through
+the real PCM adapter, first-wake transcription failure through re-arm, and
+provider failure through complete teardown rather than testing controller
+methods in isolation.
+
 ## Contract-to-test traceability
 
 | Contract journey | Primary deterministic proof |
 | --- | --- |
-| Fresh-load readiness and first wake | `[BV2-STARTUP-01..04]`, `[BV2-WAKE-01]`, `[BV2-WAKE-03..04]`, `[BV2-WAKE-08..10]`, `[BV2-BROWSER-01]` |
-| Dormant privacy, missed `Hey`, strict wake, third-person mention, generic near-miss rejection, and re-arm | `[BV2-WAKE-11]`, local-wake gate tests, `[BV2-BROWSER-01]`, `[BV2-BROWSER-13]`, v13 prerecorded corpus |
+| Fresh-load readiness and first wake | `[BV2-STARTUP-01..04]`, `[BV2-WAKE-01]`, `[BV2-WAKE-03..04]`, `[BV2-WAKE-08..10]`, `[BV2-FIRST-WAKE-01:A..E]`, `[BV2-BROWSER-01]` |
+| Dormant privacy, missed `Hey`, exact/approved-acoustic strict wake, disallowed near-match rejection, and re-arm | `[BV2-WAKE-11]`, `[BV2-FIRST-WAKE-01:A..B,E]`, local-wake gate tests, `[BV2-BROWSER-01]`, `[BV2-BROWSER-13]`; frozen v2 proposal coverage failed and classifier/cross-engine replay remain pending |
 | Live partials and exact two-second endpoint | `[BV2-TRANSCRIPT-01..04]`, `[BV2-BROWSER-01]` |
 | Incomplete fragments admitted at the normal endpoint and durable five-second Hermes clarification | `[BV2-CLARIFY-01..06]`, `[BV2-BROWSER-14]`, lifecycle clarification journeys |
 | Fifteen-second follow-up, expected one-word answer, ambient rejection, strict-wake reset, and authorized context | `[BV2-FOLLOWUP-01..08]`, `[BV2-CONTEXT-01]`, semantic context journeys, `[BV2-BROWSER-08..09]`, `[BV2-BROWSER-13]` |
@@ -218,7 +311,11 @@ Hermes repairs or clarifies them.
 | Per-user plan usage, upgrade response, admin unlimited, and exact-once accounting | semantic usage/note-limit, voice usage, plan entitlement, and `[BV2-USAGE-01..03]` journeys |
 | One accepted message, one terminal state, one final, no raw audio persistence | semantic complete journeys and semantic-neutral invariant-audit tests |
 
-## Current semantic-cutover evidence
+## Previously recorded semantic/lifecycle cutover evidence
+
+These results were recorded before the current wake replacement. They remain
+evidence for the named semantic, lifecycle, and UI boundaries only; they are not
+a current whole-repository pass and do not certify `bean-wake-model-v2.json`.
 
 | Gate | Result |
 | --- | --- |
@@ -229,15 +326,17 @@ Hermes repairs or clarifies them.
 | Typed lookup and weather selection, ambiguity, deadlines, failure scope, and machine-readable receipt boundaries | **Pass:** 23/23 tests, 467 assertions |
 | Browser Voice JavaScript | **Pass:** 155/155 tests |
 | Playwright complete browser journeys | **Pass:** 12/12 journeys |
+| Intermediate runtime-v15 KWS-acceptance benchmark | **Fail:** 0/3 real-gate engines passed; 204/248, 216/248, and 212/248 aggregate journeys with 27, 19, and 20 false wakes respectively; experiment superseded |
 | Production Vite build | **Pass:** `app-D37h1_OA.js`, `app-CbPbUmi9.css` |
 | Flutter chat/API regression suite (native voice remains deferred) | **Pass:** analyzer clean and 230/230 tests |
 | Fresh-schema invariant command | **Pass:** zero violations across an empty freshly migrated database; populated proof comes from the deterministic complete-turn tests |
 | Changed PHP formatting, Composer strict validation, and `git diff --check` | **Pass** |
 
-The local application, browser, build, and invariant gates pass. Authenticated
-deployment preflight, live-provider measurement, and representative-device
-gates must still be run before this candidate is described as certified.
-Functional test success remains separate from measured latency.
+The recorded semantic, lifecycle, browser-adapter, build, and invariant gates
+passed at that point. The wake gate did not. A fresh whole-repository run,
+three-class artifact integrity, three-class replay, authenticated deployment
+preflight, live-provider measurement, and representative-device gates remain
+pending. Functional test success remains separate from measured latency.
 
 ## Historical pre-cutover automated gate results
 
@@ -273,7 +372,48 @@ failed invocation.
 
 ## Wake-model evidence
 
-The v13 manifest records a 125/126 (99.21%) deterministic prerecorded Bean
+The one permitted frozen proposal-coverage run completed before classifier
+training and failed every positive-coverage threshold:
+
+| Split and proposal class | Result | Commercial threshold | Status |
+| --- | ---: | ---: | --- |
+| Fit strict wake | 794/1,100 (72.18%) | at least 95% | **Fail** |
+| Fit missed-`Hey` address | 946/1,300 (72.77%) | at least 95% | **Fail** |
+| Kathy strict wake | 4/44 (9.09%) | at least 80% | **Fail** |
+| Kathy missed-`Hey` address | 0/52 (0%) | at least 80% | **Fail** |
+
+The fixed run stopped before training, so it produced no
+`bean-wake-model-v2.json` artifact and no classifier-recall result. A preceding
+12-file diagnostic covered only `Hey Bean.` and `Bean, can you.` at one speech
+rate across six voices; its 6/6 strict and 5/6 address proposal results do not
+override the complete frozen matrix. The exact counts above remain the current
+proposal evidence and may not be hidden, rounded into a pass, or relabeled as
+classifier recall.
+
+This failure blocks commercial certification, not an owner-authorized push to
+the current single-owner live development environment. `wakeModelQaCertified`
+and `releaseCertified` remain false. Artifact integrity, classifier replay,
+aggregate classifier numerator/denominator, 160 ms tail behavior, proposal-only
+privacy proof, and three-engine latency remain pending. The failed intermediate
+v15 benchmark recorded above also remains historical and must not be relabeled
+as v2 evidence. `Hey beam` remains an acoustic pronunciation positive through
+the same proposal and three-class path as `Hey Bean`; it is not a separate text
+alias or runtime exception.
+
+Owner testing does not relax Rules 6, 11, 13, or 15. Dormant privacy,
+duplicate/stale-event safety, terminal failure diagnostics, and no raw-audio
+retention remain hard across `[BV2-FIRST-WAKE-01:A–E]`, `[BV2-WAKE-01]`,
+`[BV2-WAKE-11]`, `[BV2-TRANSCRIPT-03]`, `[BV2-DIAGNOSTIC-03]`,
+`[BV2-PRIVACY-PCM-03]`, `[BV2-BARGE-04]`, and `[BV2-FOLLOWUP-01]`.
+
+Grandpa UK, Grandpa US, and Rocko US were opened exactly once for a superseded
+candidate. They are now regression inputs, not untouched held-out voices, and
+must not be represented as fresh v2 certification evidence. No result for those
+voices was generated or inspected during this documentation cutover.
+
+### Historical runtime-v13 evidence
+
+The v13 manifest recorded a 125/126 (99.21%) deterministic prerecorded Bean
 Voice QA result against the agreed 95% acceptance threshold independently in
 Playwright Chromium, installed Google Chrome, and Playwright WebKit: 24/24
 isolated strict wakes, 6/6 wake-plus-command releases, 6/6 continuous-speech
@@ -284,13 +424,13 @@ each engine. That is zero false activations across 180 engine/corpus negative
 runs. Wake p95 was 437.9 ms in Chromium, 439.3 ms in installed Chrome, and 487
 ms in WebKit, all below the 500 ms contract target.
 
-The corpus includes the reported ambient conversation as a held-out negative, along
+That historical corpus included the reported ambient conversation as a negative, along
 with phonetic near misses, third-person Bean mentions, ordinary conversation,
-and other privacy families. Those strings do not occur in production decision
-code or training negatives. The first-party classifier must reject them by the
-same generic acoustic rule used for all candidates.
+and other privacy families. Those strings did not occur in production decision
+code. The result belongs to a superseded classifier architecture and cannot
+certify the v2 three-class model.
 
-The unchanged default `npm run benchmark:voice:browser` command passed all
+The then-current default `npm run benchmark:voice:browser` command passed all
 three executed engines. Microsoft Edge was explicitly classified as not
 installed; installed Safari cannot be automated by this Playwright runner. Its
 JSON distinguishes local model/gate evidence from provider/network and
@@ -310,22 +450,44 @@ passed with zero violations across 27 turns, 54 messages, 25 runs, and 261
 events. Those checks prove deployed code and durable-data integrity, not a real
 microphone, speaker, or room.
 
-Remaining verification for the new semantic candidate:
+Remaining verification required for commercial certification of the combined
+semantic and wake candidate:
 
-1. deploy the clean semantic cutover and rerun the invariant and authenticated
-   production-preflight gates against that deployment; then use the
-   owner's account for fresh-load first wake, microphone restart, live
+1. generate `bean-wake-model-v2.json` from the repository trainer; verify model
+   ID `bean-first-party-wake-v2`, schema `2.0.0`, classes `reject`,
+   `strict_wake`, and `missed_hey_confirmation`, 21,760 input samples, and a
+   2,560-sample/160 ms tail; then replace the manifest's pending byte/hash fields,
+   mark the artifact available, and refresh `SHA256SUMS` while both certification
+   flags remain false;
+2. run the deterministic package and complete first-wake journeys proving a KWS
+   proposal alone releases zero PCM, every accepted class is proposal-compatible,
+   exact `Hey Bean` and approved `Hey beam` cross the same strict class, missed
+   `Hey` uses the same model, rejection re-arms, and no pre-confirmation PCM or
+   transcript escapes;
+3. run the prerecorded v2 matrix in Playwright Chromium, installed Chrome, and
+   Playwright WebKit and report each engine plus the combined aggregate
+   numerator/denominator and p95. At least 95% of all executed Bean Voice QA
+   journeys must pass across the combined matrix, wake p95 must be at most 500
+   ms on every executed target, and every raw-audio/persistence, runtime,
+   duplicate-work, and lifecycle hard check must pass;
+4. run the full current repository tests and production build, deploy the clean
+   cutover, and rerun the read-only production preflight against that deployment;
+   then use the owner's account for fresh-load first wake, microphone restart, live
    partials, two-second endpoint, expected and ambient follow-ups, background
    audio rejection, false and meaningful barge-in, playback Stop, explicit job
    cancellation, three-job concurrency, read bypass, local/remote weather,
    direct writes, contextual corrections, complex note creation, provider fault,
    reload/reconnect, exact chat/speech parity, usage-limit upgrade UX, and admin
    diagnostics; and
-2. record visible/audible Chrome, Safari, and Edge samples in quiet speech,
+5. record visible/audible Chrome, Safari, and Edge samples in quiet speech,
    background music, nearby conversation, and speaker-echo conditions with the
    p50/p95 metrics required by `bean-voice-rules.md`.
 
 Until those live-provider and physical deployed-development gates pass, the
-accurate status is: the current local repository cutover gates pass; the
-previous deployment and its latency samples are historical; current release
-certification is pending.
+accurate status is: semantic/lifecycle results are recorded, the frozen proposal
+run and intermediate wake experiment failed, the final v2 wake artifact and
+evidence are pending, the previous deployment and its latency samples are
+historical, and current release certification is false. The owner may still
+push an otherwise operational build to `origin/main` and the current live
+single-user development environment for testing; that deployment neither
+changes these results nor satisfies any commercial gate.

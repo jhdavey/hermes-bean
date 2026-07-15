@@ -21,6 +21,67 @@ use Throwable;
 
 class AssistantVoiceController extends Controller
 {
+    private const CONTROLLED_CLIENT_FAILURE_CODES = [
+        'local_wake' => [
+            'activated_pcm_delivery_failed',
+            'already_started',
+            'audio_context_closed',
+            'audio_context_resume_timeout',
+            'audio_sink_unavailable',
+            'decode_failed',
+            'dormant_rearm_failed',
+            'gate_close_failed',
+            'gate_open_failed',
+            'incomplete_readiness_barrier',
+            'initialization_failed',
+            'invalid_audio',
+            'invalid_generation',
+            'invalid_local_pcm',
+            'invalid_message',
+            'invalid_message_type',
+            'invalid_pcm_ack_sequence',
+            'invalid_release_boundary',
+            'invalid_sequence',
+            'invalid_source_sequence',
+            'invalid_utterance_boundary',
+            'microphone_stream_required',
+            'missing_release_boundary',
+            'pcm_ack_timeout',
+            'pcm_decode_rejected',
+            'pcm_transfer_failed',
+            'processor_failed',
+            'processor_unavailable',
+            'reset_failed',
+            'runtime_load_failed',
+            'source_sequence_gap',
+            'stale_start',
+            'start_failed',
+            'unhandled_rejection',
+            'unsafe_asset_url',
+            'unsupported',
+            'worker_error',
+        ],
+        'startup' => [
+            'AbortError',
+            'NotAllowedError',
+            'NotFoundError',
+            'NotReadableError',
+            'OverconstrainedError',
+            'SecurityError',
+            'TypeError',
+            'audio_context_closed',
+            'audio_context_resume_timeout',
+            'audio_sink_unavailable',
+            'microphone_stream_required',
+            'reset_failed',
+            'stale_start',
+            'start_failed',
+            'unsupported',
+            'voice_diagnostic_outbox_corrupt',
+            'voice_diagnostic_outbox_overflow',
+        ],
+    ];
+
     public function __construct(
         private readonly OpenAiVoiceService $voice,
         private readonly WorkspaceService $workspaces,
@@ -284,44 +345,113 @@ class AssistantVoiceController extends Controller
     public function clientFailure(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'stage' => ['required', 'in:local_wake,startup,admission,clarification,connection,usage_accounting'],
+            'failure_id' => ['required', 'string', 'min:8', 'max:191', 'regex:/^[A-Za-z0-9][A-Za-z0-9:._-]+$/'],
+            'stage' => ['required', 'in:local_wake,startup,admission,clarification,connection,transcription,usage_accounting'],
             'code' => ['required', 'string', 'max:80'],
             'message' => ['required', 'string', 'max:240'],
             'cause_chain' => ['present', 'array', 'max:4'],
             'cause_chain.*.code' => ['nullable', 'string', 'max:80'],
             'cause_chain.*.message' => ['nullable', 'string', 'max:240'],
             'session_id' => ['sometimes', 'nullable', 'integer'],
-            'turn_id' => ['sometimes', 'nullable', 'string', 'max:191'],
+            'turn_id' => ['sometimes', 'nullable', 'string', 'max:120', 'regex:/^[A-Za-z0-9][A-Za-z0-9:._-]+$/'],
         ]);
         $user = $request->user();
-        $diagnostic = $this->privacy->sanitizeDiagnosticPayload([
-            'stage' => $data['stage'],
-            'code' => $data['code'],
-            'message' => $data['message'],
-            'cause_chain' => $data['cause_chain'],
-            'turn_id' => $data['turn_id'] ?? null,
-        ]);
         $session = isset($data['session_id'])
             ? ConversationSession::query()
                 ->where('user_id', $user->id)
                 ->whereKey((int) $data['session_id'])
                 ->first()
             : null;
-        ActivityEvent::create([
-            'user_id' => $user->id,
-            'workspace_id' => $session?->workspace_id ?? $user->default_workspace_id,
-            'conversation_session_id' => $session?->id,
-            'event_type' => 'browser_voice_v2.client_failure',
-            'tool_name' => 'browser.voice.client',
-            'status' => 'failed',
-            'payload' => $diagnostic,
+        $turn = filled($data['turn_id'] ?? null)
+            && (! array_key_exists('session_id', $data) || $session !== null)
+            ? VoiceTurn::query()
+                ->where('user_id', $user->id)
+                ->when($session, fn ($query) => $query->where('conversation_session_id', $session->id))
+                ->where('turn_id', $data['turn_id'])
+                ->first()
+            : null;
+        $failureIdentitySource = implode("\0", [
+            (string) $user->id,
+            $data['stage'],
+            $data['failure_id'],
         ]);
-        Log::warning('Browser Voice v2 client failure.', [
-            'user_id' => $user->id,
-            'workspace_id' => $user->default_workspace_id,
-            ...$diagnostic,
-        ]);
+        $applicationKey = (string) config('app.key');
+        $failureDigest = $applicationKey !== ''
+            ? hash_hmac('sha256', $failureIdentitySource, $applicationKey)
+            : hash('sha256', $failureIdentitySource);
+        $failureId = "browser_voice_v2:{$data['stage']}:{$failureDigest}";
+        $contentNeutralMessage = match ($data['stage']) {
+            'local_wake' => 'Private wake detection failed.',
+            'startup' => 'Browser voice startup failed.',
+            'admission' => 'Browser voice admission failed.',
+            'clarification' => 'Browser voice clarification failed.',
+            'connection' => 'Browser voice connection failed.',
+            'transcription' => 'Browser voice transcription failed.',
+            'usage_accounting' => 'Browser voice usage accounting failed.',
+        };
+        $safeCode = static fn (mixed $value): string => mb_substr(
+            preg_replace('/[^A-Za-z0-9_.-]+/', '_', (string) $value) ?? '',
+            0,
+            80,
+        );
+        $diagnosticCode = static function (mixed $value) use ($data, $safeCode): string {
+            $code = $safeCode($value);
 
-        return response()->json(['data' => ['recorded' => true]]);
+            return match ($data['stage']) {
+                'admission' => 'voice_admission_failure',
+                'clarification' => 'voice_clarification_failure',
+                'connection' => 'voice_connection_failure',
+                'transcription' => 'voice_transcription_failure',
+                'usage_accounting' => 'voice_usage_accounting_failure',
+                'local_wake' => in_array($code, self::CONTROLLED_CLIENT_FAILURE_CODES['local_wake'], true)
+                    ? $code
+                    : 'local_wake_failure',
+                'startup' => in_array($code, self::CONTROLLED_CLIENT_FAILURE_CODES['startup'], true)
+                    ? $code
+                    : 'voice_startup_failure',
+                default => $code,
+            };
+        };
+        $diagnostic = $this->privacy->sanitizeDiagnosticPayload([
+            'stage' => $data['stage'],
+            'code' => $diagnosticCode($data['code']),
+            'message' => $contentNeutralMessage,
+            'cause_chain' => collect($data['cause_chain'])
+                ->take(4)
+                ->map(fn (array $cause): array => [
+                    'code' => filled($cause['code'] ?? null) ? $diagnosticCode($cause['code']) : null,
+                    'message' => $contentNeutralMessage,
+                ])->values()->all(),
+            'turn_id' => $turn?->turn_id,
+        ]);
+        $event = ActivityEvent::firstOrCreate(
+            [
+                'user_id' => $user->id,
+                'client_event_id' => $failureId,
+            ],
+            [
+                'workspace_id' => $session?->workspace_id ?? $turn?->workspace_id ?? $user->default_workspace_id,
+                'conversation_session_id' => $session?->id ?? $turn?->conversation_session_id,
+                'event_type' => 'browser_voice_v2.client_failure',
+                'tool_name' => 'browser.voice.client',
+                'status' => 'failed',
+                'payload' => $diagnostic,
+            ],
+        );
+        if ($event->wasRecentlyCreated) {
+            Log::warning('Browser Voice v2 client failure.', [
+                'user_id' => $user->id,
+                'workspace_id' => $event->workspace_id,
+                'conversation_session_id' => $event->conversation_session_id,
+                'failure_id' => $event->client_event_id,
+                ...$diagnostic,
+            ]);
+        }
+
+        return response()->json(['data' => [
+            'recorded' => true,
+            'duplicate' => ! $event->wasRecentlyCreated,
+            'failure_id' => $event->client_event_id,
+        ]]);
     }
 }

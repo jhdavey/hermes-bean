@@ -1,52 +1,45 @@
 'use strict';
 
 // Local, single-thread wake classification. Raw microphone audio never leaves
-// this worker while Bean is dormant. The bundled KWS component supplies only
-// strict-phrase timing candidates; Bean's first-party classifier owns every
-// acceptance and missed-Hey address decision.
+// this worker while Bean is dormant. The bundled KWS component proposes only a
+// candidate type and timestamp. One first-party three-class model owns every
+// final wake decision before deterministic code may use that timestamp.
 
 const TARGET_SAMPLE_RATE = 16000;
 const MAX_AUDIO_SAMPLES = 3200;
 const MAX_DECODES_PER_MESSAGE = 32;
-const NON_WAKE_SILENCE_RESET_CHUNKS = 7;
+const NON_WAKE_SILENCE_RESET_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.7);
 const MAX_DORMANT_SILENCE_CHUNKS = 300;
 const ACTIVITY_FRAME_SAMPLES = 320;
 const DORMANT_AUDIO_RING_CHUNKS = 2;
-const SPEECH_RMS_THRESHOLD = 0.012;
+// Match the worklet's visible activity floor. This threshold starts bounded
+// local analysis only; the shared three-class model still owns every
+// activation, so lowering it cannot release dormant audio.
+const SPEECH_RMS_THRESHOLD = 0.008;
 const STRICT_RELEASE_TAIL_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.12);
 const MAX_SOURCE_BOUNDARIES = 100;
 const MAX_CLASSIFICATION_SAMPLES = TARGET_SAMPLE_RATE * 3;
 const CLASSIFICATION_LEADING_PAD_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.1);
-const CLASSIFICATION_TRAILING_PAD_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.25);
-// The independently timed strict path retains its certified operating point.
-// The prefix fallback is much stricter because it has no second timing vote.
-// Cross-engine calibration keeps the weakest held-out strict wake (0.765 on
-// WebKit) above the operating point while retaining a 0.261 observed margin
-// over the strongest timing-triggered negative (0.489). This remains one
-// phrase-agnostic verifier threshold; no recognized words or incident phrase enters
-// the decision.
-const STRICT_ACCEPTANCE_PROBABILITY = 0.75;
-const STRICT_PREFIX_ACCEPTANCE_PROBABILITY = 0.99;
-const STRICT_PREFIX_FALLBACK_SILENCE_CHUNKS = 4;
-const ADDRESS_ACCEPTANCE_PROBABILITY = 0.95;
-const FIRST_PARTY_ADDRESS_MIN_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.5);
-const FIRST_PARTY_ADDRESS_MAX_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 2.8);
-const FIRST_PARTY_ADDRESS_INTERVAL_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.3);
+const PROPOSAL_CONTEXT_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 1.2);
+const PROPOSAL_TAIL_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.16);
+const PROPOSAL_WINDOW_SAMPLES = PROPOSAL_CONTEXT_SAMPLES + PROPOSAL_TAIL_SAMPLES;
+// Start every first strict timing stream with one exact model chunk of silence.
+// This removes AudioWorklet/resampler phase from the proposal without adding
+// any real dormant PCM or changing the proposal-aligned classifier evidence.
+const STRICT_KWS_SYNTHETIC_PAD_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.32);
+const MIN_WAKE_ACCEPTANCE_PROBABILITY = 0.95;
 const KEYWORD_ALIAS = 'HEY_BEAN';
 const STRICT_WAKE_ALIAS = 'HEY_BEAN';
 const ADDRESS_WAKE_ALIAS = 'BEAN';
-const RUNTIME_VERSION = '14';
+const RUNTIME_VERSION = '16';
 
-// The timing detector proposes only the product wake phrase. It never embeds
-// incident-specific negative phrases. The first-party classifier below owns
-// the generic acoustic accept/reject decision for every proposed candidate.
-const STRICT_KEYWORDS = 'HH EY1 B IY1 N :1.2 #0.1 @HEY_BEAN';
-// Missed-Hey recovery requires an independently timed local "Bean" candidate
-// before the first-party address classifier may activate. The timing engine is
-// proposal-only: it cannot open the gate without the classifier's separate
-// address decision, and arbitrary speech can no longer activate that classifier
-// by itself.
-const ADDRESS_KEYWORDS = 'B IY1 N :1.2 #0.1 @BEAN';
+// These general graphs are high-recall proposal and timestamp sources only.
+// Neither graph can accept a wake or release dormant audio.
+const STRICT_KEYWORDS = [
+    'HH EY1 B IY1 N :3.0 #0.01 @HEY_BEAN',
+    'HH EY1 B IY1 M :3.0 #0.01 @HEY_BEAN',
+].join('\n');
+const ADDRESS_KEYWORDS = 'B IY1 N :3.0 #0.01 @BEAN';
 
 const assetBaseUrl = new URL('./', self.location.href);
 
@@ -56,23 +49,25 @@ let keywordSpotter = null;
 let beanWakeModel = null;
 let strictStream = null;
 let addressStream = null;
+let strictStreamStartSample = 0;
+let addressStreamStartSample = 0;
 let ready = false;
 let armed = false;
 let warmDecodeComplete = false;
 let failed = false;
 let closed = false;
 let speechObserved = false;
-let silentChunksAfterSpeech = 0;
+let silentSamplesAfterSpeech = 0;
 let dormantSilenceChunks = 0;
 let acceptedSampleCount = 0;
-let utteranceOnsetSeconds = null;
 let utteranceOnsetSample = null;
 let dormantAudioRing = [];
 let streamSourceChunks = [];
 let classificationAudio = new Float32Array(0);
-let nextFirstPartyAddressSample = FIRST_PARTY_ADDRESS_MIN_SAMPLES;
-let addressTimingCandidate = false;
-let addressCandidatePosted = false;
+let provisionalAddressProposal = null;
+let pendingProposal = null;
+let wakeProposalSeen = false;
+let classificationDecisionSeen = false;
 
 self.addEventListener('message', handleMessage);
 self.addEventListener('error', (event) => {
@@ -156,7 +151,7 @@ async function initialize() {
                 bpeVocab: '',
             },
             maxActivePaths: 4,
-            numTrailingBlanks: 1,
+            numTrailingBlanks: 0,
             keywordsScore: 1,
             keywordsThreshold: 0.1,
             keywords: '',
@@ -177,7 +172,7 @@ async function initialize() {
 }
 
 async function loadBeanWakeModel() {
-    const response = await fetch(versionedAsset('bean-wake-model-v1.json'), {
+    const response = await fetch(versionedAsset('bean-wake-model-v2.json'), {
         cache: 'force-cache',
         credentials: 'same-origin',
     });
@@ -189,8 +184,8 @@ async function loadBeanWakeModel() {
 }
 
 function validateBeanWakeModel(model) {
-    if (!model || model.schema_version !== '1.0.0'
-        || model.model_id !== 'bean-first-party-wake-v1'
+    if (!model || model.schema_version !== '2.0.0'
+        || model.model_id !== 'bean-first-party-wake-v2'
         || model.runtime_network_required !== false
         || model.external_account_required !== false
         || model.license_key_required !== false
@@ -206,6 +201,28 @@ function validateBeanWakeModel(model) {
         || feature.normalized_frames !== 48) {
         throw new Error('The first-party wake feature contract is incompatible.');
     }
+    const proposalWindow = model.proposal_window || {};
+    if (proposalWindow.alignment !== 'proposal_end'
+        || proposalWindow.context_samples !== PROPOSAL_CONTEXT_SAMPLES
+        || proposalWindow.tail_samples !== PROPOSAL_TAIL_SAMPLES
+        || proposalWindow.total_samples !== PROPOSAL_WINDOW_SAMPLES) {
+        throw new Error('The first-party wake proposal window is incompatible.');
+    }
+    const thresholdClasses = ['strict_wake', 'missed_hey_confirmation'];
+    if (!model.thresholds || JSON.stringify(Object.keys(model.thresholds).sort())
+        !== JSON.stringify([...thresholdClasses].sort())) {
+        throw new Error('The first-party wake thresholds are incompatible.');
+    }
+    for (const className of thresholdClasses) {
+        const threshold = model.thresholds[className];
+        if (!threshold || JSON.stringify(Object.keys(threshold)) !== JSON.stringify(['probability'])
+            || typeof threshold.probability !== 'number'
+            || !Number.isFinite(threshold.probability)
+            || threshold.probability < MIN_WAKE_ACCEPTANCE_PROBABILITY
+            || threshold.probability > 1) {
+            throw new Error(`The first-party wake threshold ${className} is incompatible.`);
+        }
+    }
     const expected = {
         'conv1.weight': [32, 32, 5],
         'conv1.bias': [32],
@@ -216,6 +233,17 @@ function validateBeanWakeModel(model) {
         'dense2.weight': [3, 64],
         'dense2.bias': [3],
     };
+    if (JSON.stringify(Object.keys(model.classifier.layers || {}).sort())
+        !== JSON.stringify(Object.keys(expected).sort())) {
+        throw new Error('The first-party wake layer inventory is incompatible.');
+    }
+    if (JSON.stringify(model.classes) !== JSON.stringify([
+        'reject',
+        'strict_wake',
+        'missed_hey_confirmation',
+    ])) {
+        throw new Error('The first-party wake classes are incompatible.');
+    }
     if (!Array.isArray(model.normalization?.mean)
         || model.normalization.mean.length !== 1536
         || !Array.isArray(model.normalization?.deviation)
@@ -235,30 +263,44 @@ function prepareBeanWakeModel(model) {
         if (Array.isArray(value)) {
             for (const item of value) flatten(item, output);
         } else {
-            const parsed = Number(value);
-            if (!Number.isFinite(parsed)) throw new Error('The first-party wake model contains a non-finite weight.');
-            output.push(parsed);
+            if (typeof value !== 'number' || !Number.isFinite(value)) {
+                throw new Error('The first-party wake model contains an invalid numeric value.');
+            }
+            output.push(value);
         }
 
         return output;
     };
+    const finiteFloat32Array = (values, label) => {
+        const converted = new Float32Array(flatten(values));
+        if (converted.some((value) => !Number.isFinite(value))) {
+            throw new Error(`The first-party wake ${label} exceeds the supported numeric range.`);
+        }
+
+        return converted;
+    };
     const layers = {};
     for (const [name, layer] of Object.entries(model.classifier.layers)) {
-        layers[name] = new Float32Array(flatten(layer.values));
+        layers[name] = finiteFloat32Array(layer.values, `layer ${name}`);
         const expectedLength = layer.shape.reduce((total, size) => total * size, 1);
         if (layers[name].length !== expectedLength) {
             throw new Error(`The first-party wake layer ${name} has the wrong size.`);
         }
     }
+    const mean = finiteFloat32Array(model.normalization.mean, 'normalization mean');
+    const deviation = finiteFloat32Array(model.normalization.deviation, 'normalization deviation');
+    if (deviation.some((value) => value <= 0)) {
+        throw new Error('The first-party wake normalization deviation must be positive.');
+    }
 
     return Object.freeze({
         classes: Object.freeze([...model.classes]),
-        mean: new Float32Array(model.normalization.mean),
-        deviation: new Float32Array(model.normalization.deviation),
         thresholds: Object.freeze({
-            strict_wake: Number(model.thresholds?.strict_wake?.probability),
-            missed_hey_confirmation: Number(model.thresholds?.missed_hey_confirmation?.probability),
+            strict_wake: model.thresholds.strict_wake.probability,
+            missed_hey_confirmation: model.thresholds.missed_hey_confirmation.probability,
         }),
+        mean,
+        deviation,
         layers: Object.freeze(layers),
     });
 }
@@ -287,138 +329,76 @@ function appendClassificationAudio(chunks) {
     classificationAudio = next;
 }
 
-function classifyBeanCandidate(decisionType, keywordResult) {
-    if (!beanWakeModel || classificationAudio.length < 400) {
-        throw new Error('The first-party wake classifier is unavailable.');
+function concatenateAudioChunks(chunks) {
+    const valid = chunks.filter((value) => value instanceof Float32Array && value.length > 0);
+    const merged = new Float32Array(valid.reduce((total, value) => total + value.length, 0));
+    let offset = 0;
+    for (const value of valid) {
+        merged.set(value, offset);
+        offset += value.length;
     }
-    const expectedClass = decisionType === 'strict_wake'
+    return merged;
+}
+
+function classifyWakeProposal(proposal) {
+    if (!proposal || !beanWakeModel) return null;
+    const requiredEndSample = proposal.candidateEndSample + PROPOSAL_TAIL_SAMPLES;
+    if (acceptedSampleCount < requiredEndSample) return null;
+
+    const samples = proposalClassificationWindow(proposal.candidateEndSample);
+    const probabilities = beanWakeProbabilities(samples, beanWakeModel);
+    const compatibleClass = proposal.proposalType === 'strict'
         ? 'strict_wake'
         : 'missed_hey_confirmation';
-    const windows = decisionType === 'strict_wake'
-        ? [
-            ...isolatedStrictWakeWindows(),
-            ...[1.8, 1.2].map((seconds) => ({
-                samples: classificationAudio.subarray(Math.max(
-                    0,
-                    classificationAudio.length - Math.round(TARGET_SAMPLE_RATE * seconds),
-                )),
-            })),
-        ]
-        : [{ samples: classificationSamplesForKeyword(keywordResult) }];
-    let probabilities = null;
-    let samples = null;
-    for (const window of windows) {
-        const candidate = beanWakeProbabilities(window.samples, beanWakeModel);
-        const expected = beanWakeModel.classes.indexOf(expectedClass);
-        if (!probabilities || candidate[expected] > probabilities[expected]) {
-            probabilities = candidate;
-            samples = window.samples;
-        }
-        const winning = candidate.indexOf(Math.max(...candidate));
-        const earlyThreshold = decisionType === 'strict_wake'
-            ? STRICT_ACCEPTANCE_PROBABILITY
-            : ADDRESS_ACCEPTANCE_PROBABILITY;
-        if (winning === expected && candidate[expected] >= earlyThreshold) break;
-    }
-    const expectedIndex = beanWakeModel.classes.indexOf(expectedClass);
+    const compatibleIndex = beanWakeModel.classes.indexOf(compatibleClass);
     const winningIndex = probabilities.indexOf(Math.max(...probabilities));
-    const threshold = decisionType === 'strict_wake'
-        ? Math.min(beanWakeModel.thresholds[expectedClass], STRICT_ACCEPTANCE_PROBABILITY)
-        : Math.min(beanWakeModel.thresholds[expectedClass], ADDRESS_ACCEPTANCE_PROBABILITY);
-    if (!Number.isFinite(threshold) || expectedIndex < 0) {
-        throw new Error('The first-party wake threshold is unavailable.');
-    }
+    const threshold = beanWakeModel.thresholds[compatibleClass];
 
     return Object.freeze({
-        accepted: winningIndex === expectedIndex && probabilities[expectedIndex] >= threshold,
-        expectedClass,
+        accepted: winningIndex === compatibleIndex
+            && probabilities[compatibleIndex] >= threshold,
+        activation: compatibleClass,
+        proposalType: proposal.proposalType,
         winningClass: beanWakeModel.classes[winningIndex] || 'reject',
-        probability: probabilities[expectedIndex],
+        probability: probabilities[compatibleIndex],
         threshold,
         sampleCount: samples.length,
+        tailSamples: PROPOSAL_TAIL_SAMPLES,
     });
 }
 
-function isolatedStrictWakeWindows() {
-    const retainedStartSample = Math.max(0, acceptedSampleCount - classificationAudio.length);
-    const onsetSample = Number.isSafeInteger(utteranceOnsetSample) ? utteranceOnsetSample : retainedStartSample;
-    const start = Math.max(retainedStartSample, onsetSample - CLASSIFICATION_LEADING_PAD_SAMPLES);
-    const localStart = start - retainedStartSample;
-    return [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8].map((seconds) => {
-        const end = Math.min(
-            acceptedSampleCount,
-            Math.max(start + 400, onsetSample + Math.round(seconds * TARGET_SAMPLE_RATE)),
+function proposalClassificationWindow(candidateEndSample) {
+    const windowStartSample = candidateEndSample - PROPOSAL_CONTEXT_SAMPLES;
+    const windowEndSample = candidateEndSample + PROPOSAL_TAIL_SAMPLES;
+    const retainedStartSample = acceptedSampleCount - classificationAudio.length;
+    const overlapStartSample = Math.max(windowStartSample, retainedStartSample, 0);
+    const overlapEndSample = Math.min(windowEndSample, acceptedSampleCount);
+    const samples = new Float32Array(PROPOSAL_WINDOW_SAMPLES);
+
+    if (overlapEndSample > overlapStartSample) {
+        samples.set(
+            classificationAudio.subarray(
+                overlapStartSample - retainedStartSample,
+                overlapEndSample - retainedStartSample,
+            ),
+            overlapStartSample - windowStartSample,
         );
-        const speech = classificationAudio.subarray(localStart, end - retainedStartSample);
-        const isolated = new Float32Array(speech.length + CLASSIFICATION_TRAILING_PAD_SAMPLES);
-        isolated.set(speech);
-        return { samples: isolated };
-    });
-}
-
-function classifyFirstPartyAddressPrefix({ addressCandidate = false } = {}) {
-    if (!beanWakeModel || classificationAudio.length < FIRST_PARTY_ADDRESS_MIN_SAMPLES) return null;
-    const probabilities = beanWakeProbabilities(classificationAudio, beanWakeModel);
-    const missedHeyClass = 'missed_hey_confirmation';
-    const strictWakeClass = 'strict_wake';
-    const missedHeyIndex = beanWakeModel.classes.indexOf(missedHeyClass);
-    const strictWakeIndex = beanWakeModel.classes.indexOf(strictWakeClass);
-    const winningIndex = probabilities.indexOf(Math.max(...probabilities));
-    // Neither recovery class may open the gate from classifier evidence alone.
-    // The proposal-only Bean timing stream must independently establish that
-    // the utterance contained the product address. Four local silent chunks
-    // also give the strict decoder its trailing-blank window before recovery.
-    const strictWakeAccepted = addressCandidate
-        && silentChunksAfterSpeech >= STRICT_PREFIX_FALLBACK_SILENCE_CHUNKS
-        && winningIndex === strictWakeIndex
-        && probabilities[strictWakeIndex] >= STRICT_PREFIX_ACCEPTANCE_PROBABILITY;
-    const missedHeyAccepted = addressCandidate
-        && winningIndex === missedHeyIndex
-        && probabilities[missedHeyIndex] >= ADDRESS_ACCEPTANCE_PROBABILITY;
-    const expectedClass = strictWakeAccepted ? strictWakeClass : missedHeyClass;
-    const expectedIndex = strictWakeAccepted ? strictWakeIndex : missedHeyIndex;
-    return Object.freeze({
-        accepted: strictWakeAccepted || missedHeyAccepted,
-        // This is the timing-detector fallback, so it always uses the existing
-        // missed-Hey privacy protocol even when the acoustic model's strict
-        // class is what rescued the address. Only the timing-owned path may
-        // publish a strict wake activation.
-        activation: 'missed_hey_confirmation',
-        expectedClass,
-        winningClass: beanWakeModel.classes[winningIndex] || 'reject',
-        probability: probabilities[expectedIndex],
-        threshold: strictWakeAccepted
-            ? STRICT_PREFIX_ACCEPTANCE_PROBABILITY
-            : ADDRESS_ACCEPTANCE_PROBABILITY,
-        sampleCount: classificationAudio.length,
-    });
-}
-
-function classificationSamplesForKeyword(keywordResult) {
-    const timestamps = Array.isArray(keywordResult?.timestamps) ? keywordResult.timestamps : [];
-    const firstSeconds = Number(timestamps[0]);
-    const lastSeconds = Number(timestamps.at(-1));
-    if (!Number.isFinite(firstSeconds) || !Number.isFinite(lastSeconds) || lastSeconds < firstSeconds) {
-        throw new Error('The first-party wake candidate did not include a valid acoustic boundary.');
-    }
-    const retainedStartSample = Math.max(0, acceptedSampleCount - classificationAudio.length);
-    const keywordStartSample = Math.max(0, Math.floor(firstSeconds * TARGET_SAMPLE_RATE));
-    const keywordEndSample = Math.max(keywordStartSample + 1, Math.ceil(lastSeconds * TARGET_SAMPLE_RATE));
-    const start = Math.max(retainedStartSample, keywordStartSample - CLASSIFICATION_LEADING_PAD_SAMPLES);
-    const end = Math.min(
-        acceptedSampleCount,
-        keywordEndSample + CLASSIFICATION_TRAILING_PAD_SAMPLES,
-    );
-    const localStart = start - retainedStartSample;
-    const localEnd = end - retainedStartSample;
-    if (localEnd - localStart < 400) {
-        throw new Error('The first-party wake candidate boundary was not retained.');
     }
 
-    return classificationAudio.subarray(localStart, localEnd);
+    return samples;
 }
 
 function beanWakeProbabilities(samples, model) {
+    const dense1 = beanWakeEmbedding(samples, model);
+    const logits = dense(dense1, model.layers['dense2.weight'], model.layers['dense2.bias'], 3);
+    const maximum = Math.max(...logits);
+    const exponentials = logits.map((value) => Math.exp(value - maximum));
+    const total = exponentials.reduce((sum, value) => sum + value, 0);
+
+    return exponentials.map((value) => value / total);
+}
+
+function beanWakeEmbedding(samples, model) {
     const features = beanWakeFeatures(samples);
     for (let index = 0; index < features.length; index += 1) {
         features[index] = (features[index] - model.mean[index]) / Math.max(0.08, model.deviation[index]);
@@ -433,21 +413,14 @@ function beanWakeProbabilities(samples, model) {
     const pool1 = maxPool1d(conv1, 32, 48);
     const conv2 = conv1dRelu(pool1, 32, 24, model.layers['conv2.weight'], model.layers['conv2.bias'], 48, 3, 1);
     const pool2 = maxPool1d(conv2, 48, 24);
-    const dense1 = denseRelu(pool2, model.layers['dense1.weight'], model.layers['dense1.bias'], 64);
-    const logits = dense(dense1, model.layers['dense2.weight'], model.layers['dense2.bias'], 3);
-    const maximum = Math.max(...logits);
-    const exponentials = logits.map((value) => Math.exp(value - maximum));
-    const total = exponentials.reduce((sum, value) => sum + value, 0);
 
-    return exponentials.map((value) => value / total);
+    return denseRelu(pool2, model.layers['dense1.weight'], model.layers['dense1.bias'], 64);
 }
 
 function beanWakeFeatures(value) {
-    let samples = trimClassificationSpeech(value);
-    if (samples.length < 400) {
-        const padded = new Float32Array(400);
-        padded.set(samples);
-        samples = padded;
+    const samples = value instanceof Float32Array ? value : new Float32Array(value || 0);
+    if (samples.length !== PROPOSAL_WINDOW_SAMPLES) {
+        throw new Error('The wake classifier requires one exact proposal window.');
     }
     const frameCount = 1 + Math.max(0, Math.floor((samples.length - 400) / 160));
     const mel = new Float32Array(frameCount * 32);
@@ -484,24 +457,6 @@ function beanWakeFeatures(value) {
 
     return normalized;
 }
-
-function trimClassificationSpeech(value) {
-    const samples = value instanceof Float32Array ? value : new Float32Array(value || 0);
-    let first = -1;
-    let last = -1;
-    for (let start = 0; start < samples.length; start += 320) {
-        const end = Math.min(samples.length, start + 320);
-        let square = 0;
-        for (let index = start; index < end; index += 1) square += samples[index] * samples[index];
-        if (Math.sqrt(square / Math.max(1, end - start)) < 0.009) continue;
-        if (first < 0) first = start;
-        last = end;
-    }
-    if (first < 0) return samples.subarray(Math.max(0, samples.length - TARGET_SAMPLE_RATE));
-
-    return samples.subarray(Math.max(0, first - 1600), Math.min(samples.length, last + 1920));
-}
-
 let cachedMelFilters = null;
 function beanMelFilters() {
     if (cachedMelFilters) return cachedMelFilters;
@@ -655,10 +610,6 @@ function handleMessage(event) {
         handleReset(message);
         return;
     }
-    if (message.type === 'cancel_candidate') {
-        handleCancelCandidate(message);
-        return;
-    }
     if (message.type === 'audio') {
         handleAudio(message);
         return;
@@ -696,6 +647,16 @@ function postReady() {
         recognitionStreamReady: keywordStreams().every((stream) => Boolean(stream?.handle)),
         keywordStreamsReady: keywordStreams().every((stream) => Boolean(stream?.handle)),
     });
+}
+
+function dormantDecision(type, reason) {
+    return {
+        type,
+        generation: currentGeneration,
+        reason,
+        proposalSeen: wakeProposalSeen,
+        classificationDecisionSeen,
+    };
 }
 
 function handleAudio(message) {
@@ -737,6 +698,8 @@ function handleAudio(message) {
     try {
         const activeOffset = firstActiveSampleOffset(samples);
         let decodeChunks = [samples];
+        let strictKeywordDecodeChunks = decodeChunks;
+        let addressKeywordDecodeChunks = decodeChunks;
         if (!speechObserved) {
             if (activeOffset < 0) {
                 pushDormantAudio(samples, sourceSequence);
@@ -747,18 +710,17 @@ function handleAudio(message) {
 
             // Give every utterance the same model/chunk alignment. Feeding an
             // always-running KWS stream made identical prerecorded wakes change
-            // decisions based only on where speech landed in a 320 ms model
-            // chunk. Recreate at local VAD onset and replay a bounded 200 ms
-            // local prefix; no audio leaves the worker.
+            // decisions based only on where speech landed in a worklet/model
+            // chunk. Recreate at local VAD onset and start both timing streams
+            // at exactly 100 ms before it; no audio leaves the worker.
             const prefix = dormantAudioRing;
             createKeywordStreams();
             const prefixSamples = prefix.reduce((total, chunk) => total + chunk.samples.length, 0);
             speechObserved = true;
-            silentChunksAfterSpeech = 0;
+            silentSamplesAfterSpeech = 0;
             dormantSilenceChunks = 0;
             acceptedSampleCount = prefixSamples + samples.length;
             utteranceOnsetSample = prefixSamples + activeOffset;
-            utteranceOnsetSeconds = (prefixSamples + activeOffset) / TARGET_SAMPLE_RATE;
             dormantAudioRing = [];
             streamSourceChunks = [];
             let streamOffset = 0;
@@ -775,145 +737,130 @@ function handleAudio(message) {
                 boundary: onsetBoundary,
             });
             decodeChunks = [...prefix.map((chunk) => chunk.samples), samples];
+            const mergedDecodeAudio = concatenateAudioChunks(decodeChunks);
+            const strictAlignedStartSample = utteranceOnsetSample;
+            const addressAlignedStartSample = Math.max(
+                0,
+                utteranceOnsetSample - CLASSIFICATION_LEADING_PAD_SAMPLES,
+            );
+            strictStreamStartSample = strictAlignedStartSample - STRICT_KWS_SYNTHETIC_PAD_SAMPLES;
+            addressStreamStartSample = addressAlignedStartSample;
+            strictKeywordDecodeChunks = [
+                new Float32Array(STRICT_KWS_SYNTHETIC_PAD_SAMPLES),
+                mergedDecodeAudio.subarray(strictAlignedStartSample),
+            ];
+            addressKeywordDecodeChunks = [mergedDecodeAudio.subarray(addressAlignedStartSample)];
         } else {
             appendSourceChunk(sourceSequence, acceptedSampleCount, samples.length);
             trackUtteranceActivity(samples);
         }
 
         appendClassificationAudio(decodeChunks);
-        for (const chunk of decodeChunks) {
-            for (const stream of keywordStreams()) stream.acceptWaveform(TARGET_SAMPLE_RATE, chunk);
+        for (const chunk of strictKeywordDecodeChunks) {
+            strictStream.acceptWaveform(TARGET_SAMPLE_RATE, chunk);
+        }
+        for (const chunk of addressKeywordDecodeChunks) {
+            addressStream.acceptWaveform(TARGET_SAMPLE_RATE, chunk);
         }
         decodeReadyStreams(keywordStreams(), MAX_DECODES_PER_MESSAGE * keywordStreams().length);
 
-        const strictResult = normalizedKeywordResult(keywordSpotter.getResult(strictStream));
-        const addressResult = normalizedKeywordResult(keywordSpotter.getResult(addressStream));
-        let decision = keywordDecision({
+        const strictResult = normalizedKeywordResult(
+            keywordSpotter.getResult(strictStream),
+            strictStreamStartSample,
+        );
+        const addressResult = normalizedKeywordResult(
+            keywordSpotter.getResult(addressStream),
+            addressStreamStartSample,
+        );
+        const proposed = coalescedWakeProposal({
             strictResult,
             addressResult,
         });
-        let classification = null;
-        if (decision.type === 'address_candidate') {
-            addressTimingCandidate = true;
-            if (!addressCandidatePosted) {
-                addressCandidatePosted = true;
-                postMessage({ type: 'address_candidate', generation: currentGeneration });
-            }
-            decision = { type: 'none', addressRelated: true };
-        }
-        const utteranceSamples = Number.isSafeInteger(utteranceOnsetSample)
-            ? acceptedSampleCount - utteranceOnsetSample
-            : 0;
-        if (decision.type === 'none'
-            && utteranceSamples >= nextFirstPartyAddressSample
-            && utteranceSamples <= FIRST_PARTY_ADDRESS_MAX_SAMPLES) {
-            nextFirstPartyAddressSample = utteranceSamples + FIRST_PARTY_ADDRESS_INTERVAL_SAMPLES;
-            classification = classifyFirstPartyAddressPrefix({
-                addressCandidate: addressTimingCandidate,
-            });
-            if (classification?.accepted) {
-                decision = {
-                    type: 'address_confirmed',
-                    addressRelated: true,
-                    activation: classification.activation,
-                };
-            } else if (classification) {
-                // Sanitized rejection telemetry makes the complete missed-Hey
-                // journey diagnosable without exposing PCM or dormant text.
-                postMessage({
-                    type: 'classification_decision',
-                    generation: currentGeneration,
-                    decisionType: 'address_prefix_rejected',
-                    accepted: false,
-                    expectedClass: classification.expectedClass,
-                    winningClass: classification.winningClass,
-                    probability: classification.probability,
-                    threshold: classification.threshold,
-                    sampleCount: classification.sampleCount,
-                });
+        if (!pendingProposal) {
+            if (provisionalAddressProposal) {
+                // The full-phrase graph may promote the provisional address
+                // until the address candidate's exact 160 ms tail is locally
+                // available. Querying both streams above happens before this
+                // boundary check, so a strict proposal on the boundary wins.
+                // The finalized candidate is emitted once; a strict promotion
+                // then waits for its own candidate end plus exactly 160 ms.
+                if (proposed?.proposalType === 'strict') {
+                    pendingProposal = proposed;
+                    provisionalAddressProposal = null;
+                    postWakeProposal(pendingProposal);
+                } else if (acceptedSampleCount >= provisionalAddressProposal.candidateEndSample
+                    + PROPOSAL_TAIL_SAMPLES) {
+                    pendingProposal = provisionalAddressProposal;
+                    provisionalAddressProposal = null;
+                    postWakeProposal(pendingProposal);
+                }
+            } else if (proposed?.proposalType === 'address') {
+                // Never finalize an address on its observation message. Even
+                // when its tail is already retained, the next source-audio
+                // boundary is the single strict-first coalescing deadline.
+                provisionalAddressProposal = proposed;
+            } else if (proposed?.proposalType === 'strict') {
+                pendingProposal = proposed;
+                postWakeProposal(pendingProposal);
             }
         }
-
-        if (decision.type === 'strict_wake' || decision.type === 'address_confirmed') {
-            classification = classification || classifyBeanCandidate(
-                decision.type,
-                strictResult,
-            );
-            // Sanitized model telemetry is available to deterministic test and
-            // admin-diagnostic consumers. It contains no PCM or dormant text.
+        const classification = classifyWakeProposal(pendingProposal);
+        if (classification) {
+            const classifiedProposal = pendingProposal;
+            pendingProposal = null;
+            classificationDecisionSeen = true;
             postMessage({
                 type: 'classification_decision',
                 generation: currentGeneration,
-                decisionType: decision.type,
+                proposalType: classification.proposalType,
                 accepted: classification.accepted,
-                expectedClass: classification.expectedClass,
                 winningClass: classification.winningClass,
                 probability: classification.probability,
                 threshold: classification.threshold,
                 sampleCount: classification.sampleCount,
+                tailSamples: classification.tailSamples,
             });
             if (!classification.accepted) {
+                const discard = dormantDecision('dormant_discard', 'classifier_rejected');
+                armed = false;
                 resetKeywordStreams();
                 acknowledge(sequence, generation, true);
-                postMessage({
-                    type: decision.addressRelated ? 'address_rejected' : 'dormant_discard',
-                    generation: currentGeneration,
-                });
+                postMessage(discard);
                 return;
+            }
+            const releaseSample = classification.activation === 'strict_wake'
+                ? strictReleaseSample(classifiedProposal.candidateEndSample)
+                : utteranceOnsetSample;
+            const releaseBoundary = sourceBoundaryForStreamSample(releaseSample);
+            if (!releaseBoundary) {
+                throw new Error('The accepted wake did not have a retained local release boundary.');
             }
             // Acknowledge the live decode before confirming wake so the main
             // thread can cross its complete readiness barrier on this chunk.
             armed = false;
             acknowledge(sequence, generation, true);
-            if (decision.type === 'address_confirmed'
-                && decision.activation !== 'strict_wake') {
-                // This event contains no audio or text and remains invisible to
-                // the application. It preserves the local confirmation protocol.
-                if (!addressCandidatePosted) {
-                    addressCandidatePosted = true;
-                    postMessage({ type: 'address_candidate', generation: currentGeneration });
-                }
-            }
-            const releaseSample = decision.type === 'strict_wake'
-                ? strictReleaseSample(strictResult)
-                : utteranceOnsetSample;
-            const releaseBoundary = sourceBoundaryForStreamSample(releaseSample);
-            if (!releaseBoundary) {
-                throw new Error('The confirmed wake did not have a retained local release boundary.');
-            }
+            const strictWake = classification.activation === 'strict_wake';
             postMessage({
                 type: 'wake_confirmed',
                 keyword: KEYWORD_ALIAS,
-                variant: decision.type === 'strict_wake' ? 'HEY BEAN' : 'BEAN',
-                activation: decision.type === 'strict_wake' || decision.activation === 'strict_wake'
-                    ? 'strict_wake'
-                    : 'missed_hey_confirmation',
+                variant: strictWake ? 'HEY BEAN' : 'BEAN',
+                activation: classification.activation,
                 generation: currentGeneration,
                 sourceSequence,
                 releaseBoundary: {
                     ...releaseBoundary,
-                    policy: decision.type === 'strict_wake'
-                        ? 'post_address_tail'
-                        : 'utterance_onset',
+                    policy: strictWake ? 'post_address_tail' : 'utterance_onset',
                 },
             });
             return;
         }
 
-        if (decision.type === 'reject') {
-            resetKeywordStreams();
-            acknowledge(sequence, generation, true);
-            postMessage({
-                type: decision.addressRelated ? 'address_rejected' : 'dormant_discard',
-                generation: currentGeneration,
-            });
-            return;
-        }
-
         if (shouldResetNonWakeUtterance()) {
+            const discard = dormantDecision('dormant_discard', 'no_accepted_wake');
+            armed = false;
             resetKeywordStreams();
             acknowledge(sequence, generation, true);
-            postMessage({ type: 'dormant_discard', generation: currentGeneration });
+            postMessage(discard);
             return;
         }
         acknowledge(sequence, generation, true);
@@ -941,33 +888,59 @@ function decodeReadyStreams(streams, limit) {
     }
 }
 
-function keywordDecision({ strictResult, addressResult = { keyword: '', timestamps: [] } }) {
+function coalescedWakeProposal({ strictResult, addressResult }) {
+    if (strictResult.keyword && strictResult.keyword !== STRICT_WAKE_ALIAS) {
+        throw new Error('The strict proposal stream returned an unexpected keyword alias.');
+    }
+    // Query both streams on the same production decode boundary. A strict
+    // proposal owns the one candidate before inspecting the custom stream.
+    // Sherpa custom-keyword streams also inherit the base HEY_BEAN graph, so
+    // that alias on the address stream is expected but never becomes an
+    // address proposal of its own.
     if (strictResult.keyword === STRICT_WAKE_ALIAS) {
-        // A deliberate Hey Bean must work even after other sound in the same
-        // continuous local utterance. Only the confirmed keyword's short tail
-        // is released, so accepting an in-stream match does not expose the
-        // earlier room conversation to the provider.
-        return { type: 'strict_wake', addressRelated: false };
+        return wakeProposal('strict', strictResult);
     }
-    if (strictResult.keyword) return { type: 'reject', addressRelated: false };
+    if (addressResult.keyword === STRICT_WAKE_ALIAS) return null;
+    if (addressResult.keyword && addressResult.keyword !== ADDRESS_WAKE_ALIAS) {
+        throw new Error('The address proposal stream returned an unexpected keyword alias.');
+    }
     if (addressResult.keyword === ADDRESS_WAKE_ALIAS) {
-        return { type: 'address_candidate', addressRelated: true };
+        return wakeProposal('address', addressResult);
     }
-    if (addressResult.keyword) return { type: 'reject', addressRelated: true };
 
-    return { type: 'none', addressRelated: false };
+    return null;
 }
 
-function strictReleaseSample(result) {
+function wakeProposal(proposalType, result) {
     const timestamps = Array.isArray(result?.timestamps) ? result.timestamps : [];
-    const keywordEndSeconds = Number(timestamps.at(-1));
-    if (!Number.isFinite(keywordEndSeconds)) {
-        throw new Error('The strict wake result did not include an end timestamp.');
+    const candidateEndSeconds = Number(timestamps.at(-1));
+    if (!Number.isFinite(candidateEndSeconds) || timestamps.length === 0) {
+        throw new Error('The wake proposal did not include an end timestamp.');
     }
 
-    const keywordEndSample = Math.max(0, Math.round(keywordEndSeconds * TARGET_SAMPLE_RATE));
+    return Object.freeze({
+        proposalType,
+        candidateEndSample: Math.max(0, Math.round(candidateEndSeconds * TARGET_SAMPLE_RATE)),
+        timestampCount: timestamps.length,
+    });
+}
+
+function postWakeProposal(proposal) {
+    wakeProposalSeen = true;
+    // The actual timestamp remains worker-private. This diagnostic can neither
+    // open the gate nor expose dormant text or PCM.
+    postMessage({
+        type: 'wake_proposal',
+        generation: currentGeneration,
+        proposalType: proposal.proposalType,
+        timestampCount: proposal.timestampCount,
+        requiredTailSamples: PROPOSAL_TAIL_SAMPLES,
+    });
+}
+
+function strictReleaseSample(candidateEndSample) {
     const onset = Number.isSafeInteger(utteranceOnsetSample) ? utteranceOnsetSample : 0;
-    return Math.max(onset, keywordEndSample - STRICT_RELEASE_TAIL_SAMPLES);
+    return Math.max(onset, candidateEndSample - STRICT_RELEASE_TAIL_SAMPLES);
 }
 
 function appendSourceChunk(sourceSequence, startSample, length) {
@@ -1000,9 +973,15 @@ function sourceBoundaryForStreamSample(value) {
     return null;
 }
 
-function normalizedKeywordResult(result) {
+function normalizedKeywordResult(result, startSample = 0) {
+    // A controlled negative strict origin subtracts the synthetic KWS-only pad
+    // so all returned timestamps remain on the real utterance timeline.
+    const offsetSeconds = (Number(startSample) || 0) / TARGET_SAMPLE_RATE;
     const timestamps = Array.isArray(result?.timestamps)
-        ? result.timestamps.map(Number).filter(Number.isFinite)
+        ? result.timestamps
+            .map(Number)
+            .filter(Number.isFinite)
+            .map((value) => value + offsetSeconds)
         : [];
     return {
         keyword: String(result?.keyword || '').trim().toUpperCase(),
@@ -1022,23 +1001,12 @@ function handleClose(message) {
     self.close();
 }
 
-function handleCancelCandidate(message) {
-    const generation = parseGeneration(message.generation);
-    if (generation === null || generation !== currentGeneration || !ready || failed) return;
-
-    try {
-        resetKeywordStreams();
-        armed = true;
-        postMessage({ type: 'address_rejected', generation: currentGeneration });
-    } catch (error) {
-        fail('candidate_cancel_failed', error);
-    }
-}
-
 function createKeywordStreams() {
     freeKeywordStreams();
     strictStream = keywordSpotter.createStream();
+    strictStreamStartSample = 0;
     addressStream = keywordSpotter.createStream(ADDRESS_KEYWORDS);
+    addressStreamStartSample = 0;
     if (keywordStreams().some((stream) => !stream?.handle)) {
         throw new Error('The local keyword streams could not be created.');
     }
@@ -1067,24 +1035,22 @@ function freeKeywordStreams() {
     }
     strictStream = null;
     addressStream = null;
+    strictStreamStartSample = 0;
+    addressStreamStartSample = 0;
 }
 
 function trackUtteranceActivity(samples) {
     const firstActiveOffset = firstActiveSampleOffset(samples);
-    const chunkStartSample = acceptedSampleCount;
     acceptedSampleCount += samples.length;
 
     if (firstActiveOffset >= 0) {
-        if (!speechObserved) {
-            utteranceOnsetSeconds = (chunkStartSample + firstActiveOffset) / TARGET_SAMPLE_RATE;
-        }
         speechObserved = true;
-        silentChunksAfterSpeech = 0;
+        silentSamplesAfterSpeech = 0;
         dormantSilenceChunks = 0;
         return;
     }
     if (speechObserved) {
-        silentChunksAfterSpeech += 1;
+        silentSamplesAfterSpeech += samples.length;
     } else {
         dormantSilenceChunks += 1;
     }
@@ -1118,22 +1084,22 @@ function pushDormantAudio(samples, sourceSequence) {
 function shouldResetNonWakeUtterance() {
     return armed
         && speechObserved
-        && silentChunksAfterSpeech >= NON_WAKE_SILENCE_RESET_CHUNKS;
+        && silentSamplesAfterSpeech >= NON_WAKE_SILENCE_RESET_SAMPLES;
 }
 
 function resetUtteranceActivity() {
     speechObserved = false;
-    silentChunksAfterSpeech = 0;
+    silentSamplesAfterSpeech = 0;
     dormantSilenceChunks = 0;
     acceptedSampleCount = 0;
-    utteranceOnsetSeconds = null;
     utteranceOnsetSample = null;
     dormantAudioRing = [];
     streamSourceChunks = [];
     classificationAudio = new Float32Array(0);
-    nextFirstPartyAddressSample = FIRST_PARTY_ADDRESS_MIN_SAMPLES;
-    addressTimingCandidate = false;
-    addressCandidatePosted = false;
+    provisionalAddressProposal = null;
+    pendingProposal = null;
+    wakeProposalSeen = false;
+    classificationDecisionSeen = false;
 }
 
 function normalizeSamples(value) {

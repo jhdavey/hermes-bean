@@ -22,6 +22,7 @@ export const BROWSER_VOICE_EFFECTS = Object.freeze({
     CANCEL_TIMER: 'cancel_timer',
     CLARIFICATION_EXPIRED: 'clarification_expired',
     CONFIRM_INTERRUPTION: 'confirm_interruption',
+    DISCARD_POTENTIAL_BARGE_IN: 'discard_potential_barge_in',
     DRAFT_CHANGED: 'draft_changed',
     DISCARD_FOLLOW_UP_CANDIDATE: 'discard_follow_up_candidate',
     DUCK_PLAYBACK: 'duck_playback',
@@ -75,6 +76,14 @@ function appendClosedTurn(closedTurnIds, turnId, limit) {
     const id = String(turnId || '').trim();
     if (!id || closedTurnIds.includes(id)) return closedTurnIds;
     return [...closedTurnIds, id].slice(-limit);
+}
+
+function potentialBargeMatchesProvider(state, event) {
+    const potential = state.potentialBargeIn;
+    if (!potential) return false;
+    const expectedProviderItemId = cleanText(potential.providerItemId);
+    return !expectedProviderItemId
+        || cleanText(event.providerItemId) === expectedProviderItemId;
 }
 
 function effect(type, detail = {}) {
@@ -166,6 +175,7 @@ function beginTurn(state, event, originState) {
         finalizedTranscript: '',
         closeAfterPlayback: false,
         speechActive: false,
+        potentialBargeIn: null,
         closedTurnIds,
         deadlines: { endpointAt: null, clarificationAt: null, followUpAt: null },
     };
@@ -304,6 +314,7 @@ export function createBrowserVoiceControllerState(options = {}) {
         liveDraft: '',
         finalizedTranscript: '',
         speechActive: false,
+        potentialBargeIn: null,
         closeAfterPlayback: false,
         recoveryState: null,
         failureReason: '',
@@ -374,6 +385,7 @@ export function reduceBrowserVoiceController(state, event) {
                     ? state.recoveryState
                     : state.conversationState,
                 speechActive: false,
+                potentialBargeIn: null,
             },
             effects: [effect(BROWSER_VOICE_EFFECTS.CANCEL_ALL_TIMERS)],
         };
@@ -420,6 +432,7 @@ export function reduceBrowserVoiceController(state, event) {
                 followUpCandidate: null,
                 liveDraft: '',
                 finalizedTranscript: transcript,
+                potentialBargeIn: null,
                 deadlines: { endpointAt: null, clarificationAt: null, followUpAt: null },
             },
             effects: [effect(BROWSER_VOICE_EFFECTS.SPEAK_CLARIFICATION, {
@@ -445,6 +458,7 @@ export function reduceBrowserVoiceController(state, event) {
             followUpCandidate: null,
             liveDraft: awaitingClarification ? state.liveDraft : '',
             speechActive: false,
+            potentialBargeIn: null,
             closeAfterPlayback: false,
             deadlines: awaitingClarification
                 ? { ...state.deadlines, endpointAt: null, clarificationAt, followUpAt: null }
@@ -536,6 +550,7 @@ export function reduceBrowserVoiceController(state, event) {
                     conversationState: BROWSER_VOICE_CONVERSATION_STATES.RECOVERING_CONNECTION,
                     recoveryState: resumableState.conversationState,
                     speechActive: false,
+                    potentialBargeIn: null,
                 },
                 effects: [
                     ...(candidateRejected?.effects || []).filter((item) => item.type === BROWSER_VOICE_EFFECTS.DISCARD_FOLLOW_UP_CANDIDATE),
@@ -553,6 +568,7 @@ export function reduceBrowserVoiceController(state, event) {
                     followUpCandidate: null,
                     failureReason: cleanText(event.reason) || 'connection_failed',
                     speechActive: false,
+                    potentialBargeIn: null,
                     deadlines: { endpointAt: null, clarificationAt: null, followUpAt: null },
                 },
                 effects: [
@@ -577,20 +593,76 @@ export function reduceBrowserVoiceController(state, event) {
             // arrives while the prior turn's follow-up window is still open.
             return beginTurn(state, event, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
 
-        case 'potential_barge_in':
+        case 'potential_barge_in': {
             if (!state.speechActive) return rejectEvent(state, event, 'playback_not_active');
-            return unchanged(state, [effect(BROWSER_VOICE_EFFECTS.DUCK_PLAYBACK, {
-                reason: cleanText(event.reason) || 'potential_speech',
-            })]);
+            const ownerTurnId = cleanText(event.ownerTurnId) || cleanText(state.activeTurn?.id);
+            if (!ownerTurnId) return rejectEvent(state, event, 'barge_owner_missing');
+            if (state.activeTurn?.id && ownerTurnId !== state.activeTurn.id) {
+                return rejectEvent(state, event, 'barge_owner_mismatch');
+            }
+            if (state.potentialBargeIn) {
+                const sameOwner = state.potentialBargeIn.ownerTurnId === ownerTurnId;
+                const sameProvider = cleanText(state.potentialBargeIn.providerItemId)
+                    === cleanText(event.providerItemId);
+                if (!sameOwner || !sameProvider) return rejectEvent(state, event, 'potential_barge_active');
+                return unchanged(state);
+            }
+            return {
+                state: {
+                    ...state,
+                    potentialBargeIn: {
+                        ownerTurnId,
+                        providerItemId: cleanText(event.providerItemId) || null,
+                        contextualFollowUp: state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP,
+                        returnToWakeOnly: false,
+                    },
+                },
+                effects: [effect(BROWSER_VOICE_EFFECTS.DUCK_PLAYBACK, {
+                    reason: cleanText(event.reason) || 'potential_speech',
+                })],
+            };
+        }
 
-        case 'barge_in_rejected':
-            if (!state.speechActive) return rejectEvent(state, event, 'playback_not_active');
-            return unchanged(state, [effect(BROWSER_VOICE_EFFECTS.RESTORE_PLAYBACK, {
-                reason: cleanText(event.reason) || 'not_meaningful',
-            })]);
+        case 'barge_in_rejected': {
+            const matchesPotential = potentialBargeMatchesProvider(state, event);
+            if (state.potentialBargeIn && !matchesPotential) {
+                return rejectEvent(state, event, 'potential_barge_mismatch');
+            }
+            if (!state.speechActive && !matchesPotential) return rejectEvent(state, event, 'playback_not_active');
+            const returnToWakeOnly = !state.speechActive
+                && Boolean(state.potentialBargeIn?.returnToWakeOnly);
+            const preserveFollowUpDeadline = !state.speechActive
+                && state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP
+                && !returnToWakeOnly;
+            return {
+                state: {
+                    ...state,
+                    conversationState: returnToWakeOnly
+                        ? BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY
+                        : state.conversationState,
+                    potentialBargeIn: null,
+                    deadlines: {
+                        ...state.deadlines,
+                        followUpAt: preserveFollowUpDeadline ? state.deadlines.followUpAt : null,
+                    },
+                },
+                effects: [
+                    ...(!preserveFollowUpDeadline ? [effect(BROWSER_VOICE_EFFECTS.CANCEL_TIMER, {
+                        timerKey: BROWSER_VOICE_TIMER_KEYS.FOLLOW_UP,
+                    })] : []),
+                    ...(state.speechActive ? [effect(BROWSER_VOICE_EFFECTS.RESTORE_PLAYBACK, {
+                        reason: cleanText(event.reason) || 'not_meaningful',
+                    })] : []),
+                ],
+            };
+        }
 
         case 'barge_in_confirmed': {
-            if (!state.speechActive) return rejectEvent(state, event, 'playback_not_active');
+            const matchesPotential = potentialBargeMatchesProvider(state, event);
+            if (state.potentialBargeIn && !matchesPotential) {
+                return rejectEvent(state, event, 'potential_barge_mismatch');
+            }
+            if (!state.speechActive && !matchesPotential) return rejectEvent(state, event, 'playback_not_active');
             if (state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION && state.activeTurn) {
                 return {
                     state: {
@@ -604,6 +676,7 @@ export function reduceBrowserVoiceController(state, event) {
                             clarificationDurable: true,
                         },
                         speechActive: false,
+                        potentialBargeIn: null,
                         deadlines: { ...state.deadlines, clarificationAt: null, endpointAt: null },
                     },
                     effects: [
@@ -612,8 +685,10 @@ export function reduceBrowserVoiceController(state, event) {
                     ],
                 };
             }
+            const contextualFollowUp = state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP
+                || Boolean(state.potentialBargeIn?.contextualFollowUp);
             const started = beginTurn(state, { ...event, reason: 'meaningful_barge_in' },
-                state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP
+                contextualFollowUp
                     ? BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP
                     : BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
             return {
@@ -761,23 +836,34 @@ export function reduceBrowserVoiceController(state, event) {
             if (state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP && state.followUpCandidate) {
                 return rejectFollowUpCandidate(state, event, atMs, cleanText(event.reason) || 'capture_failed');
             }
-            if (state.conversationState !== BROWSER_VOICE_CONVERSATION_STATES.CAPTURING || !state.activeTurn) {
+            if (![BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING, BROWSER_VOICE_CONVERSATION_STATES.CAPTURING]
+                .includes(state.conversationState) || !state.activeTurn) {
                 return rejectEvent(state, event, 'not_capturing');
             }
-            const turnId = state.activeTurn.id;
+            const turn = state.activeTurn;
+            const returnToFollowUp = turn.originState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP;
+            const followUpAt = returnToFollowUp ? atMs + state.config.followUpMs : null;
             return {
                 state: {
                     ...state,
-                    conversationState: BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP,
+                    conversationState: returnToFollowUp
+                        ? BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP
+                        : BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY,
                     activeTurn: null,
                     liveDraft: '',
                     finalizedTranscript: '',
-                    closedTurnIds: appendClosedTurn(state.closedTurnIds, turnId, state.config.closedTurnLimit),
-                    deadlines: { endpointAt: null, clarificationAt: null, followUpAt: null },
+                    potentialBargeIn: null,
+                    closedTurnIds: appendClosedTurn(state.closedTurnIds, turn.id, state.config.closedTurnLimit),
+                    deadlines: { endpointAt: null, clarificationAt: null, followUpAt },
                 },
                 effects: [
                     effect(BROWSER_VOICE_EFFECTS.CANCEL_TIMER, { timerKey: BROWSER_VOICE_TIMER_KEYS.ENDPOINT }),
-                    effect(BROWSER_VOICE_EFFECTS.DRAFT_CHANGED, { text: '', turnId }),
+                    effect(BROWSER_VOICE_EFFECTS.DRAFT_CHANGED, { text: '', turnId: turn.id }),
+                    ...(returnToFollowUp ? [effect(BROWSER_VOICE_EFFECTS.SCHEDULE_TIMER, {
+                        timerKey: BROWSER_VOICE_TIMER_KEYS.FOLLOW_UP,
+                        delayMs: state.config.followUpMs,
+                        turnId: null,
+                    })] : []),
                 ],
             };
         }
@@ -929,13 +1015,21 @@ export function reduceBrowserVoiceController(state, event) {
                     || !Number.isFinite(deadline) || atMs < deadline) {
                     return rejectEvent(state, event, 'early_or_canceled_timer');
                 }
+                const expiredPotentialBargeIn = state.potentialBargeIn;
                 return {
                     state: {
                         ...state,
                         conversationState: BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY,
+                        potentialBargeIn: null,
                         deadlines: { ...state.deadlines, followUpAt: null },
                     },
-                    effects: [],
+                    effects: expiredPotentialBargeIn
+                        ? [effect(BROWSER_VOICE_EFFECTS.DISCARD_POTENTIAL_BARGE_IN, {
+                            ownerTurnId: expiredPotentialBargeIn.ownerTurnId,
+                            providerItemId: expiredPotentialBargeIn.providerItemId,
+                            reason: 'proof_expired',
+                        })]
+                        : [],
                 };
             }
             return rejectEvent(state, event, 'unknown_timer');
@@ -991,17 +1085,34 @@ export function reduceBrowserVoiceController(state, event) {
                 ? appendClosedTurn(state.closedTurnIds, activeId, state.config.closedTurnLimit)
                 : state.closedTurnIds;
             if (state.closeAfterPlayback || event.naturalClosing) {
+                const pendingBargeIn = state.potentialBargeIn
+                    ? { ...state.potentialBargeIn, returnToWakeOnly: true }
+                    : null;
+                const pendingBargeDeadline = pendingBargeIn
+                    ? atMs + state.config.followUpMs
+                    : null;
                 return {
                     state: {
                         ...state,
-                        conversationState: BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY,
+                        conversationState: pendingBargeIn
+                            ? BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP
+                            : BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY,
                         activeTurn: playbackOwnsActiveTurn ? null : state.activeTurn,
                         speechActive: false,
+                        potentialBargeIn: pendingBargeIn,
                         closeAfterPlayback: false,
                         closedTurnIds,
-                        deadlines: { ...state.deadlines, followUpAt: null },
+                        deadlines: { ...state.deadlines, followUpAt: pendingBargeDeadline },
                     },
-                    effects: [effect(BROWSER_VOICE_EFFECTS.CANCEL_TIMER, { timerKey: BROWSER_VOICE_TIMER_KEYS.FOLLOW_UP })],
+                    effects: pendingBargeIn
+                        ? [effect(BROWSER_VOICE_EFFECTS.SCHEDULE_TIMER, {
+                            timerKey: BROWSER_VOICE_TIMER_KEYS.FOLLOW_UP,
+                            delayMs: state.config.followUpMs,
+                            turnId: null,
+                        })]
+                        : [effect(BROWSER_VOICE_EFFECTS.CANCEL_TIMER, {
+                            timerKey: BROWSER_VOICE_TIMER_KEYS.FOLLOW_UP,
+                        })],
                 };
             }
             const followUpAt = atMs + state.config.followUpMs;
@@ -1042,6 +1153,7 @@ function copyState(state) {
             }
             : null,
         followUpCandidate: state.followUpCandidate ? { ...state.followUpCandidate } : null,
+        potentialBargeIn: state.potentialBargeIn ? { ...state.potentialBargeIn } : null,
         deadlines: { ...state.deadlines },
         closedTurnIds: [...state.closedTurnIds],
         config: { ...state.config },

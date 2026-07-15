@@ -1,6 +1,6 @@
 # Third-party notices
 
-The generated `kws-runtime.js`, `kws-runtime.wasm`, `kws-api.js`, and the contents packed into `kws-model.data` provide strict wake candidate timestamps and include or derive from the following projects. The application-authored `wake-worker.js`, `gate-processor.js`, repository training script, and `bean-wake-model-v1.json` are not upstream sherpa-onnx files. The superseded general ASR runtime/model was removed.
+The generated `kws-runtime.js`, `kws-runtime.wasm`, `kws-api.js`, and the contents packed into `kws-model.data` provide local `HEY_BEAN` and `BEAN` proposals and timestamps. They include or derive from the following projects. Bean's packaged `kws-api.js` wrapper has one local integration patch that preserves an explicit `numTrailingBlanks: 0` setting with nullish/default semantics. The application-authored `wake-worker.js`, `gate-processor.js`, repository training pipeline, and `bean-wake-model-v2.json` are not upstream sherpa-onnx files. The upstream keyword spotter never opens Bean's privacy gate; the Bean-authored three-class model owns acoustic acceptance.
 
 ## Apache License 2.0 components
 

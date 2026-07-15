@@ -202,7 +202,7 @@ function initKwsConfig(config, Module) {
   Module.setValue(ptr + offset, config.maxActivePaths || 4, 'i32');
   offset += 4;
 
-  Module.setValue(ptr + offset, config.numTrailingBlanks || 1, 'i32');
+  Module.setValue(ptr + offset, config.numTrailingBlanks ?? 1, 'i32');
   offset += 4;
 
   Module.setValue(ptr + offset, config.keywordsScore || 1.0, 'float');

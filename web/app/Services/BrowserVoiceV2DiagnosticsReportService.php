@@ -107,7 +107,6 @@ class BrowserVoiceV2DiagnosticsReportService
             ->where('event_type', 'browser_voice_v2.client_failure')
             ->whereBetween('created_at', [$from, $to])
             ->orderByDesc('id')
-            ->limit(200)
             ->get();
 
         return [
@@ -123,6 +122,7 @@ class BrowserVoiceV2DiagnosticsReportService
                     'user_id' => $event->user_id,
                     'workspace_id' => $event->workspace_id,
                     'conversation_session_id' => $event->conversation_session_id,
+                    'failure_id' => $this->privacy->sanitizeTranscript((string) $event->client_event_id) ?: null,
                     'turn_id' => $this->privacy->sanitizeTranscript((string) data_get($payload, 'turn_id', '')) ?: null,
                     'stage' => $this->privacy->sanitizeTranscript((string) data_get($payload, 'stage', 'unknown')),
                     'code' => $this->privacy->sanitizeTranscript((string) data_get($payload, 'code', 'unknown')),

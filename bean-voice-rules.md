@@ -26,6 +26,8 @@ No implementation is considered correct merely because its happy path works. Sto
 - Voice architecture changes use a clean cutover: superseded voice routes, compatibility bridges, parsers, state owners, commands, and contradictory tests are removed in the same change. Development data does not require a legacy runtime.
 - `browser_voice_v2` remains the operational kill switch for new browser-voice admissions.
 - Release-certification state records whether the evidence gates in this document passed; it is not an access-control mechanism and must not prevent the owner from testing an uncertified development build.
+- During the current single-owner development phase, `origin/main` is the branch deployed to the live production environment, and that environment is an uncertified owner-test surface rather than a commercially certified release. A recorded proposal-coverage or recall failure must remain visible, keep every certification flag false, and continue to block commercial certification, but it does not by itself block the owner from pushing an otherwise operational build there for live testing.
+- Owner testing never waives invariants 6, 11, 13, or 15. Dormant privacy, stale/duplicate-event safety, visible terminal failure diagnostics, and no raw-microphone retention remain hard requirements across `[BV2-FIRST-WAKE-01:A–E]`, `[BV2-WAKE-01]`, `[BV2-WAKE-11]`, `[BV2-TRANSCRIPT-03]`, `[BV2-DIAGNOSTIC-03]`, `[BV2-PRIVACY-PCM-03]`, `[BV2-BARGE-04]`, and `[BV2-FOLLOWUP-01]` even in an uncertified owner test.
 - A deployed development build must still pass the read-only deployment preflight before authenticated voice testing so stale assets or missing routes are caught explicitly.
 - Broader-user rollout controls are out of scope until the product actually has outside users.
 
@@ -79,6 +81,7 @@ No implementation is considered correct merely because its happy path works. Sto
 
 - Turning on the microphone puts Bean in wake-only mode.
 - The first request requires `Hey Bean`.
+- An acoustically close `Hey` + `Bean` rendering such as `Hey beam` may activate as the same strict wake. This is pronunciation tolerance from one general acoustic proposal-and-classification pipeline, not a phrase-specific runtime alias or exception.
 - `Hey Bean` must work while Bean is idle, speaking, or working.
 - A valid wake while Bean is speaking interrupts playback and begins a new user turn.
 - A valid wake while Bean is working does not stop or cancel background work.
@@ -106,14 +109,17 @@ While wake-only:
 
 ### Wake detector ownership
 
-- Bean's browser build owns and ships its wake detector and acoustic model.
-- Wake detection may use bundled open-source runtime components, but it must not depend on a proprietary wake service, external account, license key, remote inference endpoint, or external runtime network call. Ordinary same-origin loading of versioned static application/model assets is permitted.
-- Wake-model training and evaluation must be reproducible from repository-owned scripts and documented local inputs. No third-party training service may be required.
+- Bean's browser build owns and ships every wake-detector runtime and acoustic-model asset.
+- Wake detection may use bundled open-source and Bean-authored acoustic models and runtimes only when they are pinned and versioned, loaded from same-origin static assets, operate fully offline, are evaluated by repository-owned scripts and documented local inputs, and pass the representative-device QA gates below. They must not depend on a proprietary wake service, external account, license key, remote inference endpoint, or external runtime network call.
+- In the current browser implementation, the bundled local keyword spotter is only a high-recall proposal and timestamp source. It never opens the privacy gate or releases audio by itself.
+- Exactly one first-party three-class acoustic classifier evaluates each coalesced proposal with its fixed local context and exactly 160 ms of local tail audio. Its only outcomes are `reject`, `strict_wake`, and `missed_hey_confirmation`; it is the sole wake-class acceptance authority for both exact and pronunciation-tolerant strict wakes and for missed-`Hey` recovery.
+- A classifier rejection returns silently to wake-only operation. An accepted class must be compatible with its local proposal type before deterministic code may use the proposal timestamp to establish the corresponding safe release boundary. There is no direct-KWS acceptance, separate address model, base/guard model, phrase fallback, or parallel verifier.
+- Training for a Bean-authored wake model must be reproducible from repository-owned scripts and documented local inputs. A bundled upstream pretrained open-source model instead requires documented provenance and license plus reproducible repository-owned packaging, configuration, and evaluation; no third-party training service may be required to build or evaluate Bean's wake behavior.
 - Wake-only audio is processed in memory on the user's device and is not uploaded, persisted, or exposed to application routing.
 - Production wake decisions must use general acoustic/address evidence and may not embed incident-specific negative-phrase aliases, deny lists, or hard-coded phrase exceptions. Named phrases may remain in training or held-out QA corpora as examples, but they may not directly control runtime rejection.
 - A candidate detector may not be released merely because it performs well on its training voices. It must pass the cross-voice, near-match, background-noise, reset/re-arm, and representative-browser gates in this contract.
-- For the current development update, the quantitative acceptance threshold is at least 95% of executed Bean Voice QA journeys passing. The numerator and denominator must be reported; skipped or unexecuted journeys do not count as passes.
-- Recognition misses, near-match activations, missed-address decisions, and failed reset/re-arm journeys count as failed QA journeys. Raw-audio escape before confirmation, persisted wake-only speech, worker/runtime errors, duplicate work, and lifecycle-integrity violations remain hard failures regardless of the aggregate percentage.
+- For commercial certification, the quantitative acceptance threshold is at least 95% of executed Bean Voice QA journeys passing. The numerator and denominator must be reported; skipped or unexecuted journeys do not count as passes. An uncertified owner-test deployment does not lower or relabel this threshold.
+- Recognition misses, missed-address decisions, and failed reset/re-arm journeys count as failed QA journeys. Contract-approved acoustically close `Hey` + `Bean` renderings count as successful strict wakes. Any activation or provider-audio release caused by non-address background speech or a disallowed near match is a wake-only privacy violation and remains a hard failure, as do raw-audio escape before confirmation, persisted wake-only speech, worker/runtime errors, duplicate work, and lifecycle-integrity violations regardless of the aggregate percentage.
 
 ## Conversation lifetime
 
@@ -363,9 +369,10 @@ Raw microphone audio is not retained by default. Diagnostic audio collection wou
 
 ## Required acceptance coverage
 
-Before a voice release, deterministic and representative-device tests must cover:
+Before commercial certification or broader-user release, deterministic and representative-device tests must cover:
 
 - First wake immediately after microphone startup
+- Exact `Hey Bean` and contract-approved acoustically close `Hey` + `Bean` renderings crossing the same single three-class acoustic decision and safe release boundary after exactly 160 ms of local tail, with a KWS proposal alone releasing no audio
 - Missed `Hey` recovery and third-person `Bean` mentions
 - Wake-only privacy and invisible background speech
 - Live partial transcription and two-second utterance closure

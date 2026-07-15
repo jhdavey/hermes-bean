@@ -83,6 +83,39 @@ class AdminVoiceQualityReportTest extends TestCase
             ->assertJsonValidationErrors('days');
     }
 
+    public function test_client_failure_report_does_not_truncate_more_than_two_hundred_events(): void
+    {
+        $adminToken = $this->apiToken('voice-quality-client-failures@example.com');
+        $admin = User::where('email', 'voice-quality-client-failures@example.com')->firstOrFail();
+        $admin->forceFill(['is_admin' => true])->save();
+        $session = ConversationSession::where('user_id', $admin->id)->firstOrFail();
+
+        for ($index = 1; $index <= 201; $index++) {
+            ActivityEvent::create([
+                'user_id' => $admin->id,
+                'workspace_id' => $session->workspace_id,
+                'conversation_session_id' => $session->id,
+                'client_event_id' => 'browser_voice_v2:connection:'.hash('sha256', "client-failure-{$index}"),
+                'event_type' => 'browser_voice_v2.client_failure',
+                'tool_name' => 'browser.voice.client',
+                'status' => 'failed',
+                'payload' => [
+                    'stage' => 'connection',
+                    'code' => 'voice_connection_failure',
+                    'message' => 'Browser voice connection failed.',
+                    'cause_chain' => [],
+                    'turn_id' => null,
+                ],
+            ]);
+        }
+
+        $this->withToken($adminToken)->getJson('/api/admin/voice-quality?days=1')
+            ->assertOk()
+            ->assertJsonPath('data.browser_voice_v2.client_failures.count', 201)
+            ->assertJsonPath('data.browser_voice_v2.client_failures.stage_counts.connection', 201)
+            ->assertJsonCount(201, 'data.browser_voice_v2.client_failures.events');
+    }
+
     public function test_browser_voice_v2_admin_diagnostic_is_complete_sanitized_and_flags_actionable_failures(): void
     {
         $this->travelTo(CarbonImmutable::parse('2026-07-11 18:00:00', 'UTC'));
@@ -256,6 +289,7 @@ class AdminVoiceQualityReportTest extends TestCase
             'user_id' => $admin->id,
             'workspace_id' => $session->workspace_id,
             'conversation_session_id' => $session->id,
+            'client_event_id' => 'browser_voice_v2:clarification:diagnostic-test',
             'event_type' => 'browser_voice_v2.client_failure',
             'tool_name' => 'browser.voice.client',
             'status' => 'failed',
@@ -383,6 +417,7 @@ class AdminVoiceQualityReportTest extends TestCase
             ->assertJsonPath('data.browser_voice_v2.alerts.semantic_receipt_identity_mismatch.count', 0)
             ->assertJsonPath('data.browser_voice_v2.alerts.raw_audio_persistence_detected.count', 1)
             ->assertJsonPath('data.browser_voice_v2.client_failures.count', 1)
+            ->assertJsonPath('data.browser_voice_v2.client_failures.events.0.failure_id', 'browser_voice_v2:clarification:diagnostic-test')
             ->assertJsonPath('data.browser_voice_v2.client_failures.events.0.message', 'Bearer [redacted] did not recover.')
             ->assertJsonPath('data.browser_voice_v2.privacy.raw_transcript_exposed', false)
             ->assertJsonPath('data.browser_voice_v2.privacy.raw_audio_retention_allowed', false);

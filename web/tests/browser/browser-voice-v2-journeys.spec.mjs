@@ -1,4 +1,5 @@
 import { expect, test } from 'playwright/test';
+import { createOfflineReplayCorpus } from './voice-v2-replay-corpus.mjs';
 
 const HARNESS_URL = '/tests/browser/fixtures/voice-v2-harness.html?reset=1';
 const READY_PARTS = [
@@ -10,6 +11,21 @@ const READY_PARTS = [
     'warm_decode',
     'provider',
 ];
+const FIRST_WAKE_REPLAY_ID = 'strict-command-strict-wake-hearing-check-daniel';
+let firstWakeReplayPromise = null;
+
+async function firstWakeReplay() {
+    firstWakeReplayPromise ||= createOfflineReplayCorpus({
+        caseIds: [FIRST_WAKE_REPLAY_ID],
+    }).then((generated) => {
+        const [entry] = generated.corpus;
+        if (entry?.id !== FIRST_WAKE_REPLAY_ID) {
+            throw new Error(`Missing first-wake replay fixture: ${FIRST_WAKE_REPLAY_ID}`);
+        }
+        return entry;
+    });
+    return firstWakeReplayPromise;
+}
 
 async function boot(page) {
     await page.goto(HARNESS_URL);
@@ -72,6 +88,149 @@ test('[BV2-BROWSER-01] fresh-load readiness, wake privacy, live transcript, and 
     expect(state.server.turns).toHaveLength(1);
     expect(state.server.messages.filter((message) => message.role === 'user')).toHaveLength(1);
     expect(state.controller.lastRejectedEvent.reason).toBe('stale_sequence');
+});
+
+test('[BV2-FIRST-WAKE-01:C–D] [BV2-WAKE-01] [BV2-TRANSCRIPT-03] prerecorded first-wake PCM crosses the production provider bridge and completes transcript, admission, final delivery, and reload exactly once', async ({ page }) => {
+    test.setTimeout(45_000);
+    const replay = await firstWakeReplay();
+    await boot(page);
+    await markReady(page);
+
+    const callsBeforeAcousticWake = await page.evaluate(() => window.voiceHarness.server.calls.length);
+    await page.evaluate((entry) => {
+        window.configureVoiceAcousticFirstWake({
+            ...entry,
+            turn_id: 'first-hearing-check',
+        });
+    }, replay);
+    await page.click('#acoustic-first-wake');
+    await page.evaluate(() => window.voiceAcousticFirstWakeRun);
+
+    const acousticWake = await page.evaluate(() => window.voiceHarness.snapshot());
+    expect(acousticWake.syntheticWakeCalls).toBe(0);
+    expect(acousticWake.acousticWake).toMatchObject({
+        entryId: FIRST_WAKE_REPLAY_ID,
+        turnId: 'first-hearing-check',
+        preConfirmationActivatedPcmCount: 0,
+        completed: true,
+        errors: [],
+    });
+    expect(acousticWake.acousticWake.readyEvents).toHaveLength(1);
+    expect(acousticWake.acousticWake.detections).toHaveLength(1);
+    expect(acousticWake.acousticWake.detections[0]).toMatchObject({
+        activation: 'strict_wake',
+        releaseBoundary: { policy: 'post_address_tail' },
+    });
+    const strictProposals = acousticWake.acousticWake.diagnostics.filter(
+        (entry) => entry.type === 'wake_proposal' && entry.proposalType === 'strict',
+    );
+    expect(strictProposals).toHaveLength(1);
+    expect(acousticWake.acousticWake.diagnostics.filter(
+        (entry) => entry.type === 'wake_proposal',
+    )).toHaveLength(1);
+    const [strictProposal] = strictProposals;
+    expect(strictProposal).toMatchObject({
+        type: 'wake_proposal',
+        proposalType: 'strict',
+        requiredTailSamples: 2_560,
+    });
+    expect(strictProposal.timestampCount).toBeGreaterThan(0);
+    const strictDecisions = acousticWake.acousticWake.diagnostics.filter(
+        (entry) => entry.type === 'classification_decision',
+    );
+    expect(strictDecisions).toHaveLength(1);
+    const [strictDecision] = strictDecisions;
+    expect(strictDecision).toMatchObject({
+        type: 'classification_decision',
+        proposalType: 'strict',
+        accepted: true,
+        winningClass: 'strict_wake',
+        sampleCount: 21_760,
+        tailSamples: 2_560,
+    });
+    expect(strictDecision.probability).toBeGreaterThanOrEqual(strictDecision.threshold);
+    expect(acousticWake.acousticWake.activatedPcmChunkCount).toBeGreaterThan(0);
+    expect(acousticWake.acousticWake.activatedPcmSampleCount).toBeGreaterThanOrEqual(6_400);
+    expect(acousticWake.acousticWake.providerEventsBeforeActivation).toBe(0);
+    expect(acousticWake.acousticWake.providerEventsAfterActivation).toBe(1);
+    expect(acousticWake.acousticWake.providerTransportGeneration).toBe(
+        acousticWake.acousticWake.detections[0].generation,
+    );
+    expect(acousticWake.providerInput.activeGeneration).toBe(
+        acousticWake.acousticWake.detections[0].generation,
+    );
+    expect(acousticWake.providerInput.events[0]).toEqual({
+        type: 'input_audio_buffer.clear',
+        encodedAudioLength: 0,
+    });
+    const providerPcmEvents = acousticWake.providerInput.events.slice(1);
+    expect(providerPcmEvents).toHaveLength(acousticWake.acousticWake.activatedPcmChunkCount);
+    expect(providerPcmEvents.every((event) => (
+        event.type === 'input_audio_buffer.append' && event.encodedAudioLength > 0
+    ))).toBe(true);
+    expect(acousticWake.providerInput.appends).toHaveLength(
+        acousticWake.acousticWake.activatedPcmChunkCount,
+    );
+    expect(acousticWake.providerInput.appends.reduce(
+        (total, entry) => total + entry.inputSamples,
+        0,
+    )).toBe(acousticWake.acousticWake.activatedPcmSampleCount);
+    expect(acousticWake.controller.conversationState).toBe('capturing');
+    expect(acousticWake.controller.activeTurn?.id).toBe('first-hearing-check');
+    expect(await page.evaluate(() => window.voiceHarness.server.calls.length)).toBe(callsBeforeAcousticWake);
+
+    await page.evaluate(() => window.voiceHarness.partial('Can you hear'));
+    await expect(page.locator('#voice-input')).toHaveText('Can you hear');
+
+    const beforeReload = await page.evaluate(async () => {
+        const harness = window.voiceHarness;
+        harness.final('Can you hear me?');
+        harness.endUtterance();
+        await harness.waitForAdmissions();
+        await harness.updateTurn('first-hearing-check', {
+            state: 'completed',
+            final_text: 'Yes—I can hear you.',
+        });
+        harness.startPlayback();
+        harness.finishPlayback();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        return {
+            snapshot: harness.snapshot(),
+            admissions: harness.server.calls.filter(
+                (call) => call.path === '/assistant/voice/turns' && call.options.method === 'POST',
+            ),
+        };
+    });
+
+    expect(beforeReload.admissions).toHaveLength(1);
+    expect(beforeReload.admissions[0].options.body).toMatchObject({
+        turn_id: 'first-hearing-check',
+        transcript: 'Can you hear me?',
+    });
+    expect(beforeReload.snapshot.server.turns).toHaveLength(1);
+    expect(beforeReload.snapshot.server.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+    expect(beforeReload.snapshot.server.messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
+    expect(beforeReload.snapshot.server.delivery.filter(
+        (entry) => entry.event === 'final_audio_started',
+    )).toHaveLength(1);
+    await expect(page.locator('#chat [data-role="user"]')).toHaveText('Can you hear me?');
+    await expect(page.locator('#chat [data-role="assistant"]')).toHaveText('Yes—I can hear you.');
+
+    await page.reload();
+    await page.evaluate(() => window.voiceHarnessReady);
+    await expect(page.locator('#chat [data-role="user"]')).toHaveCount(1);
+    await expect(page.locator('#chat [data-role="assistant"]')).toHaveCount(1);
+    const afterReload = await page.evaluate(() => window.voiceHarness.snapshot());
+    expect(afterReload.server.turns).toHaveLength(1);
+    expect(afterReload.server.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+    expect(afterReload.server.messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
+    expect(afterReload.server.delivery.filter(
+        (entry) => entry.event === 'final_audio_started',
+    )).toHaveLength(1);
+    expect(afterReload.syntheticWakeCalls).toBe(0);
+    expect(afterReload.acousticWake.detections).toHaveLength(0);
+    expect(afterReload.playback.plays).toHaveLength(0);
 });
 
 test('[BV2-BROWSER-07] a released wake fragment stays private until the complete semantic request arrives', async ({ page }) => {
@@ -574,6 +733,7 @@ test('[BV2-BROWSER-06] capture owns buffered TTS, strict local wake preserves qu
         const afterCapture = harness.snapshot();
         const staleStartAccepted = harness.playback.start(buffered);
 
+        harness.wake('strict-provider-turn');
         harness.providerTranscript('Hey Bean, what is the date?', 'strict-provider-turn');
         harness.endUtterance();
         await harness.waitForAdmissions();

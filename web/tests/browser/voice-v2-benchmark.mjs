@@ -25,6 +25,12 @@ const requestedTargets = new Set(
 const outputPath = String(process.env.VOICE_V2_BENCHMARK_OUTPUT || '').trim();
 
 const generatedCorpus = await createOfflineReplayCorpus();
+const prerecordedReplayTimeoutMs = boundedInteger(
+    process.env.VOICE_V2_PRERECORDED_TIMEOUT_MS,
+    Math.max(420_000, 120_000 + (generatedCorpus.corpus.length * 4_000)),
+    420_000,
+    1_800_000,
+);
 const server = await startVoiceV2TestServer({ port: 0 });
 const targets = [
     {
@@ -99,7 +105,9 @@ const report = {
         targets: [...requestedTargets],
         adapter_samples_per_engine: adapterSamples,
         strict_wake_replays_per_unique_file: wakeReplays,
-        negative_privacy_replays_per_unique_file: 1,
+        negative_privacy_default_replays_per_unique_file: 1,
+        transformed_near_match_replays_per_unique_file: 4,
+        prerecorded_replay_timeout_ms: prerecordedReplayTimeoutMs,
     },
     engines: [],
     summary: {},
@@ -213,7 +221,7 @@ async function runTarget(target) {
         await replayPage.click('#run');
         const prerecordedGate = await withBenchmarkDeadline(
             replayPage.evaluate(() => window.voiceReplayRun),
-            { timeoutMs: 420_000, label: `${target.id} prerecorded wake replay` },
+            { timeoutMs: prerecordedReplayTimeoutMs, label: `${target.id} prerecorded wake replay` },
         );
         const replayMicrophoneAudit = await readMicrophoneTripwire(replayPage);
         const adapterPage = await context.newPage();

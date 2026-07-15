@@ -11,10 +11,11 @@ import {
     BrowserVoiceV2Client,
     normalizeVoiceV2Snapshot,
 } from '/resources/js/heybean/browserVoiceV2Client.js';
-import {
-    isStrictRealtimeWakePhrase,
-    stripRealtimeLocalWakePrefix,
-} from '/resources/js/heybean/realtimeVoiceTurn.js';
+import { stripRealtimeLocalWakePrefix } from '/resources/js/heybean/realtimeVoiceTurn.js';
+import { LocalWakeGate } from '/resources/js/heybean/localWakeGate.js';
+import { BrowserVoiceRealtimeInputTransportV2 } from '/resources/js/heybean/browserVoiceRealtimeInputV2.js';
+import { routeBrowserVoiceRealtimeIngressV2 } from '/resources/js/heybean/browserVoiceRealtimeIngressV2.js';
+import { activateBrowserVoiceV2LocalWakeTransport } from '/resources/js/heybean/webApp.js';
 
 const STORE_KEY = 'bean-voice-v2-browser-journey-server';
 const SESSION_ID = 41;
@@ -27,6 +28,7 @@ const READY_PARTS = Object.freeze([
     'warm_decode',
     'provider',
 ]);
+let configuredAcousticFirstWake = null;
 
 function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -312,6 +314,37 @@ class VoiceV2BrowserJourneyHarness {
         this.currentCursor = 0;
         this.turnCounter = 0;
         this.rehydrating = true;
+        this.nextControllerTurnId = '';
+        this.syntheticWakeCalls = 0;
+        this.providerInputEvents = [];
+        this.providerPcmAppends = [];
+        this.providerEndpointPending = false;
+        this.inputTransport = new BrowserVoiceRealtimeInputTransportV2({
+            send: (event) => {
+                this.providerInputEvents.push({
+                    type: String(event?.type || ''),
+                    encodedAudioLength: typeof event?.audio === 'string' ? event.audio.length : 0,
+                });
+                return true;
+            },
+            onAppend: (event) => this.providerPcmAppends.push({ ...event }),
+        });
+        this.acousticWakeRunning = false;
+        this.acousticWake = {
+            entryId: null,
+            turnId: null,
+            readyEvents: [],
+            detections: [],
+            activatedPcmChunkCount: 0,
+            activatedPcmSampleCount: 0,
+            preConfirmationActivatedPcmCount: 0,
+            providerEventsBeforeActivation: 0,
+            providerEventsAfterActivation: 0,
+            providerTransportGeneration: null,
+            diagnostics: [],
+            errors: [],
+            completed: false,
+        };
 
         const params = new URLSearchParams(location.search);
         if (params.get('reset') === '1') {
@@ -338,7 +371,11 @@ class VoiceV2BrowserJourneyHarness {
             onEvent: (event) => this.#onSpeechEvent(event),
         });
         this.controller = new BrowserVoiceControllerV2({
-            createTurnId: () => `browser-turn-${++this.turnCounter}`,
+            createTurnId: () => {
+                const requested = this.nextControllerTurnId;
+                this.nextControllerTurnId = '';
+                return requested || `browser-turn-${++this.turnCounter}`;
+            },
             speechScheduler: this.speech,
             onEffect: (effect) => this.#onControllerEffect(effect),
             onStateChange: (state, event) => this.#renderController(state, event),
@@ -381,45 +418,272 @@ class VoiceV2BrowserJourneyHarness {
     }
 
     wake(turnId = `browser-turn-${++this.turnCounter}`) {
+        this.syntheticWakeCalls += 1;
         const result = this.controller.wakeConfirmed({ turnId, source: 'wake-gate' });
         if (result.state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING) {
             this.controller.activationReady({ source: 'provider' });
-            this.controller.speechStarted({ source: 'provider' });
+            routeBrowserVoiceRealtimeIngressV2(this.controller, {
+                type: 'speech_started',
+                providerItemId: `${turnId}:provider-item`,
+            });
         }
         return result;
     }
 
+    async replayAcousticFirstWake(input = {}) {
+        if (this.acousticWakeRunning) throw new Error('An acoustic wake replay is already running.');
+        if (this.controller.snapshot().conversationState !== BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY) {
+            throw new Error('The controller must be fully ready in wake-only before acoustic replay.');
+        }
+
+        const turnId = String(input.turn_id || input.turnId || '').trim();
+        const entryId = String(input.id || '').trim();
+        const sampleRate = Number(input.sample_rate);
+        const pcm = decodePcm16(input.pcm_s16le_base64);
+        if (!turnId || !entryId || sampleRate !== 16_000 || pcm.length === 0) {
+            throw new Error('A 16 kHz prerecorded first-wake fixture and stable turn ID are required.');
+        }
+
+        this.nextControllerTurnId = turnId;
+        this.providerInputEvents = [];
+        this.providerPcmAppends = [];
+        this.inputTransport.deactivate();
+        const AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext;
+        if (typeof AudioContextClass !== 'function') throw new Error('AudioContext is unavailable.');
+
+        this.acousticWakeRunning = true;
+        this.acousticWake = {
+            entryId,
+            turnId,
+            readyEvents: [],
+            detections: [],
+            activatedPcmChunkCount: 0,
+            activatedPcmSampleCount: 0,
+            preConfirmationActivatedPcmCount: 0,
+            providerEventsBeforeActivation: 0,
+            providerEventsAfterActivation: 0,
+            providerTransportGeneration: null,
+            diagnostics: [],
+            errors: [],
+            completed: false,
+        };
+        const audit = this.acousticWake;
+        const audioContext = new AudioContextClass({ latencyHint: 'interactive' });
+        const resume = audioContext.resume();
+        let gate = null;
+        let silence = null;
+        let source = null;
+        let readyResolve;
+        let readyReject;
+        let detectedResolve;
+        let detectedReject;
+        const ready = new Promise((resolve, reject) => {
+            readyResolve = resolve;
+            readyReject = reject;
+        });
+        const detected = new Promise((resolve, reject) => {
+            detectedResolve = resolve;
+            detectedReject = reject;
+        });
+        void ready.catch(() => {});
+        void detected.catch(() => {});
+
+        try {
+            await resume;
+            if (typeof audioContext.createMediaStreamDestination !== 'function') {
+                throw new Error('MediaStreamAudioDestinationNode is unavailable.');
+            }
+
+            const rawDestination = audioContext.createMediaStreamDestination();
+            silence = audioContext.createConstantSource();
+            const silenceGain = audioContext.createGain();
+            silence.offset.value = 0;
+            silenceGain.gain.value = 0;
+            silence.connect(silenceGain).connect(rawDestination);
+            silence.start();
+
+            gate = new LocalWakeGate({
+                audioContext,
+                onReady: (event) => {
+                    audit.readyEvents.push({ generation: event.generation });
+                    readyResolve(event);
+                },
+                onDetected: (event) => {
+                    audit.detections.push({
+                        generation: event.generation,
+                        activation: event.activation,
+                        variant: event.variant,
+                        sourceSequence: event.sourceSequence,
+                        releaseBoundary: event.releaseBoundary ? { ...event.releaseBoundary } : null,
+                    });
+                    audit.providerEventsBeforeActivation = this.providerInputEvents.length;
+                    const result = activateBrowserVoiceV2LocalWakeTransport({
+                        controller: this.controller,
+                        inputTransport: this.inputTransport,
+                        generation: event.generation,
+                        source: 'real-local-wake-gate',
+                    });
+                    audit.providerEventsAfterActivation = this.providerInputEvents.length;
+                    audit.providerTransportGeneration = this.inputTransport.activeGeneration;
+                    if (result.state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING) {
+                        this.controller.activationReady({ source: 'provider-after-real-local-wake' });
+                        routeBrowserVoiceRealtimeIngressV2(this.controller, {
+                            type: 'speech_started',
+                            providerItemId: `${turnId}:provider-item`,
+                        });
+                    }
+                    detectedResolve(event);
+                },
+                onActivatedPcm: (event) => {
+                    if (this.inputTransport.append(event) !== true) {
+                        throw new Error('The production provider input adapter rejected activated PCM.');
+                    }
+                    audit.activatedPcmChunkCount += 1;
+                    audit.activatedPcmSampleCount += Number(event.samples?.length) || 0;
+                    if (audit.detections.length === 0) audit.preConfirmationActivatedPcmCount += 1;
+                },
+                onDiagnostic: (event) => {
+                    const diagnostic = {
+                        type: String(event?.type || ''),
+                        atMs: Number(performance.now().toFixed(3)),
+                        sourceSequence: Number.isSafeInteger(gate?.lastSourceSequence)
+                            ? gate.lastSourceSequence
+                            : null,
+                        accepted: event?.accepted === true,
+                        proposalType: String(event?.proposalType || ''),
+                        timestampCount: Number.isSafeInteger(event?.timestampCount)
+                            ? Number(event.timestampCount)
+                            : null,
+                        requiredTailSamples: Number.isFinite(event?.requiredTailSamples)
+                            ? Number(event.requiredTailSamples)
+                            : null,
+                        winningClass: String(event?.winningClass || ''),
+                        probability: Number.isFinite(event?.probability) ? Number(event.probability) : null,
+                        threshold: Number.isFinite(event?.threshold) ? Number(event.threshold) : null,
+                        sampleCount: Number.isFinite(event?.sampleCount) ? Number(event.sampleCount) : null,
+                        tailSamples: Number.isFinite(event?.tailSamples) ? Number(event.tailSamples) : null,
+                        reason: String(event?.reason || ''),
+                        proposalSeen: event?.proposalSeen === true,
+                        classificationDecisionSeen: event?.classificationDecisionSeen === true,
+                    };
+                    audit.diagnostics.push(diagnostic);
+                    if (diagnostic.type === 'wake_candidate_discarded'
+                        && audit.detections.length === 0) {
+                        const reason = diagnostic.classificationDecisionSeen
+                            ? 'The local wake classifier rejected the acoustic proposal.'
+                            : 'The local detector discarded the PCM without an accepted wake classification.';
+                        detectedReject(new Error(reason));
+                    }
+                },
+                onError: (error) => {
+                    const normalized = {
+                        name: String(error?.name || 'Error'),
+                        code: String(error?.code || ''),
+                        message: String(error?.message || error),
+                    };
+                    audit.errors.push(normalized);
+                    readyReject(error);
+                    detectedReject(error);
+                },
+            });
+
+            await gate.start(rawDestination.stream);
+            await withTimeout(
+                ready,
+                20_000,
+                'The real local wake gate did not reach its complete readiness barrier.',
+            );
+
+            const buffer = audioContext.createBuffer(1, pcm.length, sampleRate);
+            const channel = buffer.getChannelData(0);
+            for (let index = 0; index < pcm.length; index += 1) channel[index] = pcm[index] / 32_768;
+            source = audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(rawDestination);
+            const sourceEnded = new Promise((resolve) => { source.onended = resolve; });
+            source.start(audioContext.currentTime + 0.05);
+
+            await Promise.all([
+                withTimeout(detected, 10_000, 'Prerecorded Hey Bean PCM did not activate the real local wake gate.'),
+                sourceEnded,
+            ]);
+            await delay(100);
+            audit.completed = true;
+            return this.snapshot();
+        } catch (error) {
+            if (!audit.errors.some((entry) => entry.message === String(error?.message || error))) {
+                audit.errors.push({
+                    name: String(error?.name || 'Error'),
+                    code: String(error?.code || ''),
+                    message: String(error?.message || error),
+                });
+            }
+            throw error;
+        } finally {
+            try { source?.stop(); } catch {}
+            try { silence?.stop(); } catch {}
+            if (gate) await gate.stop();
+            else await audioContext.close();
+            this.nextControllerTurnId = '';
+            this.acousticWakeRunning = false;
+        }
+    }
+
     followUp(turnId = `browser-turn-${++this.turnCounter}`) {
-        return this.controller.speechStarted({ turnId, source: 'provider' });
+        this.nextControllerTurnId = turnId;
+        const result = routeBrowserVoiceRealtimeIngressV2(this.controller, {
+            type: 'speech_started',
+            providerItemId: `${turnId}:provider-item`,
+        });
+        return { result, state: this.controller.snapshot() };
     }
 
     partial(text, event = {}) {
-        return this.controller.transcriptPartial(text, { source: 'provider', ...event });
+        if (Object.keys(event).length) {
+            return this.controller.transcriptPartial(text, { source: 'provider', ...event });
+        }
+        return routeBrowserVoiceRealtimeIngressV2(this.controller, {
+            type: 'transcript_partial',
+            text,
+            providerItemId: event.providerItemId || null,
+        });
     }
 
     final(text, event = {}) {
-        return this.controller.transcriptFinal(text, { source: 'provider', ...event });
+        const result = routeBrowserVoiceRealtimeIngressV2(this.controller, {
+            type: 'transcript_final',
+            text,
+            providerItemId: event.providerItemId || null,
+        });
+        this.providerEndpointPending = Number.isFinite(this.controller.snapshot().deadlines.endpointAt);
+        return result;
     }
 
     providerTranscript(text, turnId = `browser-turn-${++this.turnCounter}`) {
         const transcript = String(text || '').trim();
-        if (isStrictRealtimeWakePhrase(transcript)) {
-            const wake = this.controller.wakeConfirmed({ turnId, source: 'local-strict-wake' });
-            if (wake.state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING) {
-                this.controller.activationReady({ source: 'local-strict-wake' });
-            }
-        }
         // This harness method represents a provider item released by an
-        // already-confirmed local/strict wake. Follow-ups use partial()/final()
-        // and therefore never receive wake-prefix stripping implicitly.
+        // already-confirmed local wake. It cannot infer activation from text;
+        // tests must cross the acoustic/controller wake boundary explicitly.
         const command = stripRealtimeLocalWakePrefix(transcript, { wakeConfirmed: true });
-        if (command) this.controller.transcriptFinal(command, { source: 'provider' });
+        if (command) {
+            routeBrowserVoiceRealtimeIngressV2(this.controller, {
+                type: 'transcript_final',
+                text: command,
+                providerItemId: `${turnId}:provider-item`,
+            });
+            this.providerEndpointPending = Number.isFinite(this.controller.snapshot().deadlines.endpointAt);
+        }
         return this.snapshot();
     }
 
     endUtterance() {
+        if (this.providerEndpointPending) {
+            this.providerEndpointPending = false;
+            return this.snapshot();
+        }
+        let snapshot = this.controller.snapshot();
         this.controller.speechEnded({ source: 'provider' });
-        const snapshot = this.controller.snapshot();
+        snapshot = this.controller.snapshot();
         this.controller.dispatch({
             type: 'timer_fired',
             timerKey: 'endpoint',
@@ -442,7 +706,10 @@ class VoiceV2BrowserJourneyHarness {
         const result = this.controller.confirmBargeIn({ turnId, source: 'provider' });
         if (result.state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING) {
             this.controller.activationReady({ source: 'provider' });
-            this.controller.speechStarted({ source: 'provider' });
+            routeBrowserVoiceRealtimeIngressV2(this.controller, {
+                type: 'speech_started',
+                providerItemId: `${turnId}:provider-item`,
+            });
         }
         return result;
     }
@@ -464,6 +731,7 @@ class VoiceV2BrowserJourneyHarness {
     }
 
     async waitForAdmissions() {
+        await delay(0);
         while (this.admissions.size) await Promise.all([...this.admissions]);
     }
 
@@ -552,6 +820,13 @@ class VoiceV2BrowserJourneyHarness {
             controller: this.controller.snapshot(),
             speech: this.speech.snapshot(),
             readiness: { ...this.readiness },
+            syntheticWakeCalls: this.syntheticWakeCalls,
+            acousticWake: clone(this.acousticWake),
+            providerInput: {
+                activeGeneration: this.inputTransport.activeGeneration,
+                events: clone(this.providerInputEvents),
+                appends: clone(this.providerPcmAppends),
+            },
             cursor: this.currentCursor,
             networkErrors: clone(this.networkErrors),
             server: this.server.read(),
@@ -810,5 +1085,35 @@ function summarize(values, p95Target) {
     };
 }
 
+function decodePcm16(value) {
+    const binary = atob(String(value || ''));
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    const view = new DataView(bytes.buffer);
+    const samples = new Int16Array(Math.floor(bytes.byteLength / 2));
+    for (let index = 0; index < samples.length; index += 1) samples[index] = view.getInt16(index * 2, true);
+    return samples;
+}
+
+function withTimeout(promise, timeoutMs, message) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(message)), timeoutMs)),
+    ]);
+}
+
+function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 window.voiceHarness = new VoiceV2BrowserJourneyHarness();
 window.voiceHarnessReady = window.voiceHarness.ready;
+window.configureVoiceAcousticFirstWake = (input) => {
+    configuredAcousticFirstWake = structuredClone(input);
+};
+window.voiceAcousticFirstWakeRun = Promise.resolve(null);
+document.querySelector('#acoustic-first-wake').addEventListener('click', () => {
+    window.voiceAcousticFirstWakeRun = window.voiceHarness.replayAcousticFirstWake(
+        configuredAcousticFirstWake,
+    );
+});

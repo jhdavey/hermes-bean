@@ -1,13 +1,13 @@
 {
-  "version": 14,
+  "version": 16,
   "releaseCertified": false,
-  "wakeModelQaCertified": true,
-  "detector": "bean-first-party-classifier-with-local-strict-and-address-timing-candidates",
-  "worker": "/voice/wake/wake-worker.js?v=14",
-  "workerBytes": 48383,
-  "workerSha256": "a7863aea5e5fce436d57484129d143eec72e92263b153bf7516c8309d830ecd1",
+  "wakeModelQaCertified": false,
+  "detector": "bundled-local-kws-proposals-with-first-party-three-class-confirmation",
+  "worker": "/voice/wake/wake-worker.js?v=16",
+  "workerBytes": 45676,
+  "workerSha256": "f9b8bf512b7245451eb73a1bbf3541409c38afbb5438fdff0ec91b9c186f8b46",
   "workerType": "classic",
-  "audioWorklet": "/voice/wake/gate-processor.js?v=14",
+  "audioWorklet": "/voice/wake/gate-processor.js?v=16",
   "audioWorkletBytes": 8981,
   "audioWorkletSha256": "a7eda847a2ccb62581c6d91ec961b582528bea3bfa9f96bada7e470875e752de",
   "processorName": "hey-bean-gate",
@@ -15,11 +15,10 @@
   "audioBatchSamples": 1280,
   "activityReportMs": 50,
   "nonWakeSilenceResetMs": 700,
-  "addressConfirmationMs": 3000,
   "maxWorkerChunkSamples": 3200,
   "activatedPcmTransport": {
     "localRingSampleRate": 16000,
-    "localRingMaximumMs": 8000,
+    "localRingMaximumMs": 6400,
     "strictWakePostAddressTailMs": 120,
     "missedHeyReleaseBoundary": "utterance_onset",
     "providerSampleRate": 24000,
@@ -31,71 +30,64 @@
   "acceptedWakePrefixes": [
     "HEY BEAN"
   ],
-  "missedHeyMode": "local-bean-timing-candidate-plus-first-party-address-classification",
+  "qaAcceptedAcousticVariants": [
+    "HEY BEAM"
+  ],
   "workerActivationEvents": [
+    "wake_proposal",
     "classification_decision",
-    "address_candidate",
-    "address_rejected",
     "utterance_started",
     "wake_confirmed"
   ],
-  "firstPartyModel": {
-    "id": "bean-first-party-wake-v1",
-    "path": "/voice/wake/bean-wake-model-v1.json?v=14",
-    "bytes": 1094259,
-    "sha256": "3bdc1e1db3e4c8629bbd0302aac5259aeaf7b1627d33f64b10bae594162e718e",
+  "firstPartyWakeModel": {
+    "id": "bean-first-party-wake-v2",
+    "path": "/voice/wake/bean-wake-model-v2.json?v=16",
+    "bytes": 538914,
+    "sha256": "176455f94dc53d5921b1a0f8dfb45220250fbe5f942da54e87721d69a8c8867c",
+    "available": true,
+    "schemaVersion": "2.0.0",
     "architecture": "temporal_conv1d_v1",
     "classes": [
       "reject",
       "strict_wake",
       "missed_hey_confirmation"
     ],
+    "inputSamples": 21760,
+    "tailSamples": 2560,
+    "tailMs": 160,
+    "purpose": "wake_class_acceptance",
     "runtimeNetworkRequired": false,
     "externalAccountRequired": false,
     "licenseKeyRequired": false
   },
   "runtimeDecision": {
-    "timingCandidateAliases": [
+    "proposalAuthority": "bundled_local_kws",
+    "proposalAliases": [
       "HEY_BEAN",
       "BEAN"
     ],
-    "verifier": "bean-first-party-wake-v1",
-    "missedHeyRequiresIndependentBeanTimingCandidate": true,
-    "strictFallbackRequiresIndependentBeanTimingCandidate": true,
-    "strictCandidateProbability": 0.75,
-    "incidentSpecificNegativeAliases": false
+    "acceptanceAuthority": "bean-first-party-wake-v2",
+    "proposalTailMs": 160,
+    "kwsMayActivate": false,
+    "safeBoundarySource": "accepted_compatible_proposal_timestamp"
   },
   "qaEvidence": {
-    "classification": "prerecorded_offline_tts_real_local_gate_engine_replay",
-    "executedEngines": [
-      "playwright-chromium",
-      "google-chrome",
-      "playwright-webkit"
-    ],
-    "journeysPassed": 125,
-    "journeysExecuted": 126,
-    "passRate": 0.992063,
+    "classification": "uncertified_development_artifact_runtime_v16_pending_live_test",
+    "executedEngines": [],
+    "journeysPassed": 0,
+    "journeysExecuted": 0,
+    "passRate": null,
     "requiredPassRate": 0.95,
-    "strictWakeAccuracy": 1,
-    "strictWakeCommandReleaseAccuracy": 1,
-    "ongoingSpeechStrictWakeAccuracy": 1,
-    "missedHeyAddressAccuracy": 0.958333,
-    "nearMissFalseAcceptanceRate": 0,
-    "resetRecoveryRate": 1,
-    "wakeTimingSamples": 24,
-    "wakeP95Ms": 487,
-    "negativePrivacyFilesPerEngine": 60,
-    "missedHeyRequiresIndependentBeanTimingCandidate": true,
-    "fineTunedSyntheticTrainingAccuracy": 0.955006,
-    "zeroPreConfirmationPcm": true,
-    "runtimeErrors": 0,
+    "wakeP95Ms": null,
+    "zeroPreConfirmationPcm": null,
+    "runtimeErrors": null,
     "representativePhysicalMicrophoneEvidence": false
   },
-  "localTimingCandidates": {
+  "localKws": {
     "runtime": "sherpa-onnx",
     "model": "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20",
-    "decisionAuthority": false,
-    "purpose": "proposal-only Hey Bean and Bean timing; the first-party classifier owns acceptance and safe release",
+    "proposalAuthority": true,
+    "purpose": "offline high-recall HEY_BEAN and BEAN proposals and timestamps only",
     "modelChunkSize": 16,
     "modelChunkDurationMs": 320,
     "modelQuantization": {
@@ -109,24 +101,24 @@
   "requiresCrossOriginIsolation": false,
   "vendorAssets": [
     {
-      "path": "/voice/wake/kws-runtime.js?v=14",
+      "path": "/voice/wake/kws-runtime.js?v=16",
       "bytes": 90517,
       "sha256": "371a0433929467b916a095d90eff0fef36c101c50cc856a3f733f4569616a6d6"
     },
     {
-      "path": "/voice/wake/kws-runtime.wasm?v=14",
+      "path": "/voice/wake/kws-runtime.wasm?v=16",
       "bytes": 10612628,
       "sha256": "9e8ef9ffba6c212732d9da6b659936ae16da3c63a8760cdcf0ee2b391e18ce63"
     },
     {
-      "path": "/voice/wake/kws-model.data?v=14",
+      "path": "/voice/wake/kws-model.data?v=16",
       "bytes": 5448042,
       "sha256": "a4fbe1a6eddebb6671cf948ea0051d923bcd3a556c1df5e6c2fa9b99ad6b7802"
     },
     {
-      "path": "/voice/wake/kws-api.js?v=14",
+      "path": "/voice/wake/kws-api.js?v=16",
       "bytes": 11679,
-      "sha256": "c693a402438a12ef0c34fcaa52cb279e60713477aa19f6cb157a37f06b53b4b3"
+      "sha256": "50545d666b7e3a8a6a60770b2e0d44d75eaed02984bb1999776ddf2d54d10cde"
     }
   ]
 }

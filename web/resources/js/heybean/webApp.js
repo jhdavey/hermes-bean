@@ -14,14 +14,18 @@ import {
     stageOptimisticUserTurn,
     buildRealtimeConversationItemDeleteEvent,
     buildRealtimeTargetedResponseCancellationEvent,
+    createVoiceClientFailureNonce,
     isRealtimeWakeAddressOnly,
     isRealtimeDuplicateCallConflict,
     realtimeMicrophoneConstraints,
-    reportRealtimeUsageReliably,
+    reportVoiceEventReliably,
     realtimeUsageReportFromProviderEvent,
-    sanitizedLocalWakeFailure,
+    sanitizedVoiceClientFailure,
     shouldDisplayRealtimeTranscriptDraft,
     stripRealtimeLocalWakePrefix,
+    VoiceClientFailureReporter,
+    voiceClientFailureId,
+    voiceClientFailureIdentityParts,
 } from './realtimeVoiceTurn.js';
 import { LocalWakeGate } from './localWakeGate.js';
 import {
@@ -45,8 +49,54 @@ import { BrowserVoiceHttpSpeechTransportV2 } from './browserVoiceHttpSpeechV2.js
 import { BrowserVoiceRealtimeInputTransportV2 } from './browserVoiceRealtimeInputV2.js';
 import {
     BROWSER_VOICE_REALTIME_INGRESS_RESULTS,
+    BrowserVoiceProviderItemRegistryV2,
+    bindBrowserVoiceProviderSpeechStartedV2,
+    browserVoiceProviderItemBindingIsCurrentV2,
+    browserVoiceProviderItemCapacityExhaustedV2,
+    createBrowserVoiceProviderTurnIdentityV2,
+    currentBrowserVoiceProviderItemBindingV2,
     routeBrowserVoiceRealtimeIngressV2,
 } from './browserVoiceRealtimeIngressV2.js';
+
+export const BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES = Object.freeze({
+    MISSING_ITEM_ID: 'provider_item_id_missing',
+    ITEM_CAPACITY_EXHAUSTED: 'provider_item_registry_capacity_exhausted',
+    ITEM_TURN_MISMATCH: 'provider_item_turn_identity_mismatch',
+});
+
+const BROWSER_VOICE_PROVIDER_IDENTITY_EVENT_TYPES = new Set([
+    'input_audio_buffer.speech_started',
+    'conversation.item.input_audio_transcription.delta',
+    'conversation.item.input_audio_transcription.completed',
+    'conversation.item.input_audio_transcription.failed',
+]);
+
+export function browserVoiceV2ProviderInputIsActive({ inputTransport } = {}) {
+    const generation = inputTransport?.activeGeneration;
+    return generation !== null
+        && generation !== undefined
+        && Number.isSafeInteger(Number(generation))
+        && Number(generation) >= 0;
+}
+
+export function browserVoiceV2ProviderProtocolFailureForEvent({
+    eventType,
+    providerInputActive = false,
+    providerItemId = '',
+    providerItemCapacityExhausted = false,
+} = {}) {
+    const type = String(eventType || '');
+    if (!BROWSER_VOICE_PROVIDER_IDENTITY_EVENT_TYPES.has(type)) return null;
+    if (!String(providerItemId || '').trim()) {
+        return providerInputActive
+            ? BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.MISSING_ITEM_ID
+            : null;
+    }
+    if (type === 'input_audio_buffer.speech_started' && providerItemCapacityExhausted) {
+        return BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_CAPACITY_EXHAUSTED;
+    }
+    return null;
+}
 
 export function captureHeyBeanChatControlFocus(mount) {
     const active = mount?.ownerDocument?.activeElement;
@@ -164,6 +214,143 @@ export function browserVoiceV2LocalWakeMatchesCompletedBarge({
         && identities.snapshotConnectionGeneration === identities.completedConnectionGeneration
         && identities.connectionGeneration === identities.completedConnectionGeneration
         && identities.gateGeneration === identities.completedGateGeneration;
+}
+
+export function activateBrowserVoiceV2LocalWakeTransport({
+    controller,
+    inputTransport,
+    generation,
+    source = 'local_wake_gate',
+} = {}) {
+    if (typeof inputTransport?.activate !== 'function' || typeof controller?.wakeConfirmed !== 'function') {
+        throw new TypeError('Browser voice local wake activation requires its controller and input transport.');
+    }
+    if (inputTransport.activate({ generation }) !== true) {
+        throw new Error('Realtime transcription did not accept the activated wake transport.');
+    }
+
+    return controller.wakeConfirmed({ source });
+}
+
+export function applyBrowserVoiceV2WakeOnlyPrivacyBoundary({
+    snapshot,
+    previousConversationState,
+    event,
+    inputTransport,
+    localWakeGate,
+} = {}) {
+    const eventType = String(event?.type || '');
+    const enteredWakeOnly = Boolean(previousConversationState)
+        && previousConversationState !== BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY;
+    if (snapshot?.conversationState !== BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY
+        || snapshot?.potentialBargeIn
+        || !browserVoiceV2ProviderInputIsActive({ inputTransport })
+        || !enteredWakeOnly
+        || ['provider_ready', 'start'].includes(eventType)) return false;
+
+    inputTransport?.deactivate?.();
+    localWakeGate?.resetAfterTurn?.();
+    return true;
+}
+
+export function applyBrowserVoiceV2PotentialBargeProofCleanup({
+    effect,
+    registry,
+    transcripts,
+    potentialItems,
+    providerWakeTurnIds,
+    connectionGeneration,
+    clearDraft,
+    sendProviderEvent,
+} = {}) {
+    const providerItemId = String(effect?.providerItemId || '').trim();
+    if (effect?.type !== BROWSER_VOICE_EFFECTS.DISCARD_POTENTIAL_BARGE_IN
+        || !providerItemId
+        || !(registry instanceof BrowserVoiceProviderItemRegistryV2)
+        || typeof transcripts?.discardItem !== 'function'
+        || typeof potentialItems?.delete !== 'function'
+        || typeof providerWakeTurnIds?.delete !== 'function'
+        || typeof clearDraft !== 'function'
+        || typeof sendProviderEvent !== 'function') return false;
+
+    const consumed = registry.consume({ providerItemId, connectionGeneration });
+    const bindingOwned = Boolean(consumed)
+        && !browserVoiceProviderItemCapacityExhaustedV2(consumed);
+    const potentialOwned = potentialItems.delete(providerItemId);
+    const wakeOwned = providerWakeTurnIds.delete(providerItemId);
+    if (!bindingOwned && !potentialOwned && !wakeOwned) return false;
+
+    transcripts.discardItem({ itemId: providerItemId });
+    clearDraft('');
+    sendProviderEvent(buildRealtimeConversationItemDeleteEvent(providerItemId));
+    return true;
+}
+
+export function applyBrowserVoiceV2TranscriptionFailure({
+    controller,
+    payload,
+    binding,
+    action = 'capture',
+    reportFailure,
+} = {}) {
+    if (typeof reportFailure !== 'function') {
+        throw new TypeError('Browser voice transcription failure requires diagnostic reporting.');
+    }
+    if (!browserVoiceProviderItemBindingIsCurrentV2(controller, binding)) return null;
+    reportFailure(payload, binding.providerItemId, binding.turnId);
+
+    if (action === 'discard') return null;
+    if (action === 'reject_barge_in') {
+        return controller?.rejectBargeIn?.('transcription_failed', {
+            source: 'provider_transcript',
+            providerItemId: binding.providerItemId,
+        }) || null;
+    }
+    if (action === 'capture') {
+        return controller?.captureFailed?.('transcription_failed', {
+            source: 'provider_transcript',
+            turnId: binding.turnId,
+        }) || null;
+    }
+    throw new TypeError('Browser voice transcription failure action is invalid.');
+}
+
+export function applyBrowserVoiceV2ProviderProtocolFailure({
+    code,
+    reportFailure,
+    teardown,
+    userMessage = 'Bean voice lost track of transcription. Tap the Bean button to reconnect and try again.',
+} = {}) {
+    const protocolCode = String(code || '').trim();
+    if (!Object.values(BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES).includes(protocolCode)) {
+        throw new TypeError('Browser voice provider protocol failure code is invalid.');
+    }
+    const error = Object.assign(new Error('Browser voice provider protocol failed.'), {
+        code: protocolCode,
+    });
+    return teardownBrowserVoiceV2ProviderFailure({
+        error,
+        providerMessage: protocolCode,
+        userMessage,
+        reportFailure,
+        teardown,
+    });
+}
+
+export function teardownBrowserVoiceV2ProviderFailure({
+    error,
+    providerMessage = '',
+    userMessage = 'Bean voice lost its connection. Tap the Bean button to reconnect.',
+    reportFailure,
+    teardown,
+} = {}) {
+    if (typeof reportFailure !== 'function' || typeof teardown !== 'function') {
+        throw new TypeError('Browser voice provider failure requires reporting and teardown.');
+    }
+
+    reportFailure(error, providerMessage);
+    teardown(userMessage, { reportFailure: false, error });
+    return true;
 }
 
 export function mountHeyBeanWebApp(mount) {
@@ -306,9 +493,14 @@ export function mountHeyBeanWebApp(mount) {
     let realtimeVoiceActivityLevel = 0;
     const browserVoiceV2PotentialBargeInItems = new Set();
     const browserVoiceV2ProviderWakeTurnIds = new Map();
-    let browserVoiceV2PendingLocalWakeTurnId = '';
+    const browserVoiceV2ProviderItems = new BrowserVoiceProviderItemRegistryV2();
+    // Ordered provider VAD can claim only the immutable local PCM admission
+    // that preceded it. These records correlate identity; the controller still
+    // owns every lifecycle transition and rejects a record after its turn ends.
+    const browserVoiceV2PendingLocalWakeAdmissions = [];
     let browserVoiceV2CompletedProviderBarge = null;
     let browserVoiceV2LastProviderInputPcm = null;
+    let browserVoiceV2LastConversationState = BROWSER_VOICE_CONVERSATION_STATES.OFF;
     const browserVoiceV2TurnStates = new Map();
     const browserVoiceV2AcknowledgedTurnIds = new Set();
     const browserVoiceV2FinalDeliveredTurnIds = new Set();
@@ -326,6 +518,20 @@ export function mountHeyBeanWebApp(mount) {
     const browserVoiceV2RealtimeUsageEventIds = new Set();
     const browserVoiceV2AppliedStopDirectiveIds = new Set();
     const browserVoiceV2AdmissionRegistry = new BrowserVoiceAdmissionRegistryV2();
+    const browserVoiceV2ClientFailurePageNonce = createVoiceClientFailureNonce();
+    const browserVoiceV2ClientFailureReporter = new VoiceClientFailureReporter({
+        send: (failure) => api('/assistant/voice/client-failures', {
+            method: 'POST',
+            body: failure,
+            timeoutMs: 3000,
+        }),
+        isOnline: () => globalThis.navigator?.onLine !== false,
+        eventTarget: globalThis,
+        storage: globalThis.localStorage,
+        onPersistenceFailure: (diagnostic) => {
+            console.error(diagnostic.message, { code: diagnostic.code });
+        },
+    });
     let chatAnnouncementTimer = 0;
     let chatAnnouncementSessionId = null;
     let chatAnnouncementSeenKeys = new Set();
@@ -541,6 +747,7 @@ export function mountHeyBeanWebApp(mount) {
                 api('/billing/subscription').catch(() => null),
             ]);
             state.user = user;
+            scopeBrowserVoiceV2ClientFailures(user);
             state.subscriptionSummary = subscription;
             state.phase = 'subscription';
             state.error = '';
@@ -621,10 +828,20 @@ export function mountHeyBeanWebApp(mount) {
         state.remember = remember;
     }
 
-    function clearToken() {
+    function clearToken({ discardVoiceDiagnostics = false } = {}) {
+        if (discardVoiceDiagnostics) {
+            browserVoiceV2ClientFailureReporter.clearCurrentScope();
+        } else {
+            browserVoiceV2ClientFailureReporter.deactivateCurrentScope();
+        }
         localStorage.removeItem(tokenKey);
         sessionStorage.removeItem(tokenKey);
         state.token = '';
+    }
+
+    function scopeBrowserVoiceV2ClientFailures(user = state.user) {
+        const userId = String(user?.id ?? '').trim();
+        if (userId) browserVoiceV2ClientFailureReporter.setScope(userId);
     }
 
     function isUnauthenticatedError(error) {
@@ -849,6 +1066,7 @@ export function mountHeyBeanWebApp(mount) {
                 }
             };
             state.user = user;
+            scopeBrowserVoiceV2ClientFailures(user);
             restoreRememberedActiveWorkspace(user);
             state.dashboardChangeLastId = Number(localStorage.getItem(dashboardChangeStorageKey()) || 0);
             const cachedWorkspaceId = currentWorkspaceIdFromUser(state.user);
@@ -1936,6 +2154,7 @@ export function mountHeyBeanWebApp(mount) {
             });
             persistToken(result.token, true);
             state.user = result.user || null;
+            scopeBrowserVoiceV2ClientFailures(state.user);
             state.subscriptionSummary = null;
             state.busy = false;
             state.guidedSignupStep = 'personality';
@@ -6277,6 +6496,7 @@ export function mountHeyBeanWebApp(mount) {
                 state.busy = false;
                 state.subscriptionCheckoutStatus = '';
                 state.user = result.user || null;
+                scopeBrowserVoiceV2ClientFailures(state.user);
                 state.subscriptionSummary = null;
                 state.selectedPlan = result.selected_plan || data.plan || state.selectedPlan || 'premium';
                 state.selectedBillingInterval = normalizedBillingInterval(result.selected_billing_interval || data.billing_interval || state.selectedBillingInterval);
@@ -6365,6 +6585,7 @@ export function mountHeyBeanWebApp(mount) {
                 api('/billing/subscription'),
             ]);
             state.user = user;
+            scopeBrowserVoiceV2ClientFailures(user);
             state.subscriptionSummary = subscription;
             state.busy = false;
             state.error = '';
@@ -9135,9 +9356,28 @@ export function mountHeyBeanWebApp(mount) {
             updateVoiceWakeDraft(effect.text || '');
             return;
         }
+        if (effect.type === BROWSER_VOICE_EFFECTS.DISCARD_POTENTIAL_BARGE_IN) {
+            if (applyBrowserVoiceV2PotentialBargeProofCleanup({
+                effect,
+                registry: browserVoiceV2ProviderItems,
+                transcripts: realtimeInputTranscripts,
+                potentialItems: browserVoiceV2PotentialBargeInItems,
+                providerWakeTurnIds: browserVoiceV2ProviderWakeTurnIds,
+                connectionGeneration: realtimeConnectionGeneration,
+                clearDraft: updateVoiceWakeDraft,
+                sendProviderEvent: realtimeSend,
+            })) render();
+            return;
+        }
         if (effect.type === BROWSER_VOICE_EFFECTS.DISCARD_FOLLOW_UP_CANDIDATE) {
             if (effect.providerItemId) {
-                realtimeInputTranscripts.discard({ itemId: effect.providerItemId, contentIndex: 0 });
+                browserVoiceV2ProviderItems.consume({
+                    providerItemId: effect.providerItemId,
+                    connectionGeneration: realtimeConnectionGeneration,
+                });
+                browserVoiceV2PotentialBargeInItems.delete(effect.providerItemId);
+                browserVoiceV2ProviderWakeTurnIds.delete(effect.providerItemId);
+                realtimeInputTranscripts.discardItem({ itemId: effect.providerItemId });
                 realtimeSend(buildRealtimeConversationItemDeleteEvent(effect.providerItemId));
             }
             updateVoiceWakeDraft('');
@@ -9193,6 +9433,8 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function handleBrowserVoiceV2StateChange(snapshot, event = {}) {
+        const previousConversationState = browserVoiceV2LastConversationState;
+        browserVoiceV2LastConversationState = snapshot.conversationState;
         if (!browserVoiceV2Enabled()) return;
         if (browserVoiceV2CaptureActive(snapshot)) {
             browserVoiceV2Speech.captureStarted(`voice_${snapshot.conversationState}`);
@@ -9202,10 +9444,13 @@ export function mountHeyBeanWebApp(mount) {
             });
         }
         if (snapshot.conversationState === BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY) {
-            if (!['provider_ready', 'start'].includes(String(event.type || ''))) {
-                browserVoiceV2InputTransport.deactivate();
-                realtimeLocalWakeGate?.resetAfterTurn();
-            }
+            applyBrowserVoiceV2WakeOnlyPrivacyBoundary({
+                snapshot,
+                previousConversationState,
+                event,
+                inputTransport: browserVoiceV2InputTransport,
+                localWakeGate: realtimeLocalWakeGate,
+            });
             state.chatRunState = 'Listening for “Hey Bean”…';
         } else if (snapshot.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP) {
             state.chatRunState = 'Listening for follow-up…';
@@ -9218,14 +9463,14 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function browserVoiceV2CaptureActive(snapshot = browserVoiceV2Controller.snapshot()) {
-        return Boolean(snapshot.followUpCandidate) || [
+        return Boolean(snapshot.followUpCandidate || snapshot.potentialBargeIn) || [
             BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING,
             BROWSER_VOICE_CONVERSATION_STATES.CAPTURING,
         ].includes(snapshot.conversationState);
     }
 
     function browserVoiceV2SpeechBlocked(snapshot = browserVoiceV2Controller.snapshot()) {
-        return Boolean(snapshot.followUpCandidate) || [
+        return Boolean(snapshot.followUpCandidate || snapshot.potentialBargeIn) || [
             BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING,
             BROWSER_VOICE_CONVERSATION_STATES.CAPTURING,
             BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION,
@@ -9274,6 +9519,37 @@ export function mountHeyBeanWebApp(mount) {
         return state.messages.length !== before;
     }
 
+    function reportBrowserVoiceV2ClientFailure(error, {
+        stage,
+        identity = [],
+        sessionId = null,
+        turnId = '',
+        label = 'Browser Voice v2 client failure',
+    }) {
+        const stableTurnId = String(turnId || '');
+        const resolvedSessionId = Number(
+            sessionId
+            || realtimeTurnSessionIds.get(stableTurnId)
+            || state.session?.id,
+        );
+        const body = {
+            failure_id: voiceClientFailureId(stage, voiceClientFailureIdentityParts(
+                stage,
+                identity,
+                browserVoiceV2ClientFailurePageNonce,
+            )),
+            ...sanitizedVoiceClientFailure(error, stage),
+            ...(Number.isSafeInteger(resolvedSessionId) && resolvedSessionId > 0
+                ? { session_id: resolvedSessionId }
+                : {}),
+            ...(stableTurnId ? { turn_id: stableTurnId } : {}),
+        };
+        if (browserVoiceV2ClientFailureReporter.enqueue(body)) {
+            console.warn(label, body);
+        }
+        return body;
+    }
+
     function failBrowserVoiceV2Admission(turnId, isCurrent, error = null) {
         removeBrowserVoiceV2ProvisionalMessage(turnId);
         if (!isCurrent || browserVoiceV2AdmissionFailureTurnIds.has(turnId)) {
@@ -9282,13 +9558,12 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         browserVoiceV2AdmissionFailureTurnIds.add(turnId);
-        const diagnostic = sanitizedLocalWakeFailure(error, 'admission');
-        console.warn('Browser Voice v2 admission failure', diagnostic);
-        void api('/assistant/voice/client-failures', {
-            method: 'POST',
-            body: diagnostic,
-            timeoutMs: 3000,
-        }).catch(() => {});
+        reportBrowserVoiceV2ClientFailure(error, {
+            stage: 'admission',
+            identity: [turnId],
+            turnId,
+            label: 'Browser Voice v2 admission failure',
+        });
         browserVoiceV2Controller.admissionFailed(turnId, 'admission_recovery_exhausted', {
             source: 'admission_recovery',
         });
@@ -9435,16 +9710,13 @@ export function mountHeyBeanWebApp(mount) {
 
         state.error = 'I couldn’t save that answer because the connection did not recover. Your words are still in the input so you can try again.';
         state.chatRunState = 'Waiting for your answer…';
-        const diagnostic = sanitizedLocalWakeFailure(lastError, 'clarification');
-        void api('/assistant/voice/client-failures', {
-            method: 'POST',
-            body: {
-                ...diagnostic,
-                session_id: Number(sessionId),
-                turn_id: turnId,
-            },
-        }).catch(() => {});
-        console.warn('Browser Voice v2 clarification failure', diagnostic);
+        reportBrowserVoiceV2ClientFailure(lastError, {
+            stage: 'clarification',
+            identity: [clarificationId],
+            sessionId,
+            turnId,
+            label: 'Browser Voice v2 clarification failure',
+        });
         render();
     }
 
@@ -9723,6 +9995,10 @@ export function mountHeyBeanWebApp(mount) {
         realtimeVoiceActivityLevel = 0;
         state.voiceRecording = false;
         realtimeInputTranscripts.clear();
+        browserVoiceV2ProviderItems.clear();
+        browserVoiceV2PotentialBargeInItems.clear();
+        browserVoiceV2ProviderWakeTurnIds.clear();
+        browserVoiceV2PendingLocalWakeAdmissions.length = 0;
         applyRealtimeVoiceActivity();
     }
 
@@ -9819,24 +10095,48 @@ export function mountHeyBeanWebApp(mount) {
 
         browserVoiceV2CompletedProviderBarge = null;
         browserVoiceV2LastProviderInputPcm = null;
-        browserVoiceV2InputTransport.activate({ generation: gate.currentGeneration() });
-        const wake = browserVoiceV2Controller.wakeConfirmed({ source: 'local_wake_gate' });
-        browserVoiceV2PendingLocalWakeTurnId = wake.state.activeTurn?.id || '';
+        const wake = activateBrowserVoiceV2LocalWakeTransport({
+            controller: browserVoiceV2Controller,
+            inputTransport: browserVoiceV2InputTransport,
+            generation: gate.currentGeneration(),
+        });
+        const admission = createBrowserVoiceProviderTurnIdentityV2(browserVoiceV2Controller, {
+            turnId: wake.state.activeTurn?.id || '',
+            inputGeneration: gate.currentGeneration(),
+            throughSourceSequence: detection.sourceSequence,
+            providerConnectionGeneration: connectionGeneration,
+        });
+        if (!admission) {
+            failBrowserVoiceV2ProviderProtocol(
+                BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_TURN_MISMATCH,
+            );
+            return;
+        }
+        browserVoiceV2PendingLocalWakeAdmissions.push(admission);
         updateVoiceWakeDraft('');
         state.chatRunState = 'Listening…';
         render();
     }
 
+    function handleLocalWakeDiagnostic(gate, connectionGeneration, diagnostic = {}) {
+        if (!localWakeConnectionIsCurrent(gate, connectionGeneration)) return;
+        // LocalWakeGate exposes only bounded wake-decision metadata—never PCM or
+        // dormant transcript text. Keep local decisions visible during
+        // development without turning diagnostic telemetry into another owner.
+        console.info('Browser Voice v2 local wake decision', diagnostic);
+    }
+
     function handleLocalWakeFailure(gate, connectionGeneration, error = null) {
         if (!localWakeConnectionIsCurrent(gate, connectionGeneration)) return;
-        const diagnostic = sanitizedLocalWakeFailure(error);
-        console.warn('Browser Voice v2 local wake failure', diagnostic);
-        void api('/assistant/voice/client-failures', {
-            method: 'POST',
-            body: diagnostic,
-            timeoutMs: 3000,
-        }).catch(() => {});
-        handleRealtimeConnectionLoss('Private “Hey Bean” detection stopped. Tap the Bean button to reconnect.');
+        reportBrowserVoiceV2ClientFailure(error, {
+            stage: 'local_wake',
+            identity: [connectionGeneration, gate.currentGeneration()],
+            label: 'Browser Voice v2 local wake failure',
+        });
+        handleRealtimeConnectionLoss(
+            'Private “Hey Bean” detection stopped. Tap the Bean button to reconnect.',
+            { reportFailure: false },
+        );
     }
 
     async function waitForLocalWakeReady(gate, connectionGeneration, timeoutMs = 20000) {
@@ -9929,6 +10229,11 @@ export function mountHeyBeanWebApp(mount) {
                     updateRealtimeVoiceActivity(level);
                 }
             },
+            onDiagnostic: (diagnostic) => handleLocalWakeDiagnostic(
+                localWakeGate,
+                connectionGeneration,
+                diagnostic,
+            ),
             onError: (error) => handleLocalWakeFailure(localWakeGate, connectionGeneration, error),
         });
         realtimeLocalWakeGate = localWakeGate;
@@ -10090,25 +10395,56 @@ export function mountHeyBeanWebApp(mount) {
         return localWakeGate;
     }
 
-    function handleRealtimeConnectionLoss(message) {
+    function reportBrowserVoiceV2ConnectionFailure(error, message) {
+        const controller = browserVoiceV2Controller.snapshot();
+        const turnId = String(controller.followUpCandidate?.id || controller.activeTurn?.id || '');
+        reportBrowserVoiceV2ClientFailure(
+            error || Object.assign(new Error(message), { code: 'provider_connection_error' }),
+            {
+                stage: 'connection',
+                identity: [realtimeConnectionGeneration],
+                turnId,
+                label: 'Browser Voice v2 connection failure',
+            },
+        );
+    }
+
+    function handleRealtimeConnectionLoss(message, { reportFailure = true, error = null } = {}) {
         if (!realtimeVoiceActive && !state.voiceWakeListening && !state.voiceProcessing) return;
+        if (reportFailure) reportBrowserVoiceV2ConnectionFailure(error, message);
         browserVoiceV2Controller.dispatch({ type: 'connection_lost', source: 'webrtc', reason: message });
         stopVoiceWakeListening({ clearDraft: false, reason: 'connection_lost' });
         state.error = message;
         render();
     }
 
-    function bindBrowserVoiceV2ProviderItemToLocalWake(transcriptId) {
-        if (!transcriptId || !browserVoiceV2PendingLocalWakeTurnId
-            || browserVoiceV2ProviderWakeTurnIds.has(transcriptId)) return '';
+    function reportBrowserVoiceV2ProviderProtocolFailure(error, protocolCode) {
         const controller = browserVoiceV2Controller.snapshot();
-        if (controller.activeTurn?.id !== browserVoiceV2PendingLocalWakeTurnId) {
-            browserVoiceV2PendingLocalWakeTurnId = '';
-            return '';
-        }
-        browserVoiceV2ProviderWakeTurnIds.set(transcriptId, browserVoiceV2PendingLocalWakeTurnId);
-        browserVoiceV2PendingLocalWakeTurnId = '';
-        return controller.activeTurn.id;
+        const turnId = String(
+            controller.followUpCandidate?.id
+            || controller.activeTurn?.id
+            || controller.potentialBargeIn?.ownerTurnId
+            || '',
+        );
+        reportBrowserVoiceV2ClientFailure(error, {
+            stage: 'connection',
+            identity: [realtimeConnectionGeneration, protocolCode],
+            turnId,
+            label: 'Browser Voice v2 provider protocol failure',
+        });
+    }
+
+    function failBrowserVoiceV2ProviderProtocol(protocolCode) {
+        return applyBrowserVoiceV2ProviderProtocolFailure({
+            code: protocolCode,
+            reportFailure: (error) => reportBrowserVoiceV2ProviderProtocolFailure(error, protocolCode),
+            teardown: handleRealtimeConnectionLoss,
+        });
+    }
+
+    function claimBrowserVoiceV2ProviderItemLocalWakeAdmission(transcriptId) {
+        if (!transcriptId || browserVoiceV2ProviderWakeTurnIds.has(transcriptId)) return null;
+        return browserVoiceV2PendingLocalWakeAdmissions.shift() || null;
     }
 
     function rememberBrowserVoiceV2CompletedProviderBarge(turnId) {
@@ -10145,6 +10481,15 @@ export function mountHeyBeanWebApp(mount) {
             || type.startsWith('response.output_text.');
     }
 
+    function reportBrowserVoiceV2TranscriptionFailure(payload, transcriptId, turnId) {
+        reportBrowserVoiceV2ClientFailure(payload?.error, {
+            stage: 'transcription',
+            identity: [transcriptId || payload?.event_id || turnId || realtimeConnectionGeneration],
+            turnId,
+            label: 'Browser Voice v2 transcription failure',
+        });
+    }
+
     function handleBrowserVoiceV2RealtimeEvent(payload) {
         if (!browserVoiceV2Enabled()) return false;
         const usageReport = realtimeUsageReportFromProviderEvent(payload);
@@ -10160,16 +10505,70 @@ export function mountHeyBeanWebApp(mount) {
             return true;
         }
         if (isBrowserVoiceV2RealtimeOutputEvent(type)) return true;
-        if (type === 'input_audio_buffer.speech_started') {
-            const transcriptId = payload.item_id || payload.item?.id || '';
-            updateRealtimeVoiceActivity(Math.max(realtimeVoiceActivityLevel, 0.72));
-            const ingress = routeBrowserVoiceRealtimeIngressV2(browserVoiceV2Controller, {
-                type: 'speech_started',
-                providerItemId: transcriptId || null,
+        const providerItemId = payload?.item_id || payload?.item?.id || '';
+        const knownProviderItem = type === 'input_audio_buffer.speech_started'
+            && providerItemId
+            && browserVoiceV2ProviderItems.has({
+                providerItemId,
+                connectionGeneration: realtimeConnectionGeneration,
             });
+        const protocolFailure = browserVoiceV2ProviderProtocolFailureForEvent({
+            eventType: type,
+            providerInputActive: browserVoiceV2ProviderInputIsActive({
+                inputTransport: browserVoiceV2InputTransport,
+            }),
+            providerItemId,
+            providerItemCapacityExhausted: type === 'input_audio_buffer.speech_started'
+                && !knownProviderItem
+                && browserVoiceV2ProviderItems.capacityExhausted,
+        });
+        if (protocolFailure) return failBrowserVoiceV2ProviderProtocol(protocolFailure);
+        if (type === 'input_audio_buffer.speech_started') {
+            const transcriptId = providerItemId;
+            if (!transcriptId) return true;
+            if (browserVoiceV2ProviderItems.has({
+                providerItemId: transcriptId,
+                connectionGeneration: realtimeConnectionGeneration,
+            })) return true;
+            updateRealtimeVoiceActivity(Math.max(realtimeVoiceActivityLevel, 0.72));
+            const providerWakeAdmission = claimBrowserVoiceV2ProviderItemLocalWakeAdmission(transcriptId);
+            const { result: ingress, binding, staleTurnIdentity } = bindBrowserVoiceProviderSpeechStartedV2(
+                browserVoiceV2Controller,
+                browserVoiceV2ProviderItems,
+                {
+                    providerItemId: transcriptId,
+                    connectionGeneration: realtimeConnectionGeneration,
+                    turnIdentity: providerWakeAdmission,
+                    inputGeneration: browserVoiceV2InputTransport.activeGeneration,
+                    throughSourceSequence: browserVoiceV2LastProviderInputPcm?.sourceSequence,
+                },
+            );
+            if (ingress === BROWSER_VOICE_REALTIME_INGRESS_RESULTS.CAPACITY_EXHAUSTED) {
+                return failBrowserVoiceV2ProviderProtocol(
+                    BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_CAPACITY_EXHAUSTED,
+                );
+            }
+            if (!binding) {
+                browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
+                if (staleTurnIdentity && browserVoiceV2ProviderInputIsActive({
+                    inputTransport: browserVoiceV2InputTransport,
+                })) {
+                    return failBrowserVoiceV2ProviderProtocol(
+                        BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_TURN_MISMATCH,
+                    );
+                }
+                return true;
+            }
+            if (providerWakeAdmission) {
+                browserVoiceV2ProviderWakeTurnIds.set(transcriptId, binding.turnId);
+            }
             if (ingress === BROWSER_VOICE_REALTIME_INGRESS_RESULTS.POTENTIAL_BARGE_IN) {
-                if (transcriptId) browserVoiceV2PotentialBargeInItems.add(transcriptId);
-                browserVoiceV2Controller.potentialBargeIn('potential_speech', { source: 'provider_vad' });
+                browserVoiceV2PotentialBargeInItems.add(transcriptId);
+                browserVoiceV2Controller.potentialBargeIn('potential_speech', {
+                    source: 'provider_vad',
+                    ownerTurnId: binding.turnId,
+                    providerItemId: transcriptId,
+                });
             }
             return true;
         }
@@ -10181,14 +10580,31 @@ export function mountHeyBeanWebApp(mount) {
             || (type === 'conversation.item.created' && payload.item?.role === 'user')) return true;
 
         if (type === 'conversation.item.input_audio_transcription.delta') {
-            const transcriptId = payload.item_id || payload.item?.id || '';
-            if (!transcriptId) return true;
+            const transcriptId = providerItemId;
+            const binding = currentBrowserVoiceProviderItemBindingV2(
+                browserVoiceV2ProviderItems,
+                browserVoiceV2Controller,
+                {
+                    providerItemId: transcriptId,
+                    connectionGeneration: realtimeConnectionGeneration,
+                },
+            );
+            if (browserVoiceProviderItemCapacityExhaustedV2(binding)) {
+                return failBrowserVoiceV2ProviderProtocol(
+                    BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_CAPACITY_EXHAUSTED,
+                );
+            }
+            if (!binding) {
+                browserVoiceV2PotentialBargeInItems.delete(transcriptId);
+                browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
+                realtimeInputTranscripts.discardItem({ itemId: transcriptId });
+                return true;
+            }
             const draft = realtimeInputTranscripts.append({
                 itemId: transcriptId,
                 contentIndex: payload.content_index,
                 delta: payload.delta,
             });
-            bindBrowserVoiceV2ProviderItemToLocalWake(transcriptId);
             // Realtime can transcribe only PCM released by the local gate. Its
             // words may strip an already-confirmed wake prefix, but they can
             // never become a second dormant-activation authority.
@@ -10213,20 +10629,41 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         if (type === 'conversation.item.input_audio_transcription.completed') {
-            const transcriptId = payload.item_id || payload.item?.id || '';
+            const transcriptId = providerItemId;
+            const binding = currentBrowserVoiceProviderItemBindingV2(
+                browserVoiceV2ProviderItems,
+                browserVoiceV2Controller,
+                {
+                    providerItemId: transcriptId,
+                    connectionGeneration: realtimeConnectionGeneration,
+                    consume: true,
+                },
+            );
+            if (browserVoiceProviderItemCapacityExhaustedV2(binding)) {
+                return failBrowserVoiceV2ProviderProtocol(
+                    BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_CAPACITY_EXHAUSTED,
+                );
+            }
+            if (!binding) {
+                browserVoiceV2PotentialBargeInItems.delete(transcriptId);
+                browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
+                realtimeInputTranscripts.discardItem({ itemId: transcriptId });
+                return true;
+            }
             const transcript = realtimeInputTranscripts.complete({
                 itemId: transcriptId,
                 contentIndex: payload.content_index,
                 transcript: payload.transcript,
             });
-            bindBrowserVoiceV2ProviderItemToLocalWake(transcriptId);
+            realtimeInputTranscripts.discardItem({ itemId: transcriptId });
             const wakeConfirmed = browserVoiceV2ProviderWakeTurnIds.has(transcriptId);
             const potentialBargeIn = browserVoiceV2PotentialBargeInItems.delete(transcriptId);
             updateRealtimeVoiceActivity(0, { decay: false });
             if (potentialBargeIn && !isMeaningfulBrowserVoiceV2Interruption(transcript)) {
-                if (browserVoiceV2Controller.snapshot().speechActive) {
-                    browserVoiceV2Controller.rejectBargeIn('background_or_noise', { source: 'provider_transcript' });
-                }
+                browserVoiceV2Controller.rejectBargeIn('background_or_noise', {
+                    source: 'provider_transcript',
+                    providerItemId: transcriptId,
+                });
                 updateVoiceWakeDraft('');
                 if (transcriptId) realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
                 render();
@@ -10234,8 +10671,12 @@ export function mountHeyBeanWebApp(mount) {
             }
             if (potentialBargeIn) {
                 const controller = browserVoiceV2Controller.snapshot();
-                if (controller.speechActive) {
-                    const confirmed = browserVoiceV2Controller.confirmBargeIn({ source: 'provider_transcript' });
+                const pendingBargeMatches = controller.potentialBargeIn?.providerItemId === transcriptId;
+                if (controller.speechActive || pendingBargeMatches) {
+                    const confirmed = browserVoiceV2Controller.confirmBargeIn({
+                        source: 'provider_transcript',
+                        providerItemId: transcriptId,
+                    });
                     if (confirmed.state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING) {
                         // The utterance is already complete, so establish the
                         // controller capture synchronously before routing it.
@@ -10289,26 +10730,37 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         if (type === 'conversation.item.input_audio_transcription.failed') {
-            const transcriptId = payload.item_id || payload.item?.id || '';
-            const potentialBargeIn = browserVoiceV2PotentialBargeInItems.delete(transcriptId);
-            const wakeConfirmed = browserVoiceV2ProviderWakeTurnIds.has(transcriptId);
-            browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
-            realtimeInputTranscripts.discard({ itemId: transcriptId, contentIndex: payload.content_index });
-            updateRealtimeVoiceActivity(0, { decay: false });
-            if (potentialBargeIn && browserVoiceV2Controller.snapshot().speechActive) {
-                // A failed transcript cannot confirm meaningful speech. Restore
-                // the current response instead of leaving it permanently ducked
-                // or manufacturing a new user turn from an unknown utterance.
-                browserVoiceV2Controller.rejectBargeIn('transcription_failed', {
-                    source: 'provider_transcript',
-                });
-                updateVoiceWakeDraft('');
-                if (transcriptId) realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
-                state.error = '';
-                render();
-                return true;
+            const transcriptId = providerItemId;
+            const binding = currentBrowserVoiceProviderItemBindingV2(
+                browserVoiceV2ProviderItems,
+                browserVoiceV2Controller,
+                {
+                    providerItemId: transcriptId,
+                    connectionGeneration: realtimeConnectionGeneration,
+                    consume: true,
+                },
+            );
+            if (browserVoiceProviderItemCapacityExhaustedV2(binding)) {
+                return failBrowserVoiceV2ProviderProtocol(
+                    BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_CAPACITY_EXHAUSTED,
+                );
             }
-            if (potentialBargeIn && !wakeConfirmed) {
+            const potentialBargeIn = browserVoiceV2PotentialBargeInItems.delete(transcriptId);
+            browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
+            realtimeInputTranscripts.discardItem({ itemId: transcriptId });
+            updateRealtimeVoiceActivity(0, { decay: false });
+            if (!binding) return true;
+            if (potentialBargeIn) {
+                // A failed transcript cannot confirm meaningful speech. Restore
+                // the current response when it is still playing, or release the
+                // exact pending proof after its owning playback has ended.
+                applyBrowserVoiceV2TranscriptionFailure({
+                    controller: browserVoiceV2Controller,
+                    payload,
+                    binding,
+                    action: 'reject_barge_in',
+                    reportFailure: reportBrowserVoiceV2TranscriptionFailure,
+                });
                 updateVoiceWakeDraft('');
                 if (transcriptId) realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
                 state.error = '';
@@ -10317,12 +10769,22 @@ export function mountHeyBeanWebApp(mount) {
             }
             const followUpCandidate = browserVoiceV2Controller.snapshot().followUpCandidate;
             if (followUpCandidate) {
-                browserVoiceV2Controller.captureFailed('transcription_failed', { source: 'provider_transcript' });
+                applyBrowserVoiceV2TranscriptionFailure({
+                    controller: browserVoiceV2Controller,
+                    payload,
+                    binding,
+                    reportFailure: reportBrowserVoiceV2TranscriptionFailure,
+                });
                 state.error = '';
                 render();
                 return true;
             }
-            browserVoiceV2Controller.captureFailed('transcription_failed', { source: 'provider_transcript' });
+            applyBrowserVoiceV2TranscriptionFailure({
+                controller: browserVoiceV2Controller,
+                payload,
+                binding,
+                reportFailure: reportBrowserVoiceV2TranscriptionFailure,
+            });
             state.error = 'Voice transcription failed. Please try again.';
             render();
             return true;
@@ -10337,10 +10799,12 @@ export function mountHeyBeanWebApp(mount) {
         if (type === 'error') {
             const providerMessage = String(payload.error?.message || '');
             if (/cancell?ation failed|no active response|response.*already.*(?:done|cancel)/i.test(providerMessage)) return true;
-            browserVoiceV2Controller.dispatch({ type: 'connection_failed', source: 'provider', reason: 'provider_connection_error' });
-            state.error = 'Bean voice lost its connection. Tap the Bean button to reconnect.';
-            render();
-            return true;
+            return teardownBrowserVoiceV2ProviderFailure({
+                error: payload.error,
+                providerMessage,
+                reportFailure: reportBrowserVoiceV2ConnectionFailure,
+                teardown: handleRealtimeConnectionLoss,
+            });
         }
         return false;
     }
@@ -10352,7 +10816,7 @@ export function mountHeyBeanWebApp(mount) {
         if (!usageSessionId || !eventId || browserVoiceV2RealtimeUsageEventIds.has(eventId)) return;
         browserVoiceV2RealtimeUsageEventIds.add(eventId);
         try {
-            await reportRealtimeUsageReliably(report, {
+            await reportVoiceEventReliably(report, {
                 send: () => api('/assistant/voice/realtime/usage', {
                     method: 'POST',
                     body: {
@@ -10366,19 +10830,18 @@ export function mountHeyBeanWebApp(mount) {
                     // instead of disabling an otherwise healthy voice session.
                     timeoutMs: 10000,
                 }),
+                shouldRetry: (error) => Number(error?.status || 0) !== 402,
             });
         } catch (error) {
             browserVoiceV2RealtimeUsageEventIds.delete(eventId);
             if (connectionGeneration !== realtimeConnectionGeneration
                 || usageSessionId !== String(realtimeSession?.usage_session_id || '')) return;
             if (Number(error?.status || 0) !== 402) {
-                const diagnostic = sanitizedLocalWakeFailure(error, 'usage_accounting');
-                console.warn('Browser Voice v2 usage accounting failure', diagnostic);
-                void api('/assistant/voice/client-failures', {
-                    method: 'POST',
-                    body: diagnostic,
-                    timeoutMs: 3000,
-                }).catch(() => {});
+                reportBrowserVoiceV2ClientFailure(error, {
+                    stage: 'usage_accounting',
+                    identity: [usageSessionId, eventId],
+                    label: 'Browser Voice v2 usage accounting failure',
+                });
             }
             stopVoiceWakeListening({ clearDraft: true, reason: Number(error?.status || 0) === 402 ? 'usage_limit' : 'usage_accounting_failed' });
             state.error = Number(error?.status || 0) === 402
@@ -10463,7 +10926,7 @@ export function mountHeyBeanWebApp(mount) {
         browserVoiceV2PotentialBargeInItems.clear();
         browserVoiceV2ProviderWakeTurnIds.clear();
         browserVoiceV2RealtimeUsageEventIds.clear();
-        browserVoiceV2PendingLocalWakeTurnId = '';
+        browserVoiceV2PendingLocalWakeAdmissions.length = 0;
         browserVoiceV2CompletedProviderBarge = null;
         browserVoiceV2LastProviderInputPcm = null;
         realtimeVoiceActive = false;
@@ -10549,12 +11012,11 @@ export function mountHeyBeanWebApp(mount) {
             render();
         } catch (error) {
             if (connectionGeneration !== realtimeConnectionGeneration) return;
-            const diagnostic = sanitizedLocalWakeFailure(error, 'startup');
-            void api('/assistant/voice/client-failures', {
-                method: 'POST',
-                body: diagnostic,
-                timeoutMs: 3000,
-            }).catch(() => {});
+            reportBrowserVoiceV2ClientFailure(error, {
+                stage: 'startup',
+                identity: [connectionGeneration],
+                label: 'Browser Voice v2 startup failure',
+            });
             stopVoiceWakeListening({ clearDraft: false });
             state.error = Number(error?.status || 0) === 402
                 ? friendlyError(error, 'start realtime Bean voice')
@@ -11908,7 +12370,7 @@ export function mountHeyBeanWebApp(mount) {
         try {
             await api('/account', { method: 'DELETE' });
             stopDashboardChangeFeed();
-            clearToken();
+            clearToken({ discardVoiceDiagnostics: true });
             state.phase = 'signedOut';
             state.authMode = 'login';
             state.user = null;

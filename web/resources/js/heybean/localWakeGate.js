@@ -1,9 +1,25 @@
-export const LOCAL_WAKE_GATE_PROCESSOR_URL = '/voice/wake/gate-processor.js?v=14';
-export const LOCAL_WAKE_WORKER_URL = '/voice/wake/wake-worker.js?v=14';
+export const LOCAL_WAKE_GATE_PROCESSOR_URL = '/voice/wake/gate-processor.js?v=16';
+export const LOCAL_WAKE_WORKER_URL = '/voice/wake/wake-worker.js?v=16';
 export const LOCAL_WAKE_GATE_PROCESSOR_NAME = 'hey-bean-gate';
-export const LOCAL_WAKE_ADDRESS_CONFIRMATION_MS = 3000;
 export const LOCAL_WAKE_PCM_SAMPLE_RATE = 16000;
 export const LOCAL_WAKE_PCM_RING_CHUNKS = 80;
+export const LOCAL_WAKE_PCM_ACK_TIMEOUT_MS = 2000;
+export const LOCAL_WAKE_WORKER_FAILURE_DETAIL_TIMEOUT_MS = 250;
+
+const LOCAL_WAKE_WORKER_FAILURE_CODES = Object.freeze(new Set([
+    'decode_failed',
+    'initialization_failed',
+    'invalid_audio',
+    'invalid_generation',
+    'invalid_message',
+    'invalid_message_type',
+    'invalid_sequence',
+    'reset_failed',
+    'runtime_load_failed',
+    'unhandled_rejection',
+    'worker_error',
+]));
+const LOCAL_WAKE_FATAL_ACK_REASONS = Object.freeze(new Set(['decode_failed']));
 
 export class LocalWakeGateError extends Error {
     constructor(message, { code = 'local_wake_gate_error', cause } = {}) {
@@ -21,6 +37,22 @@ function errorFromEvent(event, fallback) {
     if (event?.error instanceof Error) return event.error;
     if (event instanceof Error) return event;
     return new Error(String(event?.message || fallback));
+}
+
+function sanitizedWorkerFailureCode(value) {
+    const code = String(value || '').trim();
+    return LOCAL_WAKE_WORKER_FAILURE_CODES.has(code) ? code : 'worker_error';
+}
+
+function sanitizedWorkerFailureMessage(value, fallback = 'The local wake detector failed.') {
+    const message = String(value || fallback)
+        .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+        .replace(/\b(?:sk|pk)-[A-Za-z0-9_-]+\b/g, '[redacted]')
+        .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 240);
+    return message || fallback;
 }
 
 function isSameOriginStaticPath(value) {
@@ -44,7 +76,7 @@ export class LocalWakeGate {
             ? Math.min(requestedInFlightPcm, 32)
             : 12;
         const requestedBufferedPcm = Math.floor(Number(options.maxBufferedPcm));
-        // Each worklet chunk is 100 ms at 16 kHz. Keep a bounded, memory-only
+        // Each worklet chunk is 80 ms at 16 kHz. Keep a bounded, memory-only
         // startup ring so a wake phrase spoken while the local model is warming
         // is decoded once the worker becomes ready instead of being discarded.
         this.maxBufferedPcm = Number.isFinite(requestedBufferedPcm) && requestedBufferedPcm > 0
@@ -72,11 +104,16 @@ export class LocalWakeGate {
         this.clearTimeout = typeof cancelTimeout === 'function'
             ? cancelTimeout.bind(globalThis)
             : globalThis.clearTimeout.bind(globalThis);
-        const requestedConfirmationMs = Math.floor(Number(options.addressConfirmationMs));
-        this.addressConfirmationMs = Number.isFinite(requestedConfirmationMs)
-            ? Math.max(250, Math.min(LOCAL_WAKE_ADDRESS_CONFIRMATION_MS, requestedConfirmationMs))
-            : LOCAL_WAKE_ADDRESS_CONFIRMATION_MS;
-
+        const now = injected(options, 'now', () => (
+            typeof globalThis.performance?.now === 'function'
+                ? globalThis.performance.now()
+                : Date.now()
+        ));
+        this.now = typeof now === 'function' ? now : Date.now;
+        const requestedPcmAckTimeoutMs = Math.floor(Number(options.pcmAckTimeoutMs));
+        this.pcmAckTimeoutMs = Number.isFinite(requestedPcmAckTimeoutMs)
+            ? Math.max(250, Math.min(5000, requestedPcmAckTimeoutMs))
+            : LOCAL_WAKE_PCM_ACK_TIMEOUT_MS;
         this.state = 'idle';
         this.generation = 0;
         this.workletReady = false;
@@ -85,7 +122,6 @@ export class LocalWakeGate {
         this.audioFlowReady = false;
         this.gateOpen = false;
         this.readyReportedGeneration = 0;
-        this.addressCandidateTimer = null;
         this.pendingWakeConfirmation = null;
         this.nextPcmSequence = 1;
         this.lastAcknowledgedPcmSequence = 0;
@@ -93,6 +129,11 @@ export class LocalWakeGate {
             ? this.nextPcmSequence
             : Number.POSITIVE_INFINITY;
         this.inFlightPcm = new Set();
+        this.inFlightPcmSentAt = new Map();
+        this.pcmAckWatchdogTimer = null;
+        this.pcmAckWatchdogToken = null;
+        this.pendingWorkerFailure = null;
+        this.workerFailureDetailTimer = null;
         this.bufferedPcm = [];
         this.localPcmRing = [];
         this.lastSourceSequence = -1;
@@ -113,7 +154,7 @@ export class LocalWakeGate {
             && this.audioSinkReady
             && this.workerReady
             && this.audioFlowReady
-            && !['failed', 'stopping', 'stopped'].includes(this.state);
+            && !['failed', 'failure_pending', 'stopping', 'stopped'].includes(this.state);
     }
 
     isConsumerAdmissionReady() {
@@ -182,7 +223,8 @@ export class LocalWakeGate {
         this.bufferedPcm = [];
         this.localPcmRing = [];
         this.lastSourceSequence = -1;
-        this.#clearAddressCandidateTimer();
+        this.#resetPcmAckWatchdog();
+        this.#clearPendingWorkerFailure();
 
         try {
             this.#assertSupported(rawStream);
@@ -264,8 +306,7 @@ export class LocalWakeGate {
                 this.workerReady = false;
                 this.audioFlowReady = false;
                 this.pendingWakeConfirmation = null;
-                this.#clearAddressCandidateTimer();
-                this.inFlightPcm.clear();
+                this.#resetPcmAckWatchdog();
                 this.bufferedPcm = [];
                 this.localPcmRing = [];
                 await this.#teardown();
@@ -279,6 +320,7 @@ export class LocalWakeGate {
     close() {
         this.#reportActivity(0, this.generation);
         const closeError = this.#forceClosed(this.generation);
+        this.#clearPcmAckWatchdogTimer();
         if (closeError) {
             this.#fail(closeError, this.generation);
             return false;
@@ -293,7 +335,8 @@ export class LocalWakeGate {
 
     resetAfterTurn() {
         if (!this.close()) return false;
-        if (!this.worker || !this.workletNode || this.state === 'failed') return false;
+        if (!this.worker || !this.workletNode
+            || ['failed', 'failure_pending'].includes(this.state)) return false;
 
         try {
             return this.#rearmDormant('turn_reset');
@@ -311,14 +354,14 @@ export class LocalWakeGate {
         const closeError = this.#forceClosed(this.generation);
         if (closeError) this.#reportError(closeError);
 
-        this.#clearAddressCandidateTimer();
+        this.#resetPcmAckWatchdog();
+        this.#clearPendingWorkerFailure();
         this.generation += 1;
         this.workletReady = false;
         this.audioSinkReady = false;
         this.workerReady = false;
         this.audioFlowReady = false;
         this.pendingWakeConfirmation = null;
-        this.inFlightPcm.clear();
         this.bufferedPcm = [];
         this.localPcmRing = [];
         this.lastSourceSequence = -1;
@@ -378,7 +421,7 @@ export class LocalWakeGate {
     }
 
     #handleWorkletMessage(event, generation) {
-        if (generation !== this.generation || this.state === 'failed') return;
+        if (generation !== this.generation || ['failed', 'failure_pending'].includes(this.state)) return;
 
         const data = event?.data || {};
         if (data.type === 'error') {
@@ -469,6 +512,8 @@ export class LocalWakeGate {
         const sequence = this.nextPcmSequence;
         this.nextPcmSequence += 1;
         this.inFlightPcm.add(sequence);
+        this.inFlightPcmSentAt.set(sequence, this.#monotonicNow());
+        this.#armPcmAckWatchdog(generation);
 
         try {
             this.worker.postMessage({
@@ -480,6 +525,7 @@ export class LocalWakeGate {
             }, [pcm]);
         } catch (cause) {
             this.inFlightPcm.delete(sequence);
+            this.inFlightPcmSentAt.delete(sequence);
             this.#fail(new LocalWakeGateError('The local wake detector could not accept audio.', {
                 code: 'pcm_transfer_failed',
                 cause,
@@ -573,24 +619,59 @@ export class LocalWakeGate {
 
         const data = event?.data || {};
         if (data.generation !== generation) return;
+        if (this.state === 'failure_pending') {
+            if (data.type === 'error') {
+                this.#fail(this.#workerMessageError(data), generation);
+            }
+            return;
+        }
 
         if (data.type === 'ack') {
             const sequence = Number(data.sequence);
-            this.inFlightPcm.delete(sequence);
-            if (data.accepted === true) {
-                if (Number.isSafeInteger(sequence) && sequence >= 0) {
-                    this.lastAcknowledgedPcmSequence = sequence;
+            const oldestInFlightSequence = this.inFlightPcm.values().next().value;
+            if (!Number.isSafeInteger(sequence)
+                || sequence < 0
+                || sequence !== oldestInFlightSequence) {
+                this.#fail(new LocalWakeGateError(
+                    'The local wake detector returned an invalid audio acknowledgement.',
+                    { code: 'invalid_pcm_ack_sequence' },
+                ), generation);
+                return;
+            }
+            const activationPending = data.accepted !== true
+                && data.reason === 'activation_pending'
+                && this.gateOpen;
+            if (data.accepted !== true && !activationPending) {
+                const fatalReason = String(data.reason || '');
+                if (LOCAL_WAKE_FATAL_ACK_REASONS.has(fatalReason)) {
+                    this.#beginWorkerFailureDetailWait({
+                        generation,
+                        reason: fatalReason,
+                        sequence,
+                    });
+                    return;
                 }
+                this.#fail(new LocalWakeGateError(
+                    'The local wake detector rejected live microphone processing.',
+                    { code: 'pcm_decode_rejected' },
+                ), generation);
+                return;
+            }
+
+            this.#clearPcmAckWatchdogTimer();
+            this.inFlightPcm.delete(sequence);
+            this.inFlightPcmSentAt.delete(sequence);
+            if (data.accepted === true) {
+                this.lastAcknowledgedPcmSequence = sequence;
                 this.audioFlowReady = true;
                 this.#maybeBecomeReady(generation);
             }
             this.#drainBufferedPcm(generation);
+            this.#armPcmAckWatchdog(generation);
             return;
         }
         if (data.type === 'error') {
-            this.#fail(new LocalWakeGateError(String(data.message || 'The local wake detector failed.'), {
-                code: String(data.code || 'detector_failed').slice(0, 80),
-            }), generation);
+            this.#fail(this.#workerMessageError(data), generation);
             return;
         }
         if (data.type === 'ready') {
@@ -619,31 +700,53 @@ export class LocalWakeGate {
             }
             return;
         }
+        if (data.type === 'wake_proposal') {
+            this.onDiagnostic(Object.freeze({
+                type: 'wake_proposal',
+                generation,
+                proposalType: ['strict', 'address'].includes(data.proposalType)
+                    ? data.proposalType
+                    : '',
+                timestampCount: Number.isSafeInteger(Number(data.timestampCount))
+                    ? Math.max(0, Math.min(128, Number(data.timestampCount)))
+                    : null,
+                requiredTailSamples: Number(data.requiredTailSamples) === 2560 ? 2560 : null,
+            }));
+            return;
+        }
         if (data.type === 'classification_decision') {
             this.onDiagnostic(Object.freeze({
                 type: 'classification_decision',
                 generation,
-                decisionType: String(data.decisionType || ''),
                 accepted: data.accepted === true,
-                expectedClass: String(data.expectedClass || ''),
-                winningClass: String(data.winningClass || ''),
-                probability: Number(data.probability),
-                threshold: Number(data.threshold),
-                sampleCount: Number(data.sampleCount),
+                proposalType: ['strict', 'address'].includes(data.proposalType)
+                    ? data.proposalType
+                    : '',
+                winningClass: [
+                    'reject',
+                    'strict_wake',
+                    'missed_hey_confirmation',
+                ].includes(data.winningClass) ? data.winningClass : '',
+                probability: Number.isFinite(Number(data.probability))
+                    ? Number(data.probability)
+                    : null,
+                threshold: Number.isFinite(Number(data.threshold))
+                    ? Number(data.threshold)
+                    : null,
+                sampleCount: Number(data.sampleCount) === 21760 ? 21760 : null,
+                tailSamples: Number(data.tailSamples) === 2560 ? 2560 : null,
             }));
             return;
         }
-        if (data.type === 'address_candidate') {
-            if (!this.#consumerCanAdmitCurrentDecision()) {
-                this.#rearmAfterRejectedDormantAudio(generation, 'consumer_not_ready');
-                return;
-            }
-            if (!this.isReady() || this.gateOpen || this.pendingWakeConfirmation) return;
-            this.#beginAddressCandidate(generation);
-            return;
-        }
-        if (data.type === 'address_rejected' || data.type === 'dormant_discard') {
+        if (data.type === 'dormant_discard') {
             if (this.gateOpen || this.pendingWakeConfirmation) return;
+            this.onDiagnostic(Object.freeze({
+                type: 'wake_candidate_discarded',
+                generation,
+                reason: String(data.reason || data.type).slice(0, 80),
+                proposalSeen: data.proposalSeen === true,
+                classificationDecisionSeen: data.classificationDecisionSeen === true,
+            }));
             this.#rearmAfterRejectedDormantAudio(generation, data.type);
             return;
         }
@@ -682,9 +785,24 @@ export class LocalWakeGate {
         try {
             const releaseBoundary = this.#normalizeBoundary(data.releaseBoundary);
             const detectedSourceSequence = Number(data.sourceSequence);
+            const activation = ['strict_wake', 'missed_hey_confirmation'].includes(data.activation)
+                ? data.activation
+                : null;
+            const expectedPolicy = activation === 'strict_wake'
+                ? 'post_address_tail'
+                : 'utterance_onset';
+            const expectedVariant = activation === 'strict_wake' ? 'HEY BEAN' : 'BEAN';
             if (!releaseBoundary) {
                 throw new LocalWakeGateError('The confirmed wake did not include a safe local PCM boundary.', {
                     code: 'missing_release_boundary',
+                });
+            }
+            if (!activation
+                || data.keyword !== 'HEY_BEAN'
+                || data.variant !== expectedVariant
+                || releaseBoundary.policy !== expectedPolicy) {
+                throw new LocalWakeGateError('The confirmed wake did not match its accepted acoustic class.', {
+                    code: 'invalid_wake_classification',
                 });
             }
             if (!Number.isSafeInteger(detectedSourceSequence) || detectedSourceSequence < 0
@@ -693,21 +811,19 @@ export class LocalWakeGate {
                     code: 'invalid_release_boundary',
                 });
             }
-            this.#clearAddressCandidateTimer();
             this.pendingWakeConfirmation = null;
             this.bufferedPcm = [];
             this.onDetected(Object.freeze({
                 type: 'wake_confirmed',
                 generation,
-                keyword: String(data.keyword || ''),
-                variant: String(data.variant || ''),
-                activation: data.activation === 'missed_hey_confirmation'
-                    ? 'missed_hey_confirmation'
-                    : 'strict_wake',
+                keyword: data.keyword,
+                variant: data.variant,
+                activation,
                 sourceSequence: detectedSourceSequence,
                 releaseBoundary: Object.freeze({ ...releaseBoundary }),
             }));
-            if (generation !== this.generation || this.state === 'failed') return;
+            if (generation !== this.generation
+                || ['failed', 'failure_pending'].includes(this.state)) return;
             this.#postGate(true, generation);
             this.gateOpen = true;
             this.state = 'open';
@@ -723,7 +839,7 @@ export class LocalWakeGate {
     #maybeBecomeReady(generation) {
         if (generation !== this.generation || !this.isReady()) return;
 
-        if (!this.gateOpen && this.state !== 'confirming') this.state = 'armed';
+        if (!this.gateOpen) this.state = 'armed';
         if (this.readyReportedGeneration !== generation) {
             this.readyReportedGeneration = generation;
             try {
@@ -751,21 +867,10 @@ export class LocalWakeGate {
         }
     }
 
-    #beginAddressCandidate(generation) {
-        if (generation !== this.generation || this.gateOpen || this.addressCandidateTimer !== null) return;
-
-        this.state = 'confirming';
-        this.addressCandidateTimer = this.setTimeout(() => {
-            this.addressCandidateTimer = null;
-            if (generation !== this.generation || this.gateOpen || this.state !== 'confirming') return;
-            this.#rearmAfterRejectedDormantAudio(generation, 'address_timeout');
-        }, this.addressConfirmationMs);
-    }
-
     #rearmAfterRejectedDormantAudio(generation, reason) {
-        if (generation !== this.generation || this.gateOpen || this.state === 'failed') return;
+        if (generation !== this.generation || this.gateOpen
+            || ['failed', 'failure_pending'].includes(this.state)) return;
 
-        this.#clearAddressCandidateTimer();
         try {
             this.#rearmDormant(reason);
         } catch (cause) {
@@ -777,9 +882,9 @@ export class LocalWakeGate {
     }
 
     #rearmDormant(reason) {
-        if (!this.worker || !this.workletNode || this.state === 'failed') return false;
+        if (!this.worker || !this.workletNode
+            || ['failed', 'failure_pending'].includes(this.state)) return false;
 
-        this.#clearAddressCandidateTimer();
         const generation = this.generation + 1;
         this.generation = generation;
         this.workletReady = false;
@@ -791,7 +896,8 @@ export class LocalWakeGate {
         this.consumerWakeSequenceFloor = this.consumerReady
             ? this.nextPcmSequence
             : Number.POSITIVE_INFINITY;
-        this.inFlightPcm.clear();
+        this.#resetPcmAckWatchdog();
+        this.#clearPendingWorkerFailure();
         this.bufferedPcm = [];
         this.localPcmRing = [];
         this.lastSourceSequence = -1;
@@ -806,10 +912,121 @@ export class LocalWakeGate {
         return generation;
     }
 
-    #clearAddressCandidateTimer() {
-        if (this.addressCandidateTimer === null) return;
-        this.clearTimeout(this.addressCandidateTimer);
-        this.addressCandidateTimer = null;
+    #monotonicNow() {
+        const value = Number(this.now());
+        return Number.isFinite(value) ? value : Date.now();
+    }
+
+    #armPcmAckWatchdog(generation) {
+        if (this.pcmAckWatchdogTimer !== null
+            || generation !== this.generation
+            || ['failed', 'failure_pending', 'stopping', 'stopped'].includes(this.state)) return;
+
+        const sequence = this.inFlightPcm.values().next().value;
+        if (!Number.isSafeInteger(sequence)) return;
+        const sentAt = Number(this.inFlightPcmSentAt.get(sequence));
+        const elapsed = Number.isFinite(sentAt)
+            ? Math.max(0, this.#monotonicNow() - sentAt)
+            : this.pcmAckTimeoutMs;
+        const remaining = Math.max(0, this.pcmAckTimeoutMs - elapsed);
+        const token = Object.freeze({ generation, sequence });
+        this.pcmAckWatchdogToken = token;
+        this.pcmAckWatchdogTimer = this.setTimeout(() => {
+            if (this.pcmAckWatchdogToken !== token) return;
+            this.pcmAckWatchdogTimer = null;
+            this.pcmAckWatchdogToken = null;
+            if (generation !== this.generation
+                || this.inFlightPcm.values().next().value !== sequence
+                || ['failed', 'failure_pending', 'stopping', 'stopped'].includes(this.state)) return;
+            this.#fail(new LocalWakeGateError(
+                'The local wake detector stopped acknowledging microphone audio.',
+                { code: 'pcm_ack_timeout' },
+            ), generation);
+        }, remaining);
+    }
+
+    #clearPcmAckWatchdogTimer() {
+        if (this.pcmAckWatchdogTimer !== null) {
+            this.clearTimeout(this.pcmAckWatchdogTimer);
+        }
+        this.pcmAckWatchdogTimer = null;
+        this.pcmAckWatchdogToken = null;
+    }
+
+    #resetPcmAckWatchdog() {
+        this.#clearPcmAckWatchdogTimer();
+        this.inFlightPcm.clear();
+        this.inFlightPcmSentAt.clear();
+    }
+
+    #workerMessageError(data) {
+        const pending = this.pendingWorkerFailure;
+        const declaredCode = sanitizedWorkerFailureCode(data?.code);
+        const code = pending?.reason || declaredCode;
+        const message = sanitizedWorkerFailureMessage(
+            data?.message,
+            code === 'decode_failed'
+                ? 'The local wake detector failed while decoding microphone audio.'
+                : 'The local wake detector failed.',
+        );
+
+        return new LocalWakeGateError(message, {
+            code,
+            ...(pending?.cause ? { cause: pending.cause } : {}),
+        });
+    }
+
+    #beginWorkerFailureDetailWait({ generation, reason, sequence }) {
+        if (generation !== this.generation
+            || !LOCAL_WAKE_FATAL_ACK_REASONS.has(reason)
+            || ['failed', 'failure_pending', 'stopping', 'stopped'].includes(this.state)) return;
+
+        this.#forceClosed(generation);
+        this.#resetPcmAckWatchdog();
+        this.workletReady = false;
+        this.audioSinkReady = false;
+        this.workerReady = false;
+        this.audioFlowReady = false;
+        this.pendingWakeConfirmation = null;
+        this.bufferedPcm = [];
+        this.localPcmRing = [];
+        this.lastSourceSequence = -1;
+        this.state = 'failure_pending';
+
+        // Stop capture synchronously while retaining only the worker message
+        // handler for its already-posted, ordered fatal detail.
+        this.#disconnect(this.sourceNode);
+        this.#disconnect(this.workletNode);
+        this.#stopTracks(this.rawStream);
+
+        const pending = {
+            generation,
+            reason,
+            sequence,
+            cause: new LocalWakeGateError(
+                'The local wake detector rejected microphone decoding before its fatal detail.',
+                { code: 'pcm_decode_rejected' },
+            ),
+        };
+        this.pendingWorkerFailure = pending;
+        this.workerFailureDetailTimer = this.setTimeout(() => {
+            if (this.pendingWorkerFailure !== pending
+                || generation !== this.generation
+                || this.state !== 'failure_pending') return;
+            this.workerFailureDetailTimer = null;
+            this.#fail(new LocalWakeGateError(
+                'The local wake detector failed while decoding microphone audio.',
+                { code: reason, cause: pending.cause },
+            ), generation);
+        }, LOCAL_WAKE_WORKER_FAILURE_DETAIL_TIMEOUT_MS);
+    }
+
+    #clearPendingWorkerFailure() {
+        if (this.workerFailureDetailTimer !== null) {
+            this.clearTimeout(this.workerFailureDetailTimer);
+        }
+        this.workerFailureDetailTimer = null;
+        this.pendingWorkerFailure = null;
     }
 
     #postGate(open, generation) {
@@ -848,15 +1065,15 @@ export class LocalWakeGate {
     #fail(error, generation) {
         if (generation !== this.generation || ['failed', 'stopping', 'stopped'].includes(this.state)) return;
 
+        this.#clearPendingWorkerFailure();
         const closeError = this.#forceClosed(generation);
-        this.#clearAddressCandidateTimer();
+        this.#resetPcmAckWatchdog();
         this.generation += 1;
         this.workletReady = false;
         this.audioSinkReady = false;
         this.workerReady = false;
         this.audioFlowReady = false;
         this.pendingWakeConfirmation = null;
-        this.inFlightPcm.clear();
         this.bufferedPcm = [];
         this.localPcmRing = [];
         this.lastSourceSequence = -1;
@@ -866,7 +1083,8 @@ export class LocalWakeGate {
     }
 
     async #teardown() {
-        this.#clearAddressCandidateTimer();
+        this.#resetPcmAckWatchdog();
+        this.#clearPendingWorkerFailure();
         const worker = this.worker;
         const workletNode = this.workletNode;
         const sourceNode = this.sourceNode;

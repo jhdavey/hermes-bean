@@ -67,6 +67,120 @@ class BrowserVoiceSemanticCompleteJourneyTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_first_acoustic_hearing_check_reaches_hermes_and_reloads_one_durable_final(): void
+    {
+        [$token, $session] = $this->conversation('first-acoustic-hearing-check@example.com');
+        $turnId = 'first-hearing-check';
+        $transcript = 'Can you hear me?';
+        $finalText = 'Yes—I can hear you.';
+        $fake = new CompleteJourneyHermesInterpreter([
+            new HermesSemanticInterpretation(
+                outcome: HermesSemanticInterpretation::OUTCOME_RESPOND,
+                responseText: $finalText,
+                clarificationQuestion: null,
+                acknowledgementText: null,
+                closeAfterResponse: false,
+                responseExpected: false,
+                operations: [],
+            ),
+        ]);
+
+        // The paired browser journey proves real prerecorded "Hey Bean" PCM
+        // releases no provider audio before confirmation and produces this
+        // exact provider-final transcript. This half crosses the real durable
+        // admission, Hermes interpretation, final projection, and reload path.
+        $turn = $this->admit($token, $session, $turnId, $transcript);
+        $this->drainTurn($turn, $fake);
+
+        $terminal = $turn->fresh(['finalAssistantMessage', 'runs']);
+        $this->assertSame(VoiceTurnState::Completed, $terminal->state);
+        $this->assertFalse($terminal->acknowledgement_required);
+        $this->assertNull($terminal->acknowledgement_text);
+        $this->assertNull($terminal->acknowledged_at);
+        $this->assertSame($finalText, $terminal->finalAssistantMessage?->content);
+        $this->assertCount(1, $fake->interpretationRequests);
+        $this->assertSame($turnId, $fake->interpretationRequests[0]->stableTurnId);
+        $this->assertSame($transcript, $fake->interpretationRequests[0]->transcript);
+        $this->assertSame(1, $terminal->runs->count());
+        $this->assertSame(1, $terminal->runs->where(
+            'handler',
+            HermesSemanticOperationExecutor::INTERPRETATION_HANDLER,
+        )->count());
+        $this->assertSame(0, $terminal->runs->where(
+            'handler',
+            HermesSemanticOperationExecutor::OPERATION_HANDLER,
+        )->count());
+        $this->assertSame(0, $terminal->runs->where(
+            'handler',
+            HermesSemanticOperationExecutor::COMPOSITION_HANDLER,
+        )->count());
+        $this->assertSame(0, VoiceTurnEvent::query()
+            ->where('voice_turn_id', $terminal->id)
+            ->whereIn('event_type', ['semantic_acknowledgement_published', 'acknowledgement_started'])
+            ->count());
+        $this->assertExactlyOneAcceptedAndFinalMessage($terminal);
+
+        // A browser retry after the terminal projection reuses the same stable
+        // identity and cannot invoke Hermes or create another durable message.
+        $this->withToken($token)->postJson(
+            '/api/assistant/voice/turns',
+            $this->payload($session, $turnId, $transcript),
+        )->assertOk()
+            ->assertJsonPath('data.turn.id', $terminal->id)
+            ->assertJsonPath('data.turn.turn_id', $turnId)
+            ->assertJsonPath('data.turn.state', VoiceTurnState::Completed->value)
+            ->assertJsonPath('data.turn.final_text', $finalText)
+            ->assertJsonPath('data.turn.acknowledgement_required', false)
+            ->assertJsonPath('data.turn.acknowledgement_text', null)
+            ->assertJsonCount(1, 'data.jobs');
+        Queue::assertPushed(ProcessAssistantRun::class, 1);
+        $this->assertSame(1, VoiceTurn::where('turn_id', $turnId)->count());
+        $this->assertCount(1, $fake->interpretationRequests);
+        $afterRetry = $terminal->fresh(['runs']);
+        $this->assertSame(VoiceTurnState::Completed, $afterRetry->state);
+        $this->assertFalse($afterRetry->acknowledgement_required);
+        $this->assertNull($afterRetry->acknowledgement_text);
+        $this->assertNull($afterRetry->acknowledged_at);
+        $this->assertSame(1, $afterRetry->runs->count());
+        $this->assertSame(1, $afterRetry->runs->where(
+            'handler',
+            HermesSemanticOperationExecutor::INTERPRETATION_HANDLER,
+        )->count());
+        $this->assertSame(0, $afterRetry->runs->where(
+            'handler',
+            HermesSemanticOperationExecutor::OPERATION_HANDLER,
+        )->count());
+        $this->assertSame(0, $afterRetry->runs->where(
+            'handler',
+            HermesSemanticOperationExecutor::COMPOSITION_HANDLER,
+        )->count());
+        $this->assertSame(0, VoiceTurnEvent::query()
+            ->where('voice_turn_id', $afterRetry->id)
+            ->whereIn('event_type', ['semantic_acknowledgement_published', 'acknowledgement_started'])
+            ->count());
+        $this->assertExactlyOneAcceptedAndFinalMessage($afterRetry);
+
+        $firstProjection = $this->withToken($token)
+            ->getJson("/api/assistant/voice/state?session_id={$session->id}&cursor=0")
+            ->assertOk()
+            ->json('data');
+        $reloadProjection = $this->withToken($token)
+            ->getJson("/api/assistant/voice/state?session_id={$session->id}&cursor=0")
+            ->assertOk()
+            ->json('data');
+
+        foreach ([$firstProjection, $reloadProjection] as $projection) {
+            $projectedTurn = collect($projection['turns'])->firstWhere('turn_id', $turnId);
+            $projectedUser = collect($projection['messages'])->where('turn_id', $turnId)->where('role', 'user');
+            $projectedFinal = collect($projection['messages'])->where('turn_id', $turnId)->where('role', 'assistant');
+            $this->assertSame(VoiceTurnState::Completed->value, $projectedTurn['state'] ?? null);
+            $this->assertSame($finalText, $projectedTurn['final_text'] ?? null);
+            $this->assertCount(1, $projectedUser);
+            $this->assertCount(1, $projectedFinal);
+            $this->assertSame($finalText, $projectedFinal->first()['content'] ?? null);
+        }
+    }
+
     public function test_contextual_named_mutation_resolves_in_hermes_then_executes_once(): void
     {
         Carbon::setTestNow('2026-07-14 14:00:00', 'America/New_York');

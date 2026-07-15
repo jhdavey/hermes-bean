@@ -2,11 +2,44 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+import {
+    BROWSER_VOICE_CONVERSATION_STATES,
+    BROWSER_VOICE_EFFECTS,
+    BROWSER_VOICE_TIMER_KEYS,
+    BrowserVoiceControllerV2,
+} from '../../resources/js/heybean/browserVoiceControllerV2.js';
+import {
+    BROWSER_VOICE_LOCAL_PCM_RATE,
+    BrowserVoiceRealtimeInputTransportV2,
+} from '../../resources/js/heybean/browserVoiceRealtimeInputV2.js';
+import {
+    BROWSER_VOICE_REALTIME_INGRESS_RESULTS,
+    BrowserVoiceProviderItemRegistryV2,
+    bindBrowserVoiceProviderSpeechStartedV2,
+    createBrowserVoiceProviderTurnIdentityV2,
+    currentBrowserVoiceProviderItemBindingV2,
+    routeBrowserVoiceRealtimeIngressV2,
+} from '../../resources/js/heybean/browserVoiceRealtimeIngressV2.js';
+import {
+    RealtimeInputTranscriptBuffer,
+    VoiceClientFailureReporter,
+    voiceClientFailureId,
+} from '../../resources/js/heybean/realtimeVoiceTurn.js';
+
 const source = await readFile(new URL('../../resources/js/heybean/webApp.js', import.meta.url), 'utf8');
 globalThis.window = { matchMedia: () => null };
 const {
+    BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES,
+    activateBrowserVoiceV2LocalWakeTransport,
+    applyBrowserVoiceV2ProviderProtocolFailure,
+    applyBrowserVoiceV2PotentialBargeProofCleanup,
+    applyBrowserVoiceV2TranscriptionFailure,
+    applyBrowserVoiceV2WakeOnlyPrivacyBoundary,
     browserVoiceV2LocalWakeMatchesCompletedBarge,
+    browserVoiceV2ProviderInputIsActive,
+    browserVoiceV2ProviderProtocolFailureForEvent,
     isMeaningfulBrowserVoiceV2Interruption,
+    teardownBrowserVoiceV2ProviderFailure,
 } = await import('../../resources/js/heybean/webApp.js');
 
 test('[BV2-TIMEZONE-01] browser admission and chat metadata never invent UTC when the local zone is unavailable', () => {
@@ -124,13 +157,20 @@ test('[BV2-WAKE-01] wake-ready is published only after provider transport and a 
 });
 
 test('[BV2-PRIVACY-PCM-04] local wake clears provider input before LocalWakeGate flushes activated PCM', () => {
+    const bridgeStart = source.indexOf('export function activateBrowserVoiceV2LocalWakeTransport(');
+    const bridgeEnd = source.indexOf('\nexport function applyBrowserVoiceV2WakeOnlyPrivacyBoundary(', bridgeStart);
+    const bridge = source.slice(bridgeStart, bridgeEnd);
+    const clear = bridge.indexOf('inputTransport.activate');
+    const controllerWake = bridge.indexOf('controller.wakeConfirmed');
+    assert.ok(clear >= 0 && controllerWake > clear, 'input clear must precede capture activation');
+
     const detectedStart = source.indexOf('function handleLocalWakeDetected(');
     const detectedEnd = source.indexOf('\n    function handleLocalWakeFailure(', detectedStart);
     assert.ok(detectedStart >= 0 && detectedEnd > detectedStart);
     const detected = source.slice(detectedStart, detectedEnd);
-    const clear = detected.indexOf('browserVoiceV2InputTransport.activate');
-    const controllerWake = detected.indexOf('browserVoiceV2Controller.wakeConfirmed');
-    assert.ok(clear >= 0 && controllerWake > clear, 'input clear must precede capture activation');
+    assert.match(detected, /activateBrowserVoiceV2LocalWakeTransport\(\{/);
+    assert.match(detected, /inputTransport: browserVoiceV2InputTransport/);
+    assert.match(detected, /generation: gate\.currentGeneration\(\)/);
 
     const gateStart = source.indexOf('const localWakeGate = new LocalWakeGate({');
     const microphoneStart = source.indexOf('navigator.mediaDevices.getUserMedia', gateStart);
@@ -138,11 +178,1204 @@ test('[BV2-PRIVACY-PCM-04] local wake clears provider input before LocalWakeGate
     assert.match(gateOptions, /onActivatedPcm:[\s\S]*browserVoiceV2InputTransport\.append/);
 });
 
+test('[BV2-FIRST-WAKE-01:C] the production local-wake bridge reaches one transcript admission handoff', () => {
+    const providerEvents = [];
+    const controllerEffects = [];
+    const providerItems = new BrowserVoiceProviderItemRegistryV2();
+    let timerId = 0;
+    const inputTransport = new BrowserVoiceRealtimeInputTransportV2({
+        send: (event) => {
+            providerEvents.push(event);
+            return true;
+        },
+        encodeBase64: () => 'activated-pcm',
+    });
+    const controller = new BrowserVoiceControllerV2({
+        clock: () => 100,
+        timers: {
+            setTimeout: () => ++timerId,
+            clearTimeout: () => {},
+        },
+        createTurnId: () => 'first-production-wake',
+        onEffect: (effect) => controllerEffects.push(effect),
+    });
+    controller.start();
+    controller.providerReady({ source: 'webrtc' });
+
+    const wake = activateBrowserVoiceV2LocalWakeTransport({
+        controller,
+        inputTransport,
+        generation: 7,
+    });
+    assert.equal(wake.state.activeTurn.id, 'first-production-wake');
+    assert.equal(inputTransport.append({
+        generation: 7,
+        sourceSequence: 1,
+        sampleRate: BROWSER_VOICE_LOCAL_PCM_RATE,
+        samples: new Float32Array(1600).fill(0.2),
+        released: true,
+    }), true);
+    controller.activationReady({ source: 'local_wake_gate' });
+    const started = bindBrowserVoiceProviderSpeechStartedV2(controller, providerItems, {
+        providerItemId: 'provider-first-wake',
+        connectionGeneration: 7,
+    });
+    assert.equal(started.binding.turnId, 'first-production-wake');
+    routeBrowserVoiceRealtimeIngressV2(controller, {
+        type: 'transcript_partial',
+        text: 'Can you',
+        providerItemId: 'provider-first-wake',
+    });
+    assert.equal(currentBrowserVoiceProviderItemBindingV2(providerItems, controller, {
+        providerItemId: 'provider-first-wake',
+        connectionGeneration: 7,
+        consume: true,
+    })?.turnId, 'first-production-wake');
+    routeBrowserVoiceRealtimeIngressV2(controller, {
+        type: 'transcript_final',
+        text: 'Can you hear me?',
+        providerItemId: 'provider-first-wake',
+    });
+    controller.dispatch({
+        type: 'timer_fired',
+        timerKey: BROWSER_VOICE_TIMER_KEYS.ENDPOINT,
+        turnId: 'first-production-wake',
+        source: 'timer:endpoint',
+        atMs: 100,
+    });
+
+    assert.deepEqual(providerEvents.map((event) => event.type), [
+        'input_audio_buffer.clear',
+        'input_audio_buffer.append',
+    ]);
+    const admissions = controllerEffects.filter((effect) => effect.type === BROWSER_VOICE_EFFECTS.TURN_READY);
+    assert.equal(admissions.length, 1);
+    assert.equal(admissions[0].turnId, 'first-production-wake');
+    assert.equal(admissions[0].transcript, 'Can you hear me?');
+});
+
+test('[BV2-TRANSCRIPT-03][BV2-PRIVACY-PCM-03][BV2-DIAGNOSTIC-03] first-wake transcription failure reports once, closes activated PCM, and rearms wake-only', async () => {
+    const providerEvents = [];
+    const diagnostics = [];
+    const controllerEffects = [];
+    const localWakeGate = {
+        open: true,
+        resetCount: 0,
+        resetAfterTurn() {
+            this.open = false;
+            this.resetCount += 1;
+            return true;
+        },
+    };
+    const inputTransport = new BrowserVoiceRealtimeInputTransportV2({
+        send: (event) => {
+            providerEvents.push(event);
+            return true;
+        },
+        encodeBase64: () => 'activated-pcm',
+    });
+    const providerItems = new BrowserVoiceProviderItemRegistryV2();
+    let previousConversationState = BROWSER_VOICE_CONVERSATION_STATES.OFF;
+    const controller = new BrowserVoiceControllerV2({
+        clock: () => 250,
+        createTurnId: () => 'failed-production-wake',
+        onEffect: (effect) => controllerEffects.push(effect),
+        onStateChange: (snapshot, event) => {
+            const previous = previousConversationState;
+            previousConversationState = snapshot.conversationState;
+            applyBrowserVoiceV2WakeOnlyPrivacyBoundary({
+                snapshot,
+                previousConversationState: previous,
+                event,
+                inputTransport,
+                localWakeGate,
+            });
+        },
+    });
+    const reporter = new VoiceClientFailureReporter({
+        send: async (diagnostic) => {
+            diagnostics.push(diagnostic);
+            return { recorded: true };
+        },
+        eventTarget: null,
+        scopeId: 'test-user-transcription',
+        retryDelaysMs: [],
+    });
+    const reportFailure = (payload, transcriptId, turnId) => reporter.enqueue({
+        failure_id: voiceClientFailureId('transcription', transcriptId || turnId),
+        stage: 'transcription',
+        code: payload?.error?.code,
+        message: payload?.error?.message,
+        cause_chain: [],
+        turn_id: turnId,
+    });
+
+    controller.start();
+    controller.providerReady({ source: 'webrtc' });
+    activateBrowserVoiceV2LocalWakeTransport({
+        controller,
+        inputTransport,
+        generation: 11,
+    });
+    assert.equal(inputTransport.append({
+        generation: 11,
+        sourceSequence: 8,
+        sampleRate: BROWSER_VOICE_LOCAL_PCM_RATE,
+        samples: new Float32Array(1600).fill(0.15),
+        released: true,
+    }), true);
+    controller.activationReady({ source: 'local_wake_gate' });
+    const started = bindBrowserVoiceProviderSpeechStartedV2(controller, providerItems, {
+        providerItemId: 'provider-item-1',
+        connectionGeneration: 11,
+    });
+    assert.equal(started.binding.turnId, 'failed-production-wake');
+    routeBrowserVoiceRealtimeIngressV2(controller, {
+        type: 'transcript_partial',
+        text: 'Can you',
+        providerItemId: 'provider-item-1',
+    });
+    const binding = currentBrowserVoiceProviderItemBindingV2(providerItems, controller, {
+        providerItemId: 'provider-item-1',
+        connectionGeneration: 11,
+        consume: true,
+    });
+
+    applyBrowserVoiceV2TranscriptionFailure({
+        controller,
+        payload: {
+            event_id: 'transcription-failure-1',
+            error: { code: 'hostile provider code', message: 'transcript=private pcm=AAAA' },
+        },
+        binding,
+        reportFailure,
+    });
+    await reporter.flush();
+
+    const failed = controller.snapshot();
+    assert.equal(failed.conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
+    assert.equal(failed.activeTurn, null);
+    assert.deepEqual(failed.deadlines, { endpointAt: null, clarificationAt: null, followUpAt: null });
+    assert.ok(failed.closedTurnIds.includes('failed-production-wake'));
+    assert.equal(localWakeGate.open, false);
+    assert.equal(localWakeGate.resetCount, 1);
+    assert.equal(inputTransport.append({
+        generation: 11,
+        sourceSequence: 9,
+        sampleRate: BROWSER_VOICE_LOCAL_PCM_RATE,
+        samples: new Float32Array(1600).fill(0.3),
+    }), false);
+    assert.deepEqual(providerEvents.map((event) => event.type), [
+        'input_audio_buffer.clear',
+        'input_audio_buffer.append',
+    ]);
+    assert.equal(controllerEffects.some((effect) => effect.type === BROWSER_VOICE_EFFECTS.TURN_READY), false);
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0].failure_id, voiceClientFailureId('transcription', 'provider-item-1'));
+    assert.equal(diagnostics[0].code, 'voice_transcription_failure');
+    assert.doesNotMatch(JSON.stringify(diagnostics[0]), /private|AAAA|hostile/);
+    reporter.dispose();
+});
+
+test('[BV2-FIRST-WAKE-01:E][BV2-TRANSCRIPT-03] production binds provider starts through immutable ordered PCM admission identity', () => {
+    const detectedStart = source.indexOf('function handleLocalWakeDetected(');
+    const detectedEnd = source.indexOf('\n    function handleLocalWakeDiagnostic(', detectedStart);
+    const detected = source.slice(detectedStart, detectedEnd);
+    assert.match(detected, /createBrowserVoiceProviderTurnIdentityV2\(browserVoiceV2Controller/);
+    assert.match(detected, /inputGeneration: gate\.currentGeneration\(\)/);
+    assert.match(detected, /throughSourceSequence: detection\.sourceSequence/);
+    assert.match(detected, /providerConnectionGeneration: connectionGeneration/);
+    assert.match(detected, /browserVoiceV2PendingLocalWakeAdmissions\.push\(admission\)/);
+
+    const claimStart = source.indexOf('function claimBrowserVoiceV2ProviderItemLocalWakeAdmission(');
+    const claimEnd = source.indexOf('\n    function rememberBrowserVoiceV2CompletedProviderBarge(', claimStart);
+    const claim = source.slice(claimStart, claimEnd);
+    assert.match(claim, /browserVoiceV2PendingLocalWakeAdmissions\.shift\(\)/,
+        'provider VAD must claim the oldest exact local PCM admission');
+
+    const ingressStart = source.indexOf('function handleBrowserVoiceV2RealtimeEvent(');
+    const ingressEnd = source.indexOf('\n    async function reportBrowserVoiceV2RealtimeUsage(', ingressStart);
+    const ingress = source.slice(ingressStart, ingressEnd);
+    assert.match(ingress, /turnIdentity: providerWakeAdmission/);
+    assert.match(ingress, /inputGeneration: browserVoiceV2InputTransport\.activeGeneration/);
+    assert.match(ingress, /throughSourceSequence: browserVoiceV2LastProviderInputPcm\?\.sourceSequence/);
+    assert.match(ingress, /staleTurnIdentity[\s\S]*ITEM_TURN_MISMATCH/,
+        'an ambiguous delayed item must fail the active input closed instead of binding the current turn');
+});
+
+test('[BV2-FIRST-WAKE-01:E][BV2-TRANSCRIPT-03][BV2-DIAGNOSTIC-03] delayed cross-turn provider identity fails the newer active capture closed exactly once', async () => {
+    const diagnostics = [];
+    const providerItems = new BrowserVoiceProviderItemRegistryV2();
+    const inputTransport = new BrowserVoiceRealtimeInputTransportV2({
+        send: () => true,
+        encodeBase64: () => 'activated-pcm',
+    });
+    const turnIds = ['older-pcm-turn', 'newer-pcm-turn'];
+    const controller = new BrowserVoiceControllerV2({ createTurnId: () => turnIds.shift() });
+    controller.start();
+    controller.providerReady({ source: 'webrtc' });
+    activateBrowserVoiceV2LocalWakeTransport({ controller, inputTransport, generation: 201 });
+    assert.equal(inputTransport.append({
+        generation: 201,
+        sourceSequence: 10,
+        sampleRate: BROWSER_VOICE_LOCAL_PCM_RATE,
+        samples: new Float32Array(1600).fill(0.1),
+    }), true);
+    const olderAdmission = createBrowserVoiceProviderTurnIdentityV2(controller, {
+        inputGeneration: 201,
+        throughSourceSequence: 10,
+        providerConnectionGeneration: 44,
+    });
+    controller.activationReady({ source: 'local_wake_gate' });
+
+    activateBrowserVoiceV2LocalWakeTransport({ controller, inputTransport, generation: 202 });
+    assert.equal(inputTransport.append({
+        generation: 202,
+        sourceSequence: 20,
+        sampleRate: BROWSER_VOICE_LOCAL_PCM_RATE,
+        samples: new Float32Array(1600).fill(0.2),
+    }), true);
+    const delayed = bindBrowserVoiceProviderSpeechStartedV2(controller, providerItems, {
+        providerItemId: 'delayed-older-provider-item',
+        connectionGeneration: 44,
+        turnIdentity: olderAdmission,
+        inputGeneration: inputTransport.activeGeneration,
+        throughSourceSequence: 20,
+    });
+    assert.equal(delayed.staleTurnIdentity, true);
+    assert.equal(controller.snapshot().activeTurn.id, 'newer-pcm-turn');
+    assert.equal(controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING);
+
+    let active = true;
+    let teardownCount = 0;
+    const reporter = new VoiceClientFailureReporter({
+        send: async (diagnostic) => {
+            diagnostics.push(diagnostic);
+            return { recorded: true };
+        },
+        eventTarget: null,
+        scopeId: 'cross-turn-provider-identity',
+        retryDelaysMs: [],
+    });
+    const reportFailure = (error) => reporter.enqueue({
+        failure_id: voiceClientFailureId('connection', 'generation-44', 'provider-turn-mismatch'),
+        stage: 'connection',
+        code: error?.code,
+        message: error?.message,
+        cause_chain: [],
+        turn_id: 'newer-pcm-turn',
+    });
+    const teardown = (_message, options) => {
+        assert.equal(options.reportFailure, false);
+        if (!active) return;
+        active = false;
+        teardownCount += 1;
+        inputTransport.deactivate();
+        providerItems.clear();
+        controller.disable('provider_protocol_failure');
+    };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        applyBrowserVoiceV2ProviderProtocolFailure({
+            code: BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_TURN_MISMATCH,
+            reportFailure,
+            teardown,
+        });
+    }
+    await reporter.flush();
+
+    assert.equal(teardownCount, 1);
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0].turn_id, 'newer-pcm-turn');
+    assert.equal(controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.OFF);
+    assert.equal(inputTransport.activeGeneration, null);
+    assert.equal(controller.drainEffects().some((effect) => effect.type === BROWSER_VOICE_EFFECTS.TURN_READY), false);
+    reporter.dispose();
+});
+
+test('[BV2-FIRST-WAKE-01:E][BV2-WAKE-01][BV2-TRANSCRIPT-03][BV2-DIAGNOSTIC-03] stale first-item failure cannot reset or fail the next wake', () => {
+    const providerEvents = [];
+    const diagnostics = [];
+    const turnIds = ['older-wake-turn', 'next-wake-turn'];
+    const providerItems = new BrowserVoiceProviderItemRegistryV2();
+    const inputTransport = new BrowserVoiceRealtimeInputTransportV2({
+        send: (event) => {
+            providerEvents.push(event);
+            return true;
+        },
+        encodeBase64: () => 'activated-pcm',
+    });
+    const localWakeGate = {
+        generation: 40,
+        resetCount: 0,
+        resetAfterTurn() {
+            this.generation += 1;
+            this.resetCount += 1;
+            return true;
+        },
+    };
+    let previousConversationState = BROWSER_VOICE_CONVERSATION_STATES.OFF;
+    const controller = new BrowserVoiceControllerV2({
+        createTurnId: () => turnIds.shift(),
+        onStateChange: (snapshot, event) => {
+            const previous = previousConversationState;
+            previousConversationState = snapshot.conversationState;
+            applyBrowserVoiceV2WakeOnlyPrivacyBoundary({
+                snapshot,
+                previousConversationState: previous,
+                event,
+                inputTransport,
+                localWakeGate,
+            });
+        },
+    });
+    const reportFailure = (_payload, transcriptId, turnId) => {
+        diagnostics.push({ transcriptId, turnId });
+    };
+
+    controller.start();
+    controller.providerReady({ source: 'webrtc' });
+    activateBrowserVoiceV2LocalWakeTransport({
+        controller,
+        inputTransport,
+        generation: localWakeGate.generation,
+    });
+    controller.activationReady({ source: 'local_wake_gate' });
+    const olderStarted = bindBrowserVoiceProviderSpeechStartedV2(controller, providerItems, {
+        providerItemId: 'provider-older-item',
+        connectionGeneration: 40,
+    });
+    const olderBinding = currentBrowserVoiceProviderItemBindingV2(providerItems, controller, {
+        providerItemId: 'provider-older-item',
+        connectionGeneration: 40,
+        consume: true,
+    });
+    assert.equal(olderStarted.binding.turnId, 'older-wake-turn');
+    applyBrowserVoiceV2TranscriptionFailure({
+        controller,
+        payload: { error: { code: 'transcription_failed' } },
+        binding: olderBinding,
+        reportFailure,
+    });
+    assert.equal(controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
+    assert.equal(localWakeGate.resetCount, 1);
+    const nextWakeGeneration = localWakeGate.generation;
+
+    const wakeOnly = controller.snapshot();
+    controller.dispatch({
+        type: 'capture_failed',
+        turnId: 'older-wake-turn',
+        reason: 'late_duplicate',
+        source: 'provider_transcript',
+        sequence: 1,
+        generation: wakeOnly.generation,
+        connectionGeneration: wakeOnly.connectionGeneration,
+    });
+    assert.equal(controller.snapshot().lastRejectedEvent.reason, 'stale_sequence');
+    assert.equal(localWakeGate.resetCount, 1, 'a rejected event in wake-only must not create a new local generation');
+    assert.equal(localWakeGate.generation, nextWakeGeneration);
+
+    const nextWake = activateBrowserVoiceV2LocalWakeTransport({
+        controller,
+        inputTransport,
+        generation: nextWakeGeneration,
+    });
+    assert.equal(nextWake.state.activeTurn.id, 'next-wake-turn');
+    controller.activationReady({ source: 'local_wake_gate' });
+    const nextStarted = bindBrowserVoiceProviderSpeechStartedV2(controller, providerItems, {
+        providerItemId: 'provider-next-item',
+        connectionGeneration: 40,
+    });
+    assert.equal(nextStarted.binding.turnId, 'next-wake-turn');
+    assert.equal(inputTransport.append({
+        generation: nextWakeGeneration,
+        sourceSequence: 2,
+        sampleRate: BROWSER_VOICE_LOCAL_PCM_RATE,
+        samples: new Float32Array(1600).fill(0.2),
+    }), true);
+
+    const lateOlderBinding = currentBrowserVoiceProviderItemBindingV2(providerItems, controller, {
+        providerItemId: 'provider-older-item',
+        connectionGeneration: 40,
+        consume: true,
+    });
+    assert.equal(lateOlderBinding, null);
+    assert.equal(applyBrowserVoiceV2TranscriptionFailure({
+        controller,
+        payload: { error: { code: 'late_older_failure' } },
+        binding: lateOlderBinding,
+        reportFailure,
+    }), null);
+    assert.equal(controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.CAPTURING);
+    assert.equal(controller.snapshot().activeTurn.id, 'next-wake-turn');
+    assert.deepEqual(diagnostics, [{
+        transcriptId: 'provider-older-item',
+        turnId: 'older-wake-turn',
+    }]);
+    assert.equal(localWakeGate.resetCount, 1);
+
+    const nextBinding = currentBrowserVoiceProviderItemBindingV2(providerItems, controller, {
+        providerItemId: 'provider-next-item',
+        connectionGeneration: 40,
+        consume: true,
+    });
+    applyBrowserVoiceV2TranscriptionFailure({
+        controller,
+        payload: { error: { code: 'current_failure' } },
+        binding: nextBinding,
+        reportFailure,
+    });
+    assert.deepEqual(diagnostics.at(-1), {
+        transcriptId: 'provider-next-item',
+        turnId: 'next-wake-turn',
+    });
+    assert.equal(controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
+    assert.equal(localWakeGate.resetCount, 2, 'only the accepted current-turn failure may rearm privacy');
+    assert.deepEqual(providerEvents.map((event) => event.type), [
+        'input_audio_buffer.clear',
+        'input_audio_buffer.clear',
+        'input_audio_buffer.append',
+    ]);
+});
+
+test('[BV2-FIRST-WAKE-01:E][BV2-WAKE-01][BV2-PRIVACY-PCM-03][BV2-DIAGNOSTIC-03] missing provider identity tears down once and a fresh retry reconnects privately', async () => {
+    const providerEvents = [];
+    const diagnostics = [];
+    const turnIds = ['missing-id-turn', 'retry-turn'];
+    const inputTransport = new BrowserVoiceRealtimeInputTransportV2({
+        send: (event) => {
+            providerEvents.push(event);
+            return true;
+        },
+        encodeBase64: () => 'activated-pcm',
+    });
+    const controller = new BrowserVoiceControllerV2({ createTurnId: () => turnIds.shift() });
+    const rawTrack = { stopCount: 0, stop() { this.stopCount += 1; } };
+    const localWakeGate = { stopCount: 0, stop() { this.stopCount += 1; } };
+    let voiceActive = true;
+    let teardownCount = 0;
+    let retryMessage = '';
+    const reporter = new VoiceClientFailureReporter({
+        send: async (diagnostic) => {
+            diagnostics.push(diagnostic);
+            return { recorded: true };
+        },
+        eventTarget: null,
+        scopeId: 'provider-protocol-missing-id',
+        retryDelaysMs: [],
+    });
+    const reportFailure = (error) => reporter.enqueue({
+        failure_id: voiceClientFailureId('connection', 'generation-51', 'missing-provider-item-id'),
+        stage: 'connection',
+        code: error?.code,
+        message: error?.message,
+        cause_chain: [],
+        turn_id: controller.snapshot().activeTurn?.id || '',
+    });
+    const teardown = (message, options) => {
+        assert.equal(options.reportFailure, false);
+        if (!voiceActive) return;
+        voiceActive = false;
+        teardownCount += 1;
+        retryMessage = message;
+        controller.dispatch({ type: 'connection_lost', source: 'webrtc', reason: message });
+        inputTransport.deactivate();
+        localWakeGate.stop();
+        rawTrack.stop();
+        controller.disable('connection_lost');
+    };
+
+    controller.start();
+    controller.providerReady({ source: 'webrtc' });
+    activateBrowserVoiceV2LocalWakeTransport({ controller, inputTransport, generation: 51 });
+    controller.activationReady({ source: 'local_wake_gate' });
+    assert.equal(inputTransport.append({
+        generation: 51,
+        sourceSequence: 1,
+        sampleRate: BROWSER_VOICE_LOCAL_PCM_RATE,
+        samples: new Float32Array(1600).fill(0.1),
+    }), true);
+
+    const protocolCode = browserVoiceV2ProviderProtocolFailureForEvent({
+        eventType: 'input_audio_buffer.speech_started',
+        providerInputActive: browserVoiceV2ProviderInputIsActive({ inputTransport }),
+        providerItemId: '',
+    });
+    assert.equal(protocolCode, BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.MISSING_ITEM_ID);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        applyBrowserVoiceV2ProviderProtocolFailure({
+            code: protocolCode,
+            reportFailure,
+            teardown,
+        });
+    }
+    await reporter.flush();
+
+    assert.equal(teardownCount, 1);
+    assert.equal(localWakeGate.stopCount, 1);
+    assert.equal(rawTrack.stopCount, 1);
+    assert.equal(controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.OFF);
+    assert.equal(inputTransport.append({
+        generation: 51,
+        sourceSequence: 2,
+        sampleRate: BROWSER_VOICE_LOCAL_PCM_RATE,
+        samples: new Float32Array(1600).fill(0.2),
+    }), false, 'no provider PCM may survive the fail-closed teardown');
+    assert.match(retryMessage, /Tap the Bean button to reconnect and try again/);
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0].code, 'voice_connection_failure');
+    assert.equal(diagnostics[0].turn_id, 'missing-id-turn');
+
+    voiceActive = true;
+    controller.start();
+    controller.providerReady({ source: 'webrtc' });
+    const retry = activateBrowserVoiceV2LocalWakeTransport({
+        controller,
+        inputTransport,
+        generation: 52,
+    });
+    controller.activationReady({ source: 'local_wake_gate' });
+    assert.equal(retry.state.activeTurn.id, 'retry-turn');
+    assert.equal(inputTransport.append({
+        generation: 52,
+        sourceSequence: 1,
+        sampleRate: BROWSER_VOICE_LOCAL_PCM_RATE,
+        samples: new Float32Array(1600).fill(0.3),
+    }), true);
+    assert.equal(controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.CAPTURING);
+    assert.deepEqual(providerEvents.map((event) => event.type), [
+        'input_audio_buffer.clear',
+        'input_audio_buffer.append',
+        'input_audio_buffer.clear',
+        'input_audio_buffer.append',
+    ]);
+    reporter.dispose();
+
+    assert.equal(browserVoiceV2ProviderProtocolFailureForEvent({
+        eventType: 'conversation.item.input_audio_transcription.completed',
+        providerInputActive: false,
+        providerItemId: '',
+    }), null, 'an id-less ambient event after dormant privacy teardown is ignored');
+    assert.match(source, /const protocolFailure = browserVoiceV2ProviderProtocolFailureForEvent\(\{/);
+    assert.match(source, /if \(protocolFailure\) return failBrowserVoiceV2ProviderProtocol\(protocolFailure\)/);
+});
+
+test('[BV2-TRANSCRIPT-03][BV2-BARGE-04][BV2-PRIVACY-PCM-03] the production identity policy fails active follow-up and barge input closed but ignores dormant events', async () => {
+    const diagnostics = [];
+    const turnIds = ['follow-up-owner', 'barge-owner'];
+    const inputTransport = new BrowserVoiceRealtimeInputTransportV2({
+        send: () => true,
+        encodeBase64: () => 'activated-pcm',
+    });
+    const controller = new BrowserVoiceControllerV2({ createTurnId: () => turnIds.shift() });
+    let protocolGeneration = 70;
+    let voiceActive = false;
+    let teardownCount = 0;
+    const reporter = new VoiceClientFailureReporter({
+        send: async (diagnostic) => {
+            diagnostics.push(diagnostic);
+            return { recorded: true };
+        },
+        eventTarget: null,
+        scopeId: 'provider-identity-active-contexts',
+        retryDelaysMs: [],
+    });
+    const reportFailure = (error) => reporter.enqueue({
+        failure_id: voiceClientFailureId(
+            'connection',
+            `generation-${protocolGeneration}`,
+            'missing-provider-item-id',
+        ),
+        stage: 'connection',
+        code: error?.code,
+        message: error?.message,
+        cause_chain: [],
+        turn_id: controller.snapshot().activeTurn?.id || '',
+    });
+    const teardown = (_message, options) => {
+        assert.equal(options.reportFailure, false);
+        if (!voiceActive) return;
+        voiceActive = false;
+        teardownCount += 1;
+        controller.dispatch({ type: 'connection_lost', source: 'webrtc' });
+        inputTransport.deactivate();
+        controller.disable('provider_protocol_failure');
+    };
+    const connectCapture = (generation) => {
+        protocolGeneration = generation;
+        voiceActive = true;
+        controller.start();
+        controller.providerReady({ source: 'webrtc' });
+        activateBrowserVoiceV2LocalWakeTransport({ controller, inputTransport, generation });
+        controller.activationReady({ source: 'local_wake_gate' });
+    };
+    const submitCurrentTurn = (text) => {
+        controller.transcriptFinal(text, { source: 'provider_transcript' });
+        controller.speechEnded({ source: 'provider_vad', observedSilenceMs: 2_000 });
+        const snapshot = controller.snapshot();
+        controller.dispatch({
+            type: 'timer_fired',
+            timerKey: BROWSER_VOICE_TIMER_KEYS.ENDPOINT,
+            turnId: snapshot.activeTurn.id,
+            source: `timer:endpoint:${protocolGeneration}`,
+            atMs: snapshot.deadlines.endpointAt,
+        });
+    };
+    const policyForIdless = (eventType) => browserVoiceV2ProviderProtocolFailureForEvent({
+        eventType,
+        providerInputActive: browserVoiceV2ProviderInputIsActive({ inputTransport }),
+        providerItemId: '',
+    });
+    const failClosedTwice = (code) => {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            applyBrowserVoiceV2ProviderProtocolFailure({ code, reportFailure, teardown });
+        }
+    };
+
+    connectCapture(70);
+    submitCurrentTurn('Read my tasks.');
+    assert.equal(controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP);
+    assert.equal(browserVoiceV2ProviderInputIsActive({ inputTransport }), true);
+    const followUpFailure = policyForIdless('conversation.item.input_audio_transcription.delta');
+    assert.equal(followUpFailure, BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.MISSING_ITEM_ID);
+    failClosedTwice(followUpFailure);
+    assert.equal(controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.OFF);
+    assert.equal(browserVoiceV2ProviderInputIsActive({ inputTransport }), false);
+
+    connectCapture(71);
+    submitCurrentTurn('Read my calendar.');
+    controller.playbackStarted({ turnId: 'barge-owner' });
+    assert.equal(controller.snapshot().speechActive, true);
+    assert.equal(browserVoiceV2ProviderInputIsActive({ inputTransport }), true);
+    const bargeFailure = policyForIdless('input_audio_buffer.speech_started');
+    assert.equal(bargeFailure, BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.MISSING_ITEM_ID);
+    failClosedTwice(bargeFailure);
+    assert.equal(controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.OFF);
+    assert.equal(browserVoiceV2ProviderInputIsActive({ inputTransport }), false);
+
+    protocolGeneration = 72;
+    voiceActive = true;
+    controller.start();
+    controller.providerReady({ source: 'webrtc' });
+    assert.equal(controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
+    assert.equal(browserVoiceV2ProviderInputIsActive({ inputTransport }), false);
+    assert.equal(policyForIdless('conversation.item.input_audio_transcription.completed'), null);
+    assert.equal(teardownCount, 2, 'dormant id-less activity does not create another teardown');
+
+    await reporter.flush();
+    assert.equal(diagnostics.length, 2);
+    assert.deepEqual(diagnostics.map((item) => item.turn_id), ['follow-up-owner', 'barge-owner']);
+    reporter.dispose();
+});
+
+test('[BV2-BARGE-04][BV2-PRIVACY-PCM-03][BV2-DIAGNOSTIC-03] natural-close barge proof keeps input alive only until exact rejection or expiry', () => {
+    const prepare = ({ suffix, generation }) => {
+        let now = 0;
+        let timerId = 0;
+        const scheduled = new Map();
+        const providerItems = new BrowserVoiceProviderItemRegistryV2();
+        const inputTransport = new BrowserVoiceRealtimeInputTransportV2({
+            send: () => true,
+            encodeBase64: () => 'activated-pcm',
+        });
+        const localWakeGate = {
+            resetCount: 0,
+            resetAfterTurn() {
+                this.resetCount += 1;
+                return true;
+            },
+        };
+        let previousConversationState = BROWSER_VOICE_CONVERSATION_STATES.OFF;
+        const controller = new BrowserVoiceControllerV2({
+            clock: () => now,
+            timers: {
+                setTimeout: (callback, delay) => {
+                    const id = ++timerId;
+                    scheduled.set(id, {
+                        delay,
+                        run: () => {
+                            if (!scheduled.has(id)) return false;
+                            scheduled.delete(id);
+                            callback();
+                            return true;
+                        },
+                    });
+                    return id;
+                },
+                clearTimeout: (id) => scheduled.delete(id),
+            },
+            createTurnId: () => `natural-owner-${suffix}`,
+            onStateChange: (snapshot, event) => {
+                const previous = previousConversationState;
+                previousConversationState = snapshot.conversationState;
+                applyBrowserVoiceV2WakeOnlyPrivacyBoundary({
+                    snapshot,
+                    previousConversationState: previous,
+                    event,
+                    inputTransport,
+                    localWakeGate,
+                });
+            },
+        });
+        controller.start();
+        controller.providerReady({ source: 'webrtc' });
+        activateBrowserVoiceV2LocalWakeTransport({ controller, inputTransport, generation });
+        controller.activationReady({ source: 'local_wake_gate' });
+        assert.equal(inputTransport.append({
+            generation,
+            sourceSequence: 1,
+            sampleRate: BROWSER_VOICE_LOCAL_PCM_RATE,
+            samples: new Float32Array(1600).fill(0.1),
+        }), true);
+        controller.transcriptFinal('Thanks, goodbye.', { source: 'provider_transcript' });
+        controller.speechEnded({ source: 'provider_vad', observedSilenceMs: 2_000 });
+        let snapshot = controller.snapshot();
+        controller.dispatch({
+            type: 'timer_fired',
+            timerKey: BROWSER_VOICE_TIMER_KEYS.ENDPOINT,
+            turnId: snapshot.activeTurn.id,
+            source: `timer:endpoint:${suffix}`,
+            atMs: snapshot.deadlines.endpointAt,
+        });
+        controller.playbackStarted({
+            turnId: `natural-owner-${suffix}`,
+            naturalClosing: true,
+        });
+        const started = bindBrowserVoiceProviderSpeechStartedV2(controller, providerItems, {
+            providerItemId: `natural-provider-${suffix}`,
+            connectionGeneration: generation,
+        });
+        controller.potentialBargeIn('potential_speech', {
+            source: 'provider_vad',
+            ownerTurnId: started.binding.turnId,
+            providerItemId: started.binding.providerItemId,
+        });
+        controller.playbackFinished({
+            turnId: `natural-owner-${suffix}`,
+            naturalClosing: true,
+        });
+        snapshot = controller.snapshot();
+        assert.equal(snapshot.conversationState, BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP);
+        assert.equal(snapshot.potentialBargeIn.returnToWakeOnly, true);
+        assert.equal(browserVoiceV2ProviderInputIsActive({ inputTransport }), true);
+        assert.equal(inputTransport.append({
+            generation,
+            sourceSequence: 2,
+            sampleRate: BROWSER_VOICE_LOCAL_PCM_RATE,
+            samples: new Float32Array(1600).fill(0.2),
+        }), true, 'the owning playback finish cannot cut off an already-started utterance');
+        return {
+            controller,
+            inputTransport,
+            localWakeGate,
+            providerItems,
+            binding: started.binding,
+            scheduled,
+            setNow: (value) => { now = value; },
+            generation,
+        };
+    };
+
+    const rejected = prepare({ suffix: 'rejected', generation: 81 });
+    const diagnostics = [];
+    assert.ok(applyBrowserVoiceV2TranscriptionFailure({
+        controller: rejected.controller,
+        payload: { error: { code: 'transcription_failed' } },
+        binding: rejected.binding,
+        action: 'reject_barge_in',
+        reportFailure: (_payload, providerItemId, turnId) => diagnostics.push({ providerItemId, turnId }),
+    }));
+    assert.equal(rejected.controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
+    assert.equal(rejected.controller.snapshot().potentialBargeIn, null);
+    assert.equal(rejected.controller.snapshot().deadlines.followUpAt, null);
+    assert.equal(rejected.localWakeGate.resetCount, 1);
+    assert.equal(browserVoiceV2ProviderInputIsActive({ inputTransport: rejected.inputTransport }), false);
+    assert.equal([...rejected.scheduled.values()].some((timer) => timer.delay === 15_000), false,
+        'rejection cancels the proof-only deadline instead of leaving a stale timer');
+    assert.equal(applyBrowserVoiceV2TranscriptionFailure({
+        controller: rejected.controller,
+        payload: { error: { code: 'duplicate_transcription_failed' } },
+        binding: rejected.binding,
+        action: 'reject_barge_in',
+        reportFailure: () => diagnostics.push({ duplicate: true }),
+    }), null);
+    assert.equal(diagnostics.length, 1);
+    assert.equal(rejected.controller.snapshot().rejectedEventCount, 0);
+
+    const expired = prepare({ suffix: 'expired', generation: 82 });
+    const expiry = [...expired.scheduled.values()].find((timer) => timer.delay === 15_000);
+    assert.ok(expiry, 'natural-close potential barge owns one bounded expiry');
+    expired.setNow(15_000);
+    assert.equal(expiry.run(), true);
+    assert.equal(expired.controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
+    assert.equal(expired.controller.snapshot().potentialBargeIn, null);
+    assert.equal(expired.localWakeGate.resetCount, 1);
+    assert.equal(browserVoiceV2ProviderInputIsActive({ inputTransport: expired.inputTransport }), false);
+    assert.equal(currentBrowserVoiceProviderItemBindingV2(
+        expired.providerItems,
+        expired.controller,
+        {
+            providerItemId: 'natural-provider-expired',
+            connectionGeneration: expired.generation,
+            consume: true,
+        },
+    ), null);
+    assert.equal(expired.controller.snapshot().rejectedEventCount, 0);
+    assert.equal(browserVoiceV2ProviderProtocolFailureForEvent({
+        eventType: 'conversation.item.input_audio_transcription.completed',
+        providerInputActive: browserVoiceV2ProviderInputIsActive({ inputTransport: expired.inputTransport }),
+        providerItemId: '',
+    }), null, 'expired dormant input remains privacy-armed and cannot create a protocol teardown');
+});
+
+test('[BV2-BARGE-04][BV2-PRIVACY-PCM-03][BV2-TRANSCRIPT-03] ordinary and natural proof expiry erase the exact provisional provider item once', () => {
+    for (const naturalClosing of [false, true]) {
+        const suffix = naturalClosing ? 'natural' : 'ordinary';
+        const generation = naturalClosing ? 92 : 91;
+        const providerItemId = `expiring-${suffix}-provider-item`;
+        const providerEvents = [];
+        const providerItems = new BrowserVoiceProviderItemRegistryV2();
+        const potentialItems = new Set();
+        const providerWakeTurnIds = new Map();
+        const transcripts = new RealtimeInputTranscriptBuffer();
+        const cleanupEffects = [];
+        let draft = '';
+        let clearDraftCount = 0;
+        let now = 0;
+        let timerId = 0;
+        const scheduled = new Map();
+        const inputTransport = new BrowserVoiceRealtimeInputTransportV2({
+            send: (event) => {
+                providerEvents.push(event);
+                return true;
+            },
+            encodeBase64: () => 'activated-pcm',
+        });
+        const localWakeGate = {
+            resetCount: 0,
+            resetAfterTurn() {
+                this.resetCount += 1;
+                return true;
+            },
+        };
+        let previousConversationState = BROWSER_VOICE_CONVERSATION_STATES.OFF;
+        const controller = new BrowserVoiceControllerV2({
+            clock: () => now,
+            timers: {
+                setTimeout: (callback, delay) => {
+                    const id = ++timerId;
+                    scheduled.set(id, {
+                        delay,
+                        run: () => {
+                            if (!scheduled.has(id)) return false;
+                            scheduled.delete(id);
+                            callback();
+                            return true;
+                        },
+                    });
+                    return id;
+                },
+                clearTimeout: (id) => scheduled.delete(id),
+            },
+            createTurnId: () => `expiring-${suffix}-owner`,
+            onEffect: (effect) => {
+                if (effect.type !== BROWSER_VOICE_EFFECTS.DISCARD_POTENTIAL_BARGE_IN) return;
+                cleanupEffects.push(effect);
+                applyBrowserVoiceV2PotentialBargeProofCleanup({
+                    effect,
+                    registry: providerItems,
+                    transcripts,
+                    potentialItems,
+                    providerWakeTurnIds,
+                    connectionGeneration: generation,
+                    clearDraft: (text) => {
+                        draft = text;
+                        clearDraftCount += 1;
+                    },
+                    sendProviderEvent: (event) => {
+                        providerEvents.push(event);
+                        return true;
+                    },
+                });
+            },
+            onStateChange: (snapshot, event) => {
+                const previous = previousConversationState;
+                previousConversationState = snapshot.conversationState;
+                applyBrowserVoiceV2WakeOnlyPrivacyBoundary({
+                    snapshot,
+                    previousConversationState: previous,
+                    event,
+                    inputTransport,
+                    localWakeGate,
+                });
+            },
+        });
+
+        controller.start();
+        controller.providerReady({ source: 'webrtc' });
+        activateBrowserVoiceV2LocalWakeTransport({ controller, inputTransport, generation });
+        controller.activationReady({ source: 'local_wake_gate' });
+        controller.transcriptFinal('Read my tasks.', { source: 'provider_transcript' });
+        controller.speechEnded({ source: 'provider_vad', observedSilenceMs: 2_000 });
+        const endpoint = [...scheduled.values()].find((timer) => timer.delay === 0);
+        assert.ok(endpoint);
+        assert.equal(endpoint.run(), true);
+        controller.drainEffects();
+        controller.playbackStarted({
+            turnId: `expiring-${suffix}-owner`,
+            naturalClosing,
+        });
+        const started = bindBrowserVoiceProviderSpeechStartedV2(controller, providerItems, {
+            providerItemId,
+            connectionGeneration: generation,
+        });
+        assert.ok(started.binding);
+        potentialItems.add(providerItemId);
+        controller.potentialBargeIn('potential_speech', {
+            source: 'provider_vad',
+            ownerTurnId: started.binding.turnId,
+            providerItemId,
+        });
+        transcripts.append({ itemId: providerItemId, contentIndex: 0, delta: 'visible provisional ' });
+        transcripts.append({ itemId: providerItemId, contentIndex: 2, delta: 'provider residue' });
+        draft = 'visible provisional provider residue';
+        controller.playbackFinished({
+            turnId: `expiring-${suffix}-owner`,
+            naturalClosing,
+        });
+        const expiry = [...scheduled.values()].find((timer) => timer.delay === 15_000);
+        assert.ok(expiry);
+        now = 15_000;
+        assert.equal(expiry.run(), true);
+
+        assert.equal(controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
+        assert.equal(controller.snapshot().potentialBargeIn, null);
+        assert.equal(draft, '');
+        assert.equal(clearDraftCount, 1);
+        assert.equal(potentialItems.has(providerItemId), false);
+        assert.equal(providerWakeTurnIds.has(providerItemId), false);
+        assert.equal(transcripts.complete({ itemId: providerItemId, contentIndex: 0 }), '');
+        assert.equal(transcripts.complete({ itemId: providerItemId, contentIndex: 2 }), '');
+        assert.equal(inputTransport.activeGeneration, null);
+        assert.equal(localWakeGate.resetCount, 1);
+        assert.equal(currentBrowserVoiceProviderItemBindingV2(providerItems, controller, {
+            providerItemId,
+            connectionGeneration: generation,
+            consume: true,
+        }), null, 'the expiry effect seals the item before a late terminal event can claim it');
+        assert.deepEqual(providerEvents.filter((event) => event.type === 'conversation.item.delete'), [{
+            type: 'conversation.item.delete',
+            item_id: providerItemId,
+        }]);
+        assert.equal(cleanupEffects.length, 1);
+        assert.equal(applyBrowserVoiceV2PotentialBargeProofCleanup({
+            effect: cleanupEffects[0],
+            registry: providerItems,
+            transcripts,
+            potentialItems,
+            providerWakeTurnIds,
+            connectionGeneration: generation,
+            clearDraft: () => { clearDraftCount += 1; },
+            sendProviderEvent: (event) => {
+                providerEvents.push(event);
+                return true;
+            },
+        }), false, 'a duplicate/late cleanup effect is an exact no-op');
+        assert.equal(clearDraftCount, 1);
+        assert.equal(providerEvents.filter((event) => event.type === 'conversation.item.delete').length, 1);
+        assert.equal(controller.drainEffects().some((effect) => effect.type === BROWSER_VOICE_EFFECTS.TURN_READY), false);
+    }
+});
+
+test('[BV2-TRANSCRIPT-03][BV2-PRIVACY-PCM-03][BV2-DIAGNOSTIC-03] provider item capacity never evicts and fails the active capture closed exactly once', async () => {
+    const diagnostics = [];
+    const registry = new BrowserVoiceProviderItemRegistryV2({ limit: 2 });
+    const inputTransport = new BrowserVoiceRealtimeInputTransportV2({
+        send: () => true,
+        encodeBase64: () => 'activated-pcm',
+    });
+    const controller = new BrowserVoiceControllerV2({ createTurnId: () => 'capacity-turn' });
+    controller.start();
+    controller.providerReady({ source: 'webrtc' });
+    activateBrowserVoiceV2LocalWakeTransport({ controller, inputTransport, generation: 61 });
+    controller.activationReady({ source: 'local_wake_gate' });
+
+    for (const providerItemId of ['sealed-oldest', 'sealed-newest']) {
+        const started = bindBrowserVoiceProviderSpeechStartedV2(controller, registry, {
+            providerItemId,
+            connectionGeneration: 61,
+        });
+        assert.equal(started.binding.turnId, 'capacity-turn');
+        assert.equal(currentBrowserVoiceProviderItemBindingV2(registry, controller, {
+            providerItemId,
+            connectionGeneration: 61,
+            consume: true,
+        })?.turnId, 'capacity-turn');
+    }
+    const exhausted = bindBrowserVoiceProviderSpeechStartedV2(controller, registry, {
+        providerItemId: 'must-not-evict',
+        connectionGeneration: 61,
+    });
+    assert.equal(exhausted.result, BROWSER_VOICE_REALTIME_INGRESS_RESULTS.CAPACITY_EXHAUSTED);
+    assert.equal(registry.size, 2);
+    assert.equal(registry.has({ providerItemId: 'sealed-oldest', connectionGeneration: 61 }), true);
+
+    let active = true;
+    let teardownCount = 0;
+    const reporter = new VoiceClientFailureReporter({
+        send: async (diagnostic) => {
+            diagnostics.push(diagnostic);
+            return { recorded: true };
+        },
+        eventTarget: null,
+        scopeId: 'provider-protocol-capacity',
+        retryDelaysMs: [],
+    });
+    const reportFailure = (error) => reporter.enqueue({
+        failure_id: voiceClientFailureId('connection', 'generation-61', 'provider-item-capacity'),
+        stage: 'connection',
+        code: error?.code,
+        message: error?.message,
+        cause_chain: [],
+        turn_id: 'capacity-turn',
+    });
+    const teardown = (_message, options) => {
+        assert.equal(options.reportFailure, false);
+        if (!active) return;
+        active = false;
+        teardownCount += 1;
+        inputTransport.deactivate();
+        registry.clear();
+        controller.disable('provider_protocol_failure');
+    };
+    const protocolCode = browserVoiceV2ProviderProtocolFailureForEvent({
+        eventType: 'input_audio_buffer.speech_started',
+        providerInputActive: browserVoiceV2ProviderInputIsActive({ inputTransport }),
+        providerItemId: 'must-not-evict',
+        providerItemCapacityExhausted: registry.capacityExhausted,
+    });
+    assert.equal(protocolCode, BROWSER_VOICE_PROVIDER_PROTOCOL_FAILURES.ITEM_CAPACITY_EXHAUSTED);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        applyBrowserVoiceV2ProviderProtocolFailure({
+            code: protocolCode,
+            reportFailure,
+            teardown,
+        });
+    }
+    await reporter.flush();
+
+    assert.equal(teardownCount, 1);
+    assert.equal(diagnostics.length, 1);
+    assert.equal(controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.OFF);
+    assert.equal(inputTransport.append({
+        generation: 61,
+        sourceSequence: 1,
+        sampleRate: BROWSER_VOICE_LOCAL_PCM_RATE,
+        samples: new Float32Array(1600).fill(0.1),
+    }), false);
+    assert.equal(registry.size, 0, 'the ended connection may clear its sealed identity scope');
+    reporter.dispose();
+
+    assert.match(source, /providerItemCapacityExhausted:[\s\S]*browserVoiceV2ProviderItems\.capacityExhausted/);
+});
+
+test('[BV2-DIAGNOSTIC-03][BV2-PRIVACY-PCM-03] provider error reports once and uses the connection-wide fail-closed teardown', async () => {
+    const providerEvents = [];
+    const diagnostics = [];
+    const inputTransport = new BrowserVoiceRealtimeInputTransportV2({
+        send: (event) => {
+            providerEvents.push(event);
+            return true;
+        },
+        encodeBase64: () => 'activated-pcm',
+    });
+    const controller = new BrowserVoiceControllerV2({ createTurnId: () => 'provider-failure-turn' });
+    controller.start();
+    controller.providerReady({ source: 'webrtc' });
+    activateBrowserVoiceV2LocalWakeTransport({ controller, inputTransport, generation: 19 });
+    controller.activationReady({ source: 'local_wake_gate' });
+    assert.equal(inputTransport.append({
+        generation: 19,
+        sourceSequence: 4,
+        sampleRate: BROWSER_VOICE_LOCAL_PCM_RATE,
+        samples: new Float32Array(1600).fill(0.1),
+    }), true);
+
+    const rawTrack = { stopped: false, stop() { this.stopped = true; } };
+    const localWakeGate = { open: true, stopped: false, stop() { this.open = false; this.stopped = true; } };
+    let voiceActive = true;
+    let teardownCount = 0;
+    let terminalMessage = '';
+    const reporter = new VoiceClientFailureReporter({
+        send: async (diagnostic) => {
+            diagnostics.push(diagnostic);
+            return { recorded: true };
+        },
+        eventTarget: null,
+        scopeId: 'test-user-connection',
+        retryDelaysMs: [],
+    });
+    const reportFailure = (error, message) => reporter.enqueue({
+        failure_id: voiceClientFailureId('connection', 'generation-19'),
+        stage: 'connection',
+        code: error?.code,
+        message,
+        cause_chain: [],
+        turn_id: 'provider-failure-turn',
+    });
+    const teardown = (message, options) => {
+        assert.equal(options.reportFailure, false, 'the teardown may not queue a second diagnostic');
+        if (!voiceActive) return;
+        voiceActive = false;
+        teardownCount += 1;
+        terminalMessage = message;
+        inputTransport.deactivate();
+        localWakeGate.stop();
+        rawTrack.stop();
+        controller.disable('connection_lost');
+    };
+
+    teardownBrowserVoiceV2ProviderFailure({
+        error: { code: 'provider exploded' },
+        providerMessage: 'api_key=secret transcript=private pcm=AAAA',
+        reportFailure,
+        teardown,
+    });
+    await reporter.flush();
+
+    assert.equal(teardownCount, 1);
+    assert.equal(voiceActive, false);
+    assert.equal(localWakeGate.open, false);
+    assert.equal(localWakeGate.stopped, true);
+    assert.equal(rawTrack.stopped, true);
+    assert.equal(controller.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.OFF);
+    assert.match(terminalMessage, /Tap the Bean button to reconnect/);
+    assert.equal(inputTransport.append({
+        generation: 19,
+        sourceSequence: 5,
+        sampleRate: BROWSER_VOICE_LOCAL_PCM_RATE,
+        samples: new Float32Array(1600).fill(0.2),
+    }), false);
+    assert.deepEqual(providerEvents.map((event) => event.type), [
+        'input_audio_buffer.clear',
+        'input_audio_buffer.append',
+    ]);
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0].failure_id, voiceClientFailureId('connection', 'generation-19'));
+    assert.equal(diagnostics[0].code, 'voice_connection_failure');
+    assert.doesNotMatch(JSON.stringify(diagnostics[0]), /secret|private|AAAA|exploded/);
+    reporter.dispose();
+});
+
 test('[BV2-WAKE-OWNER-01] Realtime transcript text cannot become a second wake owner', () => {
     const detectedStart = source.indexOf('function handleLocalWakeDetected(');
     const detectedEnd = source.indexOf('\n    function handleLocalWakeFailure(', detectedStart);
     const detected = source.slice(detectedStart, detectedEnd);
-    assert.match(detected, /browserVoiceV2Controller\.wakeConfirmed\(\{ source: 'local_wake_gate' \}\)/);
+    assert.match(detected, /activateBrowserVoiceV2LocalWakeTransport/);
+
+    const bridgeStart = source.indexOf('export function activateBrowserVoiceV2LocalWakeTransport(');
+    const bridgeEnd = source.indexOf('\nexport function applyBrowserVoiceV2WakeOnlyPrivacyBoundary(', bridgeStart);
+    const bridge = source.slice(bridgeStart, bridgeEnd);
+    assert.match(bridge, /return controller\.wakeConfirmed\(\{ source \}\)/);
 
     const ingressStart = source.indexOf('function handleBrowserVoiceV2RealtimeEvent(');
     const ingressEnd = source.indexOf('\n    async function reportBrowserVoiceV2RealtimeUsage(', ingressStart);
@@ -172,15 +1405,44 @@ test('[BV2-BARGE-04] failed interruption transcription restores playback instead
     const completed = source.slice(completedStart, start);
     const implementation = source.slice(start, end);
     const claimCandidate = implementation.indexOf('const potentialBargeIn = browserVoiceV2PotentialBargeInItems.delete(transcriptId)');
-    const reject = implementation.indexOf("browserVoiceV2Controller.rejectBargeIn('transcription_failed'");
-    const captureFailure = implementation.indexOf("browserVoiceV2Controller.captureFailed('transcription_failed'");
+    const reject = implementation.indexOf("action: 'reject_barge_in'");
+    const normalCaptureBranch = implementation.indexOf('const followUpCandidate = browserVoiceV2Controller.snapshot().followUpCandidate');
+    const captureFailure = implementation.indexOf('applyBrowserVoiceV2TranscriptionFailure({', normalCaptureBranch);
 
-    assert.doesNotMatch(delta, /confirmBargeIn|PotentialBargeInItems\.delete/);
+    assert.doesNotMatch(delta, /confirmBargeIn/);
+    assert.match(delta, /browserVoiceV2PotentialBargeInItems\.has\(transcriptId\)/);
     assert.match(delta, /updateVoiceWakeDraft\(commandDraft\)/);
     assert.match(completed, /browserVoiceV2Controller\.confirmBargeIn/);
+    assert.match(completed, /realtimeInputTranscripts\.discardItem\(\{ itemId: transcriptId \}\)/);
+    assert.doesNotMatch(completed, /realtimeInputTranscripts\.discard\(/);
     assert.ok(claimCandidate >= 0, 'the handler must claim the potential interruption exactly once');
     assert.ok(reject > claimCandidate, 'an unconfirmed interruption must restore the current playback');
-    assert.ok(captureFailure > reject, 'ordinary capture failure handling must remain outside the interruption branch');
+    assert.ok(normalCaptureBranch > reject && captureFailure > normalCaptureBranch,
+        'ordinary capture failure handling must remain outside the interruption branch');
+});
+
+test('[BV2-TRANSCRIPT-03] every sealed or terminal provider item clears all buffered content indices', () => {
+    const effectsStart = source.indexOf('function handleBrowserVoiceV2ControllerEffect(effect)');
+    const activateCapture = source.indexOf('if (effect.type === BROWSER_VOICE_EFFECTS.ACTIVATE_CAPTURE)', effectsStart);
+    const effects = source.slice(effectsStart, activateCapture);
+    const deltaStart = source.indexOf("if (type === 'conversation.item.input_audio_transcription.delta')");
+    const completedStart = source.indexOf("if (type === 'conversation.item.input_audio_transcription.completed')", deltaStart);
+    const failedStart = source.indexOf("if (type === 'conversation.item.input_audio_transcription.failed')", completedStart);
+    const terminalEnd = source.indexOf("if (type === 'response.function_call_arguments.delta'", failedStart);
+    const delta = source.slice(deltaStart, completedStart);
+    const completed = source.slice(completedStart, failedStart);
+    const failed = source.slice(failedStart, terminalEnd);
+
+    assert.match(effects, /DISCARD_FOLLOW_UP_CANDIDATE[\s\S]*realtimeInputTranscripts\.discardItem\(\{ itemId: effect\.providerItemId \}\)/);
+    assert.match(delta, /if \(!binding\)[\s\S]*realtimeInputTranscripts\.discardItem\(\{ itemId: transcriptId \}\)/);
+    assert.match(completed, /if \(!binding\)[\s\S]*realtimeInputTranscripts\.discardItem\(\{ itemId: transcriptId \}\)/);
+    assert.ok(
+        completed.indexOf('realtimeInputTranscripts.complete({')
+            < completed.lastIndexOf('realtimeInputTranscripts.discardItem({ itemId: transcriptId })'),
+        'a valid terminal completion reads its selected transcript before erasing every remaining index',
+    );
+    assert.match(failed, /realtimeInputTranscripts\.discardItem\(\{ itemId: transcriptId \}\)/);
+    assert.doesNotMatch(source, /realtimeInputTranscripts\.discard\(/);
 });
 
 test('[BV2-BARGE-06] only the exact completed active-conversation PCM can absorb a delayed local callback', () => {
@@ -231,7 +1493,7 @@ test('[BV2-BARGE-06] only the exact completed active-conversation PCM can absorb
     assert.match(detected, /browserVoiceV2LocalWakeMatchesCompletedBarge/);
     assert.ok(
         detected.indexOf('browserVoiceV2LocalWakeMatchesCompletedBarge')
-            < detected.indexOf('browserVoiceV2Controller.wakeConfirmed'),
+            < detected.indexOf('activateBrowserVoiceV2LocalWakeTransport'),
         'exact completed PCM must be deduplicated before local wake admission',
     );
 
@@ -249,9 +1511,11 @@ test('[BV2-USAGE-02] realtime usage is reported once and a plan limit closes voi
 
     assert.match(implementation, /browserVoiceV2RealtimeUsageEventIds\.has\(eventId\)/);
     assert.match(implementation, /\/assistant\/voice\/realtime\/usage/);
-    assert.match(implementation, /reportRealtimeUsageReliably\(report/);
+    assert.match(implementation, /reportVoiceEventReliably\(report/);
     assert.match(implementation, /timeoutMs:\s*10000/);
-    assert.match(implementation, /sanitizedLocalWakeFailure\(error, 'usage_accounting'\)/);
+    assert.match(implementation, /shouldRetry: \(error\) => Number\(error\?\.status \|\| 0\) !== 402/);
+    assert.match(implementation, /reportBrowserVoiceV2ClientFailure\(error, \{[\s\S]*stage: 'usage_accounting'/);
+    assert.match(implementation, /identity: \[usageSessionId, eventId\]/);
     assert.match(implementation, /reason: Number\(error\?\.status \|\| 0\) === 402 \? 'usage_limit'/);
     assert.match(implementation, /state\.chatRunState = [\s\S]*'Upgrade to continue'/);
 
@@ -274,10 +1538,114 @@ test('[BV2-DIAGNOSTIC-02] a post-readiness local wake failure records its saniti
     assert.ok(start >= 0 && end > start, 'the local wake failure boundary must remain discoverable');
     const implementation = source.slice(start, end);
 
-    assert.match(implementation, /sanitizedLocalWakeFailure\(error\)/);
-    assert.match(implementation, /\/assistant\/voice\/client-failures/);
+    assert.match(implementation, /reportBrowserVoiceV2ClientFailure\(error, \{/);
+    assert.match(implementation, /stage: 'local_wake'/);
+    assert.match(implementation, /identity: \[connectionGeneration, gate\.currentGeneration\(\)\]/);
     assert.match(implementation, /handleRealtimeConnectionLoss/);
     assert.match(source, /onError: \(error\) => handleLocalWakeFailure\(localWakeGate, connectionGeneration, error\)/);
+});
+
+test('[BV2-DIAGNOSTIC-03] every browser client failure uses one bounded reliable idempotent reporter', () => {
+    assert.equal(
+        (source.match(/\/assistant\/voice\/client-failures/g) || []).length,
+        1,
+        'one transport owns all browser client-failure delivery',
+    );
+    assert.match(source, /const browserVoiceV2ClientFailureReporter = new VoiceClientFailureReporter\(\{/);
+    assert.match(source, /send: \(failure\) => api\('\/assistant\/voice\/client-failures'/);
+    assert.match(source, /storage: globalThis\.localStorage/);
+    assert.match(source, /const browserVoiceV2ClientFailurePageNonce = createVoiceClientFailureNonce\(\)/);
+    assert.match(source, /onPersistenceFailure: \(diagnostic\) => \{\s+console\.error\(diagnostic\.message, \{ code: diagnostic\.code \}\)/);
+    assert.match(source, /function scopeBrowserVoiceV2ClientFailures\(user = state\.user\)/);
+    assert.match(source, /browserVoiceV2ClientFailureReporter\.setScope\(userId\)/);
+
+    const loadSignedInStart = source.indexOf('async function loadSignedIn(options = {})');
+    const loadSignedInEnd = source.indexOf('\n    function mergeUser(', loadSignedInStart);
+    assert.ok(loadSignedInStart >= 0 && loadSignedInEnd > loadSignedInStart, 'signed-in initialization must remain discoverable');
+    assert.match(source.slice(loadSignedInStart, loadSignedInEnd), /state\.user = user;\s+scopeBrowserVoiceV2ClientFailures\(user\)/);
+
+    const clearTokenStart = source.indexOf('function clearToken({ discardVoiceDiagnostics = false } = {})');
+    const clearTokenEnd = source.indexOf('\n    function isUnauthenticatedError(', clearTokenStart);
+    assert.ok(clearTokenStart >= 0 && clearTokenEnd > clearTokenStart, 'logout cleanup must remain discoverable');
+    const clearToken = source.slice(clearTokenStart, clearTokenEnd);
+    assert.match(clearToken, /browserVoiceV2ClientFailureReporter\.deactivateCurrentScope\(\)/);
+    assert.match(clearToken, /discardVoiceDiagnostics[\s\S]*browserVoiceV2ClientFailureReporter\.clearCurrentScope\(\)/);
+    assert.match(source, /clearToken\(\{ discardVoiceDiagnostics: true \}\)/);
+
+    const start = source.indexOf('function reportBrowserVoiceV2ClientFailure(');
+    const end = source.indexOf('\n    function failBrowserVoiceV2Admission(', start);
+    assert.ok(start >= 0 && end > start, 'the shared client-failure boundary must remain discoverable');
+    const implementation = source.slice(start, end);
+    assert.match(implementation, /failure_id: voiceClientFailureId\(stage, voiceClientFailureIdentityParts\(/);
+    assert.match(implementation, /browserVoiceV2ClientFailurePageNonce/);
+    assert.match(implementation, /sanitizedVoiceClientFailure\(error, stage\)/);
+    assert.match(implementation, /realtimeTurnSessionIds\.get\(stableTurnId\)/);
+    assert.match(implementation, /browserVoiceV2ClientFailureReporter\.enqueue\(body\)/);
+    assert.doesNotMatch(implementation, /dispatch\(|admissionFailed|captureFailed|stopVoiceWakeListening/);
+});
+
+test('[BV2-FIRST-WAKE-01:D] sanitized local candidate decisions remain observable without transmitting dormant content', () => {
+    const start = source.indexOf('function handleLocalWakeDiagnostic(');
+    const end = source.indexOf('\n    function handleLocalWakeFailure(', start);
+    assert.ok(start >= 0 && end > start, 'the local wake diagnostic boundary must remain discoverable');
+    const implementation = source.slice(start, end);
+
+    assert.match(implementation, /localWakeConnectionIsCurrent/);
+    assert.match(implementation, /console\.info\('Browser Voice v2 local wake decision', diagnostic\)/);
+    assert.doesNotMatch(implementation, /api\(|client-failures/);
+    assert.match(source, /onDiagnostic: \(diagnostic\) => handleLocalWakeDiagnostic\(/);
+});
+
+test('[BV2-DIAGNOSTIC-03] provider transcription failure posts sanitized telemetry with the stable voice identity', () => {
+    const reporterStart = source.indexOf('function reportBrowserVoiceV2TranscriptionFailure(');
+    const reporterEnd = source.indexOf('\n    function handleBrowserVoiceV2RealtimeEvent(', reporterStart);
+    assert.ok(reporterStart >= 0 && reporterEnd > reporterStart, 'the transcription reporter must remain discoverable');
+    const reporter = source.slice(reporterStart, reporterEnd);
+    assert.match(reporter, /reportBrowserVoiceV2ClientFailure\(payload\?\.error, \{/);
+    assert.match(reporter, /stage: 'transcription'/);
+    assert.match(reporter, /identity: \[transcriptId \|\| payload\?\.event_id \|\| turnId \|\| realtimeConnectionGeneration\]/);
+    assert.match(reporter, /turnId,/);
+    assert.doesNotMatch(reporter, /payload[^?]*\.transcript|payload[^?]*\.audio|payload[^?]*\.pcm/);
+
+    const handlerStart = source.indexOf("if (type === 'conversation.item.input_audio_transcription.failed')");
+    const handlerEnd = source.indexOf("\n        if (type === 'response.function_call_arguments.delta'", handlerStart);
+    const handler = source.slice(handlerStart, handlerEnd);
+    assert.match(handler, /currentBrowserVoiceProviderItemBindingV2\(/);
+    assert.match(handler, /consume: true/);
+    assert.match(handler, /realtimeInputTranscripts\.discardItem\(\{ itemId: transcriptId \}\)/);
+    assert.doesNotMatch(handler, /realtimeInputTranscripts\.discard\(/);
+    assert.match(handler, /if \(!binding\) return true/);
+    assert.match(handler, /applyBrowserVoiceV2TranscriptionFailure\(\{/);
+    assert.match(handler, /binding,/);
+    assert.match(handler, /reportFailure: reportBrowserVoiceV2TranscriptionFailure/);
+    assert.ok(
+        handler.indexOf('currentBrowserVoiceProviderItemBindingV2(')
+            < handler.indexOf('if (!binding) return true'),
+        'an exact current item binding must be consumed before any failure can affect lifecycle',
+    );
+});
+
+test('[BV2-DIAGNOSTIC-03] a post-readiness provider connection failure is reported once per generation', () => {
+    const reporterStart = source.indexOf('function reportBrowserVoiceV2ConnectionFailure(');
+    const reporterEnd = source.indexOf('\n    function handleRealtimeConnectionLoss(', reporterStart);
+    const reporter = source.slice(reporterStart, reporterEnd);
+    assert.match(reporter, /reportBrowserVoiceV2ClientFailure\(/);
+    assert.match(reporter, /stage: 'connection'/);
+    assert.match(reporter, /identity: \[realtimeConnectionGeneration\]/);
+    assert.match(reporter, /turnId,/);
+
+    const lossStart = source.indexOf('function handleRealtimeConnectionLoss(');
+    const lossEnd = source.indexOf('\n    function bindBrowserVoiceV2ProviderItemToLocalWake(', lossStart);
+    const loss = source.slice(lossStart, lossEnd);
+    assert.match(loss, /reportBrowserVoiceV2ConnectionFailure\(error, message\)/);
+    assert.match(loss, /stopVoiceWakeListening/);
+
+    const errorStart = source.indexOf("if (type === 'error') {");
+    const errorEnd = source.indexOf('\n        return false;', errorStart);
+    const providerError = source.slice(errorStart, errorEnd);
+    assert.match(providerError, /return teardownBrowserVoiceV2ProviderFailure\(\{/);
+    assert.match(providerError, /reportFailure: reportBrowserVoiceV2ConnectionFailure/);
+    assert.match(providerError, /teardown: handleRealtimeConnectionLoss/);
 });
 
 test('[BV2-DIAGNOSTIC-03] exhausted durable admission reports a sanitized diagnostic and retains a recovery envelope', () => {
@@ -285,8 +1653,9 @@ test('[BV2-DIAGNOSTIC-03] exhausted durable admission reports a sanitized diagno
     const end = source.indexOf('\n    async function admitBrowserVoiceV2Turn(', start);
     assert.ok(start >= 0 && end > start, 'the admission failure boundary must remain discoverable');
     const failure = source.slice(start, end);
-    assert.match(failure, /sanitizedLocalWakeFailure\(error, 'admission'\)/);
-    assert.match(failure, /\/assistant\/voice\/client-failures/);
+    assert.match(failure, /reportBrowserVoiceV2ClientFailure\(error, \{/);
+    assert.match(failure, /stage: 'admission'/);
+    assert.match(failure, /identity: \[turnId\]/);
 
     const admissionStart = source.indexOf('async function admitBrowserVoiceV2Turn(');
     const admissionEnd = source.indexOf('\n    function applyBrowserVoiceV2Snapshot(', admissionStart);
@@ -306,10 +1675,11 @@ test('[BV2-DIAGNOSTIC-04] exhausted clarification transport preserves the draft 
     assert.match(implementation, /resolvedClarificationIds\?\.includes\(clarificationId\)/);
     assert.doesNotMatch(implementation, /transcript\.endsWith/);
     assert.match(implementation, /Your words are still in the input/);
-    assert.match(implementation, /sanitizedLocalWakeFailure\(lastError, 'clarification'\)/);
-    assert.match(implementation, /\/assistant\/voice\/client-failures/);
-    assert.match(implementation, /session_id: Number\(sessionId\)/);
-    assert.match(implementation, /turn_id: turnId/);
+    assert.match(implementation, /reportBrowserVoiceV2ClientFailure\(lastError, \{/);
+    assert.match(implementation, /stage: 'clarification'/);
+    assert.match(implementation, /identity: \[clarificationId\]/);
+    assert.match(implementation, /sessionId,/);
+    assert.match(implementation, /turnId,/);
 });
 
 test('[BV2-STARTUP-03] startup uses one same-origin SDP owner and fails closed with a natural retry prompt', () => {
@@ -334,7 +1704,7 @@ test('[BV2-STARTUP-03] startup uses one same-origin SDP owner and fails closed w
     const start = source.indexOf('async function startVoiceWakeListening(');
     const end = source.indexOf('\n    function toggleVoiceWakeListening(', start);
     const implementation = source.slice(start, end);
-    const diagnostic = implementation.indexOf("sanitizedLocalWakeFailure(error, 'startup')");
+    const diagnostic = implementation.indexOf('reportBrowserVoiceV2ClientFailure(error, {');
     const stop = implementation.indexOf('stopVoiceWakeListening', diagnostic);
     const naturalFailure = implementation.indexOf('Bean couldn’t connect voice right now.', stop);
     assert.ok(diagnostic >= 0 && stop > diagnostic && naturalFailure > stop);

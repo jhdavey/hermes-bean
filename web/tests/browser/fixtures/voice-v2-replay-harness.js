@@ -125,16 +125,33 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
             providerTransport.append(event);
         },
         onDiagnostic(event) {
-            if (!activeTrial || event?.type !== 'classification_decision') return;
-            activeTrial.classifierDecisions.push({
-                decision_type: event.decisionType,
-                accepted: event.accepted,
-                expected_class: event.expectedClass,
-                winning_class: event.winningClass,
-                probability: round(event.probability),
-                threshold: round(event.threshold),
-                sample_count: event.sampleCount,
-            });
+            if (!activeTrial) return;
+            if (event?.type === 'wake_proposal') {
+                activeTrial.wakeProposals.push({
+                    at: performance.now(),
+                    proposal_type: event.proposalType,
+                    timestamp_count: event.timestampCount,
+                    required_tail_samples: event.requiredTailSamples,
+                });
+            } else if (event?.type === 'classification_decision') {
+                activeTrial.classifierDecisions.push({
+                    at: performance.now(),
+                    proposal_type: event.proposalType,
+                    accepted: event.accepted,
+                    winning_class: event.winningClass,
+                    probability: round(event.probability),
+                    threshold: round(event.threshold),
+                    sample_count: event.sampleCount,
+                    tail_samples: event.tailSamples,
+                });
+            } else if (event?.type === 'wake_candidate_discarded') {
+                activeTrial.discardDiagnostics.push({
+                    generation: event.generation,
+                    reason: event.reason,
+                    proposal_seen: event.proposalSeen === true,
+                    classification_decision_seen: event.classificationDecisionSeen === true,
+                });
+            }
         },
         onError(error) {
             const detail = normalizedError(error);
@@ -152,16 +169,27 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
         const readyMs = performance.now() - startupStartedAt;
 
         const strictWakeEntries = corpus.filter((entry) => entry.family === 'isolated_strict_wake');
-        const strictCommandEntries = corpus.filter((entry) => entry.family === 'strict_wake_time_command');
+        const strictCommandEntries = corpus.filter(
+            (entry) => entry.journey === 'strict_wake_preserves_complete_command_audio',
+        );
         const ongoingSpeechWakeEntries = corpus.filter((entry) => entry.family === 'strict_wake_in_ongoing_speech');
+        const acousticVariantEntries = corpus.filter(
+            (entry) => entry.journey === 'strict_wake_acoustic_variant',
+        );
+        const stressEntries = corpus.filter(
+            (entry) => entry.journey === 'strict_wake_kws_stress_positive',
+        );
         const addressEntries = corpus.filter((entry) => entry.expected === 'missed_hey_confirmation');
         const negativeEntries = corpus.filter((entry) => entry.expected === 'reject');
         const strictTrials = [];
         const strictCommandTrials = [];
         const ongoingSpeechWakeTrials = [];
+        const acousticVariantTrials = [];
+        const stressTrials = [];
         const addressTrials = [];
         const negativeTrials = [];
         const rejectionResetRecovery = [];
+        const executedNegativeIds = new Set();
 
         // Each voice first traverses every important near miss, resets after
         // each rejection, and then must accept one strict wake. This catches
@@ -173,6 +201,7 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
             for (const entry of voiceNegatives) {
                 const trial = await runTrial(entry, 1, 'repeated_rejection_then_wake');
                 negativeTrials.push(trial);
+                executedNegativeIds.add(entry.id);
                 rejected.push(trial);
             }
             const wake = await runTrial(strictEntry, 1, 'repeated_rejection_then_wake');
@@ -191,12 +220,31 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
                     && wake.matched,
             });
         }
+        const unpairedNegativeEntries = negativeEntries.filter((entry) => !executedNegativeIds.has(entry.id));
+        for (const entry of unpairedNegativeEntries) {
+            negativeTrials.push(await runTrial(entry, 1, 'standalone_negative_privacy'));
+            executedNegativeIds.add(entry.id);
+        }
+        const repeatedHardNegativeEntries = negativeEntries.filter(
+            (entry) => Number(entry.repetitions) > 1,
+        );
+        for (const entry of repeatedHardNegativeEntries) {
+            for (let repetition = 2; repetition <= Number(entry.repetitions); repetition += 1) {
+                negativeTrials.push(await runTrial(entry, repetition, 'repeated_transformed_near_match_privacy'));
+            }
+        }
         for (let repetition = 2; repetition <= wakeReplays; repetition += 1) {
             for (const entry of strictWakeEntries) strictTrials.push(await runTrial(entry, repetition));
         }
         for (const entry of strictCommandEntries) strictCommandTrials.push(await runTrial(entry, 1));
         for (const entry of ongoingSpeechWakeEntries) {
             ongoingSpeechWakeTrials.push(await runTrial(entry, 1, 'ongoing_speech_then_strict_wake'));
+        }
+        for (const entry of acousticVariantEntries) {
+            acousticVariantTrials.push(await runTrial(entry, 1));
+        }
+        for (const entry of stressEntries) {
+            stressTrials.push(await runTrial(entry, 1));
         }
         for (const entry of addressEntries) addressTrials.push(await runTrial(entry, 1));
 
@@ -219,9 +267,60 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
         );
         const addressAccuracy = ratio(addressTrials.filter((trial) => trial.matched).length, addressTrials.length);
         const falseWakeCount = negativeTrials.filter((trial) => trial.detections.length > 0).length;
+        const falseAcceptedClassifierCount = negativeTrials.filter(
+            (trial) => trial.classifier_decisions.some((decision) => decision.accepted === true),
+        ).length;
+        const negativeActivatedPcmCallbackCount = negativeTrials.reduce(
+            (total, trial) => total + trial.activated_pcm_callback_count,
+            0,
+        );
+        const negativeProviderAppendCount = negativeTrials.reduce(
+            (total, trial) => total + trial.provider_append_count,
+            0,
+        );
         const strictCommandReleasePassCount = strictCommandTrials.filter((trial) => trial.matched
             && trial.activated_pcm_sample_count >= STRICT_COMMAND_MIN_RELEASED_PCM_SAMPLES).length;
-        const acceptedTrials = [...strictTrials, ...strictCommandTrials, ...ongoingSpeechWakeTrials, ...addressTrials];
+        const acousticVariantPassCount = acousticVariantTrials.filter(
+            (trial) => trial.matched
+                && trial.detections.length === 1
+                && trial.detections[0]?.activation === 'strict_wake'
+                && trial.detections[0]?.release_boundary?.policy === 'post_address_tail'
+                && trial.final_classifier_decision_accepted === true
+                && trial.release_boundary_safe === true
+                && trial.first_activated_pcm_was_boundary_release === true
+                && trial.first_provider_append_observed === true
+                && trial.pre_confirmation_activated_pcm_count === 0
+                && trial.reset_rearmed,
+        ).length;
+        const stressPassCount = stressTrials.filter(
+            (trial) => trial.matched
+                && trial.detections.length === 1
+                && trial.detections[0]?.activation === 'strict_wake'
+                && trial.detections[0]?.release_boundary?.policy === 'post_address_tail'
+                && trial.final_classifier_decision_accepted === true
+                && trial.release_boundary_safe === true
+                && trial.first_activated_pcm_was_boundary_release === true
+                && trial.first_provider_append_observed === true
+                && trial.pre_confirmation_activated_pcm_count === 0
+                && trial.reset_rearmed,
+        ).length;
+        const acceptedTrials = [
+            ...strictTrials,
+            ...strictCommandTrials,
+            ...ongoingSpeechWakeTrials,
+            ...acousticVariantTrials,
+            ...stressTrials,
+            ...addressTrials,
+        ];
+        const allTrials = [...acceptedTrials, ...negativeTrials];
+        const proposalTrials = allTrials.filter((trial) => trial.wake_proposals.length > 0);
+        const proposalClassificationLatencies = proposalTrials
+            .filter((trial) => trial.proposal_to_classification_ms !== null)
+            .map((trial) => trial.proposal_to_classification_ms);
+        const proposalClassificationMetric = summarizeObserved(
+            proposalClassificationLatencies,
+            proposalTrials.length,
+        );
         const activatedPcmReleaseCount = acceptedTrials.filter(
             (trial) => trial.matched && trial.first_activated_pcm_observed,
         ).length;
@@ -229,16 +328,31 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
         const providerAppendCount = acceptedTrials.filter(
             (trial) => trial.matched && trial.first_provider_append_observed,
         ).length;
+        const acceptedWakeSafetyPass = acceptedTrials.every((trial) => (
+            trial.detections.length === 0
+            || (
+                trial.detections.length === 1
+                && trial.release_boundary_safe === true
+                && trial.first_activated_pcm_was_boundary_release === true
+                && trial.first_provider_append_was_boundary_release === true
+                && trial.first_activated_pcm_observed === true
+                && trial.first_provider_append_observed === true
+            )
+        ));
         const resetRecoveryPassCount = rejectionResetRecovery.filter((journey) => journey.pass).length;
         const qaJourneyCount = strictTrials.length
             + strictCommandTrials.length
             + ongoingSpeechWakeTrials.length
+            + acousticVariantTrials.length
+            + stressTrials.length
             + addressTrials.length
             + negativeTrials.length
             + rejectionResetRecovery.length;
         const qaJourneyPassCount = strictTrials.filter((trial) => trial.matched).length
             + strictCommandReleasePassCount
             + ongoingSpeechWakeTrials.filter((trial) => trial.matched).length
+            + acousticVariantPassCount
+            + stressPassCount
             + addressTrials.filter((trial) => trial.matched).length
             + negativeTrials.filter((trial) => trial.matched).length
             + resetRecoveryPassCount;
@@ -247,12 +361,19 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
         const resetRecoveryPass = ratio(resetRecoveryPassCount, rejectionResetRecovery.length) >= 0.95;
         const privacyPass = preConfirmationActivatedPcmCount === 0
             && acceptedTrials.every((trial) => trial.pre_confirmation_activated_pcm_count === 0);
+        // Commercial recognition misses are counted in the one aggregate QA
+        // rate. Privacy escapes, missing activated transport, runtime failures,
+        // and incomplete corpus execution remain independent hard failures.
         const pass = voiceQaPass
-            && wakeMetric.pass
+            && wakeMetric.latency_pass
             && privacyPass
+            && acceptedWakeSafetyPass
             && activatedPcmReleaseCount === expectedActivatedPcmReleaseCount
             && providerAppendCount === expectedActivatedPcmReleaseCount
-            && strictCommandReleasePassCount === strictCommandTrials.length
+            && falseAcceptedClassifierCount === 0
+            && negativeActivatedPcmCallbackCount === 0
+            && negativeProviderAppendCount === 0
+            && executedNegativeIds.size === negativeEntries.length
             && errors.length === 0;
 
         return {
@@ -269,7 +390,8 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
                 'LocalWakeGate',
                 'AudioWorklet gate/resampler',
                 'Worker',
-                'packaged local wake model',
+                'proposal-only bundled local KWS',
+                'one first-party three-class wake classifier over a fixed 160 ms tail',
                 'onActivatedPcm gate handoff',
             ],
             browser_audio_context: {
@@ -301,6 +423,33 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
                 detection_accuracy: ongoingSpeechWakeAccuracy,
                 trials: ongoingSpeechWakeTrials,
             },
+            strict_wake_acoustic_variants: {
+                unique_audio_files: acousticVariantEntries.length,
+                sample_count: acousticVariantTrials.length,
+                expected_detection_count_per_trial: 1,
+                expected_activation: 'strict_wake',
+                expected_release_policy: 'post_address_tail',
+                single_final_classifier_decision_required: true,
+                safe_release_boundary_required: true,
+                zero_pre_confirmation_pcm_required: true,
+                reset_rearm_required: true,
+                pass_count: acousticVariantPassCount,
+                pass: acousticVariantPassCount === acousticVariantTrials.length,
+                trials: acousticVariantTrials,
+            },
+            strict_wake_transform_stress: {
+                unique_audio_files: stressEntries.length,
+                sample_count: stressTrials.length,
+                single_final_classifier_decision_required: true,
+                expected_detection_count_per_trial: 1,
+                expected_release_policy: 'post_address_tail',
+                safe_release_boundary_required: true,
+                zero_pre_confirmation_pcm_required: true,
+                reset_rearm_required: true,
+                pass_count: stressPassCount,
+                pass: stressPassCount === stressTrials.length,
+                trials: stressTrials,
+            },
             strict_wake_command_release: {
                 unique_audio_files: strictCommandEntries.length,
                 sample_count: strictCommandTrials.length,
@@ -317,7 +466,8 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
                 trials: addressTrials,
             },
             negative_privacy: {
-                repetitions_per_file: 1,
+                default_repetitions_per_file: 1,
+                transformed_near_match_repetitions_per_file: 4,
                 unique_audio_files: negativeEntries.length,
                 unique_near_miss_families: new Set(negativeEntries.map((entry) => entry.family)).size,
                 voices_per_family: Object.fromEntries(
@@ -327,8 +477,17 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
                     ]),
                 ),
                 sample_count: negativeTrials.length,
+                every_unique_audio_file_executed: executedNegativeIds.size === negativeEntries.length,
+                unpaired_unique_audio_files: unpairedNegativeEntries.length,
+                unpaired_trial_ids: unpairedNegativeEntries.map((entry) => entry.id),
                 false_wake_count: falseWakeCount,
                 false_wake_rate: ratio(falseWakeCount, negativeTrials.length),
+                accepted_classifier_decision_count: falseAcceptedClassifierCount,
+                zero_accepted_classifier_decisions: falseAcceptedClassifierCount === 0,
+                activated_pcm_callback_count: negativeActivatedPcmCallbackCount,
+                provider_append_count: negativeProviderAppendCount,
+                zero_released_pcm_or_provider_append: negativeActivatedPcmCallbackCount === 0
+                    && negativeProviderAppendCount === 0,
                 pre_confirmation_activated_pcm_callback_count: preConfirmationActivatedPcmCount,
                 dormant_activated_pcm_max_abs: dormantMaxAbs,
                 zero_activated_pcm_callbacks_before_confirmation: preConfirmationActivatedPcmCount === 0,
@@ -351,7 +510,16 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
                     strictCommandTrials.length,
                 ),
                 strict_wake_in_ongoing_speech_accuracy: ongoingSpeechWakeAccuracy,
+                strict_wake_acoustic_variant_accuracy: ratio(
+                    acousticVariantPassCount,
+                    acousticVariantTrials.length,
+                ),
+                strict_wake_transform_stress_accuracy: ratio(
+                    stressPassCount,
+                    stressTrials.length,
+                ),
                 missed_hey_address_accuracy: addressAccuracy,
+                proposal_to_classification_ms: proposalClassificationMetric,
                 near_miss_false_acceptance_rate: ratio(falseWakeCount, negativeTrials.length),
                 repeated_reset_recovery_rate: ratio(
                     rejectionResetRecovery.filter((journey) => journey.pass).length,
@@ -362,6 +530,7 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
             provider_release: {
                 gate_handoff_measurement: 'accepted wake phrase end to first onActivatedPcm callback',
                 exact_zero_callbacks_before_local_confirmation: preConfirmationActivatedPcmCount === 0,
+                every_accepted_wake_used_its_safe_boundary: acceptedWakeSafetyPass,
                 observed_gate_handoff_count: activatedPcmReleaseCount,
                 expected_gate_handoff_count: expectedActivatedPcmReleaseCount,
                 gate_handoff_coverage: ratio(activatedPcmReleaseCount, expectedActivatedPcmReleaseCount),
@@ -380,6 +549,7 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
                 fixed_preroll_delay_certified_by_this_benchmark: false,
                 accepted_boundary_content_certified_by_this_benchmark: false,
                 pass: privacyPass
+                    && acceptedWakeSafetyPass
                     && activatedPcmReleaseCount === expectedActivatedPcmReleaseCount
                     && providerAppendCount === expectedActivatedPcmReleaseCount,
             },
@@ -423,7 +593,10 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
             expected: entry.expected,
             repetition,
             detections: [],
+            wakeProposals: [],
             classifierDecisions: [],
+            discardDiagnostics: [],
+            startingGeneration: gate.currentGeneration(),
             activatedPcmChunkCount: 0,
             activatedPcmSampleCount: 0,
             activatedPcmMaxAbs: 0,
@@ -468,7 +641,12 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
 
         if (entry.expected === 'reject') {
             await sourceEnded;
-            await delay(1_100);
+            await waitUntil(
+                () => gate.currentGeneration() > trial.startingGeneration,
+                4_200,
+                'Rejected dormant audio did not trigger an automatic local re-arm.',
+                { reject: false },
+            );
         } else {
             await waitUntil(
                 () => trial.detections.length > 0,
@@ -492,9 +670,81 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
         }
 
         const detection = trial.detections[0] || null;
-        const matched = entry.expected === 'reject'
+        const automaticDormantRearm = entry.expected !== 'reject'
+            || (gate.currentGeneration() > trial.startingGeneration
+                && trial.discardDiagnostics.length > 0);
+        const activationMatched = entry.expected === 'reject'
             ? detection === null
             : detection?.activation === entry.expected;
+        const expectedDetectionCount = Number.isSafeInteger(entry.expected_detection_count)
+            ? entry.expected_detection_count
+            : null;
+        const detectionCountMatched = expectedDetectionCount === null
+            || trial.detections.length === expectedDetectionCount;
+        const releasePolicyMatched = !entry.expected_release_policy
+            || detection?.releaseBoundary?.policy === entry.expected_release_policy;
+        const releaseBoundarySourceSequence = detection?.releaseBoundary?.sourceSequence;
+        const detectedSourceSequence = detection?.sourceSequence;
+        const firstActivatedPcmSourceSequence = trial.firstActivatedPcmSourceSequence;
+        const releaseBoundarySafe = Number.isSafeInteger(releaseBoundarySourceSequence)
+            && Number.isSafeInteger(detectedSourceSequence)
+            && Number.isSafeInteger(firstActivatedPcmSourceSequence)
+            && releaseBoundarySourceSequence <= detectedSourceSequence
+            && firstActivatedPcmSourceSequence >= releaseBoundarySourceSequence;
+        const acceptedWakeExpected = entry.expected !== 'reject';
+        const expectedProposalType = entry.expected === 'strict_wake' ? 'strict' : 'address';
+        const proposal = trial.wakeProposals[0] || null;
+        const proposalEvidenceMatched = !acceptedWakeExpected || (
+            trial.wakeProposals.length === 1
+            && proposal?.proposal_type === expectedProposalType
+            && Number.isSafeInteger(proposal?.timestamp_count)
+            && proposal.timestamp_count > 0
+            && proposal?.required_tail_samples === 2_560
+        );
+        const classifierDecision = trial.classifierDecisions[0] || null;
+        const finalClassifierDecisionAccepted = acceptedWakeExpected
+            && trial.classifierDecisions.length === 1
+            && classifierDecision?.proposal_type === expectedProposalType
+            && classifierDecision?.winning_class === entry.expected
+            && classifierDecision?.accepted === true
+            && Number.isFinite(classifierDecision?.probability)
+            && Number.isFinite(classifierDecision?.threshold)
+            && classifierDecision.probability >= classifierDecision.threshold
+            && classifierDecision?.sample_count === 21_760
+            && classifierDecision?.tail_samples === 2_560;
+        const rejectedProposalDecisionMatched = !acceptedWakeExpected && (
+            trial.wakeProposals.length === 0
+                ? trial.classifierDecisions.length === 0
+                : trial.wakeProposals.length === 1
+                    && trial.classifierDecisions.length === 1
+                    && Number.isSafeInteger(proposal?.timestamp_count)
+                    && proposal.timestamp_count > 0
+                    && proposal?.required_tail_samples === 2_560
+                    && classifierDecision?.proposal_type === proposal?.proposal_type
+                    && classifierDecision?.accepted === false
+                    && Number.isFinite(classifierDecision?.probability)
+                    && Number.isFinite(classifierDecision?.threshold)
+                    && classifierDecision?.sample_count === 21_760
+                    && classifierDecision?.tail_samples === 2_560
+        );
+        const classifierEvidenceMatched = acceptedWakeExpected
+            ? finalClassifierDecisionAccepted
+            : rejectedProposalDecisionMatched;
+        const matched = activationMatched
+            && automaticDormantRearm
+            && detectionCountMatched
+            && releasePolicyMatched
+            && proposalEvidenceMatched
+            && classifierEvidenceMatched
+            && trial.preConfirmationActivatedPcmCount === 0
+            && (entry.expected !== 'reject' || (
+                trial.activatedPcmChunkCount === 0
+                && trial.providerAppendCount === 0
+            ))
+            && (!acceptedWakeExpected || (
+                releaseBoundarySafe
+                && trial.firstActivatedPcmReleased === true
+            ));
         const result = {
             id: trial.id,
             voice: trial.voice,
@@ -502,6 +752,8 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
             family: trial.family,
             journey: trial.journey,
             expected: trial.expected,
+            expected_detection_count: expectedDetectionCount,
+            expected_release_policy: entry.expected_release_policy || null,
             repetition,
             matched,
             detections: trial.detections.map((item) => ({
@@ -512,7 +764,19 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
                 source_start_to_confirmation_ms: round(item.at - sourceStartAt),
                 phrase_end_to_confirmation_raw_ms: round(item.at - phraseEndAt),
             })),
-            classifier_decisions: trial.classifierDecisions,
+            wake_proposals: trial.wakeProposals.map(({ at: _at, ...proposalItem }) => proposalItem),
+            final_classifier_decision_accepted: acceptedWakeExpected
+                ? finalClassifierDecisionAccepted
+                : null,
+            classifier_decisions: trial.classifierDecisions.map(
+                ({ at: _at, ...classifierItem }) => classifierItem,
+            ),
+            proposal_to_classification_ms: proposal && classifierDecision
+                ? round(Math.max(0, classifierDecision.at - proposal.at))
+                : null,
+            discard_diagnostics: trial.discardDiagnostics,
+            automatic_dormant_rearm: entry.expected === 'reject' ? automaticDormantRearm : null,
+            release_boundary_safe: detection === null ? null : releaseBoundarySafe,
             phrase_end_to_confirmation_ms: detection ? round(Math.max(0, detection.at - phraseEndAt)) : null,
             first_activated_pcm_observed: trial.firstActivatedPcmAt !== null,
             first_activated_pcm_source_sequence: trial.firstActivatedPcmSourceSequence,
@@ -550,15 +814,23 @@ async function runPrerecordedGateBenchmark(input, audioContext) {
         providerTransport.deactivate();
 
         const generation = gate.currentGeneration();
-        if (!gate.resetAfterTurn()) throw new Error(`Wake gate failed to reset after ${entry.id}.`);
+        const automaticCleanup = entry.expected === 'reject' && automaticDormantRearm;
+        if (!automaticCleanup) {
+            if (!gate.resetAfterTurn()) throw new Error(`Wake gate failed to reset after ${entry.id}.`);
+        }
         await waitUntil(
-            () => gate.currentGeneration() > generation && gate.isReady() && !gate.isOpen(),
+            () => (automaticCleanup || gate.currentGeneration() > generation)
+                && gate.isReady()
+                && !gate.isOpen(),
             RESET_TIMEOUT_MS,
             `Wake gate did not re-arm after ${entry.id}.`,
         );
-        result.reset_generation_before = generation;
+        result.reset_generation_before = trial.startingGeneration;
         result.reset_generation_after = gate.currentGeneration();
-        result.reset_rearmed = true;
+        result.reset_rearmed = entry.expected === 'reject'
+            ? automaticDormantRearm
+            : gate.currentGeneration() > generation;
+        result.manual_cleanup_reset_used = !automaticCleanup;
         return result;
     }
 }
@@ -586,6 +858,8 @@ function summarize(values, targetP95, expectedCount) {
         max_ms: ordered.length ? round(ordered.at(-1)) : null,
         target_p95_ms_lte: targetP95,
         sufficient_sample: ordered.length >= 20,
+        recognition_coverage_pass: ratio(ordered.length, expectedCount) >= 0.95,
+        latency_pass: ordered.length >= 20 && p95 <= targetP95,
         pass: ratio(ordered.length, expectedCount) >= 0.95 && ordered.length >= 20 && p95 <= targetP95,
     };
 }

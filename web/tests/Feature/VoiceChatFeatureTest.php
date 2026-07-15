@@ -13,6 +13,7 @@ use App\Services\OpenAiVoiceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 class VoiceChatFeatureTest extends TestCase
@@ -331,6 +332,7 @@ class VoiceChatFeatureTest extends TestCase
         $token = $this->apiToken('voice-client-failure@example.com');
 
         $this->withToken($token)->postJson('/api/assistant/voice/client-failures', [
+            'failure_id' => 'browser_voice_v2:local_wake:test-gate-open',
             'stage' => 'local_wake',
             'code' => 'gate_open_failed',
             'message' => 'The local wake gate could not open safely. Bearer secret-client-token',
@@ -347,11 +349,12 @@ class VoiceChatFeatureTest extends TestCase
         $this->assertSame('local_wake', data_get($event->payload, 'stage'));
         $this->assertSame('gate_open_failed', data_get($event->payload, 'code'));
         $this->assertSame(
-            'The local wake gate could not open safely. Bearer [redacted]',
+            'Private wake detection failed.',
             data_get($event->payload, 'message'),
         );
+        $this->assertSame('local_wake_failure', data_get($event->payload, 'cause_chain.1.code'));
         $this->assertSame(
-            'Realtime transcription disconnected. [redacted key]',
+            'Private wake detection failed.',
             data_get($event->payload, 'cause_chain.1.message'),
         );
 
@@ -362,12 +365,53 @@ class VoiceChatFeatureTest extends TestCase
         );
     }
 
+    public function test_controlled_local_worker_code_reaches_admin_exactly_without_hostile_content(): void
+    {
+        $token = $this->apiToken('voice-worker-code@example.com');
+        $user = User::where('email', 'voice-worker-code@example.com')->firstOrFail();
+
+        $response = $this->withToken($token)->postJson('/api/assistant/voice/client-failures', [
+            'failure_id' => 'browser_voice_v2:local_wake:pcm-ack-timeout-page-one',
+            'stage' => 'local_wake',
+            'code' => 'pcm_ack_timeout',
+            'message' => 'transcript=Hey_Bean_private pcm=AAAA provider_body=secret',
+            'cause_chain' => [
+                ['code' => 'initialization_failed', 'message' => 'raw provider initialization response'],
+                ['code' => 'provider_secret_code', 'message' => 'Bearer hostile-provider-token pcm=BBBB'],
+            ],
+        ])->assertOk()->assertJsonPath('data.recorded', true);
+        $failureId = (string) $response->json('data.failure_id');
+        $this->assertMatchesRegularExpression('/^browser_voice_v2:local_wake:[a-f0-9]{64}$/', $failureId);
+        $this->assertStringNotContainsString('pcm-ack-timeout-page-one', $failureId);
+
+        $event = ActivityEvent::query()
+            ->where('client_event_id', $failureId)
+            ->sole();
+        $this->assertSame('pcm_ack_timeout', data_get($event->payload, 'code'));
+        $this->assertSame('initialization_failed', data_get($event->payload, 'cause_chain.0.code'));
+        $this->assertSame('local_wake_failure', data_get($event->payload, 'cause_chain.1.code'));
+        $this->assertSame('Private wake detection failed.', data_get($event->payload, 'message'));
+        $this->assertSame('Private wake detection failed.', data_get($event->payload, 'cause_chain.0.message'));
+        $this->assertStringNotContainsString('Hey_Bean_private', json_encode($event->payload, JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString('AAAA', json_encode($event->payload, JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString('BBBB', json_encode($event->payload, JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString('provider_secret_code', json_encode($event->payload, JSON_THROW_ON_ERROR));
+
+        $user->forceFill(['is_admin' => true])->save();
+        $this->withToken($token)->getJson('/api/admin/voice-quality?days=1')
+            ->assertOk()
+            ->assertJsonPath('data.browser_voice_v2.client_failures.events.0.code', 'pcm_ack_timeout')
+            ->assertJsonPath('data.browser_voice_v2.client_failures.events.0.cause_chain.0.code', 'initialization_failed')
+            ->assertJsonPath('data.browser_voice_v2.client_failures.events.0.cause_chain.1.code', 'local_wake_failure');
+    }
+
     public function test_authenticated_browser_can_record_a_sanitized_startup_failure(): void
     {
         Log::spy();
         $token = $this->apiToken('voice-startup-failure@example.com');
 
         $this->withToken($token)->postJson('/api/assistant/voice/client-failures', [
+            'failure_id' => 'browser_voice_v2:startup:test-abort',
             'stage' => 'startup',
             'code' => 'AbortError',
             'message' => 'signal is aborted without reason',
@@ -389,6 +433,7 @@ class VoiceChatFeatureTest extends TestCase
         $token = $this->apiToken('voice-admission-failure@example.com');
 
         $this->withToken($token)->postJson('/api/assistant/voice/client-failures', [
+            'failure_id' => 'browser_voice_v2:admission:test-timeout',
             'stage' => 'admission',
             'code' => 'AbortError',
             'message' => 'The durable turn request timed out.',
@@ -400,8 +445,151 @@ class VoiceChatFeatureTest extends TestCase
         Log::shouldHaveReceived('warning')->once()->withArgs(
             fn (string $message, array $context): bool => $message === 'Browser Voice v2 client failure.'
                 && $context['stage'] === 'admission'
-                && $context['code'] === 'AbortError',
+                && $context['code'] === 'voice_admission_failure',
         );
+    }
+
+    public function test_authenticated_browser_can_record_a_sanitized_transcription_failure_with_turn_identity(): void
+    {
+        Log::spy();
+        $token = $this->apiToken('voice-transcription-failure@example.com');
+        $user = User::where('email', 'voice-transcription-failure@example.com')->firstOrFail();
+        $session = ConversationSession::where('user_id', $user->id)->firstOrFail();
+        VoiceTurn::create([
+            'turn_id' => 'first-hearing-check',
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'conversation_session_id' => $session->id,
+            'transcript' => 'Can you hear me?',
+            'sanitized_transcript' => 'Can you hear me?',
+            'state' => 'accepted',
+            'idempotency_key' => 'first-hearing-check',
+            'accepted_at' => now(),
+            'side_effect_status' => 'none',
+        ]);
+
+        $payload = [
+            'failure_id' => 'browser_voice_v2:transcription:first-hearing-check',
+            'stage' => 'transcription',
+            'code' => 'input_audio_transcription_failed',
+            'message' => 'api_key=provider-secret transcript=Can_you_hear_me pcm=AAAA',
+            'cause_chain' => [[
+                'code' => 'provider_error',
+                'message' => 'nested Bearer secret-provider-token raw_audio=BBBB',
+            ]],
+            'session_id' => $session->id,
+            'turn_id' => 'first-hearing-check',
+        ];
+        $first = $this->withToken($token)->postJson('/api/assistant/voice/client-failures', $payload)
+            ->assertOk()
+            ->assertJsonPath('data.recorded', true)
+            ->assertJsonPath('data.duplicate', false);
+        $failureId = (string) $first->json('data.failure_id');
+        $this->assertMatchesRegularExpression('/^browser_voice_v2:transcription:[a-f0-9]{64}$/', $failureId);
+        $this->assertNotSame($payload['failure_id'], $failureId);
+        $this->withToken($token)->postJson('/api/assistant/voice/client-failures', $payload)
+            ->assertOk()
+            ->assertJsonPath('data.recorded', true)
+            ->assertJsonPath('data.duplicate', true)
+            ->assertJsonPath('data.failure_id', $failureId);
+
+        $this->assertTrue(Schema::hasColumn('activity_events', 'client_event_id'));
+        $events = ActivityEvent::query()
+            ->where('user_id', $user->id)
+            ->where('client_event_id', $failureId)
+            ->get();
+        $this->assertCount(1, $events);
+        $event = $events->sole();
+        $this->assertSame($session->id, $event->conversation_session_id);
+        $this->assertSame($failureId, $event->client_event_id);
+        $this->assertSame('transcription', data_get($event->payload, 'stage'));
+        $this->assertSame('first-hearing-check', data_get($event->payload, 'turn_id'));
+        $this->assertSame('voice_transcription_failure', data_get($event->payload, 'code'));
+        $this->assertSame('voice_transcription_failure', data_get($event->payload, 'cause_chain.0.code'));
+        $this->assertSame(
+            'Browser voice transcription failed.',
+            data_get($event->payload, 'message'),
+        );
+        $this->assertSame(
+            'Browser voice transcription failed.',
+            data_get($event->payload, 'cause_chain.0.message'),
+        );
+        $this->assertStringNotContainsString('provider-secret', json_encode($event->payload, JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString('Can_you_hear_me', json_encode($event->payload, JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString('pcm=', json_encode($event->payload, JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString('raw_audio=', json_encode($event->payload, JSON_THROW_ON_ERROR));
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(
+            fn (string $message, array $context): bool => $message === 'Browser Voice v2 client failure.'
+                && $context['stage'] === 'transcription'
+                && $context['turn_id'] === 'first-hearing-check'
+                && $context['conversation_session_id'] === $session->id
+                && $context['failure_id'] === $failureId,
+        );
+    }
+
+    public function test_client_failure_identity_is_required_and_unique_per_user(): void
+    {
+        $firstToken = $this->apiToken('voice-failure-id-first@example.com');
+        $secondToken = $this->apiToken('voice-failure-id-second@example.com');
+        $payload = [
+            'failure_id' => 'browser_voice_v2:connection:transcript_private_words_pcm_AAAA',
+            'stage' => 'connection',
+            'code' => 'provider connection error!',
+            'message' => 'api_key=provider-secret transcript=private_words pcm=AAAA',
+            'cause_chain' => [[
+                'code' => 'nested connection error!',
+                'message' => 'Bearer another-provider-secret',
+            ]],
+            'turn_id' => 'transcript_private_words_pcm_AAAA',
+        ];
+
+        $this->withToken($firstToken)->postJson(
+            '/api/assistant/voice/client-failures',
+            collect($payload)->except('failure_id')->all(),
+        )->assertUnprocessable()->assertJsonValidationErrors('failure_id');
+
+        $first = $this->withToken($firstToken)->postJson('/api/assistant/voice/client-failures', $payload)
+            ->assertOk()
+            ->assertJsonPath('data.duplicate', false);
+        $second = $this->withToken($secondToken)->postJson('/api/assistant/voice/client-failures', $payload)
+            ->assertOk()
+            ->assertJsonPath('data.duplicate', false);
+        $firstFailureId = (string) $first->json('data.failure_id');
+        $secondFailureId = (string) $second->json('data.failure_id');
+        $this->assertNotSame($firstFailureId, $secondFailureId);
+        $this->assertMatchesRegularExpression('/^browser_voice_v2:connection:[a-f0-9]{64}$/', $firstFailureId);
+        $this->assertMatchesRegularExpression('/^browser_voice_v2:connection:[a-f0-9]{64}$/', $secondFailureId);
+        $this->assertStringNotContainsString('private_words', $firstFailureId);
+        $this->assertStringNotContainsString('private_words', $secondFailureId);
+
+        $events = ActivityEvent::query()
+            ->whereIn('client_event_id', [$firstFailureId, $secondFailureId])
+            ->orderBy('user_id')
+            ->get();
+        $this->assertCount(2, $events);
+        foreach ($events as $event) {
+            $this->assertSame('voice_connection_failure', data_get($event->payload, 'code'));
+            $this->assertSame('voice_connection_failure', data_get($event->payload, 'cause_chain.0.code'));
+            $this->assertSame('Browser voice connection failed.', data_get($event->payload, 'message'));
+            $this->assertSame('Browser voice connection failed.', data_get($event->payload, 'cause_chain.0.message'));
+            $this->assertNull(data_get($event->payload, 'turn_id'));
+            $this->assertStringNotContainsString('provider-secret', json_encode($event->payload, JSON_THROW_ON_ERROR));
+            $this->assertStringNotContainsString('private_words', json_encode($event->payload, JSON_THROW_ON_ERROR));
+        }
+    }
+
+    public function test_activity_event_client_identity_migration_is_nullable_and_user_scoped_unique(): void
+    {
+        $column = collect(Schema::getColumns('activity_events'))->firstWhere('name', 'client_event_id');
+        $this->assertIsArray($column);
+        $this->assertTrue((bool) ($column['nullable'] ?? false));
+
+        $index = collect(Schema::getIndexes('activity_events'))
+            ->firstWhere('name', 'activity_events_user_client_event_unique');
+        $this->assertIsArray($index);
+        $this->assertTrue((bool) ($index['unique'] ?? false));
+        $this->assertSame(['user_id', 'client_event_id'], $index['columns'] ?? null);
     }
 
     public function test_authenticated_browser_can_record_a_sanitized_usage_accounting_failure(): void
@@ -410,6 +598,7 @@ class VoiceChatFeatureTest extends TestCase
         $token = $this->apiToken('voice-usage-accounting-failure@example.com');
 
         $this->withToken($token)->postJson('/api/assistant/voice/client-failures', [
+            'failure_id' => 'browser_voice_v2:usage_accounting:test-exhausted',
             'stage' => 'usage_accounting',
             'code' => 'usage_transport_failed',
             'message' => 'Realtime usage reporting exhausted its retry schedule.',
@@ -422,8 +611,53 @@ class VoiceChatFeatureTest extends TestCase
         Log::shouldHaveReceived('warning')->once()->withArgs(
             fn (string $message, array $context): bool => $message === 'Browser Voice v2 client failure.'
                 && $context['stage'] === 'usage_accounting'
-                && $context['code'] === 'usage_transport_failed',
+                && $context['code'] === 'voice_usage_accounting_failure',
         );
+    }
+
+    public function test_client_failure_endpoint_forces_content_neutral_diagnostics_for_every_transport_stage(): void
+    {
+        $token = $this->apiToken('voice-neutral-diagnostics@example.com');
+        $user = User::where('email', 'voice-neutral-diagnostics@example.com')->firstOrFail();
+        $stages = [
+            'admission' => ['voice_admission_failure', 'Browser voice admission failed.'],
+            'clarification' => ['voice_clarification_failure', 'Browser voice clarification failed.'],
+            'usage_accounting' => ['voice_usage_accounting_failure', 'Browser voice usage accounting failed.'],
+        ];
+
+        foreach ($stages as $stage => [$expectedCode, $expectedMessage]) {
+            $failureId = "browser_voice_v2:{$stage}:hostile-content";
+            $response = $this->withToken($token)->postJson('/api/assistant/voice/client-failures', [
+                'failure_id' => $failureId,
+                'stage' => $stage,
+                'code' => 'transcript_private_words_pcm_AAAA',
+                'message' => 'transcript=private_words pcm=AAAA provider_body=secret',
+                'cause_chain' => [[
+                    'code' => 'raw_audio_BBBB',
+                    'message' => 'Bearer provider-token raw_audio=BBBB',
+                ]],
+            ])->assertOk()->assertJsonPath('data.recorded', true);
+            $persistedFailureId = (string) $response->json('data.failure_id');
+            $this->assertMatchesRegularExpression(
+                "/^browser_voice_v2:{$stage}:[a-f0-9]{64}$/",
+                $persistedFailureId,
+            );
+            $this->assertStringNotContainsString('hostile-content', $persistedFailureId);
+
+            $event = ActivityEvent::query()
+                ->where('user_id', $user->id)
+                ->where('client_event_id', $persistedFailureId)
+                ->sole();
+            $this->assertSame($expectedCode, data_get($event->payload, 'code'));
+            $this->assertSame($expectedCode, data_get($event->payload, 'cause_chain.0.code'));
+            $this->assertSame($expectedMessage, data_get($event->payload, 'message'));
+            $this->assertSame($expectedMessage, data_get($event->payload, 'cause_chain.0.message'));
+            $serialized = json_encode($event->payload, JSON_THROW_ON_ERROR);
+            $this->assertStringNotContainsString('private_words', $serialized);
+            $this->assertStringNotContainsString('AAAA', $serialized);
+            $this->assertStringNotContainsString('BBBB', $serialized);
+            $this->assertStringNotContainsString('provider_body', $serialized);
+        }
     }
 
     public function test_authenticated_browser_can_record_a_durable_clarification_transport_failure(): void
@@ -434,6 +668,7 @@ class VoiceChatFeatureTest extends TestCase
         $session = ConversationSession::where('user_id', $user->id)->firstOrFail();
 
         $this->withToken($token)->postJson('/api/assistant/voice/client-failures', [
+            'failure_id' => 'browser_voice_v2:clarification:test-exhausted',
             'stage' => 'clarification',
             'code' => 'AbortError',
             'message' => 'The clarification request did not recover.',
@@ -451,7 +686,7 @@ class VoiceChatFeatureTest extends TestCase
             ->firstOrFail();
         $this->assertSame($session->id, $event->conversation_session_id);
         $this->assertSame('clarification', data_get($event->payload, 'stage'));
-        $this->assertSame('voice-clarification-turn-0001', data_get($event->payload, 'turn_id'));
+        $this->assertNull(data_get($event->payload, 'turn_id'));
     }
 
     private function completedUsage(User $user, float $cost): AiUsageLog
