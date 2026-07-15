@@ -14,6 +14,7 @@ use App\Services\RealtimeVoiceApplicationEventHandler;
 use App\Services\RealtimeVoiceSessionService;
 use App\Services\VoiceTurnPrivacyService;
 use App\Services\WorkspaceService;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -177,6 +178,7 @@ class AssistantVoiceController extends Controller
                 'workspace_id' => $workspace->id,
                 'stage' => 'realtime_sdp',
                 'exception' => $error::class,
+                'cause_code' => $this->realtimeProviderFailureCode($error),
             ]);
 
             return response()->json([
@@ -337,5 +339,27 @@ class AssistantVoiceController extends Controller
             'failure_id' => $event->client_event_id,
             'playback_recovery' => $playbackRecovery,
         ]]);
+    }
+
+    private function realtimeProviderFailureCode(Throwable $error): string
+    {
+        $message = strtolower($error->getMessage());
+
+        if ($error instanceof ConnectionException) {
+            return match (true) {
+                str_contains($message, 'curl error 28'), str_contains($message, 'timed out') => 'provider_connection_timeout',
+                str_contains($message, 'curl error 6'), str_contains($message, 'could not resolve host') => 'provider_dns_failure',
+                preg_match('/curl error (35|51|58|60)\b/', $message) === 1 => 'provider_tls_failure',
+                default => 'provider_connection_failure',
+            };
+        }
+
+        return match (true) {
+            str_contains($message, 'did not include an sdp answer') => 'provider_sdp_answer_missing',
+            str_contains($message, 'did not return the realtime call identifier') => 'provider_call_id_missing',
+            str_contains($message, 'provider rejected the realtime call'),
+            str_contains($message, 'realtime call request failed with status') => 'provider_call_rejected',
+            default => 'provider_session_failure',
+        };
     }
 }

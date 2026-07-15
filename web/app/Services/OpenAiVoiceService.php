@@ -12,6 +12,11 @@ class OpenAiVoiceService
 
     public const DEFAULT_REALTIME_MODEL = 'gpt-realtime-2.1-mini';
 
+    public const SUPPORTED_REALTIME_MODELS = [
+        self::DEFAULT_REALTIME_MODEL,
+        'gpt-realtime-2.1',
+    ];
+
     private const VOICES = [
         'alloy' => 'Alloy',
         'ash' => 'Ash',
@@ -75,17 +80,7 @@ class OpenAiVoiceService
         $model = $this->realtimeModel();
         $session = $this->realtimeSessionConfiguration($profile, $context, $voice, $model);
         $normalizedSdp = preg_replace('/\r\n|\r|\n/', "\r\n", trim($sdp))."\r\n";
-        $boundary = '----BeanRealtime'.bin2hex(random_bytes(18));
         $sessionJson = json_encode($session, JSON_THROW_ON_ERROR);
-        $multipartBody = "--{$boundary}\r\n"
-            ."Content-Disposition: form-data; name=\"sdp\"\r\n"
-            ."Content-Type: application/sdp\r\n\r\n"
-            .$normalizedSdp."\r\n"
-            ."--{$boundary}\r\n"
-            ."Content-Disposition: form-data; name=\"session\"\r\n"
-            ."Content-Type: application/json\r\n\r\n"
-            .$sessionJson."\r\n"
-            ."--{$boundary}--\r\n";
 
         $response = Http::withToken($this->apiKey())
             ->accept('application/sdp')
@@ -93,7 +88,9 @@ class OpenAiVoiceService
                 'OpenAI-Safety-Identifier' => $safetyIdentifier,
             ]))
             ->timeout((float) config('services.openai.realtime_session_timeout', 10))
-            ->withBody($multipartBody, "multipart/form-data; boundary={$boundary}")
+            ->asMultipart()
+            ->attach('sdp', $normalizedSdp)
+            ->attach('session', $sessionJson)
             ->post($this->endpoint('/realtime/calls'));
 
         if (! $response->successful()) {
@@ -205,7 +202,15 @@ class OpenAiVoiceService
 
     private function realtimeModel(): string
     {
-        return (string) config('services.openai.realtime_model', self::DEFAULT_REALTIME_MODEL);
+        $model = trim((string) config('services.openai.realtime_model', self::DEFAULT_REALTIME_MODEL));
+        if (! in_array($model, self::SUPPORTED_REALTIME_MODELS, true)) {
+            throw new RuntimeException(sprintf(
+                'Unsupported OpenAI Realtime model [%s]; configure a supported Realtime 2 model.',
+                mb_substr($model, 0, 100),
+            ));
+        }
+
+        return $model;
     }
 
     private function apiKey(): string

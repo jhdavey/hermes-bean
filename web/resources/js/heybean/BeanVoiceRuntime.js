@@ -41,8 +41,26 @@ function stableTurnId(randomUUID = () => globalThis.crypto?.randomUUID?.()) {
     return `browser-voice-${suffix}`;
 }
 
+function createLocalAudioContext() {
+    const AudioContext = globalThis.AudioContext || globalThis.webkitAudioContext;
+    return typeof AudioContext === 'function' ? new AudioContext() : null;
+}
+
+function primeLocalAudioContext(audioContext) {
+    if (audioContext?.state !== 'suspended' || typeof audioContext.resume !== 'function') return;
+    const result = audioContext.resume();
+    result?.catch?.(() => {});
+}
+
 function viewState(runtime) {
     const mode = runtime.mode;
+    const activityVisible = runtime.enabled && [
+        BEAN_VOICE_MODES.WAKE_ONLY,
+        BEAN_VOICE_MODES.PRE_ADMITTING,
+        BEAN_VOICE_MODES.LISTENING,
+        BEAN_VOICE_MODES.SPEAKING,
+        BEAN_VOICE_MODES.FOLLOW_UP,
+    ].includes(mode);
     return Object.freeze({
         mode,
         enabled: runtime.enabled,
@@ -52,7 +70,7 @@ function viewState(runtime) {
             BEAN_VOICE_MODES.LISTENING,
             BEAN_VOICE_MODES.FOLLOW_UP,
         ].includes(mode),
-        recording: runtime.activityLevel >= 0.055,
+        recording: activityVisible && runtime.activityLevel >= 0.055,
         processing: [
             BEAN_VOICE_MODES.STARTING,
             BEAN_VOICE_MODES.PRE_ADMITTING,
@@ -85,6 +103,7 @@ export class BeanVoiceRuntime {
         currentWorkspaceId = () => null,
         acquireMicrophone = null,
         getUserMedia = null,
+        localAudioContextFactory = createLocalAudioContext,
         localWakeGateFactory = (options) => new LocalWakeGate(options),
         inputTransportFactory = (options) => new BeanVoicePcmTransport(options),
         transportFactory = (options) => new BeanVoiceRealtimeTransport(options),
@@ -113,6 +132,9 @@ export class BeanVoiceRuntime {
             getUserMedia || ((constraints) => navigator.mediaDevices.getUserMedia(constraints)),
             realtimeMicrophoneConstraints(),
         ));
+        this.localAudioContextFactory = typeof localAudioContextFactory === 'function'
+            ? localAudioContextFactory
+            : createLocalAudioContext;
         this.localWakeGateFactory = localWakeGateFactory;
         this.createTurnId = createTurnId;
         this.onViewState = onViewState;
@@ -200,12 +222,59 @@ export class BeanVoiceRuntime {
         this.mode = BEAN_VOICE_MODES.STARTING;
         this.#emitView();
 
+        let startupLocalWakeFailure = null;
+        let preparedAudioContext = null;
+        let gate = null;
         try {
+            // Web Audio must be created and resumed in the original button
+            // gesture. Conversation and microphone setup are asynchronous and
+            // would otherwise consume the browser's transient activation.
+            preparedAudioContext = this.localAudioContextFactory();
+            try {
+                gate = this.localWakeGateFactory({
+                    audioContext: preparedAudioContext,
+                    consumerReady: false,
+                    beforeRelease: (detection) => this.#preAdmitWake(detection, generation),
+                    onDetected: (detection) => this.#wakeReleased(detection, generation),
+                    onReleaseRejected: (event) => this.#wakeReleaseRejected(event, generation),
+                    onReady: (event) => this.#localGateReady(event, generation),
+                    onActivatedPcm: (event) => {
+                        if (!this.#current(generation) || this.transport.appendActivatedPcm(event) !== true) {
+                            throw new Error('Activated microphone PCM was not accepted by Realtime.');
+                        }
+                    },
+                    onActivity: ({ level }) => this.#updateActivity(level, generation),
+                    onDiagnostic: (diagnostic) => this.#diagnostic(diagnostic),
+                    onError: (error) => {
+                        if (!this.#current(generation)) return;
+                        if (this.mode === BEAN_VOICE_MODES.STARTING) {
+                            startupLocalWakeFailure = startupLocalWakeFailure || error;
+                            return;
+                        }
+                        this.#handleFailure(error, 'local_wake');
+                    },
+                });
+            } catch (error) {
+                try { preparedAudioContext?.close?.(); } catch (_) {}
+                throw error;
+            }
+            this.localWakeGate = gate;
+            primeLocalAudioContext(preparedAudioContext);
+
+            const sessionPromise = this.ensureConversationSession();
+            const microphonePromise = Promise.resolve(this.acquireMicrophone()).then((stream) => {
+                if (!this.#current(generation) || this.localWakeGate !== gate) {
+                    stream?.getTracks?.().forEach((track) => track.stop());
+                    return null;
+                }
+                this.rawMicrophoneStream = stream;
+                return stream;
+            });
             const [session, rawMicrophoneStream] = await Promise.all([
-                this.ensureConversationSession(),
-                this.acquireMicrophone(),
+                sessionPromise,
+                microphonePromise,
             ]);
-            if (!this.#current(generation)) {
+            if (!this.#current(generation) || this.localWakeGate !== gate) {
                 rawMicrophoneStream?.getTracks?.().forEach((track) => track.stop());
                 return false;
             }
@@ -213,22 +282,6 @@ export class BeanVoiceRuntime {
             if (!sessionId) throw new Error('Bean voice could not establish its conversation session.');
             this.conversationSessionId = sessionId;
             this.rawMicrophoneStream = rawMicrophoneStream;
-            const gate = this.localWakeGateFactory({
-                consumerReady: false,
-                beforeRelease: (detection) => this.#preAdmitWake(detection, generation),
-                onDetected: (detection) => this.#wakeReleased(detection, generation),
-                onReleaseRejected: (event) => this.#wakeReleaseRejected(event, generation),
-                onReady: (event) => this.#localGateReady(event, generation),
-                onActivatedPcm: (event) => {
-                    if (!this.#current(generation) || this.transport.appendActivatedPcm(event) !== true) {
-                        throw new Error('Activated microphone PCM was not accepted by Realtime.');
-                    }
-                },
-                onActivity: ({ level }) => this.#updateActivity(level, generation),
-                onDiagnostic: (diagnostic) => this.#diagnostic(diagnostic),
-                onError: (error) => this.#handleFailure(error, 'local_wake'),
-            });
-            this.localWakeGate = gate;
             const [localAudio, realtimeSession] = await Promise.all([
                 gate.start(rawMicrophoneStream),
                 this.transport.connect({
@@ -263,12 +316,14 @@ export class BeanVoiceRuntime {
                 throw new Error('Private wake detection did not complete its admission barrier.');
             }
             this.projection.start(sessionId);
+            this.#clearActivityTimer();
+            this.activityLevel = 0;
             this.mode = BEAN_VOICE_MODES.WAKE_ONLY;
             this.#emitView();
             return true;
         } catch (error) {
             if (!this.#current(generation)) return false;
-            this.#handleFailure(error, 'startup');
+            this.#handleFailure(startupLocalWakeFailure || error, 'startup');
             await this.stop('startup_failed');
             this.mode = BEAN_VOICE_MODES.FAILED;
             this.error = 'Bean couldn’t connect voice right now. Tap Bean to try again.';

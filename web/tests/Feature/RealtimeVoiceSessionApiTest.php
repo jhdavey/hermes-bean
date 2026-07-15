@@ -7,7 +7,10 @@ use App\Models\User;
 use App\Models\VoiceRealtimeSession;
 use App\Services\OpenAiVoiceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use RuntimeException;
 use Tests\TestCase;
 
 class RealtimeVoiceSessionApiTest extends TestCase
@@ -31,12 +34,32 @@ class RealtimeVoiceSessionApiTest extends TestCase
             'cedar',
         ], $voice->voiceKeys());
         $this->assertSame(OpenAiVoiceService::DEFAULT_VOICE, $voice->normalizeVoice('nova'));
+        $this->assertSame('gpt-realtime-2.1-mini', OpenAiVoiceService::DEFAULT_REALTIME_MODEL);
+        $this->assertSame([
+            'gpt-realtime-2.1-mini',
+            'gpt-realtime-2.1',
+        ], OpenAiVoiceService::SUPPORTED_REALTIME_MODELS);
+    }
+
+    public function test_legacy_realtime_model_is_rejected_before_any_provider_request(): void
+    {
+        config()->set('services.openai.realtime_model', 'gpt-realtime');
+        Http::preventStrayRequests();
+
+        try {
+            app(OpenAiVoiceService::class)->defaultVoiceSettings();
+            $this->fail('The legacy Realtime model should have been rejected.');
+        } catch (RuntimeException $error) {
+            $this->assertStringContainsString('configure a supported Realtime 2 model', $error->getMessage());
+        }
+
+        Http::assertNothingSent();
     }
 
     public function test_same_origin_session_creates_one_audio_native_call_and_returns_only_public_binding(): void
     {
         config()->set('services.openai.server_api_key', 'test-openai-key');
-        config()->set('services.openai.realtime_model', 'gpt-realtime-test');
+        config()->set('services.openai.realtime_model', OpenAiVoiceService::DEFAULT_REALTIME_MODEL);
         config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
         $token = $this->apiToken('realtime-session-api@example.com');
         $user = User::query()->where('email', 'realtime-session-api@example.com')->firstOrFail();
@@ -60,7 +83,7 @@ class RealtimeVoiceSessionApiTest extends TestCase
             'sdp' => "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n",
         ])->assertOk()
             ->assertJsonPath('data.provider', 'openai_realtime')
-            ->assertJsonPath('data.model', 'gpt-realtime-test')
+            ->assertJsonPath('data.model', OpenAiVoiceService::DEFAULT_REALTIME_MODEL)
             ->assertJsonPath('data.voice', 'shimmer')
             ->assertJsonPath('data.sideband_ready', false)
             ->assertJsonStructure(['data' => ['realtime_session_id', 'playback_capability', 'sdp']])
@@ -77,23 +100,77 @@ class RealtimeVoiceSessionApiTest extends TestCase
             'status' => 'opened',
         ]);
 
-        Http::assertSent(function ($request): bool {
-            $body = $request->body();
-            preg_match('/name="session"\r\nContent-Type: application\/json\r\n\r\n(.*?)\r\n--/s', $body, $match);
-            $session = json_decode((string) ($match[1] ?? ''), true);
+        Http::assertSent(function ($request) use ($user): bool {
+            $this->assertSame('https://api.openai.test/v1/realtime/calls', $request->url());
+            $this->assertTrue($request->isMultipart());
+            $this->assertStringStartsWith(
+                'multipart/form-data; boundary=',
+                (string) ($request->header('Content-Type')[0] ?? ''),
+            );
+            $this->assertTrue($request->hasHeader('Authorization', 'Bearer test-openai-key'));
+            $this->assertTrue($request->hasHeader('Accept', 'application/sdp'));
+            $this->assertTrue($request->hasHeader(
+                'OpenAI-Safety-Identifier',
+                hash_hmac('sha256', (string) $user->id, (string) config('app.key')),
+            ));
 
-            return $request->url() === 'https://api.openai.test/v1/realtime/calls'
-                && $request->hasHeader('Authorization', 'Bearer test-openai-key')
-                && data_get($session, 'type') === 'realtime'
-                && data_get($session, 'output_modalities') === ['audio']
-                && data_get($session, 'audio.input.format.type') === 'audio/pcm'
-                && data_get($session, 'audio.input.format.rate') === 24000
-                && data_get($session, 'audio.input.turn_detection.silence_duration_ms') === 2000
-                && data_get($session, 'audio.input.turn_detection.create_response') === false
-                && data_get($session, 'audio.input.turn_detection.interrupt_response') === false
-                && ! array_key_exists('transcription', (array) data_get($session, 'audio.input'))
-                && data_get($session, 'tools') === []
-                && data_get($session, 'tool_choice') === 'none';
+            $parts = $request->data();
+            $this->assertCount(2, $parts);
+            $this->assertSame(['name' => 'sdp', 'contents' => "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"], $parts[0]);
+            $this->assertSame('session', $parts[1]['name'] ?? null);
+            $this->assertSame(['name', 'contents'], array_keys($parts[1]));
+            $session = json_decode((string) ($parts[1]['contents'] ?? ''), true, flags: JSON_THROW_ON_ERROR);
+
+            $this->assertSame('realtime', data_get($session, 'type'));
+            $this->assertSame(OpenAiVoiceService::DEFAULT_REALTIME_MODEL, data_get($session, 'model'));
+            $this->assertSame('low', data_get($session, 'reasoning.effort'));
+            $this->assertSame(['audio'], data_get($session, 'output_modalities'));
+            $this->assertSame('audio/pcm', data_get($session, 'audio.input.format.type'));
+            $this->assertSame(24000, data_get($session, 'audio.input.format.rate'));
+            $this->assertSame(2000, data_get($session, 'audio.input.turn_detection.silence_duration_ms'));
+            $this->assertFalse(data_get($session, 'audio.input.turn_detection.create_response'));
+            $this->assertFalse(data_get($session, 'audio.input.turn_detection.interrupt_response'));
+            $this->assertArrayNotHasKey('transcription', (array) data_get($session, 'audio.input'));
+            $this->assertSame([], data_get($session, 'tools'));
+            $this->assertSame('none', data_get($session, 'tool_choice'));
+
+            return true;
         });
+    }
+
+    public function test_provider_timeout_fails_closed_and_logs_only_an_actionable_sanitized_cause(): void
+    {
+        config()->set('services.openai.server_api_key', 'test-openai-key');
+        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+        $token = $this->apiToken('realtime-session-timeout@example.com');
+        $user = User::query()->where('email', 'realtime-session-timeout@example.com')->firstOrFail();
+        $conversation = ConversationSession::query()->where('user_id', $user->id)->firstOrFail();
+
+        Http::fake(static function (): never {
+            throw new ConnectionException('cURL error 28: Operation timed out while using sk-live-must-not-leak');
+        });
+        Log::shouldReceive('warning')
+            ->once()
+            ->withArgs(static function (string $message, array $context): bool {
+                return $message === 'Realtime browser voice provider connection failed.'
+                    && ($context['stage'] ?? null) === 'realtime_sdp'
+                    && ($context['exception'] ?? null) === ConnectionException::class
+                    && ($context['cause_code'] ?? null) === 'provider_connection_timeout'
+                    && ! str_contains(json_encode($context, JSON_THROW_ON_ERROR), 'sk-live-must-not-leak');
+            });
+
+        $this->withToken($token)->postJson('/api/assistant/voice/realtime/session', [
+            'session_id' => $conversation->id,
+            'workspace_id' => $conversation->workspace_id,
+            'controller_generation' => 1,
+            'provider_connection_generation' => 1,
+            'timezone' => 'America/New_York',
+            'sdp' => "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n",
+        ])->assertStatus(502)
+            ->assertJsonPath('error.code', 'realtime_connection_failed')
+            ->assertJsonMissing(['sk-live-must-not-leak']);
+
+        $this->assertDatabaseCount('voice_realtime_sessions', 0);
+        $this->assertDatabaseCount('ai_usage_logs', 0);
     }
 }

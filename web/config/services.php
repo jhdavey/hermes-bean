@@ -4,6 +4,16 @@ use App\Services\OpenAiVoiceService;
 
 $openAiPublicKey = (string) env('OPENAI_PUBLIC_KEY', '');
 $hermesApiBase = env('HERMES_API_BASE') ?: 'https://api.openai.com/v1';
+$openAiRealtimeModel = trim((string) env(
+    'OPENAI_REALTIME_MODEL',
+    OpenAiVoiceService::DEFAULT_REALTIME_MODEL,
+));
+if (! in_array($openAiRealtimeModel, OpenAiVoiceService::SUPPORTED_REALTIME_MODELS, true)) {
+    throw new InvalidArgumentException(sprintf(
+        'OPENAI_REALTIME_MODEL must be one of: %s.',
+        implode(', ', OpenAiVoiceService::SUPPORTED_REALTIME_MODELS),
+    ));
+}
 
 return [
 
@@ -85,7 +95,7 @@ return [
     'openai' => [
         'server_api_key' => $openAiPublicKey,
         'public_key' => $openAiPublicKey,
-        'realtime_model' => env('OPENAI_REALTIME_MODEL', OpenAiVoiceService::DEFAULT_REALTIME_MODEL),
+        'realtime_model' => $openAiRealtimeModel,
         'realtime_sideband_url' => env('OPENAI_REALTIME_SIDEBAND_URL', 'wss://api.openai.com/v1/realtime'),
         'realtime_reasoning_effort' => env('OPENAI_REALTIME_REASONING_EFFORT', 'low'),
         'realtime_session_timeout' => (float) env('OPENAI_REALTIME_SESSION_TIMEOUT', 10),

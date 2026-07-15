@@ -14,23 +14,43 @@ function strictDetection(generation = 7, sourceSequence = 20) {
     };
 }
 
-function harness({ gateAdmissionReady = true } = {}) {
+function harness({
+    gateAdmissionReady = true,
+    gestureAudioContext = false,
+    sessionFailures = [],
+    freshMicrophonePerStart = false,
+} = {}) {
     const requests = [];
     const views = [];
     const work = [];
     const invalidations = [];
     const failures = [];
+    const startupOrder = [];
+    const audioContexts = [];
+    const rawTracks = [];
+    const rawStreams = [];
+    const pendingSessionFailures = [...sessionFailures];
     const timers = new Map();
     let nextTimer = 1;
-    const rawTrack = { stopped: 0, stop() { this.stopped += 1; } };
-    const rawStream = {
-        getTracks: () => [rawTrack],
-        getAudioTracks: () => [rawTrack],
-    };
+    let microphoneAttempts = 0;
+
+    function createRawStream() {
+        const rawTrack = { stopped: 0, stop() { this.stopped += 1; } };
+        const rawStream = {
+            getTracks: () => [rawTrack],
+            getAudioTracks: () => [rawTrack],
+        };
+        rawTracks.push(rawTrack);
+        rawStreams.push(rawStream);
+        return rawStream;
+    }
+
+    const rawStream = createRawStream();
 
     class FakeGate {
         constructor(options) {
             this.options = options;
+            startupOrder.push('gate:create');
             this.generation = 7;
             this.consumerReady = false;
             this.ready = gateAdmissionReady;
@@ -41,7 +61,8 @@ function harness({ gateAdmissionReady = true } = {}) {
         }
 
         async start(stream) {
-            assert.equal(stream, rawStream);
+            startupOrder.push('gate:start');
+            assert.ok(rawStreams.includes(stream));
             return { sampleRate: 16000 };
         }
 
@@ -72,6 +93,7 @@ function harness({ gateAdmissionReady = true } = {}) {
                 code: 'consumer_admission_stopped',
             }));
             this.consumerAdmissionWaiter = null;
+            await this.options.audioContext?.close?.();
         }
         close() { this.closeCount += 1; return true; }
         resetAfterTurn() {
@@ -185,10 +207,46 @@ function harness({ gateAdmissionReady = true } = {}) {
             return { accepted: true };
         },
         openProjectionStream: async () => { throw new Error('fake projection owns streaming'); },
-        ensureConversationSession: async () => ({ id: 42 }),
+        ensureConversationSession: async () => {
+            startupOrder.push('session:start');
+            const failure = pendingSessionFailures.shift();
+            if (failure) throw failure;
+            return { id: 42 };
+        },
         openRealtimeSession: async () => { throw new Error('fake transport owns session setup'); },
         currentWorkspaceId: () => 9,
-        acquireMicrophone: async () => rawStream,
+        acquireMicrophone: async () => {
+            startupOrder.push('microphone:start');
+            const stream = freshMicrophonePerStart && microphoneAttempts > 0
+                ? createRawStream()
+                : rawStream;
+            microphoneAttempts += 1;
+            return stream;
+        },
+        ...(gestureAudioContext ? {
+            localAudioContextFactory: () => {
+                startupOrder.push('audio:create');
+                const context = {
+                    state: 'suspended',
+                    resumeCount: 0,
+                    closeCount: 0,
+                    resume() {
+                        startupOrder.push('audio:resume');
+                        this.resumeCount += 1;
+                        this.state = 'running';
+                        return Promise.resolve();
+                    },
+                    close() {
+                        startupOrder.push('audio:close');
+                        this.closeCount += 1;
+                        this.state = 'closed';
+                        return Promise.resolve();
+                    },
+                };
+                audioContexts.push(context);
+                return context;
+            },
+        } : {}),
         localWakeGateFactory: (options) => { gate = new FakeGate(options); return gate; },
         inputTransportFactory: () => ({ append() {}, activate() {}, deactivate() {} }),
         transportFactory: (options) => { transport = new FakeTransport(options); return transport; },
@@ -220,8 +278,12 @@ function harness({ gateAdmissionReady = true } = {}) {
         work,
         invalidations,
         failures,
+        startupOrder,
+        audioContexts,
         timers,
-        rawTrack,
+        rawTrack: rawTracks[0],
+        rawTracks,
+        rawStreams,
         get gate() { return gate; },
         get transport() { return transport; },
         get projection() { return projection; },
@@ -235,22 +297,39 @@ function harness({ gateAdmissionReady = true } = {}) {
 }
 
 test('[BV2-FIRST-WAKE-01:A-E][BV2-WAKE-01] slow local startup completes wake, admission, and one authorized final', async () => {
-    const h = harness({ gateAdmissionReady: false });
+    const h = harness({ gateAdmissionReady: false, gestureAudioContext: true });
     let settled = false;
     const startup = h.runtime.start().then((result) => {
         settled = true;
         return result;
     });
 
+    assert.deepEqual(h.startupOrder.slice(0, 5), [
+        'audio:create',
+        'gate:create',
+        'audio:resume',
+        'session:start',
+        'microphone:start',
+    ]);
+    assert.equal(h.audioContexts[0].resumeCount, 1);
+    assert.equal(h.gate.options.audioContext, h.audioContexts[0]);
+
     await h.flush();
     assert.equal(h.transport.connected, true, 'Realtime may finish before the local model');
     assert.equal(settled, false);
     assert.equal(h.runtime.snapshot().mode, 'starting');
+    h.gate.options.onActivity({ level: 0.9 });
+    assert.equal(h.runtime.snapshot().recording, false);
+    assert.equal(h.runtime.snapshot().processing, true);
     assert.equal(h.projection.sessionId, undefined);
 
     h.gate.readyNow();
     assert.equal(await startup, true);
     assert.equal(h.runtime.snapshot().mode, 'wake_only');
+    assert.equal(h.runtime.snapshot().activityLevel, 0);
+    assert.equal(h.runtime.snapshot().recording, false);
+    h.gate.options.onActivity({ level: 0.9 });
+    assert.equal(h.runtime.snapshot().recording, true);
     assert.equal(h.gate.isConsumerAdmissionReady(), true);
     assert.equal(h.projection.sessionId, '42');
 
@@ -297,6 +376,76 @@ test('[BV2-FIRST-WAKE-01:A-E][BV2-WAKE-01] slow local startup completes wake, ad
     assert.equal(h.runtime.snapshot().mode, 'wake_only');
     assert.equal(h.transport.appended.length, 1);
     assert.equal(h.transport.authorizations.length, 1);
+    await h.runtime.stop('journey_complete');
+    assert.equal(h.audioContexts[0].closeCount, 1);
+    assert.ok(h.rawTracks[0].stopped >= 1);
+});
+
+test('[BV2-FIRST-WAKE-01:A-E][BV2-DIAGNOSTIC-03] failed startup tears down its primed context and retry uses a fresh generation', async () => {
+    const h = harness({
+        gestureAudioContext: true,
+        sessionFailures: [Object.assign(new Error('session unavailable'), { code: 'session_unavailable' })],
+        freshMicrophonePerStart: true,
+    });
+
+    const firstStartup = h.runtime.start();
+    const firstGate = h.gate;
+    assert.equal(await firstStartup, false);
+    assert.equal(h.runtime.snapshot().mode, 'failed');
+    assert.equal(firstGate.stopped, true);
+    assert.equal(h.audioContexts[0].resumeCount, 1);
+    assert.equal(h.audioContexts[0].closeCount, 1);
+    assert.ok(h.rawTracks[0].stopped >= 1);
+    assert.equal(h.failures.length, 1, 'one startup cause produces one diagnostic');
+    assert.equal(h.failures[0].context.stage, 'startup');
+
+    const secondStartup = h.runtime.start();
+    const secondGate = h.gate;
+    assert.equal(await secondStartup, true);
+    assert.notEqual(secondGate, firstGate);
+    assert.notEqual(h.audioContexts[1], h.audioContexts[0]);
+    assert.equal(h.audioContexts[1].resumeCount, 1);
+    assert.equal(h.audioContexts[1].closeCount, 0);
+    assert.equal(h.runtime.snapshot().mode, 'wake_only');
+    assert.equal(h.rawTracks.length, 2);
+
+    const resumeIndices = h.startupOrder
+        .map((event, index) => (event === 'audio:resume' ? index : -1))
+        .filter((index) => index >= 0);
+    const sessionIndices = h.startupOrder
+        .map((event, index) => (event === 'session:start' ? index : -1))
+        .filter((index) => index >= 0);
+    assert.equal(resumeIndices.length, 2);
+    assert.equal(sessionIndices.length, 2);
+    assert.ok(resumeIndices.every((index, attempt) => index < sessionIndices[attempt]));
+
+    await h.runtime.stop('retry_journey_complete');
+    assert.equal(h.audioContexts[1].closeCount, 1);
+    assert.ok(h.rawTracks[1].stopped >= 1);
+});
+
+test('[BV2-FIRST-WAKE-01:A-E][BV2-PRIVACY-PCM-03] stop during cold readiness prevents stale wake-only publication', async () => {
+    const h = harness({ gateAdmissionReady: false, gestureAudioContext: true });
+    const startup = h.runtime.start();
+    const startupGate = h.gate;
+
+    await h.flush();
+    assert.equal(h.runtime.snapshot().mode, 'starting');
+    assert.equal(h.projection.sessionId, undefined);
+    await h.runtime.stop('pagehide');
+    startupGate.readyNow();
+
+    assert.equal(await startup, false);
+    assert.equal(h.runtime.snapshot().mode, 'off');
+    assert.equal(h.runtime.snapshot().recording, false);
+    assert.equal(h.projection.sessionId, undefined);
+    assert.equal(h.audioContexts[0].closeCount, 1);
+    assert.ok(h.rawTracks[0].stopped >= 1);
+    assert.equal(
+        h.views.slice(h.views.findLastIndex((view) => view.mode === 'off'))
+            .some((view) => view.mode === 'wake_only'),
+        false,
+    );
 });
 
 test('[BV-JOURNEY-01] wake to authorized acknowledgement and final stays transcript-free end to end', async () => {

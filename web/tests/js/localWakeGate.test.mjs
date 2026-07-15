@@ -1025,6 +1025,7 @@ function createHarness({
     onDetected = null,
     onReleaseRejected = null,
     pcmAckTimeoutMs = LOCAL_WAKE_PCM_ACK_TIMEOUT_MS,
+    precreateAudioContext = false,
 } = {}) {
     const order = [];
     const contexts = [];
@@ -1207,11 +1208,13 @@ function createHarness({
     const releaseRejections = [];
     const readiness = [];
     const activatedPcm = [];
+    const preparedAudioContext = precreateAudioContext ? new FakeAudioContext() : null;
     const gate = new LocalWakeGate({
         AudioContext: FakeAudioContext,
         AudioWorkletNode: FakeAudioWorkletNode,
         Worker: FakeWorker,
         MediaStream: FakeMediaStream,
+        ...(preparedAudioContext ? { audioContext: preparedAudioContext } : {}),
         maxInFlightPcm,
         maxBufferedPcm,
         consumerReady,
@@ -1277,6 +1280,7 @@ function createHarness({
         FakeAudioContext,
         FakeAudioWorkletNode,
         FakeMediaStream,
+        preparedAudioContext,
     };
 }
 
@@ -1344,6 +1348,20 @@ test('start exposes only a closed local PCM analysis sink through a same-origin 
     assert.deepEqual(worker.options, { name: 'heybean-local-wake' });
     assert.ok(harness.order.includes(`module:${LOCAL_WAKE_GATE_PROCESSOR_URL}`));
     assert.equal(harness.gate.isOpen(), false);
+});
+
+test('[BV2-FIRST-WAKE-01:A-E] a gesture-prepared AudioContext is the gate context and is closed on teardown', async () => {
+    const harness = createHarness({ precreateAudioContext: true });
+    const prepared = harness.preparedAudioContext;
+
+    assert.equal(harness.contexts.length, 1);
+    await harness.gate.start(harness.rawStream);
+    assert.equal(harness.contexts.length, 1, 'startup must not replace the gesture-prepared context');
+    assert.equal(harness.worklets[0].context, prepared);
+
+    await harness.gate.stop();
+    assert.equal(prepared.closed, true);
+    assert.equal(harness.rawTrack.stopped, true);
 });
 
 test('only a fully ready current-generation wake confirmation opens and reset rejects stale events', async () => {
