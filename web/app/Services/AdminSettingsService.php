@@ -3,14 +3,11 @@
 namespace App\Services;
 
 use App\Models\AdminSetting;
-use App\Models\AgentProfile;
 use App\Models\User;
 use Illuminate\Support\Collection;
 
 class AdminSettingsService
 {
-    public const MAIN_MODEL = 'models.main';
-
     public const EXTERNAL_LOOKUP_MODEL = 'models.external_lookup';
 
     public const BEAN_CHAT_ENABLED = 'kill_switches.bean_chat_enabled';
@@ -33,7 +30,6 @@ class AdminSettingsService
     {
         return [
             'models' => [
-                'main_model' => $this->settingPayload(self::MAIN_MODEL, $this->defaultMainModel()),
                 'external_lookup_model' => $this->settingPayload(self::EXTERNAL_LOOKUP_MODEL, $this->defaultExternalLookupModel()),
             ],
             'kill_switches' => [
@@ -45,10 +41,9 @@ class AdminSettingsService
         ];
     }
 
-    public function update(array $modelSettings, array $usageLimits, ?User $actor = null, bool $applyMainModelToProfiles = false, array $killSwitches = []): array
+    public function update(array $modelSettings, array $usageLimits, ?User $actor = null, array $killSwitches = []): array
     {
         foreach ([
-            self::MAIN_MODEL => $modelSettings['main_model'] ?? null,
             self::EXTERNAL_LOOKUP_MODEL => $modelSettings['external_lookup_model'] ?? null,
         ] as $key => $value) {
             $this->set($key, trim((string) $value), 'string', $actor);
@@ -70,22 +65,7 @@ class AdminSettingsService
 
         $this->settings = null;
 
-        if ($applyMainModelToProfiles) {
-            AgentProfile::query()->update(['model' => $this->mainModel()]);
-            $this->settings = null;
-        }
-
         return $this->payload();
-    }
-
-    public function mainModel(): string
-    {
-        return $this->stringValue(self::MAIN_MODEL, $this->defaultMainModel());
-    }
-
-    public function mainModelOverride(): ?string
-    {
-        return $this->storedStringValue(self::MAIN_MODEL);
     }
 
     public function externalLookupModel(): string
@@ -179,11 +159,6 @@ class AdminSettingsService
         $this->settings ??= AdminSetting::query()->get()->keyBy('key');
 
         return $this->settings;
-    }
-
-    private function defaultMainModel(): string
-    {
-        return (string) config('services.hermes_runtime.default_model', 'gpt-5.5');
     }
 
     private function defaultExternalLookupModel(): string

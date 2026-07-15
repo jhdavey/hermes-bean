@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\AssistantRunConflictException;
 use App\Http\Middleware\ApiRateLimit;
 use App\Http\Middleware\ApiSecurityHeaders;
 use App\Http\Middleware\AuthenticateBearerToken;
@@ -33,5 +34,7 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        $exceptions->render(function (AssistantRunConflictException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 409);
+        });
     })->create();

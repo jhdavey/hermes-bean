@@ -8,6 +8,7 @@ use App\Models\AiUsageAlert;
 use App\Models\AiUsageLog;
 use App\Models\ConversationSession;
 use App\Models\User;
+use App\Models\VoiceTurn;
 use App\Services\OpenAiVoiceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -149,7 +150,22 @@ class VoiceChatFeatureTest extends TestCase
         config()->set('services.openai.speech_model', 'tts-1-test');
         config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
         $token = $this->apiToken('voice-speech@example.com');
+        $user = User::where('email', 'voice-speech@example.com')->firstOrFail();
+        $session = ConversationSession::query()->where('user_id', $user->id)->firstOrFail();
         $text = 'Done—I created the note “Meal Plans” with five recipes.';
+        VoiceTurn::create([
+            'turn_id' => 'speech-clarification-turn-0001',
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'conversation_session_id' => $session->id,
+            'transcript' => 'Create a note.',
+            'sanitized_transcript' => 'Create a note.',
+            'state' => 'awaiting_clarification',
+            'idempotency_key' => 'speech-clarification-turn-0001',
+            'accepted_at' => now(),
+            'side_effect_status' => 'none',
+            'metadata' => ['clarification_question' => $text],
+        ]);
         Http::fake(fn () => Http::response('ID3-fake-mp3', 200, ['Content-Type' => 'application/octet-stream']));
         $payload = [
             'turn_id' => 'speech-clarification-turn-0001',
@@ -174,7 +190,6 @@ class VoiceChatFeatureTest extends TestCase
             && $request['response_format'] === 'pcm'
             && $request->hasHeader('Authorization', 'Bearer test-openai-key')
             && $request->hasHeader('OpenAI-Safety-Identifier'));
-        $user = User::where('email', 'voice-speech@example.com')->firstOrFail();
         $this->assertSame(1, AiUsageLog::where('user_id', $user->id)->where('request_type', 'voice_speech')->count());
         $usage = AiUsageLog::where('user_id', $user->id)->where('request_type', 'voice_speech')->firstOrFail();
         $this->assertSame(mb_strlen($text), data_get($usage->metadata, 'characters'));
@@ -193,6 +208,24 @@ class VoiceChatFeatureTest extends TestCase
             'text' => 'I cannot create notes.',
         ])->assertStatus(409)
             ->assertJsonPath('error.code', 'voice_speech_text_mismatch');
+
+        Http::assertNothingSent();
+    }
+
+    public function test_speech_rejects_non_durable_interruption_and_cancellation_copy(): void
+    {
+        $token = $this->apiToken('voice-speech-purpose@example.com');
+        Http::fake();
+
+        foreach (['interruption', 'cancellation'] as $purpose) {
+            $this->withToken($token)->postJson('/api/assistant/voice/speech', [
+                'turn_id' => 'speech-purpose-turn-0001',
+                'speech_item_id' => "speech-purpose-turn-0001:{$purpose}",
+                'purpose' => $purpose,
+                'text' => 'Arbitrary client-authored speech.',
+            ])->assertUnprocessable()
+                ->assertJsonValidationErrors('purpose');
+        }
 
         Http::assertNothingSent();
     }

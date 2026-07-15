@@ -168,7 +168,8 @@ class AppleCalendarImportService
                 ? $this->existingExternalEvent($workspace, $providerKey, $uid)
                 : new CalendarEvent;
 
-            if ($this->calendarStatus($event) === 'cancelled') {
+            $providerStatus = $this->calendarStatus($event);
+            if ($providerStatus === 'cancelled') {
                 if ($existing->exists) {
                     $existing->delete();
                     $deleted++;
@@ -191,6 +192,7 @@ class AppleCalendarImportService
             $metadata = array_merge($existing->exists ? ($existing->metadata ?? []) : [], [
                 'source' => $providerKey === 'apple' ? 'apple_calendar' : 'external_calendar',
                 'external_calendar_provider' => $providerKey,
+                'external_calendar_status' => $providerStatus,
                 'apple_calendar_uid' => $uid !== '' ? $uid : null,
                 'external_calendar_uid' => $uid !== '' ? $uid : null,
                 'apple_calendar_sequence' => $event['SEQUENCE']['value'] ?? null,
@@ -217,7 +219,7 @@ class AppleCalendarImportService
                 'recurrence' => $recurrence,
                 'starts_at' => $startsAt['value'],
                 'ends_at' => $endsAt['value'],
-                'status' => $this->calendarStatus($event),
+                'status' => 'scheduled',
                 'metadata' => $metadata,
             ])->save();
 

@@ -17,28 +17,29 @@ class Task extends Model
 
     public function isCompleted(): bool
     {
-        return in_array(strtolower(str_replace('_', '-', (string) $this->status)), ['completed', 'complete', 'done'], true);
+        return $this->status === 'completed';
     }
 
     public function scopeVisibleInActiveViews(Builder $query): Builder
     {
         $today = Carbon::today();
-        $completedStatuses = ['completed', 'complete', 'done'];
+        $completedStatus = 'completed';
 
-        return $query->where(function (Builder $query) use ($today, $completedStatuses): void {
+        return $query->where(function (Builder $query) use ($today, $completedStatus): void {
             $query->whereNull('due_at')
                 ->orWhere('due_at', '>=', $today)
-                ->orWhere(function (Builder $query) use ($today, $completedStatuses): void {
+                ->orWhere(function (Builder $query) use ($today, $completedStatus): void {
                     $query->where('due_at', '<', $today)
                         ->whereNull('completed_at')
-                        ->where(function (Builder $query) use ($completedStatuses): void {
+                        ->where(function (Builder $query) use ($completedStatus): void {
                             $query->whereNull('status')
-                                ->orWhereNotIn('status', $completedStatuses);
+                                ->orWhere('status', '!=', $completedStatus);
                         });
                 })
-                ->orWhereNotNull('metadata->recurrence')
-                ->orWhereNotNull('metadata->recurring')
-                ->orWhereNotNull('metadata->rrule');
+                ->orWhere(function (Builder $query): void {
+                    $query->whereNotNull('metadata->recurrence')
+                        ->where('metadata->recurrence', '!=', 'none');
+                });
         });
     }
 }

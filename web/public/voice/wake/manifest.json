@@ -1,13 +1,13 @@
 {
-  "version": 13,
+  "version": 14,
   "releaseCertified": false,
   "wakeModelQaCertified": true,
   "detector": "bean-first-party-classifier-with-local-strict-and-address-timing-candidates",
-  "worker": "/voice/wake/wake-worker.js?v=13",
-  "workerBytes": 48355,
-  "workerSha256": "547883e927905890965add198c61dc6862479d75aab03c99b324042d8c845a7b",
+  "worker": "/voice/wake/wake-worker.js?v=14",
+  "workerBytes": 48383,
+  "workerSha256": "a7863aea5e5fce436d57484129d143eec72e92263b153bf7516c8309d830ecd1",
   "workerType": "classic",
-  "audioWorklet": "/voice/wake/gate-processor.js?v=13",
+  "audioWorklet": "/voice/wake/gate-processor.js?v=14",
   "audioWorkletBytes": 8981,
   "audioWorkletSha256": "a7eda847a2ccb62581c6d91ec961b582528bea3bfa9f96bada7e470875e752de",
   "processorName": "hey-bean-gate",
@@ -41,7 +41,7 @@
   ],
   "firstPartyModel": {
     "id": "bean-first-party-wake-v1",
-    "path": "/voice/wake/bean-wake-model-v1.json?v=13",
+    "path": "/voice/wake/bean-wake-model-v1.json?v=14",
     "bytes": 1094259,
     "sha256": "3bdc1e1db3e4c8629bbd0302aac5259aeaf7b1627d33f64b10bae594162e718e",
     "architecture": "temporal_conv1d_v1",
@@ -61,6 +61,7 @@
     ],
     "verifier": "bean-first-party-wake-v1",
     "missedHeyRequiresIndependentBeanTimingCandidate": true,
+    "strictFallbackRequiresIndependentBeanTimingCandidate": true,
     "strictCandidateProbability": 0.75,
     "incidentSpecificNegativeAliases": false
   },
@@ -108,22 +109,22 @@
   "requiresCrossOriginIsolation": false,
   "vendorAssets": [
     {
-      "path": "/voice/wake/kws-runtime.js?v=13",
+      "path": "/voice/wake/kws-runtime.js?v=14",
       "bytes": 90517,
       "sha256": "371a0433929467b916a095d90eff0fef36c101c50cc856a3f733f4569616a6d6"
     },
     {
-      "path": "/voice/wake/kws-runtime.wasm?v=13",
+      "path": "/voice/wake/kws-runtime.wasm?v=14",
       "bytes": 10612628,
       "sha256": "9e8ef9ffba6c212732d9da6b659936ae16da3c63a8760cdcf0ee2b391e18ce63"
     },
     {
-      "path": "/voice/wake/kws-model.data?v=13",
+      "path": "/voice/wake/kws-model.data?v=14",
       "bytes": 5448042,
       "sha256": "a4fbe1a6eddebb6671cf948ea0051d923bcd3a556c1df5e6c2fa9b99ad6b7802"
     },
     {
-      "path": "/voice/wake/kws-api.js?v=13",
+      "path": "/voice/wake/kws-api.js?v=14",
       "bytes": 11679,
       "sha256": "c693a402438a12ef0c34fcaa52cb279e60713477aa19f6cb157a37f06b53b4b3"
     }

@@ -185,6 +185,8 @@ class OutlookCalendarSyncService
                 $calendarSummary = $this->calendarSummary($connection, $calendarId);
                 $eventMetadata = array_merge($existingMetadata, [
                     'source' => $preserveHeyBeanSource ? ($existingMetadata['source'] ?? 'heybean') : 'outlook_calendar',
+                    'outlook_show_as' => $item['showAs'] ?? null,
+                    'outlook_response_status' => $item['responseStatus'] ?? null,
                     'outlook_web_link' => $item['webLink'] ?? null,
                     'outlook_calendar_id' => $calendarId,
                     'outlook_calendar_summary' => $calendarSummary,
@@ -204,7 +206,7 @@ class OutlookCalendarSyncService
                     'color' => $preserveHeyBeanSource ? $event->color : ($this->calendarColor($connection, $calendarId) ?? '#0078D4'),
                     'starts_at' => $startsAt,
                     'ends_at' => $endsAt,
-                    'status' => 'confirmed',
+                    'status' => 'scheduled',
                     'outlook_updated_at' => isset($item['lastModifiedDateTime']) ? Carbon::parse($item['lastModifiedDateTime']) : null,
                     'metadata' => $eventMetadata,
                 ])->save();

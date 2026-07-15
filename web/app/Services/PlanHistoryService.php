@@ -19,9 +19,8 @@ use Illuminate\Support\Collection;
 
 class PlanHistoryService
 {
-    private const INACTIVE_TASK_STATUSES = ['completed', 'complete', 'done'];
-    private const INACTIVE_REMINDER_STATUSES = ['completed', 'complete', 'done', 'dismissed', 'canceled', 'cancelled', 'skipped', 'archived'];
     private const INACTIVE_APPROVAL_STATUSES = ['approved', 'denied', 'rejected', 'canceled', 'cancelled', 'expired'];
+
     private const INACTIVE_BLOCKER_STATUSES = ['resolved', 'closed', 'dismissed', 'canceled', 'cancelled', 'archived'];
 
     public function __construct(private readonly PlanLimitService $limits) {}
@@ -100,7 +99,7 @@ class PlanHistoryService
 
     public function taskIsPrunable(Task $task, Carbon $cutoff): bool
     {
-        if (! in_array($this->status($task->status), self::INACTIVE_TASK_STATUSES, true)) {
+        if ($task->status !== 'completed') {
             return false;
         }
 
@@ -109,7 +108,7 @@ class PlanHistoryService
 
     public function reminderIsPrunable(Reminder $reminder, Carbon $cutoff): bool
     {
-        if (! in_array($this->status($reminder->status), self::INACTIVE_REMINDER_STATUSES, true)) {
+        if ($reminder->status !== 'completed') {
             return false;
         }
 
@@ -193,10 +192,7 @@ class PlanHistoryService
         $counts['reminders'] = $this->deleteMatchingReminderIds($user, $cutoff);
         $counts['calendar_events'] = $this->deleteMatchingCalendarEventIds($user, $cutoff);
         $counts['conversation_sessions'] = $this->deleteOldConversationSessions($user, $cutoff);
-        $counts['conversation_messages'] = ConversationMessage::query()
-            ->where('user_id', $user->id)
-            ->where('created_at', '<', $cutoff)
-            ->delete();
+        $counts['conversation_messages'] = $this->deleteUnreferencedOldConversationMessages($user, $cutoff);
         $counts['activity_events'] = ActivityEvent::query()
             ->where('user_id', $user->id)
             ->where('created_at', '<', $cutoff)
@@ -280,6 +276,30 @@ class PlanHistoryService
             });
 
         return $count;
+    }
+
+    private function deleteUnreferencedOldConversationMessages(User $user, Carbon $cutoff): int
+    {
+        return ConversationMessage::query()
+            ->where('user_id', $user->id)
+            ->where('created_at', '<', $cutoff)
+            ->whereNotExists(fn ($query) => $query
+                ->selectRaw('1')
+                ->from('assistant_runs')
+                ->whereColumn('assistant_runs.user_message_id', 'conversation_messages.id'))
+            ->whereNotExists(fn ($query) => $query
+                ->selectRaw('1')
+                ->from('assistant_runs')
+                ->whereColumn('assistant_runs.assistant_message_id', 'conversation_messages.id'))
+            ->whereNotExists(fn ($query) => $query
+                ->selectRaw('1')
+                ->from('voice_turns')
+                ->whereColumn('voice_turns.user_message_id', 'conversation_messages.id'))
+            ->whereNotExists(fn ($query) => $query
+                ->selectRaw('1')
+                ->from('voice_turns')
+                ->whereColumn('voice_turns.final_assistant_message_id', 'conversation_messages.id'))
+            ->delete();
     }
 
     private function deleteFilteredIds($query, callable $filter, ?string $workspaceLinkType = null): int

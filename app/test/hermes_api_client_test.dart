@@ -40,7 +40,7 @@ void main() {
 
     final requestFuture = server.first.then((request) async {
       expect(request.method, 'POST');
-      expect(request.uri.path, '/api/assistant/sessions/42/messages');
+      expect(request.uri.path, '/api/assistant/sessions/42/runs');
       expect(
         request.headers.value(HttpHeaders.authorizationHeader),
         'Bearer t',
@@ -50,7 +50,7 @@ void main() {
       expect(body, contains('I’m Harley'));
       expect(jsonDecode(body), {
         'content': 'I’m Harley',
-        'metadata': {'source': 'flutter'},
+        'metadata': {'client_request_id': 'flutter-message-42'},
       });
 
       request.response.headers.contentType = ContentType.json;
@@ -71,10 +71,10 @@ void main() {
       bearerToken: 't',
     );
 
-    final result = await client.sendMessage(
+    final result = await client.queueMessage(
       sessionId: 42,
       content: 'I’m Harley',
-      metadata: const {'source': 'flutter'},
+      clientRequestId: 'flutter-message-42',
     );
     await requestFuture;
 
@@ -90,7 +90,11 @@ void main() {
         expect(request.path, '/assistant/sessions/42/messages/7001/branch');
         expect(request.body, {
           'content': 'Plan tomorrow',
-          'metadata': {'source': 'flutter', 'edited_message_id': 7001},
+          'metadata': {
+            'source': 'flutter',
+            'edited_message_id': 7001,
+            'client_request_id': 'flutter-branch-7001',
+          },
         });
         return HermesApiResponse(
           201,
@@ -119,12 +123,60 @@ void main() {
       sessionId: 42,
       messageId: 7001,
       content: 'Plan tomorrow',
+      clientRequestId: 'flutter-branch-7001',
       metadata: const {'source': 'flutter', 'edited_message_id': 7001},
     );
 
     expect(result.status, 'completed');
     expect(result.userMessage?.id, 7002);
     expect(result.assistantMessage?.content, 'Updated.');
+  });
+
+  test('queueMessage leaves run source ownership to the backend', () async {
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        expect(request.method, 'POST');
+        expect(request.path, '/assistant/sessions/42/runs');
+        expect(request.body, {
+          'content': 'Plan tomorrow',
+          'metadata': {
+            'client_context': {'timezone_offset': '-04:00'},
+            'client_request_id': 'flutter-queue-42',
+          },
+        });
+        expect(request.body, isNot(contains('source')));
+        return HermesApiResponse(
+          201,
+          jsonEncode({
+            'data': {
+              'status': 'queued',
+              'session': {'id': 42, 'status': 'queued'},
+              'run': {
+                'id': 420,
+                'status': 'queued',
+                'source': 'assistant_run_controller',
+                'client_request_id': 'flutter-queue-42',
+              },
+              'events': [],
+            },
+          }),
+        );
+      },
+    );
+
+    final result = await client.queueMessage(
+      sessionId: 42,
+      content: 'Plan tomorrow',
+      clientRequestId: 'flutter-queue-42',
+      metadata: const {
+        'client_context': {'timezone_offset': '-04:00'},
+      },
+    );
+
+    expect(result.run?.clientRequestId, 'flutter-queue-42');
+    expect(result.run?.source, 'assistant_run_controller');
   });
 
   test('checks email availability before guided registration', () async {
@@ -1170,6 +1222,7 @@ void main() {
                 {
                   'id': 2,
                   'title': 'Stand up',
+                  'status': 'scheduled',
                   'due_at': '2026-05-10T09:00:00Z',
                 },
               ],
@@ -1184,6 +1237,7 @@ void main() {
                 {
                   'id': 3,
                   'title': 'Design review',
+                  'status': 'scheduled',
                   'starts_at': '2026-05-10T14:30:00Z',
                 },
               ],
@@ -1213,6 +1267,7 @@ void main() {
       final reminder = HermesReminder.fromJson({
         'id': 2,
         'title': 'Stand up',
+        'status': 'scheduled',
         'remind_at': '2026-05-10T09:00:00Z',
         'metadata': '{"color":"#34C759","is_critical":true}',
       });
@@ -1221,6 +1276,7 @@ void main() {
         'workspace_id': 1,
         'linked_workspace_ids': [1, 2],
         'title': 'Design review',
+        'status': 'scheduled',
         'starts_at': '2026-05-10T14:30:00Z',
         'metadata': '{"google_calendar_id":"work@example.com"}',
       });
@@ -1242,6 +1298,7 @@ void main() {
       final event = HermesCalendarEvent.fromJson({
         'id': 4,
         'title': 'Workout',
+        'status': 'scheduled',
         'starts_at': '2026-06-22T05:00:00Z',
         'ends_at': '2026-06-22T06:00:00Z',
         'recurrence': null,
@@ -1255,6 +1312,21 @@ void main() {
 
       expect(event.recurrence, isNull);
       expect(event.metadata?['recurrence'], 'daily');
+    },
+  );
+
+  test(
+    'calendar recurrence is read only from its canonical top-level field',
+    () {
+      final event = HermesCalendarEvent.fromJson({
+        'id': 5,
+        'title': 'Planning',
+        'status': 'scheduled',
+        'starts_at': '2026-06-23T14:00:00Z',
+        'metadata': {'recurrence': 'daily'},
+      });
+
+      expect(event.recurrence, isNull);
     },
   );
 
@@ -1363,8 +1435,10 @@ void main() {
           expect(request.body, {
             'title': 'Client kickoff',
             'starts_at': '2026-05-20T15:00:00Z',
+            'all_day': true,
             'ends_at': '2026-05-20T16:00:00Z',
             'description': 'Bring the client brief.',
+            'status': 'scheduled',
             'category': 'Work',
             'color': '#007AFF',
             'recurrence': 'none',
@@ -1377,6 +1451,7 @@ void main() {
               'data': {
                 'id': 77,
                 'title': 'Client kickoff',
+                'status': 'scheduled',
                 'starts_at': '2026-05-20T15:00:00Z',
                 'ends_at': '2026-05-20T16:00:00Z',
                 'description': 'Bring the client brief.',
@@ -1393,6 +1468,7 @@ void main() {
       final event = await client.createCalendarEvent(
         title: 'Client kickoff',
         startsAt: '2026-05-20T15:00:00Z',
+        allDay: true,
         endsAt: '2026-05-20T16:00:00Z',
         notes: 'Bring the client brief.',
         category: 'Work',
@@ -1413,6 +1489,7 @@ void main() {
     final event = HermesCalendarEvent.fromJson({
       'id': 3,
       'title': 'Design review',
+      'status': 'scheduled',
       'starts_at': '2026-05-10T14:30:00Z',
       'google_calendar_id': 'work@example.com',
       'metadata': {'recurrence': 'none'},
@@ -1421,6 +1498,39 @@ void main() {
     expect(event.googleCalendarId, 'work@example.com');
     expect(event.metadata?['google_calendar_id'], 'work@example.com');
   });
+
+  test(
+    'calendar all-day parsing accepts only canonical snake-case booleans',
+    () {
+      final event = HermesCalendarEvent.fromJson({
+        'id': 4,
+        'title': 'Holiday',
+        'status': 'scheduled',
+        'all_day': true,
+        'allDay': true,
+        'metadata': {'allDay': true},
+      });
+
+      expect(event.metadata?['all_day'], isTrue);
+      expect(
+        () => HermesCalendarEvent.fromJson({
+          'id': 5,
+          'title': 'Alias value',
+          'status': 'scheduled',
+          'all_day': 'yes',
+        }),
+        throwsFormatException,
+      );
+
+      final aliasOnly = HermesCalendarEvent.fromJson({
+        'id': 6,
+        'title': 'Alias only',
+        'status': 'scheduled',
+        'allDay': true,
+      });
+      expect(aliasOnly.metadata?['all_day'], isNull);
+    },
+  );
 
   test(
     'loads external calendar providers and imports selected provider',
@@ -1560,6 +1670,7 @@ void main() {
                 {
                   'id': 2,
                   'title': 'pack laptop',
+                  'status': 'scheduled',
                   'remind_at': '2026-05-11T09:00:00Z',
                 },
               ],
@@ -1567,6 +1678,7 @@ void main() {
                 {
                   'id': 3,
                   'title': 'Focus block',
+                  'status': 'scheduled',
                   'starts_at': '2026-05-11T09:00:00Z',
                 },
               ],
@@ -1597,7 +1709,7 @@ void main() {
   });
 
   test(
-    'uses injected transport to start, resume, send, and poll activity',
+    'uses injected transport to start, resume, queue, and poll activity',
     () async {
       final requests = <HermesApiRequest>[];
       final client = HermesApiClient(
@@ -1640,11 +1752,10 @@ void main() {
           }
 
           if (request.method == 'POST' &&
-              request.path == '/assistant/sessions/42/messages') {
-            expect(request.responseTimeout, const Duration(seconds: 120));
+              request.path == '/assistant/sessions/42/runs') {
             expect(request.body, {
               'content': 'Schedule dentist tomorrow at 3pm',
-              'metadata': {'source': 'flutter-test'},
+              'metadata': {'client_request_id': 'flutter-test-message-42'},
             });
             return HermesApiResponse(
               201,
@@ -1687,7 +1798,7 @@ void main() {
 
           if (request.method == 'POST' &&
               request.path == '/approvals/7/approve') {
-            expect(request.body, {'always_approve': true});
+            expect(request.body, isNull);
             return HermesApiResponse(
               200,
               jsonEncode({
@@ -1737,10 +1848,10 @@ void main() {
       final cancelled = await client.cancelSession(42);
       expect(cancelled.id, 42);
 
-      final messageResult = await client.sendMessage(
+      final messageResult = await client.queueMessage(
         sessionId: 42,
         content: 'Schedule dentist tomorrow at 3pm',
-        metadata: {'source': 'flutter-test'},
+        clientRequestId: 'flutter-test-message-42',
       );
       expect(messageResult.status, 'completed');
       expect(messageResult.assistantMessage?.content, 'Done');
@@ -1753,7 +1864,7 @@ void main() {
         'assistant.calendar_event.created',
       ]);
 
-      final approved = await client.approveApproval(7, alwaysApprove: true);
+      final approved = await client.approveApproval(7);
       expect(approved.approval.status, 'approved');
       expect(approved.events.single.eventType, 'assistant.approval.approved');
 
@@ -1764,7 +1875,7 @@ void main() {
         'POST http://local.test/api/assistant/sessions',
         'GET http://local.test/api/assistant/sessions/42',
         'POST http://local.test/api/assistant/sessions/42/cancel',
-        'POST http://local.test/api/assistant/sessions/42/messages',
+        'POST http://local.test/api/assistant/sessions/42/runs',
         'GET http://local.test/api/assistant/sessions/42/events',
         'POST http://local.test/api/approvals/7/approve',
         'POST http://local.test/api/approvals/8/deny',
@@ -2207,6 +2318,149 @@ void main() {
     ]);
   });
 
+  test('memory items require an explicit canonical type', () {
+    expect(
+      () => HermesMemoryItem.fromJson({
+        'id': 9,
+        'content': 'The Miata is a project car.',
+      }),
+      throwsFormatException,
+    );
+
+    final item = HermesMemoryItem.fromJson({
+      'id': 9,
+      'type': 'project',
+      'content': 'The Miata is a project car.',
+    });
+    expect(item.type, 'project');
+  });
+
+  test('session reload exposes exact active assistant-run identities', () {
+    final details = HermesSessionDetails.fromJson({
+      'id': 42,
+      'status': 'running',
+      'assistant_runs': [
+        {
+          'id': 81,
+          'status': 'queued',
+          'source': 'flutter',
+          'client_request_id': 'flutter-reload-81',
+          'input': 'First durable request',
+          'user_message_id': 91,
+          'user_message': {
+            'id': 91,
+            'role': 'user',
+            'content': 'First durable request',
+          },
+        },
+      ],
+    });
+
+    expect(details.activeRuns, hasLength(1));
+    expect(details.activeRuns.single.clientRequestId, 'flutter-reload-81');
+    expect(details.activeRuns.single.input, 'First durable request');
+    expect(details.activeRuns.single.userMessageId, 91);
+    expect(details.activeRuns.single.userMessage?.id, 91);
+  });
+
+  test('domain decoders accept only exact canonical statuses', () {
+    expect(
+      () => HermesTask.fromJson({'id': 1, 'title': 'Task'}),
+      throwsFormatException,
+    );
+    expect(
+      () => HermesReminder.fromJson({'id': 2, 'title': 'Reminder'}),
+      throwsFormatException,
+    );
+    expect(
+      () => HermesCalendarEvent.fromJson({'id': 3, 'title': 'Event'}),
+      throwsFormatException,
+    );
+    expect(
+      HermesTask.fromJson({'id': 1, 'title': 'Task', 'status': 'open'}).status,
+      'open',
+    );
+    expect(
+      HermesReminder.fromJson({
+        'id': 2,
+        'title': 'Reminder',
+        'status': 'scheduled',
+      }).status,
+      'scheduled',
+    );
+    expect(
+      HermesCalendarEvent.fromJson({
+        'id': 3,
+        'title': 'Event',
+        'status': 'scheduled',
+      }).status,
+      'scheduled',
+    );
+
+    for (final status in ['complete', 'done', 'OPEN', 'pending']) {
+      expect(
+        () => HermesTask.fromJson({'id': 1, 'title': 'Task', 'status': status}),
+        throwsFormatException,
+      );
+    }
+    for (final status in ['pending', 'complete', 'done', 'COMPLETED']) {
+      expect(
+        () => HermesReminder.fromJson({
+          'id': 2,
+          'title': 'Reminder',
+          'status': status,
+        }),
+        throwsFormatException,
+      );
+    }
+    for (final status in ['confirmed', 'tentative', 'canceled', 'SCHEDULED']) {
+      expect(
+        () => HermesCalendarEvent.fromJson({
+          'id': 3,
+          'title': 'Event',
+          'status': status,
+        }),
+        throwsFormatException,
+      );
+    }
+  });
+
+  test('calendar event reminders are created as scheduled', () async {
+    final client = HermesApiClient(
+      baseUrl: Uri.parse('http://local.test/api'),
+      bearerToken: 'token-123',
+      transport: (request) async {
+        expect(request.method, 'POST');
+        expect(request.path, '/reminders');
+        expect(request.body, {
+          'calendar_event_id': 12,
+          'title': 'Reminder: Design review',
+          'remind_at': '2026-07-15T13:45:00Z',
+          'status': 'scheduled',
+        });
+        return HermesApiResponse(
+          201,
+          jsonEncode({
+            'data': {
+              'id': 13,
+              'title': 'Reminder: Design review',
+              'calendar_event_id': 12,
+              'status': 'scheduled',
+            },
+          }),
+        );
+      },
+    );
+
+    final reminder = await client.createEventReminder(
+      calendarEventId: 12,
+      title: 'Reminder: Design review',
+      remindAt: '2026-07-15T13:45:00Z',
+    );
+
+    expect(reminder.status, 'scheduled');
+  });
+
   test(
     'adds workspace and sync parameters to domain resource payloads',
     () async {
@@ -2231,7 +2485,7 @@ void main() {
             return HermesApiResponse(
               201,
               jsonEncode({
-                'data': {'id': 1, 'title': 'Buy milk'},
+                'data': {'id': 1, 'title': 'Buy milk', 'status': 'open'},
               }),
             );
           }
@@ -2243,17 +2497,18 @@ void main() {
             return HermesApiResponse(
               200,
               jsonEncode({
-                'data': {'id': 1, 'title': 'Buy milk'},
+                'data': {'id': 1, 'title': 'Buy milk', 'status': 'open'},
               }),
             );
           }
           if (request.path == '/reminders' && request.method == 'POST') {
             expect(request.body, containsPair('workspace_id', 1));
             expect(request.body, containsPair('sync_to_workspace_ids', [2]));
+            expect(request.body, containsPair('status', 'scheduled'));
             return HermesApiResponse(
               201,
               jsonEncode({
-                'data': {'id': 2, 'title': 'Ping'},
+                'data': {'id': 2, 'title': 'Ping', 'status': 'scheduled'},
               }),
             );
           }
@@ -2264,7 +2519,7 @@ void main() {
             return HermesApiResponse(
               200,
               jsonEncode({
-                'data': {'id': 2, 'title': 'Ping'},
+                'data': {'id': 2, 'title': 'Ping', 'status': 'scheduled'},
               }),
             );
           }
@@ -2272,11 +2527,11 @@ void main() {
             expect(request.body, containsPair('workspace_id', 1));
             expect(request.body, containsPair('sync_to_workspace_ids', [2]));
             expect(request.body, containsPair('location', 'Conference Room B'));
-            expect(request.body, containsPair('status', 'tentative'));
+            expect(request.body, containsPair('status', 'scheduled'));
             return HermesApiResponse(
               201,
               jsonEncode({
-                'data': {'id': 3, 'title': 'Meet'},
+                'data': {'id': 3, 'title': 'Meet', 'status': 'scheduled'},
               }),
             );
           }
@@ -2284,11 +2539,11 @@ void main() {
               request.method == 'PATCH') {
             expect(request.body, containsPair('sync_to_workspace_ids', [2, 3]));
             expect(request.body, containsPair('location', 'Main Hall'));
-            expect(request.body, containsPair('status', 'confirmed'));
+            expect(request.body, containsPair('status', 'cancelled'));
             return HermesApiResponse(
               200,
               jsonEncode({
-                'data': {'id': 3, 'title': 'Meet'},
+                'data': {'id': 3, 'title': 'Meet', 'status': 'cancelled'},
               }),
             );
           }
@@ -2368,8 +2623,9 @@ void main() {
       await client.createCalendarEvent(
         title: 'Meet',
         startsAt: '2026-05-20T10:00:00Z',
+        allDay: false,
         location: 'Conference Room B',
-        status: 'tentative',
+        status: 'scheduled',
         workspaceId: 1,
         syncToWorkspaceIds: [2],
       );
@@ -2377,8 +2633,9 @@ void main() {
         3,
         title: 'Meet',
         startsAt: '2026-05-20T10:00:00Z',
+        allDay: false,
         location: 'Main Hall',
-        status: 'confirmed',
+        status: 'cancelled',
         syncToWorkspaceIds: [2, 3],
       );
       await client.createNote(title: 'Plan', syncToWorkspaceIds: [2]);
@@ -2410,7 +2667,7 @@ void main() {
             return HermesApiResponse(
               200,
               jsonEncode({
-                'data': {'id': 1, 'title': 'Task'},
+                'data': {'id': 1, 'title': 'Task', 'status': 'open'},
               }),
             );
           }
@@ -2418,7 +2675,7 @@ void main() {
             return HermesApiResponse(
               200,
               jsonEncode({
-                'data': {'id': 2, 'title': 'Reminder'},
+                'data': {'id': 2, 'title': 'Reminder', 'status': 'scheduled'},
               }),
             );
           }
@@ -2427,7 +2684,7 @@ void main() {
             return HermesApiResponse(
               200,
               jsonEncode({
-                'data': {'id': 3, 'title': 'Event'},
+                'data': {'id': 3, 'title': 'Event', 'status': 'scheduled'},
               }),
             );
           }
@@ -2449,6 +2706,7 @@ void main() {
         3,
         title: 'Event',
         startsAt: '2026-05-20T10:00:00Z',
+        allDay: false,
         syncToWorkspaceIds: const [],
       );
       await client.updateNote(4, syncToWorkspaceIds: const []);

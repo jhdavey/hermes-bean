@@ -84,6 +84,7 @@ globalThis.__wakeBoundary = {
     assert.match(source, /sourceSequence/);
     assert.match(source, /classifyFirstPartyAddressPrefix/);
     assert.match(source, /const ADDRESS_KEYWORDS = 'B IY1 N/);
+    assert.match(source, /strictWakeAccepted = addressCandidate/);
     assert.match(source, /addressCandidate\s*&&\s*winningIndex === missedHeyIndex/);
     assert.doesNotMatch(source, /decoded_text|result\.text|transcript/);
 
@@ -900,7 +901,8 @@ test('[BV2-WAKE-11] independent local timing proposals require one generic verif
     assert.deepEqual([...new Set(worker.match(/@[A-Z_]+/g))], ['@HEY_BEAN', '@BEAN']);
     assert.match(worker, /missedHeyAccepted = addressCandidate/);
     assert.match(worker, /addressTimingCandidate = true/);
-    assert.match(worker, /strictWakeAccepted = silentChunksAfterSpeech >= STRICT_PREFIX_FALLBACK_SILENCE_CHUNKS/);
+    assert.match(worker, /strictWakeAccepted = addressCandidate/);
+    assert.match(worker, /&& silentChunksAfterSpeech >= STRICT_PREFIX_FALLBACK_SILENCE_CHUNKS/);
     assert.match(worker, /activation: 'missed_hey_confirmation'/);
     assert.match(worker, /decision\.activation !== 'strict_wake'/);
 });

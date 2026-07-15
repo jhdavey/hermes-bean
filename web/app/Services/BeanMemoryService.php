@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Jobs\ExtractBeanMemoryFromTurn;
 use App\Models\ActivityEvent;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
@@ -13,13 +12,26 @@ use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class BeanMemoryService
 {
-    public function __construct(
-        private readonly WorkspaceService $workspaces,
-        private readonly AgentProfileService $agentProfiles,
-    ) {}
+    public const TURN_ACTIVITY_EVENT_TYPE = 'conversation.turn_activity';
+
+    public const CANONICAL_TYPES = [
+        'fact',
+        'preference',
+        'identity',
+        'relationship',
+        'project',
+        'routine',
+        'constraint',
+        'decision',
+        'instruction',
+        'temporary_context',
+    ];
+
+    public function __construct(private readonly WorkspaceService $workspaces) {}
 
     public function createItem(User $user, Workspace $workspace, array $attributes, ?User $actor = null): MemoryItem
     {
@@ -43,7 +55,6 @@ class BeanMemoryService
                 'last_seen_at' => now(),
                 'metadata' => array_replace_recursive($existing->metadata ?? [], $attributes['metadata'] ?? []),
             ])->save();
-            $this->agentProfiles->refreshRuntimeMemoryForWorkspace($workspace, $user);
 
             return $existing->refresh();
         }
@@ -55,7 +66,6 @@ class BeanMemoryService
             ...$attributes,
             'last_seen_at' => $attributes['last_seen_at'] ?? now(),
         ]);
-        $this->agentProfiles->refreshRuntimeMemoryForWorkspace($workspace, $user);
 
         return $item->refresh();
     }
@@ -64,9 +74,6 @@ class BeanMemoryService
     {
         $this->authorizeItem($user, $item);
         $item->update($this->normalizedItemAttributes($attributes, partial: true));
-        if ($item->workspace) {
-            $this->agentProfiles->refreshRuntimeMemoryForWorkspace($item->workspace, $user);
-        }
 
         return $item->refresh();
     }
@@ -74,114 +81,36 @@ class BeanMemoryService
     public function forgetItem(User $user, MemoryItem $item): void
     {
         $this->authorizeItem($user, $item);
-        $workspace = $item->workspace;
         $item->update(['status' => 'archived']);
         $item->delete();
-        if ($workspace) {
-            $this->agentProfiles->refreshRuntimeMemoryForWorkspace($workspace, $user);
-        }
     }
 
-    public function recordTurnCandidate(ConversationSession $session, ConversationMessage $userMessage, ?ConversationMessage $assistantMessage = null): void
+    public function recordTurnActivity(ConversationSession $session, ConversationMessage $userMessage, ConversationMessage $assistantMessage): void
     {
-        $event = MemoryEvent::create([
-            'user_id' => $session->user_id,
-            'workspace_id' => $session->workspace_id,
-            'conversation_session_id' => $session->id,
-            'conversation_message_id' => $userMessage->id,
-            'assistant_message_id' => $assistantMessage?->id,
-            'event_type' => 'conversation.turn',
-            'status' => 'pending',
-            'content' => str($userMessage->content)->squish()->limit(2000, '')->toString(),
-            'payload' => [
-                'user_message' => $userMessage->content,
-                'assistant_message' => $assistantMessage?->content,
-                'metadata' => $userMessage->metadata,
-            ],
-        ]);
-
-        ExtractBeanMemoryFromTurn::dispatch($event->id)->afterResponse();
-    }
-
-    public function processEvent(int $memoryEventId): void
-    {
-        $event = MemoryEvent::find($memoryEventId);
-        if (! $event || $event->status !== 'pending') {
-            return;
+        if ((int) $userMessage->conversation_session_id !== (int) $session->id
+            || (int) $assistantMessage->conversation_session_id !== (int) $session->id) {
+            throw new \InvalidArgumentException('Turn activity messages must belong to the supplied conversation session.');
         }
 
-        $user = User::find($event->user_id);
-        $workspace = Workspace::find($event->workspace_id);
-        if (! $user || ! $workspace) {
-            $event->update(['status' => 'skipped', 'processed_at' => now()]);
+        DB::transaction(function () use ($session, $userMessage, $assistantMessage): void {
+            Workspace::query()->whereKey($session->workspace_id)->lockForUpdate()->firstOrFail();
 
-            return;
-        }
+            $event = MemoryEvent::query()->createOrFirst([
+                'conversation_message_id' => $userMessage->id,
+                'event_type' => self::TURN_ACTIVITY_EVENT_TYPE,
+            ], [
+                'user_id' => $session->user_id,
+                'workspace_id' => $session->workspace_id,
+                'conversation_session_id' => $session->id,
+                'assistant_message_id' => $assistantMessage->id,
+                'status' => 'processed',
+                'content' => null,
+                'payload' => null,
+                'processed_at' => now(),
+            ]);
 
-        $created = 0;
-        foreach ($this->heuristicMemories((string) data_get($event->payload ?? [], 'user_message', $event->content ?? '')) as $memory) {
-            $this->createItem($user, $workspace, [
-                ...$memory,
-                'source_type' => 'conversation_message',
-                'source_id' => $event->conversation_message_id,
-                'metadata' => [
-                    'memory_event_id' => $event->id,
-                    'extraction' => 'heuristic',
-                ],
-            ], $user);
-            $created++;
-        }
-
-        $this->upsertDailySummary($event);
-        $event->update([
-            'status' => $created > 0 ? 'processed' : 'skipped',
-            'processed_at' => now(),
-            'payload' => [
-                ...(is_array($event->payload) ? $event->payload : []),
-                'created_memory_items' => $created,
-            ],
-        ]);
-    }
-
-    public function runtimeContext(User $user, Workspace $workspace, string $query = '', int $limit = 8): array
-    {
-        $items = $this->memoryQuery($user, $workspace, ['query' => $query])
-            ->orderByDesc('importance')
-            ->orderByDesc('confidence')
-            ->latest('last_seen_at')
-            ->latest('updated_at')
-            ->limit(max(1, min($limit, 12)))
-            ->get()
-            ->map(fn (MemoryItem $item): array => $this->memoryPayload($item, compact: true))
-            ->values()
-            ->all();
-
-        $summaries = MemorySummary::query()
-            ->where('user_id', $user->id)
-            ->where('workspace_id', $workspace->id)
-            ->orderByDesc('ends_at')
-            ->orderByDesc('updated_at')
-            ->limit(3)
-            ->get()
-            ->map(fn (MemorySummary $summary): array => [
-                'id' => $summary->id,
-                'summary_type' => $summary->summary_type,
-                'period_key' => $summary->period_key,
-                'title' => $summary->title,
-                'summary' => str($summary->summary)->squish()->limit(700, '')->toString(),
-            ])
-            ->values()
-            ->all();
-
-        return [
-            'policy' => [
-                'hot_path_limit' => max(1, min($limit, 12)),
-                'retrieval' => 'bounded_indexed',
-                'note' => 'Raw history is available through recall tools; only this compact memory slice is injected automatically.',
-            ],
-            'items' => $items,
-            'summaries' => $summaries,
-        ];
+            $this->upsertDailySummary($event);
+        }, 3);
     }
 
     public function searchMemory(User $user, Workspace $workspace, array $filters = []): array
@@ -198,9 +127,12 @@ class BeanMemoryService
             ->all();
     }
 
-    public function requestHistory(ConversationSession $session, array $filters = []): array
-    {
-        [$from, $to, $timezone] = $this->dateWindow($session, $filters);
+    public function requestHistory(
+        ConversationSession $session,
+        array $filters = [],
+        ?string $trustedTimezone = null,
+    ): array {
+        [$from, $to, $timezone] = $this->dateWindow($session, $filters, $trustedTimezone);
         $query = ConversationMessage::query()
             ->where('user_id', $session->user_id)
             ->where('role', 'user')
@@ -232,16 +164,21 @@ class BeanMemoryService
                 'session_id' => $message->conversation_session_id,
                 'workspace_id' => $message->session?->workspace_id,
                 'content' => str($message->content)->squish()->limit(1200, '')->toString(),
-                'created_at' => $message->created_at?->copy()->setTimezone($timezone)->toIso8601String(),
+                'created_at' => $timezone !== null
+                    ? $message->created_at?->copy()->setTimezone($timezone)->toIso8601String()
+                    : $message->created_at?->copy()->utc()->toIso8601String(),
                 'created_at_utc' => $message->created_at?->toIso8601String(),
             ])
             ->values()
             ->all();
     }
 
-    public function activityTimeline(ConversationSession $session, array $filters = []): array
-    {
-        [$from, $to, $timezone] = $this->dateWindow($session, $filters);
+    public function activityTimeline(
+        ConversationSession $session,
+        array $filters = [],
+        ?string $trustedTimezone = null,
+    ): array {
+        [$from, $to, $timezone] = $this->dateWindow($session, $filters, $trustedTimezone);
         $query = ActivityEvent::query()
             ->where('user_id', $session->user_id)
             ->when($from && $to, fn (Builder $query) => $query->whereBetween('created_at', [$from, $to]));
@@ -270,7 +207,9 @@ class BeanMemoryService
                 'tool_name' => $event->tool_name,
                 'status' => $event->status,
                 'payload' => $event->payload,
-                'created_at' => $event->created_at?->copy()->setTimezone($timezone)->toIso8601String(),
+                'created_at' => $timezone !== null
+                    ? $event->created_at?->copy()->setTimezone($timezone)->toIso8601String()
+                    : $event->created_at?->copy()->utc()->toIso8601String(),
                 'created_at_utc' => $event->created_at?->toIso8601String(),
             ])
             ->values()
@@ -307,6 +246,10 @@ class BeanMemoryService
 
     private function normalizedItemAttributes(array $attributes, bool $partial = false): array
     {
+        if (! $partial && ! array_key_exists('type', $attributes)) {
+            throw new \InvalidArgumentException('Memory type is required.');
+        }
+
         $normalized = [];
         foreach ([
             'type', 'status', 'visibility', 'title', 'content', 'summary',
@@ -317,8 +260,12 @@ class BeanMemoryService
             }
         }
 
-        if (! $partial || array_key_exists('type', $attributes)) {
-            $normalized['type'] = $this->memoryType((string) ($attributes['type'] ?? 'fact'));
+        if (array_key_exists('type', $attributes)) {
+            $type = $attributes['type'];
+            if (! is_string($type) || ! in_array($type, self::CANONICAL_TYPES, true)) {
+                throw new \InvalidArgumentException('Memory type must be an explicit canonical type.');
+            }
+            $normalized['type'] = $type;
         }
         if (! $partial || array_key_exists('status', $attributes)) {
             $normalized['status'] = (string) ($attributes['status'] ?? 'active');
@@ -342,55 +289,15 @@ class BeanMemoryService
         return $normalized;
     }
 
-    private function memoryType(string $type): string
-    {
-        $type = str($type)->lower()->replace([' ', '-'], '_')->toString();
-
-        return in_array($type, ['preference', 'identity', 'relationship', 'project', 'routine', 'constraint', 'decision', 'instruction', 'temporary_context', 'fact'], true)
-            ? $type
-            : 'fact';
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function heuristicMemories(string $message): array
-    {
-        $text = trim(preg_replace('/\s+/', ' ', $message) ?: '');
-        if ($text === '') {
-            return [];
-        }
-
-        $lower = mb_strtolower($text);
-        $explicit = preg_match('/\b(?:remember|save this|keep in mind|don\'t forget)\b/i', $text) === 1;
-        $preference = preg_match('/\b(?:i prefer|i like|i don\'t like|please always|always|never|don\'t|do not)\b/i', $text) === 1;
-        $identity = preg_match('/\b(?:my name is|call me|i am|i\'m|my wife|my husband|my son|my daughter|my dog|my company)\b/i', $text) === 1;
-        $project = preg_match('/\b(?:project|working on|miata|client|build|renovation|launch)\b/i', $text) === 1;
-
-        if (! $explicit && ! $preference && ! $identity && ! $project) {
-            return [];
-        }
-
-        $type = $preference ? 'preference' : ($identity ? 'identity' : ($project ? 'project' : 'fact'));
-        if (preg_match('/\b(?:always|never|don\'t|do not)\b/i', $text) === 1) {
-            $type = 'instruction';
-        }
-
-        return [[
-            'type' => $type,
-            'content' => str($text)->replaceMatches('/^(hey bean,?\s*)/i', '')->limit(500, '')->toString(),
-            'confidence' => $explicit ? 95 : 70,
-            'importance' => $explicit ? 75 : 55,
-        ]];
-    }
-
     private function upsertDailySummary(MemoryEvent $event): void
     {
         $createdAt = $event->created_at ?: now();
         $periodKey = $createdAt->toDateString();
-        $userRequests = ConversationMessage::query()
+        $userRequests = MemoryEvent::query()
             ->where('user_id', $event->user_id)
-            ->where('role', 'user')
+            ->where('workspace_id', $event->workspace_id)
+            ->where('event_type', self::TURN_ACTIVITY_EVENT_TYPE)
+            ->where('status', 'processed')
             ->whereBetween('created_at', [$createdAt->copy()->startOfDay(), $createdAt->copy()->endOfDay()])
             ->count();
 
@@ -512,30 +419,85 @@ class BeanMemoryService
     }
 
     /**
-     * @return array{0:?Carbon,1:?Carbon,2:string}
+     * @return array{0:?Carbon,1:?Carbon,2:?string}
      */
-    private function dateWindow(ConversationSession $session, array $filters): array
-    {
-        $timezone = $this->sessionTimezone($session);
-        $fromDate = trim((string) ($filters['from_date'] ?? $filters['date'] ?? ''));
-        $toDate = trim((string) ($filters['to_date'] ?? $filters['date'] ?? ''));
+    private function dateWindow(
+        ConversationSession $session,
+        array $filters,
+        ?string $trustedTimezone = null,
+    ): array {
+        $timezone = $this->validTimezone($trustedTimezone) ?? $this->sessionTimezone($session);
+        $aliases = array_values(array_intersect(['date', 'from_date', 'to_date'], array_keys($filters)));
+        if ($aliases !== []) {
+            throw new \InvalidArgumentException('History intervals accept only canonical from and to timestamps.');
+        }
 
-        if ($fromDate === '' && $toDate === '') {
+        $hasFrom = is_string($filters['from'] ?? null) && trim($filters['from']) !== '';
+        $hasTo = is_string($filters['to'] ?? null) && trim($filters['to']) !== '';
+        if ($hasFrom !== $hasTo) {
+            throw new \InvalidArgumentException('History intervals require both from and to timestamps.');
+        }
+
+        if (! $hasFrom) {
             return [null, null, $timezone];
         }
 
-        $from = Carbon::parse($fromDate ?: $toDate, $timezone)->startOfDay()->utc();
-        $to = Carbon::parse($toDate ?: $fromDate, $timezone)->endOfDay()->utc();
+        $from = $this->absoluteHistoryInstant($filters['from'], 'from');
+        $to = $this->absoluteHistoryInstant($filters['to'], 'to');
+        if ($to->lt($from)) {
+            throw new \InvalidArgumentException('History interval to cannot be before from.');
+        }
 
         return [$from, $to, $timezone];
     }
 
-    private function sessionTimezone(ConversationSession $session): string
+    private function absoluteHistoryInstant(mixed $value, string $field): Carbon
+    {
+        if (! is_string($value)
+            || preg_match('/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?(Z|[+-](\d{2}):(\d{2}))$/', $value, $parts) !== 1
+            || ! checkdate((int) $parts[2], (int) $parts[3], (int) $parts[1])
+            || (int) $parts[4] > 23
+            || (int) $parts[5] > 59
+            || (isset($parts[6]) && $parts[6] !== '' && (int) $parts[6] > 59)) {
+            throw new \InvalidArgumentException("History interval {$field} must be an absolute ISO-8601 timestamp with an explicit offset.");
+        }
+
+        if ($parts[8] !== 'Z') {
+            $offsetHour = (int) ($parts[9] ?? 0);
+            $offsetMinute = (int) ($parts[10] ?? 0);
+            if ($offsetHour > 14 || $offsetMinute > 59 || ($offsetHour === 14 && $offsetMinute !== 0)) {
+                throw new \InvalidArgumentException("History interval {$field} must use a valid explicit offset.");
+            }
+        }
+
+        return Carbon::parse($value)->utc();
+    }
+
+    private function sessionTimezone(ConversationSession $session): ?string
     {
         $message = $session->messages()->whereNotNull('metadata')->latest('id')->first();
-        $timezone = data_get($message?->metadata ?? [], 'client_context.timezone');
+        $context = data_get($message?->metadata ?? [], 'client_context');
+        if (! is_array($context)) {
+            return null;
+        }
 
-        return is_string($timezone) && $timezone !== '' ? $timezone : config('app.timezone', 'UTC');
+        return $this->validTimezone($context['timezone'] ?? null)
+            ?? $this->validTimezone($context['timezone_offset'] ?? null);
+    }
+
+    private function validTimezone(mixed $timezone): ?string
+    {
+        $timezone = is_string($timezone) ? trim($timezone) : '';
+        if ($timezone === '') {
+            return null;
+        }
+        try {
+            new \DateTimeZone($timezone);
+
+            return $timezone;
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function limit(array $filters): int

@@ -1,8 +1,3 @@
-import {
-    BROWSER_VOICE_FOLLOW_UP_RELEVANCE,
-    classifyBrowserVoiceFollowUpRelevance,
-} from './browserVoiceFollowUpRelevanceV2.js';
-
 export const BROWSER_VOICE_CONVERSATION_STATES = Object.freeze({
     OFF: 'off',
     STARTING: 'starting',
@@ -70,26 +65,6 @@ const DEFAULT_CONFIG = Object.freeze({
 
 function cleanText(value) {
     return String(value || '').replace(/\s+/g, ' ').trim();
-}
-
-// Endpointing is intentionally domain agnostic. This guard only recognizes
-// unmistakably open grammatical boundaries so a mid-sentence pause can keep
-// listening briefly. Semantic completeness belongs exclusively to server
-// admission, where application context and typed handlers are authoritative.
-function hasOpenUtteranceBoundary(value) {
-    const text = cleanText(value)
-        .toLowerCase()
-        .replace(/[^a-z0-9'\s]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-    if (!text) return true;
-
-    if (/\b(?:a|an|the|my|your|this|that|some|any|for|with|to|at|on|by|from|about|of|called|titled|named|containing|saying|and|or)$/.test(text)) {
-        return true;
-    }
-
-    return /^(?:can|could|would|will) you(?: please)? [a-z][a-z'-]*$/.test(text);
 }
 
 function joinSegments(segments, draft = '') {
@@ -190,7 +165,6 @@ function beginTurn(state, event, originState) {
         liveDraft: '',
         finalizedTranscript: '',
         closeAfterPlayback: false,
-        followUpResponseExpected: false,
         speechActive: false,
         closedTurnIds,
         deadlines: { endpointAt: null, clarificationAt: null, followUpAt: null },
@@ -301,7 +275,6 @@ function promoteFollowUpCandidate(state, text, final) {
             activeTurn,
             followUpCandidate: null,
             liveDraft: text,
-            followUpResponseExpected: false,
             closedTurnIds,
             deadlines: { ...state.deadlines, followUpAt: null },
         },
@@ -332,7 +305,6 @@ export function createBrowserVoiceControllerState(options = {}) {
         finalizedTranscript: '',
         speechActive: false,
         closeAfterPlayback: false,
-        followUpResponseExpected: false,
         recoveryState: null,
         failureReason: '',
         deadlines: { endpointAt: null, clarificationAt: null, followUpAt: null },
@@ -709,16 +681,12 @@ export function reduceBrowserVoiceController(state, event) {
             if (state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP && state.followUpCandidate) {
                 const draft = cleanText(event.text);
                 const final = event.type === 'transcript_final';
-                const relevance = classifyBrowserVoiceFollowUpRelevance(draft, {
-                    final,
-                    responseExpected: state.followUpResponseExpected,
-                });
-                if (relevance === BROWSER_VOICE_FOLLOW_UP_RELEVANCE.MEANINGFUL) {
-                    return promoteFollowUpCandidate(state, draft, final);
-                }
-                if (relevance === BROWSER_VOICE_FOLLOW_UP_RELEVANCE.REJECTED) {
-                    return rejectFollowUpCandidate(state, event, atMs, 'not_meaningful');
-                }
+                // Once the follow-up window has admitted microphone capture, the
+                // browser owns only transcript transport. Meaning, conversational
+                // relevance, corrections, controls, and one-word answers are all
+                // decided by the server's single Hermes semantic path.
+                if (draft) return promoteFollowUpCandidate(state, draft, final);
+                if (final) return rejectFollowUpCandidate(state, event, atMs, 'empty_transcript');
                 return unchanged({
                     ...state,
                     followUpCandidate: {
@@ -752,13 +720,7 @@ export function reduceBrowserVoiceController(state, event) {
         case 'speech_ended': {
             if (state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP && state.followUpCandidate) {
                 const draft = cleanText(state.followUpCandidate.finalizedDraft || state.followUpCandidate.draft);
-                const relevance = classifyBrowserVoiceFollowUpRelevance(draft, {
-                    final: true,
-                    responseExpected: state.followUpResponseExpected,
-                });
-                if (relevance !== BROWSER_VOICE_FOLLOW_UP_RELEVANCE.MEANINGFUL) {
-                    return rejectFollowUpCandidate(state, event, atMs, 'not_meaningful');
-                }
+                if (!draft) return rejectFollowUpCandidate(state, event, atMs, 'empty_transcript');
                 const promoted = promoteFollowUpCandidate(state, draft, true);
                 const observedSilenceMs = Math.max(0, Number(event.observedSilenceMs) || 0);
                 const remainingMs = Math.max(0, promoted.state.config.endpointMs - observedSilenceMs);
@@ -893,41 +855,6 @@ export function reduceBrowserVoiceController(state, event) {
                 const segments = segment ? [...state.activeTurn.segments, segment] : state.activeTurn.segments;
                 const transcript = joinSegments(segments);
 
-                if (!state.activeTurn.clarificationDurable && hasOpenUtteranceBoundary(transcript)) {
-                    const clarificationAt = atMs + state.config.clarificationMs;
-                    return {
-                        state: {
-                            ...state,
-                            conversationState: BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION,
-                            activeTurn: {
-                                ...state.activeTurn,
-                                segments,
-                                draft: '',
-                                finalizedDraft: '',
-                                clarificationContinuation: false,
-                            },
-                            liveDraft: transcript,
-                            deadlines: {
-                                ...state.deadlines,
-                                endpointAt: null,
-                                clarificationAt,
-                            },
-                        },
-                        effects: [
-                            effect(BROWSER_VOICE_EFFECTS.DRAFT_CHANGED, {
-                                text: transcript,
-                                turnId: state.activeTurn.id,
-                                final: true,
-                            }),
-                            effect(BROWSER_VOICE_EFFECTS.SCHEDULE_TIMER, {
-                                timerKey: BROWSER_VOICE_TIMER_KEYS.CLARIFICATION,
-                                delayMs: state.config.clarificationMs,
-                                turnId: state.activeTurn.id,
-                            }),
-                        ],
-                    };
-                }
-
                 const clarificationContinuation = Boolean(state.activeTurn.clarificationContinuation);
                 const activeTurn = {
                     ...state.activeTurn,
@@ -1006,7 +933,6 @@ export function reduceBrowserVoiceController(state, event) {
                     state: {
                         ...state,
                         conversationState: BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY,
-                        followUpResponseExpected: false,
                         deadlines: { ...state.deadlines, followUpAt: null },
                     },
                     effects: [],
@@ -1072,7 +998,6 @@ export function reduceBrowserVoiceController(state, event) {
                         activeTurn: playbackOwnsActiveTurn ? null : state.activeTurn,
                         speechActive: false,
                         closeAfterPlayback: false,
-                        followUpResponseExpected: false,
                         closedTurnIds,
                         deadlines: { ...state.deadlines, followUpAt: null },
                     },
@@ -1087,7 +1012,6 @@ export function reduceBrowserVoiceController(state, event) {
                     activeTurn: playbackOwnsActiveTurn && state.activeTurn?.submitted ? null : state.activeTurn,
                     speechActive: false,
                     closeAfterPlayback: false,
-                    followUpResponseExpected: Boolean(event.responseExpected),
                     closedTurnIds,
                     deadlines: { ...state.deadlines, followUpAt },
                 },

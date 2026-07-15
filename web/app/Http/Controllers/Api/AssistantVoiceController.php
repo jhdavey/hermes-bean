@@ -152,22 +152,30 @@ class AssistantVoiceController extends Controller
             'workspace_id' => ['sometimes', 'nullable', 'integer', 'exists:workspaces,id'],
             'turn_id' => ['required', 'string', 'max:191'],
             'speech_item_id' => ['required', 'string', 'max:191'],
-            'purpose' => ['required', 'in:acknowledgement,final,clarification,interruption,cancellation'],
+            'purpose' => ['required', 'in:acknowledgement,final,clarification'],
             'text' => ['required', 'string', 'max:4096'],
         ]);
         $user = $request->user();
         $workspace = $this->workspaces->resolveWorkspace($user, $data['workspace_id'] ?? null);
-        $text = trim((string) $data['text']);
-        if (in_array($data['purpose'], ['acknowledgement', 'final'], true)) {
+        $text = (string) $data['text'];
+        if (trim($text) === '') {
+            return response()->json([
+                'message' => 'Speech text may not be blank.',
+                'error' => ['code' => 'voice_speech_text_blank'],
+            ], 422);
+        }
+        if (in_array($data['purpose'], ['acknowledgement', 'final', 'clarification'], true)) {
             $turn = VoiceTurn::query()
                 ->where('user_id', $user->id)
                 ->where('workspace_id', $workspace->id)
                 ->where('turn_id', $data['turn_id'])
                 ->first();
-            $expected = $data['purpose'] === 'final'
-                ? trim((string) $turn?->finalAssistantMessage()->value('content'))
-                : trim((string) $turn?->acknowledgement_text);
-            if ($expected === '' || ! hash_equals($expected, $text)) {
+            $expected = match ($data['purpose']) {
+                'final' => (string) $turn?->finalAssistantMessage()->value('content'),
+                'clarification' => (string) data_get($turn?->metadata, 'clarification_question', ''),
+                default => (string) $turn?->acknowledgement_text,
+            };
+            if (trim($expected) === '' || ! hash_equals($expected, $text)) {
                 return response()->json([
                     'message' => 'Bean could not verify the response text for speech.',
                     'error' => ['code' => 'voice_speech_text_mismatch'],

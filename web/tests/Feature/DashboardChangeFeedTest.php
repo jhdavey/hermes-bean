@@ -29,6 +29,7 @@ class DashboardChangeFeedTest extends TestCase
 
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Realtime event',
+            'all_day' => false,
             'starts_at' => now()->addDay()->setHour(9)->toIso8601String(),
             'ends_at' => now()->addDay()->setHour(10)->toIso8601String(),
         ])->assertCreated()->json('data.id');

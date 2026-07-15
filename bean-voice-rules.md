@@ -16,13 +16,14 @@ Bean voice should feel like a fast, attentive human assistant:
 - Keep background work independent from speech playback.
 - Make accepted work durable and recoverable across reloads.
 - Never remain indefinitely in a thinking, listening, queued, running, or speaking state.
-- Prefer deterministic local or application handlers for bounded requests. Use an agent only when interpretation or complex reasoning is actually needed.
+- Send every activated spoken request through one Hermes semantic interpretation path. Hermes owns meaning, completeness, conversational reference resolution, operation selection, work decomposition, and natural response language; deterministic application code owns validation, execution, lifecycle, and safety.
 
 No implementation is considered correct merely because its happy path works. Stop, interruption, follow-up, timeout, reload, duplicate-event, provider-failure, and concurrent-work behavior are part of the primary contract.
 
 ## Development deployment
 
 - Bean is currently a private development product used only by its owner; there is no user allowlist or staged customer cohort.
+- Voice architecture changes use a clean cutover: superseded voice routes, compatibility bridges, parsers, state owners, commands, and contradictory tests are removed in the same change. Development data does not require a legacy runtime.
 - `browser_voice_v2` remains the operational kill switch for new browser-voice admissions.
 - Release-certification state records whether the evidence gates in this document passed; it is not an access-control mechanism and must not prevent the owner from testing an uncertified development build.
 - A deployed development build must still pass the read-only deployment preflight before authenticated voice testing so stale assets or missing routes are caught explicitly.
@@ -30,9 +31,9 @@ No implementation is considered correct merely because its happy path works. Sto
 
 ## Subscription and usage enforcement
 
-- Browser voice uses the same per-user subscription limits as every other application surface. Voice may not bypass a plan limit by choosing an instant, typed, external, or complex lane.
+- Browser voice uses the same per-user subscription limits as every other application surface. Voice may not bypass a plan limit through semantic interpretation or any typed or external operation.
 - Admin accounts are unlimited and bypass subscription usage and feature limits.
-- Deterministic local answers and typed reads that incur no provider cost do not consume AI cost budget. Provider-backed transcription, speech, model reasoning, and external calls are metered to the authenticated user that incurred them.
+- Every activated spoken request incurs the configured Hermes semantic-interpretation model usage and is metered to the authenticated user that incurred it. Typed reads or writes do not add AI cost by themselves, while provider-backed transcription, speech, additional model reasoning, and external calls remain metered.
 - Realtime transcription and speech usage is recorded idempotently from provider usage events. A duplicate, late, or replayed provider event may not be charged twice.
 - The server checks the authenticated user's remaining budget before issuing a Realtime voice session and after recording each provider usage event. A client may display usage state, but it is never the quota owner.
 - Resource and feature entitlements, including note access and note-count limits, apply identically to direct voice writes and model-generated voice writes.
@@ -45,8 +46,8 @@ No implementation is considered correct merely because its happy path works. Sto
 - **Active conversation:** Bean has accepted a wake and may accept contextual follow-ups without another wake phrase.
 - **Utterance:** One continuous segment of user speech bounded by end-of-speech silence.
 - **Logical request:** The complete user intent, including any continuation or clarification. Several utterances may form one logical request.
-- **Instant request:** A deterministic device-local answer such as current time or date.
-- **Direct request:** A bounded read or write handled by a typed application or provider service without general agent reasoning.
+- **Semantic interpretation:** The single Hermes-owned step that determines what an activated utterance means, whether information is missing, which typed operations are required, how conversational references resolve, and what Bean should say.
+- **Typed operation:** A schema-validated application, work-control, or provider operation executed by deterministic code after Hermes selects it and supplies structured arguments.
 - **Background job:** Work that continues independently of speech playback.
 - **Acknowledgement:** A short spoken confirmation that Bean heard or queued a request. It is not a success claim.
 - **Final response:** The one durable Bean message that reports the outcome of a logical request.
@@ -70,6 +71,7 @@ No implementation is considered correct merely because its happy path works. Sto
 13. A provider or worker failure always becomes a terminal user-visible result and an admin diagnostic.
 14. Bean never claims a write succeeded until the authoritative application operation succeeded.
 15. Raw microphone audio is not retained by default.
+16. A durable Hermes final is preserved literally through storage, reload projection, visible chat, TTS verification, and playback; neither the model layer nor a client rewrites, unwraps, or suppresses its content.
 
 ## Wake behavior
 
@@ -136,100 +138,67 @@ While wake-only:
 
 ## Incomplete requests and clarification
 
-- At the end of an utterance, Bean determines whether the logical request is actionable.
+- At the end of an utterance, the Hermes semantic interpreter determines whether the logical request is actionable.
 - A complete request proceeds immediately.
 - A clearly incomplete request receives one short, specific clarification question.
-- If Bean is uncertain whether the user merely paused, it continues listening silently rather than inventing work.
+- Two seconds of silence always closes the current utterance and durably admits every non-empty activated transcript to Hermes. The browser does not classify grammar, extend capture from phrase shape, decide completeness, or enter semantic clarification on its own.
+- If Hermes is uncertain whether required information is missing, it asks one specific clarification rather than inventing work.
 - The user does not need another wake phrase to continue the request.
 - Bean waits five seconds for the clarification answer.
 - The original utterance and clarification answer form one logical request, one durable user turn, and one final response.
 - A continuation must never become a second queued task merely because the recognizer split the speech.
 - If no answer arrives within five seconds, Bean ends the clarification gracefully and returns to the appropriate follow-up or wake-only state.
 
-## Request lanes
+## Single semantic path and typed execution
 
-Routing is decided once per logical request. Later components must not independently reinterpret or silently move the request between lanes.
+Every activated spoken logical request uses the same Hermes semantic interpretation path. There is no local or deterministic intent shortcut for time, date, voice-state questions, application reads, application writes, weather, conversational replies, Stop, or cancellation.
 
-### Instant lane
+Hermes owns:
 
-Examples:
+- The meaning of the user's complete request.
+- Whether a required detail is missing and the exact clarification to ask.
+- Resolving references such as `that task`, `move it`, `the first one`, or a correction to prior work.
+- Selecting one or more typed operations and producing their schema-valid arguments.
+- Decomposing multi-clause and multi-domain requests into meaningful work items.
+- Producing acknowledgement, clarification, failure, and final-response language grounded in actual typed-operation results.
 
-- Current local time
-- Current local date
-- Basic voice-state questions
+Deterministic application code owns:
 
-Rules:
+- Wake and dormant-privacy gating, stable turn admission, lifecycle state, execution order, deadlines, and response delivery.
+- Tool schemas, argument validation, authorization, subscription enforcement, and resource entitlements.
+- Authoritative calendar, task, reminder, note, memory, weather/provider, Stop, cancellation, and work-status operations.
+- Idempotency, resource locking, duplicate suppression, write reconciliation, reload recovery, and exactly one durable final response.
 
-- Resolve locally when possible.
-- No acknowledgement.
-- No background job.
-- Speak the final answer immediately.
+Additional rules:
 
-### Direct application read lane
-
-Examples:
-
-- Calendar for today or tomorrow
-- Next calendar event
-- Task, reminder, or note lookup
-- Other bounded application reads
-
-Rules:
-
-- Use typed application services and authoritative stored data.
-- Do not invoke a general model or background agent for supported reads.
-- Normally skip acknowledgement and speak the result directly.
-- If the read unexpectedly exceeds the fast-result grace period, a natural `Let me check` acknowledgement is allowed.
-
-### Direct application write lane
-
-Examples:
-
-- Create a fully specified reminder
-- Create or complete a fully specified task
-- Create a straightforward note
-
-Rules:
-
-- Use typed, idempotent application services.
-- Normally no separate acknowledgement when the result will be fast.
-- The request and its dock item appear immediately.
-- Never announce success before the authoritative write succeeds.
-- Missing required parameters trigger clarification rather than a speculative write.
-
-### Weather and bounded external lane
-
-- Local weather normally answers without acknowledgement.
-- Local means the stored default/home location, an explicitly authorized current device location, or a location established as local in the active conversation.
-- A different location, such as Universal Studios when it is not the current/default area, may receive a short acknowledgement if the final result is not already ready.
-- Weather uses the dedicated weather provider directly, not a general web-search or agent fallback.
-- Place, date, time, and day-part references must be preserved across contextual follow-ups.
-- Provider failure returns a scoped weather failure; it never falls through to unrelated information.
-
-### Complex agent lane
-
-Examples:
-
-- Multi-day planning
-- Drafting or creative generation
-- Ambiguous multi-step work
-- Requests spanning several application domains
-
-Rules:
-
-- Give a natural acknowledgement promptly.
-- Create visible work items for meaningful subtasks.
-- Produce one combined final response after all required subtasks reach terminal states.
-- Use the agent only for reasoning; deterministic reads and writes remain typed operations.
+- One configurable, low-latency backend model may be selected specifically for voice semantic interpretation. Selecting a faster model changes neither the tool boundary nor lifecycle ownership.
+- The model may not write application state directly, claim an unverified side effect, invent a tool result, or become the owner of a queue, turn, job, or delivery state.
+- A typed operation executes only after its arguments pass deterministic schema, authorization, entitlement, and safety checks. Deterministic code may reject a missing or contradictory tool payload, but it never decides what the user meant or whether conversational information is sufficient; that rejection returns to Hermes for repair or one specific clarification.
+- Voice operations have one canonical argument shape. Execution adapters may translate validated canonical values into an application or provider API, but they may not accept semantic aliases, parse transcript prose, infer omitted meaning, silently select a named resource, or reinterpret a temporal value after Hermes.
+- Hermes supplies every meaning-bearing value expressed by the user, while typed application services apply only documented incidental defaults: tasks are `todo` and `open`, reminders and calendar events are `scheduled`, optional text and relationships are `null`, booleans are `false`, recurrence is absent, uncategorized resources use Bean green `#34C759`, note-folder sort order is `0`, and blockers are `open` with no context. Hermes alone decides whether omitted user information is genuinely required and asks the clarification; deterministic validation rejects only missing schema requirements, contradictions, unauthorized targets, or unsafe values and returns that structured constraint to Hermes without authoring the question.
+- Task search uses only the canonical `status` or `statuses` fields to filter completion state. A task search with no status filter returns both open and completed tasks; a day-context operation that intends only active tasks must explicitly request `status: "open"`.
+- For semantic calendar operations, `all_day`, `starts_at`, and `ends_at` are literal canonical values from Hermes. Execution stores their resolved instants and never changes an end-boundary convention or timezone offset.
+- Invalid or ambiguous structured arguments return to the same semantic path for one specific clarification; they do not fall through to a regex parser, second model runtime, or speculative write.
+- Deterministic turn completion records only non-semantic activity identifiers and counters. It never infers or creates durable memory from transcript phrases; conversational meaning may mutate memory only when Hermes selects an explicit typed memory operation.
+- Durable memory has exactly four voice operations: explicit search/read, create/remember, update/correct, and delete/forget. A create requires Hermes to provide both one canonical memory type (`fact`, `preference`, `identity`, `relationship`, `project`, `routine`, `constraint`, `decision`, `instruction`, or `temporary_context`) and non-empty canonical content. Update and delete require either one authorized concrete memory ID or one exact-title/exact-content unique search reference that deterministic code seals to an authorized ID before staging.
+- Ordinary conversational disclosure, including `I prefer ...`, `I am ...`, and similar prose, is never an implicit request to persist memory. Hermes selects a memory mutation only when the user explicitly asks to remember, save, correct, update, forget, or delete durable memory. Missing content, an unresolved type, or an ambiguous target produces one Hermes clarification on the original stable turn; deterministic code never supplies a default type, extracts content from the transcript, interprets aliases, or chooses among matches.
+- An acknowledgement becomes eligible for delivery only after the complete executable plan passes deterministic validation and is durably staged. A rejected plan may not publish or speak its provisional acknowledgement.
+- The current UTC instant and any available timezone and location are supplied to Hermes as trusted runtime context. An absent timezone or location remains explicitly unknown; deterministic code never substitutes UTC as the user's local zone. Hermes interprets the question, asks one focused clarification when the missing context affects meaning, and produces the answer. The browser or server does not recognize those phrases as local shortcuts.
+- Weather remains an authoritative typed provider operation selected by Hermes. A provider failure remains scoped to weather, is returned to Hermes as a terminal typed receipt for grounded language or a follow-up, and may not fall through to unrelated information.
+- An expected typed-operation rejection discovered after staging—such as duplicate prevention or a target that changed concurrently—terminalizes as a machine-readable negative receipt and still reaches Hermes composition. The operation exception and lifecycle contain no clarification or conversational failure copy; Hermes alone explains the result or asks the follow-up.
+- A semantically identified read-only operation may bypass unrelated background execution after interpretation. No request bypasses semantic interpretation.
+- A multi-step logical request may create several typed jobs but receives one combined final response after all required jobs terminalize.
+- If Hermes itself is unavailable or produces no valid final after the one allowed same-model retry, deterministic lifecycle code may persist one fixed, content-neutral operational failure fallback solely to satisfy the terminal-state and exactly-one-final invariants. That last-resort fallback never interprets the transcript, selects work, invents a result, or claims an unverified side effect; all ordinary validation, operation, and partial-success failures return to Hermes for grounded language.
+- Hermes owns the sole semantic retry budget. A terminal provider, validation, or composition failure is never requeued as a fresh whole semantic run; lifecycle recovery may replace only a stale/crashed worker generation behind the same durable identity and idempotency receipts.
+- Generic-versus-voice lifecycle ownership is determined only by the server-owned durable voice-turn relationship. Client metadata and diagnostic source labels can never create, impersonate, route, or mutate a voice run.
 
 ## Acknowledgement policy
 
-- If the final response is ready during a short grace period, skip the acknowledgement and speak the final response.
+- If semantic interpretation and the final response finish during a short grace period, skip the acknowledgement and speak the final response.
 - The grace period is 250–500 ms and should be tuned using audible production latency, not request-start proxies.
 - If work will take longer, acknowledge naturally and specifically.
-- Queued follow-up work always receives an immediate acknowledgement such as `Got it—I added that.`
-- A read acknowledgement describes checking: `Let me check your calendar.`
-- A work acknowledgement describes intent: `I’ll put that together.`
+- Queued follow-up work always receives a prompt acknowledgement grounded in the semantic plan.
+- A read acknowledgement describes checking, and a work acknowledgement describes intent, without claiming an operation succeeded.
 - An acknowledgement may not ask an unrelated question, imply completion, or improvise missing requirements.
 - Once acknowledgement playback starts, the final response waits for it to finish.
 - Bean never speaks two responses simultaneously.
@@ -242,10 +211,11 @@ These are user-audible service-level objectives. They are initial release target
 | --- | --- | --- |
 | Wake recognition | At least 95% Bean Voice QA journey pass rate and p95 within 500 ms after the wake phrase completes | Never expose dormant speech while deciding |
 | Live transcript update | p95 within 150 ms of recognized partial text | Never wait until utterance end to show all text |
-| Instant final audio start | p50 ≤ 500 ms; p95 ≤ 1,000 ms after final transcript | Terminal failure by 2 seconds |
-| Direct app read final audio | p50 ≤ 800 ms; p95 ≤ 1,500 ms | Terminal failure by 3 seconds |
-| Direct app write acceptance/dock | p95 ≤ 800 ms | Terminal failure or explicit background state by 2 seconds |
-| Simple direct write final | p95 ≤ 3 seconds | Terminal failure by 5 seconds |
+| Semantic interpretation | p50 ≤ 500 ms; p95 ≤ 1,000 ms after final transcript | Terminal interpretation failure by 2 seconds; never fall back to heuristic routing |
+| Semantic no-tool final audio | p50 ≤ 800 ms; p95 ≤ 1,500 ms after final transcript | Terminal failure by 3 seconds |
+| Typed read final audio | p50 ≤ 1,000 ms; p95 ≤ 2,000 ms | Terminal failure by 4 seconds |
+| Typed write acceptance/dock | p95 ≤ 1,000 ms | Terminal failure or explicit background state by 2 seconds |
+| Simple typed write final | p95 ≤ 4 seconds | Terminal failure by 6 seconds |
 | Acknowledgement audio start | p50 ≤ 500 ms; p95 ≤ 800 ms | Skip it if the final answer is already ready |
 | Bounded external lookup final | p50 ≤ 2 seconds; p95 ≤ 4 seconds | Terminal result or scoped failure by 8 seconds |
 | Complex work acknowledgement | p95 ≤ 800 ms | Visible dock state within 1 second |
@@ -257,8 +227,9 @@ No request may display an unchanged `Thinking` or `Working` state beyond its no-
 
 ## Retry policy
 
-- Instant/local operations do not retry through a model.
-- Read-only application and external operations may retry once within the same hard deadline.
+- Semantic interpretation may retry once with the same stable turn ID and configured model only when no typed side effect has begun and the retry fits within the same hard deadline.
+- There is no heuristic router, local-answer path, or second model fallback after semantic interpretation fails.
+- Read-only application and external typed operations may retry once within the same hard deadline.
 - Writes may retry only with the same stable idempotency key and only when reconciliation proves this cannot create a duplicate side effect.
 - A failed background worker may retry once only when no mutating work committed.
 - Never stack fallback runtimes silently.
@@ -280,7 +251,7 @@ No request may display an unchanged `Thinking` or `Working` state beyond its no-
 ## Background work and concurrency
 
 - Up to three background jobs may run concurrently.
-- Instant answers and read-only requests may bypass active background work.
+- Semantically interpreted no-tool answers and read-only typed operations may bypass active background execution.
 - Independent writes may run concurrently.
 - Work targeting the same resource or dependent resources is serialized.
 - Corrections, deletions, and cancellations targeting active work take priority over later unrelated writes.
@@ -292,7 +263,20 @@ No request may display an unchanged `Thinking` or `Working` state beyond its no-
 
 ## Stop behavior
 
-Pressing Stop or saying `Stop`:
+Pressing the visible Stop control:
+
+- Stops Bean's current speech immediately through the deterministic playback controller.
+- Does not create a spoken logical request or invoke semantic interpretation.
+- Creates no assistant final or spoken confirmation because there is no logical request.
+
+Saying `Stop`:
+
+- Is admitted and interpreted through the same Hermes semantic path as every other activated utterance; there is no local phrase shortcut.
+- On meaningful barge-in, the current playback has already stopped under the interruption rule while semantic interpretation determines whether the user meant playback Stop, task cancellation, or something else.
+- Hermes must select the typed playback-Stop operation for an unqualified request to stop Bean speaking. Deterministic code executes that operation.
+- Receives exactly one durable literal Hermes final like every other non-canceled semantic turn. That final remains visible and is eligible for normal non-overlapping speech delivery after the prior speech item stops; the client may not suppress it.
+
+In either form, playback Stop:
 
 - Stops Bean's current speech only.
 - Does not cancel active backend work.
@@ -301,6 +285,7 @@ Pressing Stop or saying `Stop`:
 - Keeps microphone wake detection enabled.
 - Returns voice interaction to wake-only mode unless an explicit active clarification requires otherwise.
 - Does not delete the accepted request or its eventual final text.
+- Keeps the stopped speech item's complete final text visible. A physical Stop adds no new final; a semantic spoken Stop delivers its separate Hermes-produced final normally.
 
 If the user later asks `Did you finish that?`, Bean reports the actual task state: still working, completed, failed, or explicitly canceled. It must not claim Stop canceled background work.
 
@@ -350,7 +335,7 @@ Every failed, timed-out, abandoned, canceled, or unusually slow turn must be vis
 - User and workspace identifiers
 - Sanitized transcript
 - Stable turn ID and run/job IDs
-- Selected lane and handler
+- Selected lane and handler for every durable run/job
 - Wake, transcription, durable-admission, acknowledgement, first-progress, final-response, and playback latency
 - Provider and typed tool calls
 - Retry attempts
@@ -365,14 +350,14 @@ Raw microphone audio is not retained by default. Diagnostic audio collection wou
 ## Ideal reference interaction
 
 1. The user turns on the microphone. Bean shows wake-only readiness. Room conversation remains invisible.
-2. The user says, `Hey Bean, what's on my calendar tomorrow?` The words appear live after wake activation. Two seconds of silence closes the utterance.
-3. The calendar read finishes quickly, so Bean skips acknowledgement and answers directly within the app-read target.
-4. After Bean finishes, the 15-second follow-up window begins. The user asks, `What time is the first one?` without a wake phrase. Bean uses the prior calendar context and answers directly.
+2. The user says, `Hey Bean, what's on my calendar tomorrow?` The words appear live after wake activation. Two seconds of silence closes the utterance, and the request is durably admitted before interpretation.
+3. Hermes interprets the request, selects the typed calendar read, and supplies structured arguments. The authoritative read finishes quickly, so Bean skips acknowledgement and Hermes produces the grounded final answer.
+4. After Bean finishes, the 15-second follow-up window begins. The user asks, `What time is the first one?` without a wake phrase. Hermes resolves `the first one` from prior durable context, selects any required typed read, and answers directly.
 5. While Bean is speaking, the user begins a meaningful new request. Playback may briefly lower while speech is evaluated; after speech is confirmed, the old audio stops permanently, its full text remains visible, and the new utterance is accepted once.
 6. The user asks for a meal plan note. Bean acknowledges within 800 ms, creates visible dock items, and begins background work.
-7. While that work runs, the user asks for the current time. Bean answers immediately without delaying or canceling the meal plan.
-8. The user adds a reminder request. Bean says it added the request, shows a second dock item, and runs it when one of the three background slots is available.
-9. The user presses Stop while Bean is speaking. Only playback stops. Both background jobs continue.
+7. While that work runs, the user asks for the current time. The request still crosses the Hermes semantic path, receives trusted current-time context, and bypasses unrelated background execution only after interpretation.
+8. The user adds a reminder request. Hermes selects the typed reminder operation; Bean acknowledges without claiming success, shows a second dock item, and runs it when one of the three background slots is available.
+9. The user says `Stop` while Bean is speaking. Barge-in stops playback immediately; Hermes interprets the utterance as playback Stop, deterministic work control leaves both background jobs running, and the literal Hermes final for the Stop turn remains eligible for normal speech. The visible Stop control would stop playback without creating a spoken turn or final.
 10. After the conversation returns to wake-only, the user says, `Hey Bean, did you finish the note?` Bean reports the real job state and does not claim Stop canceled it.
 11. If a provider fails, Bean terminalizes that job, gives one natural failure response, offers a retry, and records the full diagnostic in admin.
 
@@ -385,17 +370,31 @@ Before a voice release, deterministic and representative-device tests must cover
 - Wake-only privacy and invisible background speech
 - Live partial transcription and two-second utterance closure
 - Incomplete request, five-second clarification, and one logical turn
+- Syntactically incomplete fragments reaching durable Hermes admission at the normal two-second endpoint without any browser phrase rule
 - Fifteen-second follow-up timeout and natural closing phrases
-- Instant, app read, app write, local weather, remote weather, and complex lanes
+- Time, date, voice-state, app read, app write, local weather, remote weather, conversational, and complex requests all crossing the same Hermes semantic path
+- No client, admission, runtime, or typed-service heuristic shortcut that can answer or route an activated spoken request before Hermes interpretation
+- Explicit remember, memory search/read, correction/update, and forget/delete journeys using canonical memory fields and exact authorized targets
+- Ambiguous or incomplete memory requests producing one Hermes clarification on the original stable turn with zero speculative memory writes
+- Duplicate delivery and reload during a memory mutation producing one memory side effect, one accepted user message, and one durable final Bean response
+- A duplicate-memory or stale-target race discovered during execution producing zero speculative writes, one structured negative receipt with no application-authored question, and one literal Hermes-composed response or follow-up
+- `I prefer`, `I am`, and similar conversational transcript prose producing idempotent activity accounting but no durable memory unless the user explicitly asks to persist it and Hermes selects the corresponding typed memory operation
+- Configurable fast semantic model selection, usage enforcement, timeout, same-model retry, and terminal failure without heuristic or second-model fallback
+- Structured tool selection and argument validation for reads, writes, weather, work status, playback Stop, single-job cancellation, and all-job cancellation
+- Ambiguous named-location provider results returning bounded candidates to Hermes for a natural follow-up, with no first-result geocoding guess or unrelated provider fallback
+- Incidental task, reminder, calendar, folder, category, and blocker create fields using documented application defaults without a semantic retry, while genuinely missing meaning such as a reminder time or calendar start returns to Hermes for one clarification before any write
+- Completed-task search using an explicit canonical status, no-status task search returning all statuses, and day context explicitly selecting open tasks
+- Ambiguous and incomplete model output returning through Hermes for one Hermes-authored clarification journey on the original stable turn, with deterministic complete-journey coverage
 - Fast-result acknowledgement skipping
 - Slow-result acknowledgement followed by non-overlapping final speech
 - Meaningful barge-in, false barge-in, and permanent playback stop after confirmation
-- Stop during acknowledgement, final speech, and background work
+- Spoken semantic Stop and visible-control Stop during acknowledgement, final speech, and background work
 - Explicit single-job and all-job cancellation
 - Three concurrent independent jobs and same-resource serialization
 - Read-only bypass while background work is active
 - Out-of-order job completion with clearly identified results
 - Reload during capture, queued work, running work, acknowledgement, and final delivery
+- Literal Hermes final preservation through durable storage, reload, visible text, verified TTS, and delivery
 - Duplicate and out-of-order provider/browser events
 - Provider timeout, transport failure, worker crash, and ambiguous write reconciliation
 - Exactly one accepted user message and one final Bean message

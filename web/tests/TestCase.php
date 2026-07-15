@@ -15,7 +15,6 @@ abstract class TestCase extends BaseTestCase
     {
         parent::setUp();
 
-        config()->set('services.hermes_runtime.crud_planner_enabled', false);
     }
 
     protected function apiToken(string $email = 'test@example.com'): string

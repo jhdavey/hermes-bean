@@ -54,23 +54,66 @@ class TopWorkspaceSwitcherAssetTest extends TestCase
         $this->assertStringNotContainsString("api('/workspaces/default'", $appJs);
     }
 
-    public function test_web_bean_chat_uses_backend_routed_run_endpoint_for_normal_turns(): void
+    public function test_web_bean_chat_uses_one_durable_run_path_without_bridge_suppression(): void
     {
         $appJs = $this->appJsSource();
 
-        $this->assertStringContainsString('const useRunEndpoint = !editingMessageId;', $appJs);
-        $this->assertStringContainsString("source: useRunEndpoint ? 'web_routed_chat' : 'web_direct_chat'", $appJs);
-        $this->assertStringContainsString('? `/assistant/sessions/${state.session.id}/runs`', $appJs);
-        $this->assertStringContainsString("? { content, source: 'web_routed_chat', metadata }", $appJs);
+        $this->assertStringNotContainsString("source: 'web_chat'", $appJs);
+        $this->assertStringContainsString(': `/assistant/sessions/${request.sessionId}/runs`', $appJs);
+        $this->assertStringContainsString('const body = { content, metadata };', $appJs);
         $this->assertStringContainsString('/messages/${encodeURIComponent(editingMessageId)}/branch', $appJs);
         $this->assertStringContainsString('/runs/lookup?client_request_id=', $appJs);
-        $this->assertStringContainsString('chatQueue: []', $appJs);
-        $this->assertStringContainsString('enqueueChatContent(content', $appJs);
-        $this->assertStringContainsString('drainChatQueue()', $appJs);
+        $this->assertStringContainsString('const activeChatRequests = new Map();', $appJs);
+        $this->assertStringContainsString('activeChatRequestForBeanWorkEvent(event)', $appJs);
+        $this->assertStringContainsString('request?.clientRequestId', $appJs);
         $this->assertStringContainsString('client_context: clientTemporalContext()', $appJs);
+        $this->assertStringNotContainsString('chatQueue', $appJs);
+        $this->assertStringNotContainsString('enqueueChatContent', $appJs);
+        $this->assertStringNotContainsString('drainChatQueue', $appJs);
+        $this->assertStringNotContainsString('client_queue_status', $appJs);
+        $this->assertStringNotContainsString('transcript.endsWith', $appJs);
         $this->assertStringNotContainsString('beanRequestShouldUseQueuedRuntime', $appJs);
         $this->assertStringNotContainsString('beanAcknowledgementForRequest', $appJs);
         $this->assertStringNotContainsString('beanInitialWorkLabelsForRequest', $appJs);
+        $this->assertStringNotContainsString('assistantMessageShouldStayOutOfChat', $appJs);
+        $this->assertStringNotContainsString('missing_run_bridge', $appJs);
+        $this->assertStringNotContainsString('async_queue_bridge', $appJs);
+        $this->assertStringNotContainsString('beanWorkSubjectKeyForLabel', $appJs);
+        $this->assertStringNotContainsString('beanWorkCategoryForLabel', $appJs);
+        $this->assertStringNotContainsString('grocery shopping', $appJs);
+    }
+
+    public function test_web_calendar_editor_sends_canonical_top_level_all_day(): void
+    {
+        $appJs = $this->appJsSource();
+
+        $this->assertStringContainsString('all_day: allDay', $appJs);
+        $this->assertStringContainsString('delete metadata.all_day;', $appJs);
+        $this->assertStringContainsString('all_day: body.all_day === true', $appJs);
+        $this->assertStringContainsString("labelInput('Start date', 'allDayStart'", $appJs);
+        $this->assertStringContainsString("labelInput('Ends before', 'allDayEnd'", $appJs);
+        $this->assertStringContainsString('preserveLiteralAllDayBounds', $appJs);
+        $this->assertStringNotContainsString('allDayEndIsExclusiveMidnight', $appJs);
+        $this->assertStringNotContainsString('allDayExclusiveEndDate', $appJs);
+    }
+
+    public function test_resource_editors_use_only_the_canonical_recurrence_contract(): void
+    {
+        $appJs = $this->appJsSource();
+
+        $this->assertStringContainsString('recurrence: recurrence.value', $appJs);
+        $this->assertStringContainsString('...recurrence.details', $appJs);
+        $this->assertStringContainsString('details.days = Array.from', $appJs);
+        $this->assertStringContainsString("details.unit = ['days', 'weeks', 'months', 'years']", $appJs);
+        $this->assertStringContainsString("status: completed ? 'open' : 'completed'", $appJs);
+        $this->assertStringContainsString("return task?.status === 'completed';", $appJs);
+        $this->assertStringContainsString("return reminder?.status === 'completed';", $appJs);
+        $this->assertStringNotContainsString('normalizeRecurrenceValue', $appJs);
+        $this->assertStringNotContainsString('name="specificDays"', $appJs);
+        $this->assertStringNotContainsString('.specificDays', $appJs);
+        $this->assertStringNotContainsString('name="intervalUnit"', $appJs);
+        $this->assertStringNotContainsString('.intervalUnit', $appJs);
+        $this->assertStringNotContainsString('interval_unit', $appJs);
     }
 
     private function appJsSource(): string

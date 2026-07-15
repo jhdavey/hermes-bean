@@ -3,6 +3,32 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const source = await readFile(new URL('../../resources/js/heybean/webApp.js', import.meta.url), 'utf8');
+globalThis.window = { matchMedia: () => null };
+const {
+    browserVoiceV2LocalWakeMatchesCompletedBarge,
+    isMeaningfulBrowserVoiceV2Interruption,
+} = await import('../../resources/js/heybean/webApp.js');
+
+test('[BV2-TIMEZONE-01] browser admission and chat metadata never invent UTC when the local zone is unavailable', () => {
+    assert.match(source, /function resolvedBrowserTimeZone\(\)/);
+    assert.match(source, /timezone: resolvedBrowserTimeZone\(\)/);
+    assert.doesNotMatch(source, /resolvedOptions\(\)\.timeZone \|\| 'UTC'/);
+});
+
+test('generic web chat admits every submit immediately and recovers only by exact stable run identity', () => {
+    assert.doesNotMatch(source, /chatQueue|scheduleChatQueueDrain|drainChatQueue|client_queue_status/);
+    const submitStart = source.indexOf('async function submitChat(');
+    const submitEnd = source.indexOf('\n    async function copyChatMessage(', submitStart);
+    const submit = source.slice(submitStart, submitEnd);
+    assert.match(submit, /void sendChatContent\(/);
+    assert.doesNotMatch(submit, /chatHasActiveTurn/);
+
+    const recoveryStart = source.indexOf('async function recoverChatFailureFromServer(');
+    const recoveryEnd = source.indexOf('\n    function replaceLocalUserMessage(', recoveryStart);
+    const recovery = source.slice(recoveryStart, recoveryEnd);
+    assert.match(recovery, /runs\/lookup\?client_request_id=/);
+    assert.doesNotMatch(recovery, /messages\.slice|find\(\(message\).*assistant/);
+});
 
 test('[BV2-STARTUP-01] Bean session hydration starts before the unrelated 25-second dashboard feed', () => {
     const start = source.indexOf('async function loadSignedIn(options = {})');
@@ -112,6 +138,20 @@ test('[BV2-PRIVACY-PCM-04] local wake clears provider input before LocalWakeGate
     assert.match(gateOptions, /onActivatedPcm:[\s\S]*browserVoiceV2InputTransport\.append/);
 });
 
+test('[BV2-WAKE-OWNER-01] Realtime transcript text cannot become a second wake owner', () => {
+    const detectedStart = source.indexOf('function handleLocalWakeDetected(');
+    const detectedEnd = source.indexOf('\n    function handleLocalWakeFailure(', detectedStart);
+    const detected = source.slice(detectedStart, detectedEnd);
+    assert.match(detected, /browserVoiceV2Controller\.wakeConfirmed\(\{ source: 'local_wake_gate' \}\)/);
+
+    const ingressStart = source.indexOf('function handleBrowserVoiceV2RealtimeEvent(');
+    const ingressEnd = source.indexOf('\n    async function reportBrowserVoiceV2RealtimeUsage(', ingressStart);
+    const ingress = source.slice(ingressStart, ingressEnd);
+    assert.match(ingress, /const wakeConfirmed = browserVoiceV2ProviderWakeTurnIds\.has\(transcriptId\)/);
+    assert.doesNotMatch(ingress, /wakeConfirmed\(|provider_strict_wake|activateBrowserVoiceV2ProviderWake/);
+    assert.doesNotMatch(source, /function activateBrowserVoiceV2ProviderWake/);
+});
+
 test('[BV2-PRIVACY-01] startup microphone activity is not presented as accepted listening', () => {
     const start = source.indexOf('function updateRealtimeVoiceActivity(');
     const end = source.indexOf('\n    function clearRealtimeVoiceInputFeedback(', start);
@@ -123,22 +163,87 @@ test('[BV2-PRIVACY-01] startup microphone activity is not presented as accepted 
 });
 
 test('[BV2-BARGE-04] failed interruption transcription restores playback instead of admitting unknown speech', () => {
+    const deltaStart = source.indexOf("if (type === 'conversation.item.input_audio_transcription.delta')");
+    const completedStart = source.indexOf("if (type === 'conversation.item.input_audio_transcription.completed')", deltaStart);
     const start = source.indexOf("if (type === 'conversation.item.input_audio_transcription.failed')");
     const end = source.indexOf("if (type === 'response.function_call_arguments.delta'", start);
-    assert.ok(start >= 0 && end > start, 'the transcription-failure handler must remain discoverable');
+    assert.ok(deltaStart >= 0 && completedStart > deltaStart && start > completedStart && end > start);
+    const delta = source.slice(deltaStart, completedStart);
+    const completed = source.slice(completedStart, start);
     const implementation = source.slice(start, end);
     const claimCandidate = implementation.indexOf('const potentialBargeIn = browserVoiceV2PotentialBargeInItems.delete(transcriptId)');
     const reject = implementation.indexOf("browserVoiceV2Controller.rejectBargeIn('transcription_failed'");
     const captureFailure = implementation.indexOf("browserVoiceV2Controller.captureFailed('transcription_failed'");
 
+    assert.doesNotMatch(delta, /confirmBargeIn|PotentialBargeInItems\.delete/);
+    assert.match(delta, /updateVoiceWakeDraft\(commandDraft\)/);
+    assert.match(completed, /browserVoiceV2Controller\.confirmBargeIn/);
     assert.ok(claimCandidate >= 0, 'the handler must claim the potential interruption exactly once');
     assert.ok(reject > claimCandidate, 'an unconfirmed interruption must restore the current playback');
     assert.ok(captureFailure > reject, 'ordinary capture failure handling must remain outside the interruption branch');
 });
 
+test('[BV2-BARGE-06] only the exact completed active-conversation PCM can absorb a delayed local callback', () => {
+    const snapshot = {
+        generation: 4,
+        connectionGeneration: 9,
+        activeTurn: { id: 'stable-barge-turn' },
+    };
+    const completedBarge = {
+        turnId: 'stable-barge-turn',
+        controllerGeneration: 4,
+        connectionGeneration: 9,
+        gateGeneration: 3,
+        throughSourceSequence: 412,
+    };
+
+    assert.equal(browserVoiceV2LocalWakeMatchesCompletedBarge({
+        snapshot,
+        completedBarge,
+        connectionGeneration: 9,
+        gateGeneration: 3,
+        sourceSequence: 412,
+    }), true);
+    assert.equal(browserVoiceV2LocalWakeMatchesCompletedBarge({
+        snapshot,
+        completedBarge,
+        connectionGeneration: 9,
+        gateGeneration: 3,
+        sourceSequence: 413,
+    }), false, 'a later utterance must remain a new local wake');
+    assert.equal(browserVoiceV2LocalWakeMatchesCompletedBarge({
+        snapshot: { ...snapshot, activeTurn: { id: 'different-turn' } },
+        completedBarge,
+        connectionGeneration: 9,
+        gateGeneration: 3,
+        sourceSequence: 412,
+    }), false);
+    assert.equal(browserVoiceV2LocalWakeMatchesCompletedBarge({
+        snapshot,
+        completedBarge,
+        connectionGeneration: 9,
+        gateGeneration: 3,
+    }), false, 'missing PCM identity must fail open to the local wake owner');
+
+    const detectedStart = source.indexOf('function handleLocalWakeDetected(');
+    const detectedEnd = source.indexOf('\n    function handleLocalWakeFailure(', detectedStart);
+    const detected = source.slice(detectedStart, detectedEnd);
+    assert.match(detected, /browserVoiceV2LocalWakeMatchesCompletedBarge/);
+    assert.ok(
+        detected.indexOf('browserVoiceV2LocalWakeMatchesCompletedBarge')
+            < detected.indexOf('browserVoiceV2Controller.wakeConfirmed'),
+        'exact completed PCM must be deduplicated before local wake admission',
+    );
+
+    const ingressStart = source.indexOf('function handleBrowserVoiceV2RealtimeEvent(');
+    const ingressEnd = source.indexOf('\n    async function reportBrowserVoiceV2RealtimeUsage(', ingressStart);
+    const ingress = source.slice(ingressStart, ingressEnd);
+    assert.doesNotMatch(ingress, /isStrictRealtimeWakePhrase|const strictWake/);
+});
+
 test('[BV2-USAGE-02] realtime usage is reported once and a plan limit closes voice with an upgrade path', () => {
     const start = source.indexOf('async function reportBrowserVoiceV2RealtimeUsage(');
-    const end = source.indexOf('\n    function normalizeBrowserVoiceV2Speech(', start);
+    const end = source.indexOf('\n    function handleRealtimeEvent(', start);
     assert.ok(start >= 0 && end > start, 'the realtime usage reporter must remain discoverable');
     const implementation = source.slice(start, end);
 
@@ -155,6 +260,12 @@ test('[BV2-USAGE-02] realtime usage is reported once and a plan limit closes voi
     const markup = source.slice(markupStart, markupEnd);
     assert.match(markup, /Upgrade to keep going/);
     assert.match(markup, /href="\/pricing">View plans<\/a>/);
+});
+
+test('[BV2-BARGE-05] repeated Bean wording remains a meaningful interruption for Hermes', () => {
+    assert.equal(isMeaningfulBrowserVoiceV2Interruption('Delete the first one.'), true);
+    assert.equal(isMeaningfulBrowserVoiceV2Interruption('  '), false);
+    assert.doesNotMatch(source, /isBrowserVoiceV2PlaybackEcho|spoken\.includes\(candidate\)|overlap\s*>=/);
 });
 
 test('[BV2-DIAGNOSTIC-02] a post-readiness local wake failure records its sanitized cause before teardown', () => {
@@ -192,6 +303,8 @@ test('[BV2-DIAGNOSTIC-04] exhausted clarification transport preserves the draft 
 
     assert.match(implementation, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)/);
     assert.match(implementation, /snapshot\.turns\.find/);
+    assert.match(implementation, /resolvedClarificationIds\?\.includes\(clarificationId\)/);
+    assert.doesNotMatch(implementation, /transcript\.endsWith/);
     assert.match(implementation, /Your words are still in the input/);
     assert.match(implementation, /sanitizedLocalWakeFailure\(lastError, 'clarification'\)/);
     assert.match(implementation, /\/assistant\/voice\/client-failures/);
@@ -246,11 +359,28 @@ test('[BV2-WAKE-RESIDUE-01] an address-only provider transcript cannot reach adm
     const failed = source.indexOf("if (type === 'conversation.item.input_audio_transcription.failed')", completed);
     assert.ok(completed >= 0 && failed > completed);
     const implementation = source.slice(completed, failed);
-    const addressOnly = implementation.indexOf('isRealtimeWakeAddressOnly(transcript)');
+    const addressOnly = implementation.indexOf('isRealtimeWakeAddressOnly(transcript, { wakeConfirmed })');
     const deleteProviderItem = implementation.indexOf('buildRealtimeConversationItemDeleteEvent(transcriptId)', addressOnly);
     const final = implementation.indexOf("type: 'transcript_final'");
 
     assert.ok(addressOnly >= 0, 'wake residue must have an explicit fail-closed branch');
     assert.ok(deleteProviderItem > addressOnly, 'wake residue must be erased from provider conversation state');
     assert.ok(final > deleteProviderItem, 'address-only handling must return before transcript admission');
+});
+
+test('[BV2-SEMANTIC-04] activated speech has no browser intent or spoken-Stop shortcut', () => {
+    assert.doesNotMatch(source, /browserVoiceFollowUpRelevanceV2|classifyBrowserVoiceFollowUpRelevance/);
+    assert.doesNotMatch(source, /isBrowserVoiceV2PlaybackStop|isSpokenStopShortcut/);
+    assert.doesNotMatch(source, /isBrowserVoiceV2NaturalClosing|isLikelyNonEnglishRealtimeTranscript|isVoiceFillerOnly/);
+    assert.match(source, /stripRealtimeLocalWakePrefix\(transcript, \{ wakeConfirmed \}\)/);
+    assert.match(source, /naturalClosing: Boolean\(turn\.close_after_response \?\? turn\.closeAfterResponse \?\? false\)/);
+    assert.match(source, /responseExpected: Boolean\(turn\.response_expected \?\? turn\.responseExpected \?\? false\)/);
+});
+
+test('[BV2-STOP-09] playback Stop is applied once and its Hermes final remains eligible for speech', () => {
+    assert.match(source, /browserVoiceV2AppliedStopDirectiveIds\.has\(stopDirectiveId\)/);
+    assert.match(source, /browserVoiceV2Controller\.stopPlayback\('semantic_spoken_stop'\)/);
+    assert.match(source, /directive_id: stopDirectiveId/);
+    assert.doesNotMatch(source, /suppressFinalAudio|suppress_final_audio/);
+    assert.match(source, /text: turn\.finalText/);
 });

@@ -25,7 +25,6 @@ class AdminSettingsController extends Controller
     {
         $data = $request->validate([
             'model_settings' => ['required', 'array'],
-            'model_settings.main_model' => ['required', 'string', 'max:120', 'regex:/^[A-Za-z0-9._:\/-]+$/'],
             'model_settings.external_lookup_model' => ['required', 'string', 'max:120', 'regex:/^[A-Za-z0-9._:\/-]+$/'],
             'kill_switches' => ['required', 'array'],
             'kill_switches.bean_chat_enabled' => ['required', 'boolean'],
@@ -36,7 +35,6 @@ class AdminSettingsController extends Controller
             'usage_limits.premium_external_cost_limit' => ['sometimes', 'numeric', 'min:0', 'max:100000'],
             'usage_limits.pro_cost_limit' => ['sometimes', 'numeric', 'min:0', 'max:100000'],
             'usage_limits.pro_external_cost_limit' => ['sometimes', 'numeric', 'min:0', 'max:100000'],
-            'apply_main_model_to_profiles' => ['sometimes', 'boolean'],
         ]);
 
         $modelErrors = $registry->validationErrors($data['model_settings']);
@@ -48,7 +46,6 @@ class AdminSettingsController extends Controller
             $data['model_settings'],
             $data['usage_limits'] ?? [],
             $request->user(),
-            (bool) ($data['apply_main_model_to_profiles'] ?? false),
             $data['kill_switches'],
         );
 

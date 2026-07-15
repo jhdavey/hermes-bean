@@ -8,6 +8,7 @@ use App\Notifications\ReminderDueNotification;
 use App\Services\DashboardChangeNotifier;
 use App\Services\FirebaseCloudMessagingService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 
 class SendDueReminderNotifications extends Command
@@ -24,10 +25,7 @@ class SendDueReminderNotifications extends Command
         Reminder::query()
             ->whereNotNull('remind_at')
             ->where('remind_at', '<=', now())
-            ->where(function ($query): void {
-                $query->whereNull('status')
-                    ->orWhereNotIn('status', ['completed', 'complete', 'done', 'COMPLETED', 'Complete', 'Done']);
-            })
+            ->where('status', 'scheduled')
             ->where(function ($query): void {
                 $query->whereNull('metadata->email_notification_sent_at')
                     ->orWhereNull('metadata->push_notification_sent_at');
@@ -115,13 +113,13 @@ class SendDueReminderNotifications extends Command
         }
 
         try {
-            return now()->lt(\Illuminate\Support\Carbon::parse($retryAfter));
+            return now()->lt(Carbon::parse($retryAfter));
         } catch (\Throwable) {
             return false;
         }
     }
 
-    private function emailRetryAfter(\Throwable $exception): \Illuminate\Support\Carbon
+    private function emailRetryAfter(\Throwable $exception): Carbon
     {
         $message = mb_strtolower($exception->getMessage());
 

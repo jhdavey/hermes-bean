@@ -6,8 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Approval;
 use App\Models\Blocker;
 use App\Models\CalendarEvent;
-use App\Models\EventCategory;
 use App\Models\ConversationSession;
+use App\Models\EventCategory;
 use App\Models\MemoryItem;
 use App\Models\MemorySummary;
 use App\Models\Note;
@@ -17,9 +17,9 @@ use App\Models\Task;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
 use App\Models\WorkspaceMembership;
+use App\Services\BeanMemoryService;
 use App\Services\GoogleCalendarSyncService;
 use App\Services\OutlookCalendarSyncService;
-use App\Services\BeanMemoryService;
 use App\Services\PlanHistoryService;
 use App\Services\PlanLimitService;
 use App\Services\RecurringCalendarEventService;
@@ -35,11 +35,31 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
-use Throwable;
 
 class DomainResourceController extends Controller
 {
     private const DEFAULT_CATEGORY_COLOR = '#34C759';
+
+    private const TASK_STATUSES = ['open', 'completed'];
+
+    private const REMINDER_STATUSES = ['scheduled', 'completed'];
+
+    private const CALENDAR_STATUSES = ['scheduled', 'cancelled'];
+
+    private const RECURRENCES = ['none', 'daily', 'weekly', 'monthly', 'yearly', 'specific_days', 'interval'];
+
+    private const RECURRENCE_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+    private const RECURRENCE_UNITS = ['days', 'weeks', 'months', 'years'];
+
+    private const LEGACY_RECURRENCE_METADATA_KEYS = [
+        'recurring',
+        'rrule',
+        'specific_days',
+        'specificDays',
+        'interval_unit',
+        'intervalUnit',
+    ];
 
     public function __construct(
         private readonly StructuredHermesActionService $actions,
@@ -70,7 +90,7 @@ class DomainResourceController extends Controller
     {
         $workspace = $this->workspace($request);
         $validated = $request->validate([
-            'type' => ['nullable', 'string', 'max:50'],
+            'type' => ['required', 'string', Rule::in(BeanMemoryService::CANONICAL_TYPES)],
             'status' => ['nullable', 'string', 'max:50'],
             'visibility' => ['nullable', 'string', 'max:50'],
             'title' => ['nullable', 'string', 'max:255'],
@@ -92,7 +112,7 @@ class DomainResourceController extends Controller
     {
         $item = MemoryItem::withTrashed()->where('user_id', $request->user()->id)->findOrFail($memoryItem);
         $validated = $request->validate([
-            'type' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'type' => ['sometimes', 'required', 'string', Rule::in(BeanMemoryService::CANONICAL_TYPES)],
             'status' => ['sometimes', 'nullable', 'string', 'max:50'],
             'visibility' => ['sometimes', 'nullable', 'string', 'max:50'],
             'title' => ['sometimes', 'nullable', 'string', 'max:255'],
@@ -134,32 +154,60 @@ class DomainResourceController extends Controller
     public function requestHistory(Request $request): JsonResponse
     {
         $session = $this->historySession($request);
+        $this->rejectUnknownQueryParameters($request, [
+            'from', 'to', 'query', 'workspace_id', 'limit',
+        ]);
         $validated = $request->validate([
-            'date' => ['nullable', 'date_format:Y-m-d'],
-            'from_date' => ['nullable', 'date_format:Y-m-d'],
-            'to_date' => ['nullable', 'date_format:Y-m-d'],
+            'from' => ['nullable', 'string', 'required_with:to', 'max:40'],
+            'to' => ['nullable', 'string', 'required_with:from', 'max:40'],
             'query' => ['nullable', 'string', 'max:255'],
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:50'],
         ]);
 
-        return response()->json(['data' => $this->memory->requestHistory($session, $validated)]);
+        try {
+            $history = $this->memory->requestHistory($session, $validated);
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['from' => $exception->getMessage()]);
+        }
+
+        return response()->json(['data' => $history]);
     }
 
     public function activityTimeline(Request $request): JsonResponse
     {
         $session = $this->historySession($request);
+        $this->rejectUnknownQueryParameters($request, [
+            'from', 'to', 'event_type', 'tool_name', 'workspace_id', 'limit',
+        ]);
         $validated = $request->validate([
-            'date' => ['nullable', 'date_format:Y-m-d'],
-            'from_date' => ['nullable', 'date_format:Y-m-d'],
-            'to_date' => ['nullable', 'date_format:Y-m-d'],
+            'from' => ['nullable', 'string', 'required_with:to', 'max:40'],
+            'to' => ['nullable', 'string', 'required_with:from', 'max:40'],
             'event_type' => ['nullable', 'string', 'max:120'],
             'tool_name' => ['nullable', 'string', 'max:120'],
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:50'],
         ]);
 
-        return response()->json(['data' => $this->memory->activityTimeline($session, $validated)]);
+        try {
+            $activity = $this->memory->activityTimeline($session, $validated);
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['from' => $exception->getMessage()]);
+        }
+
+        return response()->json(['data' => $activity]);
+    }
+
+    /** @param list<string> $allowed */
+    private function rejectUnknownQueryParameters(Request $request, array $allowed): void
+    {
+        $errors = [];
+        foreach (array_diff(array_keys($request->query()), $allowed) as $field) {
+            $errors[(string) $field] = ['This query parameter is not supported.'];
+        }
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
     }
 
     public function listNoteFolders(Request $request): JsonResponse
@@ -341,7 +389,7 @@ class DomainResourceController extends Controller
         $tasks = $this->scoped(Task::query(), $request)
             ->where(function ($query): void {
                 $query->whereNull('status')
-                    ->orWhereNotIn('status', ['completed', 'complete', 'done', 'COMPLETED', 'Complete', 'Done']);
+                    ->orWhere('status', '!=', 'completed');
             })
             ->orderBy('due_at')
             ->orderBy('id')
@@ -363,10 +411,7 @@ class DomainResourceController extends Controller
             $this->scoped(Task::query(), $request)
                 ->whereNotNull('completed_at')
                 ->when($historyCutoff !== null, fn ($query) => $query->where('completed_at', '>=', $historyCutoff))
-                ->where(function ($query): void {
-                    $query->whereIn('status', ['completed', 'complete', 'done'])
-                        ->orWhereIn('status', ['COMPLETED', 'Complete', 'Done']);
-                })
+                ->where('status', 'completed')
                 ->orderByDesc('completed_at')
                 ->orderByDesc('id')
                 ->get()
@@ -462,7 +507,7 @@ class DomainResourceController extends Controller
             'conversation_session_id' => $this->ownedSessionRule($request),
             'title' => ['required', 'string', 'max:255'],
             'type' => ['required', Rule::in(['todo', 'chore', 'maintenance'])],
-            'status' => ['nullable', 'string', 'max:50'],
+            'status' => ['sometimes', 'required', 'string', Rule::in(self::TASK_STATUSES)],
             'notes' => ['nullable', 'string'],
             'category' => ['nullable', 'string', 'max:80'],
             'color' => ['nullable', 'string', 'max:20'],
@@ -474,6 +519,8 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
+
+        $this->assertCanonicalRecurrenceMetadata($validated);
 
         $this->normalizeDateFields($validated, ['due_at', 'completed_at']);
         $validated = $this->withDefaultUncategorizedColor($validated, true);
@@ -499,7 +546,7 @@ class DomainResourceController extends Controller
         $validated = $request->validate([
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'type' => ['sometimes', 'required', Rule::in(['todo', 'chore', 'maintenance'])],
-            'status' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'status' => ['sometimes', 'required', 'string', Rule::in(self::TASK_STATUSES)],
             'notes' => ['sometimes', 'nullable', 'string'],
             'category' => ['sometimes', 'nullable', 'string', 'max:80'],
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
@@ -510,6 +557,8 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
+
+        $this->assertCanonicalRecurrenceMetadata($validated);
 
         $this->normalizeDateFields($validated, ['due_at', 'completed_at']);
         $validated = $this->withDefaultUncategorizedColor($validated);
@@ -565,12 +614,14 @@ class DomainResourceController extends Controller
             'color' => ['nullable', 'string', 'max:20'],
             'is_critical' => ['nullable', 'boolean'],
             'remind_at' => ['required', 'date'],
-            'status' => ['nullable', 'string', 'max:50'],
+            'status' => ['sometimes', 'required', 'string', Rule::in(self::REMINDER_STATUSES)],
             'metadata' => ['nullable', 'array'],
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
+        $this->assertCanonicalRecurrenceMetadata($validated);
+        $validated['status'] ??= 'scheduled';
         $this->normalizeDateFields($validated, ['remind_at']);
         $validated = $this->withDefaultUncategorizedColor($validated, true);
         if ($this->reminderRecurrenceRequested($validated) && ! $this->planLimits->canUseRecurringReminders($request->user())) {
@@ -597,11 +648,12 @@ class DomainResourceController extends Controller
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
             'is_critical' => ['sometimes', 'boolean'],
             'remind_at' => ['sometimes', 'required', 'date'],
-            'status' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'status' => ['sometimes', 'required', 'string', Rule::in(self::REMINDER_STATUSES)],
             'metadata' => ['sometimes', 'nullable', 'array'],
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
+        $this->assertCanonicalRecurrenceMetadata($validated);
         $this->normalizeDateFields($validated, ['remind_at']);
         $validated = $this->withDefaultUncategorizedColor($validated);
         if ($this->reminderRecurrenceRequested($validated) && ! $this->planLimits->canUseRecurringReminders($request->user())) {
@@ -640,18 +692,21 @@ class DomainResourceController extends Controller
             'category' => ['nullable', 'string', 'max:80'],
             'color' => ['nullable', 'string', 'max:20'],
             'is_critical' => ['nullable', 'boolean'],
-            'recurrence' => ['nullable', 'string', 'max:50'],
+            'recurrence' => ['sometimes', 'required', 'string', Rule::in(self::RECURRENCES)],
             'starts_at' => ['required', 'date'],
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
-            'status' => ['nullable', 'string', 'max:50'],
+            'all_day' => ['required', $this->canonicalBooleanRule()],
+            'status' => ['sometimes', 'required', 'string', Rule::in(self::CALENDAR_STATUSES)],
             'metadata' => ['nullable', 'array'],
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
+        $validated['status'] ??= 'scheduled';
+        $this->assertCanonicalRecurrenceMetadata($validated, $validated['recurrence'] ?? null, true);
+        $this->rejectCalendarAllDayMetadataFields($validated);
         $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
-        $this->normalizeAllDayTitleIntent($validated);
-        $this->normalizeAllDayCalendarBounds($validated);
+        $this->storeCanonicalCalendarAllDay($validated);
         $validated = $this->withDefaultUncategorizedColor($validated, true);
         if ($this->calendarRecurrenceRequested($validated['recurrence'] ?? null) && ! $this->planLimits->canUseRecurringCalendar($request->user())) {
             return $this->planLimits->limitResponse('Recurring calendar events are available on Premium, Pro, and Enterprise plans.');
@@ -676,33 +731,47 @@ class DomainResourceController extends Controller
             'category' => ['sometimes', 'nullable', 'string', 'max:80'],
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
             'is_critical' => ['sometimes', 'boolean'],
-            'recurrence' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'recurrence' => ['sometimes', 'required', 'string', Rule::in(self::RECURRENCES)],
             'starts_at' => ['sometimes', 'required', 'date'],
             'ends_at' => ['sometimes', 'nullable', 'date', 'after_or_equal:starts_at'],
-            'status' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'all_day' => ['sometimes', 'required', $this->canonicalBooleanRule()],
+            'status' => ['sometimes', 'required', 'string', Rule::in(self::CALENDAR_STATUSES)],
             'metadata' => ['sometimes', 'nullable', 'array'],
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
+        $effectiveRecurrence = array_key_exists('recurrence', $validated)
+            ? $validated['recurrence']
+            : $model->recurrence;
+        $effectiveMetadata = array_key_exists('metadata', $validated)
+            ? $validated['metadata']
+            : $model->metadata;
+        $this->assertCanonicalRecurrenceMetadata(
+            ['metadata' => $effectiveMetadata],
+            $effectiveRecurrence,
+            true,
+            array_key_exists('metadata', $validated),
+        );
+        $this->rejectCalendarAllDayMetadataFields($validated);
         $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
-        $this->normalizeAllDayTitleIntent($validated, $model);
+        $this->storeCanonicalCalendarAllDay($validated, $model);
         $validated = $this->withDefaultUncategorizedColor($validated);
         if ($this->recurringCalendarEvents->isGeneratedOccurrence($model)) {
+            if (isset($validated['recurrence']) && $validated['recurrence'] !== 'none') {
+                throw ValidationException::withMessages([
+                    'recurrence' => 'A generated occurrence cannot define a recurrence.',
+                ]);
+            }
             $validated['recurrence'] = null;
             $metadata = (array) ($validated['metadata'] ?? $model->metadata ?? []);
-            $metadata['recurrence'] = 'none';
             unset(
-                $metadata['specific_days'],
-                $metadata['specificDays'],
+                $metadata['recurrence'],
                 $metadata['days'],
                 $metadata['interval'],
-                $metadata['interval_unit'],
-                $metadata['intervalUnit'],
                 $metadata['unit']
             );
             $validated['metadata'] = $metadata;
         }
-        $this->normalizeAllDayCalendarBounds($validated, $model);
         if (array_key_exists('recurrence', $validated) && $this->calendarRecurrenceRequested($validated['recurrence']) && ! $this->planLimits->canUseRecurringCalendar($request->user())) {
             return $this->planLimits->limitResponse('Recurring calendar events are available on Premium, Pro, and Enterprise plans.');
         }
@@ -894,12 +963,9 @@ class DomainResourceController extends Controller
     public function approveApproval(Request $request, string $approval): JsonResponse
     {
         $ownedApproval = Approval::where('user_id', $request->user()->id)->findOrFail($approval);
-        $validated = $request->validate([
-            'always_approve' => ['sometimes', 'boolean'],
-        ]);
 
         try {
-            $result = $this->actions->approve($ownedApproval, (bool) ($validated['always_approve'] ?? false));
+            $result = $this->actions->approve($ownedApproval);
         } catch (InvalidArgumentException $exception) {
             return response()->json(['message' => $exception->getMessage()], 409);
         }
@@ -992,7 +1058,6 @@ class DomainResourceController extends Controller
                 'created_by_user_id' => $request->user()->id,
                 'title' => 'Memory lookup',
                 'status' => 'active',
-                'runtime_mode' => 'memory',
                 'metadata' => ['source' => 'memory_lookup'],
                 'last_activity_at' => now(),
             ]);
@@ -1416,9 +1481,8 @@ class DomainResourceController extends Controller
 
     private function calendarEventIsRecurring(CalendarEvent $event): bool
     {
-        $recurrence = strtolower((string) ($event->recurrence ?? 'none'));
-
-        return $recurrence !== '' && $recurrence !== 'none';
+        return is_string($event->recurrence)
+            && in_array($event->recurrence, array_diff(self::RECURRENCES, ['none']), true);
     }
 
     private function applyRecurringCalendarDelete(CalendarEvent $event, string $mode, string $occurrenceDate): CalendarEvent
@@ -1426,7 +1490,7 @@ class DomainResourceController extends Controller
         $metadata = $event->metadata ?? [];
 
         if ($mode === 'single') {
-            $exceptions = collect($metadata['recurring_exception_dates'] ?? $metadata['recurrence_exceptions'] ?? [])
+            $exceptions = collect($metadata['recurring_exception_dates'] ?? [])
                 ->map(fn ($value): string => trim((string) $value))
                 ->filter()
                 ->push($occurrenceDate)
@@ -1504,7 +1568,7 @@ class DomainResourceController extends Controller
 
     private function taskStatusIsCompleted(?string $status): bool
     {
-        return in_array(strtolower(str_replace('_', '-', (string) $status)), ['completed', 'complete', 'done'], true);
+        return $status === 'completed';
     }
 
     /**
@@ -1646,13 +1710,8 @@ class DomainResourceController extends Controller
 
     private function calendarRecurrenceRequested(mixed $recurrence): bool
     {
-        if (! is_scalar($recurrence)) {
-            return false;
-        }
-
-        $normalized = strtolower(trim((string) $recurrence));
-
-        return ! in_array($normalized, ['', 'none', 'no', 'never', 'once', 'one_time'], true);
+        return is_string($recurrence)
+            && in_array($recurrence, array_diff(self::RECURRENCES, ['none']), true);
     }
 
     /**
@@ -1707,44 +1766,11 @@ class DomainResourceController extends Controller
      */
     private function taskRecurrenceValue(array $metadata): ?string
     {
-        $raw = $metadata['recurrence'] ?? $metadata['recurring'] ?? $metadata['rrule'] ?? null;
+        $recurrence = $metadata['recurrence'] ?? null;
 
-        if (is_array($raw)) {
-            $raw = $raw['value']
-                ?? $raw['type']
-                ?? $raw['frequency']
-                ?? $raw['freq']
-                ?? $raw['recurrence']
-                ?? $raw['rule']
-                ?? null;
-        }
-
-        if (! is_scalar($raw)) {
-            return null;
-        }
-
-        $normalized = strtolower(trim((string) $raw));
-        $normalized = str_replace(['-', ' '], '_', $normalized);
-        if (str_contains($normalized, 'freq=')) {
-            $normalized = match (true) {
-                str_contains($normalized, 'freq=daily') => 'daily',
-                str_contains($normalized, 'freq=weekly') => 'weekly',
-                str_contains($normalized, 'freq=monthly') => 'monthly',
-                str_contains($normalized, 'freq=yearly') => 'yearly',
-                default => $normalized,
-            };
-        }
-
-        return match ($normalized) {
-            '', 'no', 'none', 'never', 'one_time', 'once' => 'none',
-            'day', 'days', 'daily', 'every_day' => 'daily',
-            'week', 'weeks', 'weekly', 'every_week' => 'weekly',
-            'month', 'months', 'monthly', 'every_month' => 'monthly',
-            'year', 'years', 'yearly', 'annually', 'annual', 'every_year' => 'yearly',
-            'specific_day', 'specific_days', 'selected_days', 'days_of_week' => 'specific_days',
-            'interval', 'custom', 'custom_interval' => 'interval',
-            default => $normalized,
-        };
+        return is_string($recurrence) && in_array($recurrence, self::RECURRENCES, true)
+            ? $recurrence
+            : null;
     }
 
     /**
@@ -1789,9 +1815,8 @@ class DomainResourceController extends Controller
      */
     private function nextSpecificTaskDay(Carbon $from, array $metadata): ?Carbon
     {
-        $days = collect($metadata['days'] ?? $metadata['specific_days'] ?? $metadata['specificDays'] ?? [])
-            ->map(fn ($day): string => strtolower(substr(trim((string) $day), 0, 3)))
-            ->filter(fn (string $day): bool => in_array($day, ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], true))
+        $days = collect($metadata['days'] ?? [])
+            ->filter(fn ($day): bool => is_string($day) && in_array($day, self::RECURRENCE_DAYS, true))
             ->unique()
             ->values();
         if ($days->isEmpty()) {
@@ -1813,17 +1838,97 @@ class DomainResourceController extends Controller
     /**
      * @param  array<string, mixed>  $metadata
      */
-    private function addTaskRecurrenceInterval(Carbon $from, array $metadata): Carbon
+    private function addTaskRecurrenceInterval(Carbon $from, array $metadata): ?Carbon
     {
-        $interval = max(1, (int) ($metadata['interval'] ?? 1));
-        $unit = strtolower((string) ($metadata['unit'] ?? $metadata['interval_unit'] ?? $metadata['intervalUnit'] ?? 'days'));
+        $interval = $metadata['interval'] ?? null;
+        $unit = $metadata['unit'] ?? null;
+        if (! is_int($interval) || $interval < 1 || ! in_array($unit, self::RECURRENCE_UNITS, true)) {
+            return null;
+        }
 
         return match ($unit) {
-            'weeks', 'week' => $from->copy()->addWeeks($interval),
-            'months', 'month' => $from->copy()->addMonthsNoOverflow($interval),
-            'years', 'year' => $from->copy()->addYearsNoOverflow($interval),
-            default => $from->copy()->addDays($interval),
+            'days' => $from->copy()->addDays($interval),
+            'weeks' => $from->copy()->addWeeks($interval),
+            'months' => $from->copy()->addMonthsNoOverflow($interval),
+            'years' => $from->copy()->addYearsNoOverflow($interval),
         };
+    }
+
+    /**
+     * @return array<string, array<int, mixed>>
+     */
+    private function recurrenceMetadataRules(bool $calendar = false): array
+    {
+        return [
+            'metadata.recurrence' => $calendar
+                ? ['prohibited']
+                : ['sometimes', 'required', 'string', Rule::in(self::RECURRENCES)],
+            'metadata.days' => ['sometimes', 'required', 'array', 'min:1'],
+            'metadata.days.*' => ['required', 'string', Rule::in(self::RECURRENCE_DAYS), 'distinct:strict'],
+            'metadata.interval' => ['sometimes', 'required', 'integer', 'min:1'],
+            'metadata.unit' => ['sometimes', 'required', 'string', Rule::in(self::RECURRENCE_UNITS)],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function assertCanonicalRecurrenceMetadata(
+        array $attributes,
+        ?string $calendarRecurrence = null,
+        bool $calendar = false,
+        bool $rejectLegacyKeys = true,
+    ): void {
+        $metadata = $attributes['metadata'] ?? null;
+        if (! is_array($metadata)) {
+            return;
+        }
+
+        if ($rejectLegacyKeys) {
+            validator(
+                ['metadata' => $metadata],
+                $this->recurrenceMetadataRules($calendar),
+            )->validate();
+        }
+
+        $errors = [];
+        if ($rejectLegacyKeys) {
+            foreach (self::LEGACY_RECURRENCE_METADATA_KEYS as $key) {
+                if (array_key_exists($key, $metadata)) {
+                    $errors["metadata.{$key}"] = 'Use the canonical recurrence metadata fields recurrence, days, interval, and unit.';
+                }
+            }
+        }
+
+        $recurrence = $calendar ? $calendarRecurrence : ($metadata['recurrence'] ?? null);
+        $hasDays = array_key_exists('days', $metadata);
+        $hasInterval = array_key_exists('interval', $metadata);
+        $hasUnit = array_key_exists('unit', $metadata);
+
+        if ($recurrence === 'specific_days') {
+            if (! $hasDays) {
+                $errors['metadata.days'] = 'Specific-day recurrence requires canonical days.';
+            }
+            if ($hasInterval || $hasUnit) {
+                $errors['metadata.interval'] = 'Specific-day recurrence accepts only days.';
+            }
+        } elseif ($recurrence === 'interval') {
+            if (! $hasInterval) {
+                $errors['metadata.interval'] = 'Interval recurrence requires a positive interval.';
+            }
+            if (! $hasUnit) {
+                $errors['metadata.unit'] = 'Interval recurrence requires days, weeks, months, or years.';
+            }
+            if ($hasDays) {
+                $errors['metadata.days'] = 'Interval recurrence does not accept days.';
+            }
+        } elseif ($hasDays || $hasInterval || $hasUnit) {
+            $errors['metadata'] = 'Recurrence detail fields require specific_days or interval recurrence.';
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
     }
 
     private function enforceNotesAccess(Request $request): ?JsonResponse
@@ -1860,48 +1965,14 @@ class DomainResourceController extends Controller
     /**
      * @param  array<string, mixed>  $attributes
      */
-    private function normalizeAllDayCalendarBounds(array &$attributes, ?CalendarEvent $event = null): void
+    private function storeCanonicalCalendarAllDay(array &$attributes, ?CalendarEvent $event = null): void
     {
-        $metadata = array_key_exists('metadata', $attributes)
-            ? ($attributes['metadata'] ?? [])
-            : ($event?->metadata ?? []);
-        if (! is_array($metadata) || ! $this->calendarMetadataAllDay($metadata)) {
+        if (! array_key_exists('all_day', $attributes)) {
             return;
         }
 
-        if ($event && ! array_key_exists('starts_at', $attributes) && ! array_key_exists('ends_at', $attributes) && ! array_key_exists('metadata', $attributes)) {
-            return;
-        }
-
-        $start = $attributes['starts_at'] ?? $event?->starts_at;
-        if (! $start instanceof Carbon) {
-            return;
-        }
-
-        $attributes['ends_at'] = $this->inclusiveAllDayEnd($start, $attributes['ends_at'] ?? $event?->ends_at);
-        if (array_key_exists('metadata', $attributes)) {
-            $attributes['metadata'] = array_merge($metadata, ['all_day' => true]);
-        }
-    }
-
-    /**
-     * @param  array<string, mixed>  $attributes
-     */
-    private function normalizeAllDayTitleIntent(array &$attributes, ?CalendarEvent $event = null): void
-    {
-        if (! isset($attributes['title']) || ! is_string($attributes['title'])) {
-            return;
-        }
-
-        $title = trim($attributes['title']);
-        if (! preg_match('/^\s*all[\s-]?day\s*:\s*(.+)$/i', $title, $matches)) {
-            return;
-        }
-
-        $normalizedTitle = trim((string) ($matches[1] ?? ''));
-        if ($normalizedTitle !== '') {
-            $attributes['title'] = $normalizedTitle;
-        }
+        $allDay = $attributes['all_day'];
+        unset($attributes['all_day']);
 
         $metadata = array_key_exists('metadata', $attributes)
             ? ($attributes['metadata'] ?? [])
@@ -1909,30 +1980,38 @@ class DomainResourceController extends Controller
         if (! is_array($metadata)) {
             $metadata = [];
         }
-        $attributes['metadata'] = array_merge($metadata, ['all_day' => true]);
+        unset($metadata['allDay']);
+        $attributes['metadata'] = array_merge($metadata, ['all_day' => $allDay]);
+    }
+
+    private function canonicalBooleanRule(): \Closure
+    {
+        return static function (string $attribute, mixed $value, \Closure $fail): void {
+            if (! is_bool($value)) {
+                $fail("The {$attribute} field must be a boolean.");
+            }
+        };
     }
 
     /**
-     * @param  array<string, mixed>  $metadata
+     * @param  array<string, mixed>  $attributes
      */
-    private function calendarMetadataAllDay(array $metadata): bool
+    private function rejectCalendarAllDayMetadataFields(array $attributes): void
     {
-        $value = $metadata['all_day'] ?? $metadata['allDay'] ?? null;
-
-        return $value === true
-            || $value === 1
-            || in_array(strtolower((string) $value), ['true', '1', 'yes'], true);
-    }
-
-    private function inclusiveAllDayEnd(Carbon $startsAt, ?Carbon $endsAt): Carbon
-    {
-        $start = $startsAt->copy()->utc()->startOfDay();
-        $end = $endsAt?->copy()->utc() ?? $start->copy();
-
-        if ($end->isStartOfDay() && $end->gt($start)) {
-            return $end->subMinute();
+        $metadata = $attributes['metadata'] ?? null;
+        if (! is_array($metadata)) {
+            return;
         }
 
-        return $end->setTime(23, 59);
+        $errors = [];
+        foreach (['all_day', 'allDay'] as $field) {
+            if (array_key_exists($field, $metadata)) {
+                $errors["metadata.{$field}"] = ['All-day state must use the top-level all_day boolean.'];
+            }
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
     }
 }

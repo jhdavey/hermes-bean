@@ -9,6 +9,12 @@ use Illuminate\Support\Collection;
 
 class RecurringCalendarEventService
 {
+    private const RECURRENCES = ['daily', 'weekly', 'monthly', 'yearly', 'specific_days', 'interval'];
+
+    private const RECURRENCE_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+    private const RECURRENCE_UNITS = ['days', 'weeks', 'months', 'years'];
+
     private const GENERATED_METADATA_KEY = 'recurrence_generated';
 
     private const PARENT_METADATA_KEY = 'recurrence_parent_event_id';
@@ -80,7 +86,7 @@ class RecurringCalendarEventService
             ->filter()
             ->unique()
             ->flip();
-        $exceptionDates = collect($metadata['recurring_exception_dates'] ?? $metadata['recurrence_exceptions'] ?? [])
+        $exceptionDates = collect($metadata['recurring_exception_dates'] ?? [])
             ->map(fn ($date): string => trim((string) $date))
             ->filter()
             ->unique()
@@ -166,9 +172,9 @@ class RecurringCalendarEventService
 
     private function isRecurringSource(CalendarEvent $event): bool
     {
-        $recurrence = strtolower(trim((string) ($event->recurrence ?? 'none')));
-
-        return $recurrence !== '' && $recurrence !== 'none' && ! $this->isGeneratedOccurrence($event);
+        return is_string($event->recurrence)
+            && in_array($event->recurrence, self::RECURRENCES, true)
+            && ! $this->isGeneratedOccurrence($event);
     }
 
     public function isRecurringSeriesEvent(CalendarEvent $event): bool
@@ -237,13 +243,12 @@ class RecurringCalendarEventService
     private function occurrenceStarts(CalendarEvent $event, CarbonImmutable $horizon): iterable
     {
         $startsAt = CarbonImmutable::parse($event->starts_at)->utc();
-        $recurrence = strtolower(trim((string) $event->recurrence));
+        $recurrence = $event->recurrence;
         $metadata = $event->metadata ?? [];
 
         if ($recurrence === 'specific_days') {
-            $days = collect($metadata['days'] ?? $metadata['specific_days'] ?? $metadata['specificDays'] ?? [])
-                ->map(fn ($day): string => strtolower(substr(trim((string) $day), 0, 3)))
-                ->filter()
+            $days = collect($metadata['days'] ?? [])
+                ->filter(fn ($day): bool => is_string($day) && in_array($day, self::RECURRENCE_DAYS, true))
                 ->unique()
                 ->values();
             if ($days->isEmpty()) {
@@ -279,16 +284,19 @@ class RecurringCalendarEventService
         };
     }
 
-    private function addInterval(CarbonImmutable $from, array $metadata): CarbonImmutable
+    private function addInterval(CarbonImmutable $from, array $metadata): ?CarbonImmutable
     {
-        $interval = max(1, (int) ($metadata['interval'] ?? 1));
-        $unit = strtolower((string) ($metadata['unit'] ?? $metadata['interval_unit'] ?? $metadata['intervalUnit'] ?? 'days'));
+        $interval = $metadata['interval'] ?? null;
+        $unit = $metadata['unit'] ?? null;
+        if (! is_int($interval) || $interval < 1 || ! in_array($unit, self::RECURRENCE_UNITS, true)) {
+            return null;
+        }
 
         return match ($unit) {
-            'weeks', 'week' => $from->addWeeks($interval),
-            'months', 'month' => $from->addMonthsNoOverflow($interval),
-            'years', 'year' => $from->addYearsNoOverflow($interval),
-            default => $from->addDays($interval),
+            'days' => $from->addDays($interval),
+            'weeks' => $from->addWeeks($interval),
+            'months' => $from->addMonthsNoOverflow($interval),
+            'years' => $from->addYearsNoOverflow($interval),
         };
     }
 

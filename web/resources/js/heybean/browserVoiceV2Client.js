@@ -1,5 +1,4 @@
 const ACTIVE_TURN_STATES = new Set([
-    'capturing',
     'awaiting_clarification',
     'accepted',
     'running',
@@ -399,8 +398,6 @@ function normalizeTurn(turn, events = []) {
         ...turn,
         turnId,
         state: stableText(turn?.state).toLowerCase(),
-        lane: stableText(turn?.lane),
-        handler: stableText(turn?.handler),
         version: nonNegativeInteger(turn?.version),
         transcript: stableText(turn?.transcript),
         acknowledgementRequired: Boolean(turn?.acknowledgement_required ?? turn?.acknowledgementRequired),
@@ -413,9 +410,16 @@ function normalizeTurn(turn, events = []) {
         ),
         finalDeliveredAt: stableText(turn?.final_delivered_at || turn?.finalDeliveredAt),
         finalAudioStarted,
+        stopPlayback: Boolean(turn?.stop_playback ?? turn?.stopPlayback),
+        stopPlaybackDirectiveId: stableText(
+            turn?.stop_playback_directive_id || turn?.stopPlaybackDirectiveId,
+        ),
         clarificationQuestion: stableText(turn?.clarification?.question || turn?.clarification_question),
         clarificationSequence: nonNegativeInteger(turn?.clarification?.sequence || turn?.clarification_sequence),
         clarificationDeadlineAt: stableText(turn?.clarification?.deadline_at || turn?.clarification_deadline_at),
+        resolvedClarificationIds: normalizedStableTexts(
+            turn?.resolved_clarification_ids || turn?.resolvedClarificationIds,
+        ),
         jobs: normalizedObjects(turn?.jobs).map(normalizeJob),
     };
 }
@@ -444,6 +448,10 @@ function normalizeJob(job) {
 
 function normalizedObjects(value) {
     return Array.isArray(value) ? value.filter((item) => item && typeof item === 'object') : [];
+}
+
+function normalizedStableTexts(value) {
+    return Array.isArray(value) ? [...new Set(value.map(stableText).filter(Boolean))] : [];
 }
 
 function stableText(value) {

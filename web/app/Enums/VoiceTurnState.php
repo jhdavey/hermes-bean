@@ -4,7 +4,6 @@ namespace App\Enums;
 
 enum VoiceTurnState: string
 {
-    case Capturing = 'capturing';
     case AwaitingClarification = 'awaiting_clarification';
     case Accepted = 'accepted';
     case Running = 'running';

@@ -100,8 +100,6 @@ class PersistentFakeVoiceServer {
                 transcript: input.transcript || current.transcript || '',
                 state: input.state || current.state || 'accepted',
                 version: Number(input.version ?? current.version ?? 1),
-                lane: input.lane || current.lane || 'complex_agent',
-                handler: input.handler || current.handler || 'agent',
                 acknowledgement_required: Boolean(
                     input.acknowledgement_required ?? current.acknowledgement_required,
                 ),
@@ -169,8 +167,6 @@ class PersistentFakeVoiceServer {
                     transcript: input.transcript,
                     state: needsClarification ? 'awaiting_clarification' : 'accepted',
                     version: 1,
-                    lane: 'complex_agent',
-                    handler: 'agent',
                     acknowledgement_required: false,
                     acknowledgement_text: '',
                     final_text: '',
@@ -408,12 +404,15 @@ class VoiceV2BrowserJourneyHarness {
     providerTranscript(text, turnId = `browser-turn-${++this.turnCounter}`) {
         const transcript = String(text || '').trim();
         if (isStrictRealtimeWakePhrase(transcript)) {
-            const wake = this.controller.wakeConfirmed({ turnId, source: 'provider-strict-wake' });
+            const wake = this.controller.wakeConfirmed({ turnId, source: 'local-strict-wake' });
             if (wake.state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING) {
-                this.controller.activationReady({ source: 'provider-strict-wake' });
+                this.controller.activationReady({ source: 'local-strict-wake' });
             }
         }
-        const command = stripRealtimeLocalWakePrefix(transcript);
+        // This harness method represents a provider item released by an
+        // already-confirmed local/strict wake. Follow-ups use partial()/final()
+        // and therefore never receive wake-prefix stripping implicitly.
+        const command = stripRealtimeLocalWakePrefix(transcript, { wakeConfirmed: true });
         if (command) this.controller.transcriptFinal(command, { source: 'provider' });
         return this.snapshot();
     }
@@ -631,7 +630,7 @@ class VoiceV2BrowserJourneyHarness {
         const finalAudioStart = await Promise.all(Array.from({ length: count }, (_, index) => (
             measureSyntheticSpeechStart((scheduler) => scheduler.finalReady({
                 turnId: `benchmark-final-audio-${index}`,
-                text: 'Instant synthetic final.',
+                text: 'Semantic synthetic final.',
             }))
         )));
         const acknowledgementAudioStart = await Promise.all(Array.from({ length: Math.min(count, 25) }, (_, index) => (

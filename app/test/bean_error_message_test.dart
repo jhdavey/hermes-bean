@@ -88,16 +88,6 @@ void main() {
     },
   );
 
-  test('chat failures stay recoverable and hide status codes', () {
-    final message = beanFriendlyChatFailureMessage(
-      const HermesApiException(429, '{"message":"Too Many Attempts."}'),
-    );
-
-    expect(message, contains('checking the latest app state'));
-    expect(message, isNot(contains('429')));
-    expect(message, isNot(contains('HermesApiException')));
-  });
-
   test('usage limit messages are shown directly without generic snag copy', () {
     const body =
         '{"message":"This account has reached today\'s AI usage limit.","code":"bean_usage_limit"}';
@@ -110,79 +100,6 @@ void main() {
     expect(message, isNot(contains('Bean hit a snag')));
     expect(message, isNot(contains('429')));
     expect(message, isNot(contains('HermesApiException')));
-  });
-
-  test('stale assistant error copy is sanitized before display', () {
-    final messages = [
-      'Bean could not finish that request.',
-      'Bean hit a snag while trying to handle that request.',
-      'HermesApiException(statusCode: 502)',
-      'I tried to check that live information, but the lookup did not return a usable result.',
-      'I’m still checking live sources for that.',
-      'Something unexpected happened. Please try again in a moment.',
-    ];
-
-    for (final message in messages) {
-      final safe = beanSafeAssistantDisplayContent(message);
-      expect(safe, contains('checking the latest app state'));
-      expect(safe, isNot(contains('could not finish')));
-      expect(safe, isNot(contains('hit a snag')));
-      expect(safe, isNot(contains('HermesApiException')));
-      expect(safe, isNot(contains('502')));
-      expect(safe, isNot(contains('still checking')));
-      expect(safe, isNot(contains('Something unexpected')));
-    }
-
-    expect(
-      beanSafeAssistantDisplayContent('Done - I added that to your calendar.'),
-      'Done - I added that to your calendar.',
-    );
-  });
-
-  test('internal Bean bridge messages stay out of the visible chat transcript', () {
-    for (final runtime in [
-      'missing_run_bridge',
-      'direct_queue_bridge',
-      'async_queue_bridge',
-      'failed_run_bridge',
-    ]) {
-      expect(
-        beanAssistantMessageShouldStayOutOfChat(
-          HermesMessage(
-            id: 1,
-            role: 'assistant',
-            content:
-                'I’m checking the latest app state now. If I need one more detail, I’ll ask.',
-            metadata: {'runtime': runtime},
-          ),
-        ),
-        isTrue,
-      );
-    }
-
-    expect(
-      beanAssistantMessageShouldStayOutOfChat(
-        const HermesMessage(
-          id: 2,
-          role: 'assistant',
-          content:
-              'I didn’t receive that request cleanly. Please send it once more and I’ll take it from there.',
-        ),
-      ),
-      isTrue,
-    );
-
-    expect(
-      beanAssistantMessageShouldStayOutOfChat(
-        const HermesMessage(
-          id: 3,
-          role: 'assistant',
-          content: 'Done - I added that to your calendar.',
-          metadata: {'runtime': 'tools'},
-        ),
-      ),
-      isFalse,
-    );
   });
 
   test('queued Bean work recovers transient transport failures', () {

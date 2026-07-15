@@ -299,7 +299,7 @@ class _TaskListCardState extends State<_TaskListCard> {
       titleLabel: 'Task title',
       timeLabel: 'Due date',
       initialTitle: task?.title ?? '',
-      initialTime: _formatCalendarEventDateTime(task?.dueAt),
+      initialTime: _formatCalendarDateTimeInput(task?.dueAt),
       initialNotes: task?.notes ?? '',
       allowEmptyTime: true,
       showNotes: true,
@@ -645,12 +645,12 @@ class _ReminderListCardState extends State<_ReminderListCard> {
               ? 'all'
               : _showCompleted
               ? 'completed'
-              : 'pending',
+              : 'scheduled',
           options: const [
             _QuietFilterOption(
-              key: Key('reminder-filter-pending'),
-              value: 'pending',
-              label: 'Pending',
+              key: Key('reminder-filter-scheduled'),
+              value: 'scheduled',
+              label: 'Scheduled',
             ),
             _QuietFilterOption(
               key: Key('reminder-filter-completed'),
@@ -680,7 +680,7 @@ class _ReminderListCardState extends State<_ReminderListCard> {
                 ? 'No reminders yet'
                 : _showCompleted
                 ? 'No completed reminders'
-                : 'No pending reminders',
+                : 'No scheduled reminders',
           )
         else ...[
           if (todayReminders.isNotEmpty)
@@ -752,7 +752,7 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       titleLabel: 'Reminder title',
       timeLabel: 'Remind me at',
       initialTitle: reminder?.title ?? '',
-      initialTime: _formatCalendarEventDateTime(reminder?.dueAt),
+      initialTime: _formatCalendarDateTimeInput(reminder?.dueAt),
       editorIcon: Icons.notifications_active_outlined,
       editorSubtitle: 'Time-sensitive nudge with optional repeat',
       primarySectionTitle: 'Reminder basics',
@@ -772,7 +772,9 @@ class _ReminderListCardState extends State<_ReminderListCard> {
       deleteLabel: reminder == null ? null : 'Delete reminder',
       completeLabel: reminder == null
           ? null
-          : (_reminderIsCompleted(reminder) ? 'Mark pending' : 'Mark complete'),
+          : (_reminderIsCompleted(reminder)
+                ? 'Mark scheduled'
+                : 'Mark complete'),
       workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
       showPrimaryWorkspaceSelector: reminder == null,
@@ -792,9 +794,9 @@ class _ReminderListCardState extends State<_ReminderListCard> {
         if (title.isEmpty || time.isEmpty) return;
         final status = result['complete'] == true
             ? (reminder != null && _reminderIsCompleted(reminder)
-                  ? 'pending'
+                  ? 'scheduled'
                   : 'completed')
-            : (reminder?.status ?? 'pending');
+            : (reminder?.status ?? 'scheduled');
         await widget.onReminderSaved(
           reminder,
           title: title,
@@ -838,9 +840,9 @@ class _ReminderListCardState extends State<_ReminderListCard> {
     if (title.isEmpty || time.isEmpty) return;
     final status = result['complete'] == true
         ? (reminder != null && _reminderIsCompleted(reminder)
-              ? 'pending'
+              ? 'scheduled'
               : 'completed')
-        : (reminder?.status ?? 'pending');
+        : (reminder?.status ?? 'scheduled');
     await widget.onReminderSaved(
       reminder,
       title: title,

@@ -57,7 +57,7 @@ class ReminderNotificationDeliveryTest extends TestCase
             'user_id' => $user->id,
             'title' => 'Yoga session',
             'remind_at' => now()->subMinute(),
-            'status' => 'pending',
+            'status' => 'scheduled',
         ]);
 
         Artisan::call('reminders:send-due-notifications');
@@ -68,6 +68,49 @@ class ReminderNotificationDeliveryTest extends TestCase
             '2026-05-18T13:45:00+00:00',
             $reminder->refresh()->metadata['email_notification_sent_at']
         );
+    }
+
+    public function test_only_exact_scheduled_reminders_are_eligible_for_due_notifications(): void
+    {
+        Notification::fake();
+        Carbon::setTestNow('2026-05-18 13:45:00');
+        $user = User::factory()->create([
+            'email' => 'canonical-reminder-notification@example.com',
+            'subscription_tier' => 'premium',
+            'notification_preferences' => [
+                'reminder_push' => false,
+                'reminder_email' => true,
+            ],
+        ]);
+        $scheduled = Reminder::create([
+            'user_id' => $user->id,
+            'title' => 'Canonical scheduled reminder',
+            'remind_at' => now()->subMinute(),
+            'status' => 'scheduled',
+        ]);
+        $legacy = Reminder::create([
+            'user_id' => $user->id,
+            'title' => 'Legacy pending reminder',
+            'remind_at' => now()->subMinute(),
+            'status' => 'pending',
+        ]);
+        $completed = Reminder::create([
+            'user_id' => $user->id,
+            'title' => 'Completed reminder',
+            'remind_at' => now()->subMinute(),
+            'status' => 'completed',
+        ]);
+
+        Artisan::call('reminders:send-due-notifications');
+
+        Notification::assertSentTo(
+            $user,
+            ReminderDueNotification::class,
+            fn (ReminderDueNotification $notification): bool => $notification->toArray($user)['reminder_id'] === $scheduled->id,
+        );
+        Notification::assertSentToTimes($user, ReminderDueNotification::class, 1);
+        $this->assertArrayNotHasKey('email_notification_sent_at', $legacy->refresh()->metadata ?? []);
+        $this->assertArrayNotHasKey('email_notification_sent_at', $completed->refresh()->metadata ?? []);
     }
 
     public function test_due_reminder_email_failure_does_not_fail_command_or_retry_immediately(): void
@@ -105,7 +148,7 @@ class ReminderNotificationDeliveryTest extends TestCase
             'user_id' => $user->id,
             'title' => 'Quota-safe reminder',
             'remind_at' => now()->subMinute(),
-            'status' => 'pending',
+            'status' => 'scheduled',
         ]);
 
         $this->assertSame(0, Artisan::call('reminders:send-due-notifications'));
@@ -128,7 +171,7 @@ class ReminderNotificationDeliveryTest extends TestCase
             'title' => 'Logo email reminder',
             'notes' => 'Bring the black logo into the header.',
             'remind_at' => now(),
-            'status' => 'pending',
+            'status' => 'scheduled',
         ]);
 
         $html = (string) (new ReminderDueNotification($reminder))->toMail($user)->render();
@@ -153,7 +196,7 @@ class ReminderNotificationDeliveryTest extends TestCase
             'user_id' => $user->id,
             'title' => 'Skipped email reminder',
             'remind_at' => now()->subMinute(),
-            'status' => 'pending',
+            'status' => 'scheduled',
         ]);
 
         Artisan::call('reminders:send-due-notifications');
@@ -196,7 +239,7 @@ class ReminderNotificationDeliveryTest extends TestCase
             'workspace_id' => $workspace->id,
             'title' => 'Shared dinner reminder',
             'remind_at' => now()->subMinute(),
-            'status' => 'pending',
+            'status' => 'scheduled',
             'metadata' => [
                 'notification_recipients_by_workspace' => [
                     (string) $workspace->id => [$owner->id, $member->id],
@@ -284,7 +327,7 @@ class ReminderNotificationDeliveryTest extends TestCase
             'user_id' => $user->id,
             'title' => 'Push yoga session',
             'remind_at' => now()->subMinute(),
-            'status' => 'pending',
+            'status' => 'scheduled',
         ]);
 
         Artisan::call('reminders:send-due-notifications');

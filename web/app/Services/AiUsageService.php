@@ -2,13 +2,10 @@
 
 namespace App\Services;
 
-use App\Models\ActivityEvent;
 use App\Models\AiUsageAlert;
 use App\Models\AiUsageLog;
-use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
 use App\Models\User;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -27,33 +24,6 @@ class AiUsageService
         }
 
         return max(1, (int) ceil(mb_strlen($text) / 4));
-    }
-
-    /**
-     * @return array{allowed:bool,reason:?string,input_tokens:int,reserved_output_tokens:int,estimated_cost_usd:float,budget:array<string,mixed>}
-     */
-    public function preflight(ConversationSession $session, ConversationMessage $message, array $modelRoute, string $prompt): array
-    {
-        $user = User::findOrFail($session->user_id);
-        $inputTokens = $this->estimateTokens($prompt);
-        $reservedOutputTokens = (int) config('services.ai_usage.reserve_output_tokens', 1200);
-        $billingModel = (string) ($modelRoute['billing_model'] ?? $modelRoute['model'] ?? $this->adminSettings->mainModel());
-        $estimatedCost = $this->estimatedCost($billingModel, $inputTokens, $reservedOutputTokens);
-
-        return $this->preflightDirect(
-            $user,
-            $session->workspace_id,
-            $billingModel,
-            $inputTokens,
-            $reservedOutputTokens,
-            $estimatedCost,
-            $this->requestTypeForMessage($message),
-            [
-                'session' => $session,
-                'message' => $message,
-                'model_route' => $modelRoute,
-            ],
-        );
     }
 
     /**
@@ -286,104 +256,11 @@ class AiUsageService
         ];
     }
 
-    public function recordCompletion(
-        ConversationSession $session,
-        ConversationMessage $userMessage,
-        ?ConversationMessage $assistantMessage,
-        array $modelRoute,
-        string $prompt,
-        string $stdout,
-        Collection $domainEvents,
-        string $status = 'completed'
-    ): AiUsageLog {
-        $inputTokens = $this->estimateTokens($prompt);
-        $outputTokens = $this->estimateTokens($stdout);
-        $actualUsage = $this->tokenUsageFromPayload($stdout);
-        if ($actualUsage['input_tokens'] > 0 || $actualUsage['output_tokens'] > 0) {
-            $inputTokens = $actualUsage['input_tokens'];
-            $outputTokens = $actualUsage['output_tokens'];
-        }
-        $displayModel = (string) ($modelRoute['model'] ?? 'agent-routed');
-        $billingModel = (string) ($modelRoute['billing_model'] ?? $modelRoute['model'] ?? $this->adminSettings->mainModel());
-        $cost = $this->estimatedCost($billingModel, $inputTokens, $outputTokens);
-        $actionTypes = $domainEvents
-            ->map(fn (ActivityEvent $event): ?string => $event->tool_name ?: $event->event_type)
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-
-        $log = AiUsageLog::create([
-            'user_id' => $session->user_id,
-            'workspace_id' => $session->workspace_id,
-            'conversation_session_id' => $session->id,
-            'conversation_message_id' => $userMessage->id,
-            'provider' => (string) config('services.hermes_runtime.default_provider'),
-            'model' => $displayModel,
-            'route_tier' => (string) $modelRoute['tier'],
-            'request_type' => $this->requestTypeForMessage($userMessage),
-            'status' => $status,
-            'input_tokens' => $inputTokens,
-            'output_tokens' => $outputTokens,
-            'total_tokens' => $inputTokens + $outputTokens,
-            'tool_call_count' => count($actionTypes),
-            'estimated_cost_usd' => $cost,
-            'action_types' => $actionTypes,
-            'metadata' => [
-                'assistant_message_id' => $assistantMessage?->id,
-                'model_route' => $modelRoute,
-                'billing_model' => $billingModel,
-                'context_mode' => $modelRoute['context_mode'] ?? null,
-                'input_prompt' => $prompt,
-            ],
-        ]);
-
-        $this->detectSpikes($session);
-
-        return $log;
-    }
-
     private function speechSynthesisCost(int $characters): float
     {
         $price = max(0.0, (float) config('services.ai_usage.speech_price_per_million_characters', 15.0));
 
         return round((max(0, $characters) / 1_000_000) * $price, 6);
-    }
-
-    public function recordBlocked(
-        ConversationSession $session,
-        ConversationMessage $userMessage,
-        array $modelRoute,
-        array $budget,
-        string $reason
-    ): AiUsageLog {
-        $inputTokens = (int) ($budget['input_tokens'] ?? 0);
-        $reservedOutputTokens = (int) ($budget['reserved_output_tokens'] ?? 0);
-
-        return AiUsageLog::create([
-            'user_id' => $session->user_id,
-            'workspace_id' => $session->workspace_id,
-            'conversation_session_id' => $session->id,
-            'conversation_message_id' => $userMessage->id,
-            'provider' => (string) config('services.hermes_runtime.default_provider'),
-            'model' => (string) ($modelRoute['model'] ?? 'agent-routed'),
-            'route_tier' => (string) $modelRoute['tier'],
-            'request_type' => $this->requestTypeForMessage($userMessage),
-            'status' => 'blocked',
-            'input_tokens' => $inputTokens,
-            'output_tokens' => 0,
-            'total_tokens' => $inputTokens,
-            'tool_call_count' => 0,
-            'estimated_cost_usd' => 0,
-            'action_types' => [],
-            'metadata' => [
-                'reason' => $reason,
-                'model_route' => $modelRoute,
-                'context_mode' => $modelRoute['context_mode'] ?? null,
-                'reserved_output_tokens' => $reservedOutputTokens,
-                'estimated_blocked_cost_usd' => $budget['estimated_cost_usd'] ?? null,
-            ],
-        ]);
     }
 
     public function estimatedCost(string $model, int $inputTokens, int $outputTokens): float
@@ -402,18 +279,19 @@ class AiUsageService
         array $metadata = [],
         array $actionTypes = [],
         string $status = 'completed',
+        ?string $providerEventId = null,
     ): AiUsageLog {
         $inputTokens = (int) ($usage['input_tokens'] ?? 0);
         $outputTokens = (int) ($usage['output_tokens'] ?? 0);
         $toolCallCount = (int) ($usage['tool_call_count'] ?? count($actionTypes));
         $cost = $this->estimatedCost($model, $inputTokens, $outputTokens);
 
-        $log = AiUsageLog::create([
+        $values = [
             'user_id' => $user->id,
             'workspace_id' => $workspaceId,
             'conversation_session_id' => $metadata['conversation_session_id'] ?? null,
             'conversation_message_id' => $metadata['conversation_message_id'] ?? null,
-            'provider' => (string) ($metadata['provider'] ?? config('services.hermes_runtime.default_provider')),
+            'provider' => (string) ($metadata['provider'] ?? 'openai'),
             'model' => $model,
             'route_tier' => (string) ($metadata['route_tier'] ?? $requestType),
             'request_type' => $requestType,
@@ -425,7 +303,14 @@ class AiUsageService
             'estimated_cost_usd' => $cost,
             'action_types' => array_values(array_filter($actionTypes)),
             'metadata' => $metadata ?: null,
-        ]);
+        ];
+
+        $log = $providerEventId === null
+            ? AiUsageLog::create($values)
+            : AiUsageLog::query()->createOrFirst(
+                ['provider_event_id' => $providerEventId],
+                $values,
+            );
 
         return $log;
     }
@@ -532,49 +417,6 @@ class AiUsageService
             'message' => $message,
             'metadata' => $metadata ?: null,
         ]);
-    }
-
-    private function detectSpikes(ConversationSession $session): void
-    {
-        $this->detectCostSpike($session, 'user', $session->user_id);
-        if ($session->workspace_id) {
-            $this->detectCostSpike($session, 'workspace', $session->workspace_id);
-        }
-    }
-
-    private function detectCostSpike(ConversationSession $session, string $scopeType, int $scopeId): void
-    {
-        $column = $scopeType === 'workspace' ? 'workspace_id' : 'user_id';
-        $todayCost = (float) AiUsageLog::query()
-            ->where($column, $scopeId)
-            ->where('status', 'completed')
-            ->where('created_at', '>=', now()->startOfDay())
-            ->sum('estimated_cost_usd');
-        $minCost = (float) config('services.ai_usage.spike_min_daily_cost_usd', 1.00);
-        if ($todayCost < $minCost) {
-            return;
-        }
-
-        $priorSevenDayCost = (float) AiUsageLog::query()
-            ->where($column, $scopeId)
-            ->where('status', 'completed')
-            ->whereBetween('created_at', [now()->subDays(7)->startOfDay(), now()->subDay()->endOfDay()])
-            ->sum('estimated_cost_usd');
-        $dailyAverage = max(0.01, $priorSevenDayCost / 7);
-        $multiplier = (float) config('services.ai_usage.spike_multiplier', 3);
-        if ($todayCost >= ($dailyAverage * $multiplier)) {
-            $this->alert(
-                $session,
-                $scopeType.'_cost_spike',
-                'warning',
-                round($dailyAverage * $multiplier, 4),
-                round($todayCost, 4),
-                ucfirst($scopeType).' AI cost is unusually high today.',
-                ['daily_average_usd' => round($dailyAverage, 4), 'multiplier' => $multiplier],
-                $scopeType,
-                $scopeId
-            );
-        }
     }
 
     /** @param array<string,mixed> $usage
@@ -690,13 +532,6 @@ class AiUsageService
         ];
     }
 
-    private function requestTypeForMessage(ConversationMessage $message): string
-    {
-        $metadata = $message->metadata ?? [];
-
-        return 'text';
-    }
-
     private function alertFromContext(User $user, ?int $workspaceId, array $context, string $type, string $severity, float $threshold, float $observed, string $message, array $metadata = []): void
     {
         $session = $context['session'] ?? null;
@@ -711,27 +546,6 @@ class AiUsageService
             'workspace_id' => $workspaceId,
         ]);
         $this->alert($stubSession, $type, $severity, $threshold, $observed, $message, $metadata, 'user', $user->id);
-    }
-
-    private function tokenUsageFromPayload(string $payload): array
-    {
-        $usage = [
-            'input_tokens' => 0,
-            'output_tokens' => 0,
-        ];
-        try {
-            $decoded = json_decode($payload, true, flags: JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return $usage;
-        }
-
-        foreach ((array) $decoded as $item) {
-            $itemUsage = is_array($item) ? (array) ($item['usage'] ?? []) : [];
-            $usage['input_tokens'] += (int) ($itemUsage['prompt_tokens'] ?? $itemUsage['input_tokens'] ?? 0);
-            $usage['output_tokens'] += (int) ($itemUsage['completion_tokens'] ?? $itemUsage['output_tokens'] ?? 0);
-        }
-
-        return $usage;
     }
 
     private function beanPausedMessage(string $kind): string

@@ -21,7 +21,7 @@ return new class extends Migration
             $table->foreignId('conversation_message_id')->nullable()->constrained('conversation_messages')->nullOnDelete();
             $table->string('provider')->nullable()->index();
             $table->string('model')->index();
-            $table->string('route_tier')->default('complex')->index();
+            $table->string('route_tier')->default('semantic_interpretation')->index();
             $table->string('status')->default('completed')->index();
             $table->unsignedInteger('input_tokens')->default(0);
             $table->unsignedInteger('output_tokens')->default(0);

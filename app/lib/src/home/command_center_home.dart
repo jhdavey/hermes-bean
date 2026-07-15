@@ -80,6 +80,7 @@ class _CommandCenterHome extends StatefulWidget {
     HermesCalendarEvent event, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -250,7 +251,7 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
       titleLabel: 'Task title',
       timeLabel: 'Due date',
       initialTitle: task.title,
-      initialTime: _formatCalendarEventDateTime(task.dueAt),
+      initialTime: _formatCalendarDateTimeInput(task.dueAt),
       initialNotes: task.notes ?? '',
       allowEmptyTime: true,
       showNotes: true,
@@ -342,7 +343,7 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
       titleLabel: 'Reminder title',
       timeLabel: 'Remind me at',
       initialTitle: reminder.title,
-      initialTime: _formatCalendarEventDateTime(reminder.dueAt),
+      initialTime: _formatCalendarDateTimeInput(reminder.dueAt),
       editorIcon: Icons.notifications_active_outlined,
       editorSubtitle: 'Time-sensitive nudge with optional repeat',
       primarySectionTitle: 'Reminder basics',
@@ -361,7 +362,7 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
       onEventCategorySaved: widget.onEventCategorySaved,
       deleteLabel: 'Delete reminder',
       completeLabel: _reminderIsCompleted(reminder)
-          ? 'Mark pending'
+          ? 'Mark scheduled'
           : 'Mark complete',
       workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
@@ -375,8 +376,8 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
         final time = (result['time'] as String?)?.trim() ?? '';
         if (title.isEmpty || time.isEmpty) return;
         final status = result['complete'] == true
-            ? (_reminderIsCompleted(reminder) ? 'pending' : 'completed')
-            : (reminder.status ?? 'pending');
+            ? (_reminderIsCompleted(reminder) ? 'scheduled' : 'completed')
+            : reminder.status;
         await widget.onReminderSaved(
           reminder,
           title: title,
@@ -419,8 +420,8 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
     final time = (result['time'] as String?)?.trim() ?? '';
     if (title.isEmpty || time.isEmpty) return;
     final status = result['complete'] == true
-        ? (_reminderIsCompleted(reminder) ? 'pending' : 'completed')
-        : (reminder.status ?? 'pending');
+        ? (_reminderIsCompleted(reminder) ? 'scheduled' : 'completed')
+        : reminder.status;
     await widget.onReminderSaved(
       reminder,
       title: title,
@@ -841,6 +842,7 @@ class _CommandCenterAgendaRow extends StatelessWidget {
               ),
               Row(
                 children: [
+                  const SizedBox(width: 8),
                   SizedBox(
                     key: Key('command-center-agenda-time-${item.key}'),
                     width: timeWidth,

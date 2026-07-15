@@ -9,7 +9,7 @@ use App\Models\ConversationSession;
 use App\Models\User;
 use App\Models\VoiceTurn;
 use App\Models\VoiceTurnEvent;
-use App\Services\VoiceQualityReportService;
+use App\Services\BrowserVoiceV2DiagnosticsReportService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -18,7 +18,7 @@ class AdminVoiceQualityReportTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_voice_quality_report_is_admin_only_and_labels_insufficient_data(): void
+    public function test_voice_quality_report_is_admin_only_and_labels_insufficient_v2_data(): void
     {
         $adminToken = $this->apiToken('voice-quality-admin@example.com');
         $userToken = $this->apiToken('voice-quality-user@example.com');
@@ -31,188 +31,19 @@ class AdminVoiceQualityReportTest extends TestCase
 
         $this->withToken($adminToken)->getJson('/api/admin/voice-quality')
             ->assertOk()
-            ->assertJsonPath('data.window.default_days', VoiceQualityReportService::DEFAULT_WINDOW_DAYS)
-            ->assertJsonPath('data.window.max_days', VoiceQualityReportService::MAX_WINDOW_DAYS)
-            ->assertJsonPath('data.metrics.direct_transcript_to_audio_start_ms.sample_count', 0)
-            ->assertJsonPath('data.metrics.direct_transcript_to_audio_start_ms.p50_ms', null)
-            ->assertJsonPath('data.gates.direct_audio_start_latency.status', 'insufficient_data')
-            ->assertJsonPath('data.gates.direct_audio_start_latency.status_label', 'Insufficient data')
-            ->assertJsonPath('data.gates.tool_acknowledgement_audio_start_latency.status', 'insufficient_data')
-            ->assertJsonPath('data.gates.tool_final_audio_start_latency.status', 'insufficient_data')
-            ->assertJsonPath(
-                'data.coverage.not_evaluated.wake_and_stop_safety',
-                'Requires deterministic and noisy-audio replay evidence; latency telemetry cannot establish this gate.',
-            )
-            ->assertJsonPath(
-                'data.coverage.not_evaluated.speech_quality_human_rating',
-                'Requires blinded human ratings; response duration is not a speech-quality score.',
-            );
-    }
-
-    public function test_report_deduplicates_proxy_metrics_without_claiming_a_benchmark_pass(): void
-    {
-        $adminToken = $this->apiToken('voice-quality-metrics@example.com');
-        $admin = User::where('email', 'voice-quality-metrics@example.com')->firstOrFail();
-        $admin->forceFill(['is_admin' => true])->save();
-        $session = ConversationSession::where('user_id', $admin->id)->firstOrFail();
-
-        for ($index = 1; $index <= VoiceQualityReportService::MINIMUM_GATE_SAMPLES; $index++) {
-            $directValue = $index <= 10 ? 600 : 1_400;
-            $duration = $index <= 10 ? 1_000 : 2_000;
-            $directQuality = [
-                'schema_version' => 1,
-                'route' => 'direct',
-                'transcript_to_audio_start_ms' => $directValue,
-                'response_duration_ms' => $duration,
-            ];
-            $clientTurnId = 'direct-'.$index;
-            $this->qualityMessage($admin, $session, 'user', $directQuality, $clientTurnId);
-            $this->qualityMessage($admin, $session, 'assistant', $directQuality, $clientTurnId);
-
-            $toolValue = $index <= 18 ? 400 : 900;
-            $toolQuality = [
-                'schema_version' => 1,
-                'route' => 'tool',
-                'transcript_to_request_start_ms' => $toolValue,
-            ];
-            $clientRequestId = 'tool-'.$index;
-            $this->qualityMessage($admin, $session, 'user', $toolQuality, null, $clientRequestId);
-            $this->qualityMessage($admin, $session, 'assistant', $toolQuality, null, $clientRequestId);
-        }
-
-        $this->withToken($adminToken)->getJson('/api/admin/voice-quality')
-            ->assertOk()
-            ->assertJsonPath('data.population.source_message_count', 80)
-            ->assertJsonPath('data.population.unique_turn_count', 40)
-            ->assertJsonPath('data.population.duplicate_message_count', 40)
-            ->assertJsonPath('data.metrics.direct_transcript_to_audio_start_ms.sample_count', 20)
-            ->assertJsonPath('data.metrics.direct_transcript_to_audio_start_ms.p50_ms', 600)
-            ->assertJsonPath('data.metrics.direct_transcript_to_audio_start_ms.p95_ms', 1_400)
-            ->assertJsonPath('data.metrics.direct_response_duration_ms.sample_count', 20)
-            ->assertJsonPath('data.metrics.direct_response_duration_ms.p50_ms', 1_000)
-            ->assertJsonPath('data.metrics.direct_response_duration_ms.p95_ms', 2_000)
-            ->assertJsonPath('data.metrics.tool_transcript_to_request_start_ms.sample_count', 20)
-            ->assertJsonPath('data.metrics.tool_transcript_to_request_start_ms.p50_ms', 400)
-            ->assertJsonPath('data.metrics.tool_transcript_to_request_start_ms.p95_ms', 900)
-            ->assertJsonPath('data.metrics.direct_transcript_to_audio_start_ms.measurement_type', 'provider_playback_signal_proxy')
-            ->assertJsonPath('data.metrics.tool_transcript_to_request_start_ms.measurement_type', 'client_request_dispatch')
-            ->assertJsonPath('data.gates.direct_audio_start_latency.status', 'insufficient_data')
-            ->assertJsonPath('data.gates.tool_acknowledgement_audio_start_latency.status', 'insufficient_data')
-            ->assertJsonPath('data.gates.tool_final_audio_start_latency.status', 'insufficient_data')
-            ->assertJsonPath('data.outcome_coverage.direct_and_status_voice_turns.denominator_available', true)
-            ->assertJsonPath('data.outcome_coverage.direct_and_status_voice_turns.total_accepted_turns', 20)
-            ->assertJsonPath('data.outcome_coverage.direct_and_status_voice_turns.completed_count', 20)
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.total_persisted_tool_turns', 20)
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.counts.unlinked', 20);
-    }
-
-    public function test_report_exposes_backend_tool_outcome_coverage_without_calling_it_voice_playback(): void
-    {
-        $this->travelTo(CarbonImmutable::parse('2026-07-10 12:00:00', 'UTC'));
-        $adminToken = $this->apiToken('voice-quality-outcomes@example.com');
-        $admin = User::where('email', 'voice-quality-outcomes@example.com')->firstOrFail();
-        $admin->forceFill(['is_admin' => true])->save();
-        $session = ConversationSession::where('user_id', $admin->id)->firstOrFail();
-        $quality = [
-            'schema_version' => 1,
-            'route' => 'tool',
-            'transcript_to_request_start_ms' => 100,
-        ];
-
-        $definitions = [
-            'completed' => ['status' => 'completed', 'completed_at' => now()],
-            'cancelled' => ['status' => 'cancelled', 'cancelled_at' => now(), 'completed_at' => now()],
-            'failed' => ['status' => 'failed', 'error' => 'Provider rejected the request.', 'completed_at' => now()],
-            'hung' => ['status' => 'failed', 'error' => 'Assistant run timed out.', 'completed_at' => now()],
-            'in-flight' => ['status' => 'running', 'started_at' => now()->subSeconds(10)],
-            'unlinked' => null,
-        ];
-
-        foreach ($definitions as $name => $runAttributes) {
-            $message = $this->qualityMessage($admin, $session, 'user', $quality, null, 'outcome-'.$name);
-            if ($runAttributes === null) {
-                continue;
-            }
-
-            AssistantRun::create([
-                'user_id' => $admin->id,
-                'workspace_id' => $session->workspace_id,
-                'conversation_session_id' => $session->id,
-                'user_message_id' => $message->id,
-                'source' => 'web_routed_chat',
-                'input' => 'Tool outcome '.$name,
-                ...$runAttributes,
-            ]);
-        }
-
-        $this->withToken($adminToken)->getJson('/api/admin/voice-quality')
-            ->assertOk()
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.total_persisted_tool_turns', 6)
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.run_linked_turn_count', 5)
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.run_link_coverage_percent', 83.3)
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.counts.completed', 1)
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.counts.cancelled', 1)
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.counts.failed', 1)
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.counts.hung', 1)
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.counts.in_flight', 1)
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.counts.unlinked', 1)
-            ->assertJsonPath('data.outcome_coverage.direct_and_status_voice_turns.denominator_available', true)
-            ->assertJsonPath('data.outcome_coverage.direct_and_status_voice_turns.total_accepted_turns', 0)
-            ->assertJsonPath(
-                'data.outcome_coverage.tool_backend_runs.limitations.1',
-                'Completed means backend run completion; final voice playback may still fail or be cancelled.',
-            );
-    }
-
-    public function test_report_uses_the_corrected_run_instead_of_a_late_coalesced_original(): void
-    {
-        $adminToken = $this->apiToken('voice-quality-coalesced@example.com');
-        $admin = User::where('email', 'voice-quality-coalesced@example.com')->firstOrFail();
-        $admin->forceFill(['is_admin' => true])->save();
-        $session = ConversationSession::where('user_id', $admin->id)->firstOrFail();
-        $message = $this->qualityMessage($admin, $session, 'user', [
-            'schema_version' => 1,
-            'route' => 'tool',
-            'transcript_to_request_start_ms' => 120,
-        ], null, 'voice-corrected');
-
-        AssistantRun::create([
-            'user_id' => $admin->id,
-            'workspace_id' => $session->workspace_id,
-            'conversation_session_id' => $session->id,
-            'user_message_id' => $message->id,
-            'source' => 'web_routed_chat',
-            'status' => 'completed',
-            'input' => 'Corrected request.',
-            'metadata' => [
-                'client_request_id' => 'voice-corrected',
-                'supersession_predecessor_missing' => true,
-                'superseded_client_request_ids' => ['voice-original'],
-            ],
-            'completed_at' => now(),
-        ]);
-        AssistantRun::create([
-            'user_id' => $admin->id,
-            'workspace_id' => $session->workspace_id,
-            'conversation_session_id' => $session->id,
-            'user_message_id' => $message->id,
-            'source' => 'web_routed_chat',
-            'status' => 'cancelled',
-            'input' => 'Original request.',
-            'metadata' => [
-                'client_request_id' => 'voice-original',
-                'late_superseded_request_coalesced' => true,
-            ],
-            'cancelled_at' => now(),
-            'completed_at' => now(),
-        ]);
-
-        $this->withToken($adminToken)->getJson('/api/admin/voice-quality')
-            ->assertOk()
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.total_persisted_tool_turns', 1)
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.run_linked_turn_count', 1)
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.counts.completed', 1)
-            ->assertJsonPath('data.outcome_coverage.tool_backend_runs.counts.cancelled', 0);
+            ->assertJsonPath('data.window.default_days', BrowserVoiceV2DiagnosticsReportService::DEFAULT_WINDOW_DAYS)
+            ->assertJsonPath('data.window.max_days', BrowserVoiceV2DiagnosticsReportService::MAX_WINDOW_DAYS)
+            ->assertJsonPath('data.browser_voice_v2.population.turn_count', 0)
+            ->assertJsonPath('data.browser_voice_v2.latency_metrics.wake_recognition_ms.sample_count', 0)
+            ->assertJsonPath('data.browser_voice_v2.latency_metrics.wake_recognition_ms.p50_ms', null)
+            ->assertJsonPath('data.browser_voice_v2.benchmark_gates.wake_recognition.status', 'insufficient_data')
+            ->assertJsonPath('data.browser_voice_v2.benchmark_gates.wake_recognition.status_label', 'Insufficient data')
+            ->assertJsonPath('data.browser_voice_v2.benchmark_gates.semantic_interpretation.status', 'insufficient_data')
+            ->assertJsonPath('data.browser_voice_v2.latency_metrics.semantic_interpretation_ms.sample_count', 0)
+            ->assertJsonPath('data.browser_voice_v2.latency_metrics.typed_external_final_audio_start_ms.sample_count', 0)
+            ->assertJsonPath('data.browser_voice_v2.semantic_pipeline.receipts.expected_count', 0)
+            ->assertJsonPath('data.browser_voice_v2.privacy.raw_transcript_exposed', false)
+            ->assertJsonPath('data.browser_voice_v2.privacy.raw_audio_retention_allowed', false);
     }
 
     public function test_report_supports_an_explicit_date_window_and_rejects_oversized_windows(): void
@@ -222,19 +53,13 @@ class AdminVoiceQualityReportTest extends TestCase
         $admin = User::where('email', 'voice-quality-window@example.com')->firstOrFail();
         $admin->forceFill(['is_admin' => true])->save();
         $session = ConversationSession::where('user_id', $admin->id)->firstOrFail();
-        $quality = [
-            'schema_version' => 1,
-            'route' => 'direct',
-            'transcript_to_audio_start_ms' => 500,
-            'response_duration_ms' => 900,
-        ];
 
-        $inside = $this->qualityMessage($admin, $session, 'assistant', $quality, 'inside-window');
+        $inside = $this->voiceTurn($admin, $session, 'inside-window');
         $inside->forceFill([
             'created_at' => CarbonImmutable::parse('2026-07-03 08:00:00', 'UTC'),
             'updated_at' => CarbonImmutable::parse('2026-07-03 08:00:00', 'UTC'),
         ])->save();
-        $outside = $this->qualityMessage($admin, $session, 'assistant', $quality, 'outside-window');
+        $outside = $this->voiceTurn($admin, $session, 'outside-window');
         $outside->forceFill([
             'created_at' => CarbonImmutable::parse('2026-06-30 08:00:00', 'UTC'),
             'updated_at' => CarbonImmutable::parse('2026-06-30 08:00:00', 'UTC'),
@@ -242,10 +67,10 @@ class AdminVoiceQualityReportTest extends TestCase
 
         $this->withToken($adminToken)->getJson('/api/admin/voice-quality?from=2026-07-03&to=2026-07-03')
             ->assertOk()
-            ->assertJsonPath('data.population.source_message_count', 1)
-            ->assertJsonPath('data.population.unique_turn_count', 1)
-            ->assertJsonPath('data.metrics.direct_transcript_to_audio_start_ms.sample_count', 1)
-            ->assertJsonPath('data.metrics.direct_transcript_to_audio_start_ms.p50_ms', 500);
+            ->assertJsonPath('data.window.from', '2026-07-03T00:00:00+00:00')
+            ->assertJsonPath('data.window.to', '2026-07-03T23:59:59+00:00')
+            ->assertJsonPath('data.browser_voice_v2.population.turn_count', 1)
+            ->assertJsonPath('data.browser_voice_v2.turns.0.turn_id', 'inside-window');
 
         $this->withToken($adminToken)->getJson('/api/admin/voice-quality?days=91')
             ->assertUnprocessable()
@@ -256,43 +81,6 @@ class AdminVoiceQualityReportTest extends TestCase
         $this->withToken($adminToken)->getJson('/api/admin/voice-quality?days=7&from=2026-07-03&to=2026-07-03')
             ->assertUnprocessable()
             ->assertJsonValidationErrors('days');
-    }
-
-    public function test_report_exposes_direct_and_status_terminal_outcome_denominator(): void
-    {
-        $adminToken = $this->apiToken('voice-quality-lifecycle@example.com');
-        $admin = User::where('email', 'voice-quality-lifecycle@example.com')->firstOrFail();
-        $admin->forceFill(['is_admin' => true])->save();
-        $session = ConversationSession::where('user_id', $admin->id)->firstOrFail();
-        $quality = [
-            'schema_version' => 1,
-            'route' => 'direct',
-            'response_duration_ms' => 500,
-        ];
-
-        foreach (['accepted', 'completed', 'interrupted', 'failed', 'timed_out', 'superseded'] as $outcome) {
-            $this->qualityMessage(
-                $admin,
-                $session,
-                'user',
-                $quality,
-                'lifecycle-'.$outcome,
-                null,
-                $outcome,
-            );
-        }
-
-        $this->withToken($adminToken)->getJson('/api/admin/voice-quality')
-            ->assertOk()
-            ->assertJsonPath('data.outcome_coverage.direct_and_status_voice_turns.denominator_available', true)
-            ->assertJsonPath('data.outcome_coverage.direct_and_status_voice_turns.total_accepted_turns', 6)
-            ->assertJsonPath('data.outcome_coverage.direct_and_status_voice_turns.terminal_outcome_count', 5)
-            ->assertJsonPath('data.outcome_coverage.direct_and_status_voice_turns.completed_count', 1)
-            ->assertJsonPath('data.outcome_coverage.direct_and_status_voice_turns.cancelled_count', 1)
-            ->assertJsonPath('data.outcome_coverage.direct_and_status_voice_turns.interrupted_count', 1)
-            ->assertJsonPath('data.outcome_coverage.direct_and_status_voice_turns.failed_count', 1)
-            ->assertJsonPath('data.outcome_coverage.direct_and_status_voice_turns.timed_out_count', 1)
-            ->assertJsonPath('data.outcome_coverage.direct_and_status_voice_turns.in_flight_count', 1);
     }
 
     public function test_browser_voice_v2_admin_diagnostic_is_complete_sanitized_and_flags_actionable_failures(): void
@@ -316,25 +104,16 @@ class AdminVoiceQualityReportTest extends TestCase
             'conversation_session_id' => $session->id,
             'client_turn_id' => 'v2-diagnostic-failed-0001',
             'role' => 'assistant',
-            'content' => 'I could not reach the weather service. Would you like me to try again?',
+            'content' => 'I could not reach the weather service.',
             'metadata' => ['source' => 'browser_voice_v2'],
         ]);
-        $failedTurn = VoiceTurn::create([
-            'turn_id' => 'v2-diagnostic-failed-0001',
-            'user_id' => $admin->id,
-            'workspace_id' => $session->workspace_id,
-            'conversation_session_id' => $session->id,
+        $failedTurn = $this->voiceTurn($admin, $session, 'v2-diagnostic-failed-0001', [
             'user_message_id' => $userMessage->id,
             'final_assistant_message_id' => $finalMessage->id,
-            'source' => 'browser_voice_v2',
-            'client_kind' => 'browser_voice',
             'transcript' => 'RAW transcript must not be projected',
             'sanitized_transcript' => 'Weather for Orlando Bearer abcdefghijklmnopqrstuvwxyz',
-            'lane' => 'external',
-            'handler' => 'external.weather',
             'state' => 'failed',
             'version' => 5,
-            'idempotency_key' => 'v2-diagnostic-failed-0001',
             'acknowledgement_required' => true,
             'acknowledgement_text' => 'Let me check Orlando.',
             'acknowledged_at' => now()->subMilliseconds(580),
@@ -347,56 +126,101 @@ class AdminVoiceQualityReportTest extends TestCase
             'no_progress_deadline_at' => now()->subMilliseconds(750),
             'failure_category' => 'weather_provider_timeout',
             'internal_failure_detail' => 'Provider timeout Bearer abcdefghijklmnopqrstuvwxyz',
-            'user_facing_failure_text' => 'I could not reach the weather service. Would you like me to try again?',
+            'user_facing_failure_text' => 'I could not reach the weather service.',
             'side_effect_status' => 'uncertain',
-            'retry_count' => 0,
             'metadata' => [
                 'controller_generation' => 7,
                 'provider_connection_generation' => 11,
-                'transcript_timing' => [
-                    'final_at_ms' => $transcriptFinalAt->getTimestampMs(),
-                    'duration_ms' => 800,
-                ],
+                'transcript_timing' => ['final_at_ms' => $transcriptFinalAt->getTimestampMs()],
                 'telemetry' => ['durable_admission_ms' => 50],
-                'raw_audio_retained' => false,
                 'raw_audio' => 'RAW-AUDIO-BYTES-DO-NOT-EXPOSE',
             ],
         ]);
-        $run = AssistantRun::create([
-            'voice_turn_id' => $failedTurn->id,
-            'user_id' => $admin->id,
-            'workspace_id' => $session->workspace_id,
-            'conversation_session_id' => $session->id,
-            'user_message_id' => $userMessage->id,
-            'source' => 'browser_voice_v2',
+        $interpretationRun = $this->semanticRun($failedTurn, $admin, $session, 'interpretation', [
+            'lane' => 'semantic',
+            'handler' => 'agent.semantic',
+            'label' => 'Interpret request',
+            'status' => 'completed',
+            'metadata' => [
+                'role' => 'semantic_interpretation',
+                'semantic_sequence' => 1,
+                'semantic_outcome' => 'execute',
+            ],
+            'started_at' => now()->subMilliseconds(900),
+            'completed_at' => now()->subMilliseconds(550),
+        ]);
+        $operationRun = $this->semanticRun($failedTurn, $admin, $session, 'weather', [
             'lane' => 'external',
-            'handler' => 'external.weather',
+            'handler' => 'semantic.operation',
             'label' => 'Check weather',
-            'priority' => 0,
-            'idempotency_key' => 'v2-diagnostic-failed-0001:primary',
-            'hard_deadline_at' => now()->subMilliseconds(50),
-            'last_progress_at' => now()->subMilliseconds(700),
-            'dispatch_requested_at' => now()->subMilliseconds(920),
             'status' => 'failed',
             'input' => 'RAW run input must not be projected',
             'metadata' => [
-                'resource_wait_started_at' => now()->subSeconds(2)->toIso8601String(),
+                'role' => 'semantic_operation',
+                'semantic_sequence' => 1,
+                'semantic_operation_id' => 'weather',
+                'semantic_tool' => 'external.lookup',
+                'semantic_operation_receipt' => [
+                    'operation_id' => 'weather',
+                    'tool' => 'external.lookup',
+                    'status' => 'failed',
+                    'data' => ['category' => 'weather_provider_timeout'],
+                    'side_effect_committed' => false,
+                    'completed_at' => now()->toIso8601String(),
+                ],
                 'pcm_data' => 'RUN-RAW-AUDIO-DO-NOT-EXPOSE',
             ],
             'error' => 'Weather provider timed out Bearer abcdefghijklmnopqrstuvwxyz',
-            'started_at' => now()->subMilliseconds(850),
+            'started_at' => now()->subMilliseconds(500),
+            'completed_at' => now(),
+        ]);
+        $missingReceiptRun = $this->semanticRun($failedTurn, $admin, $session, 'forecast', [
+            'lane' => 'external',
+            'handler' => 'semantic.operation',
+            'label' => 'Check forecast',
+            'status' => 'failed',
+            'metadata' => [
+                'role' => 'semantic_operation',
+                'semantic_sequence' => 1,
+                'semantic_operation_id' => 'forecast',
+                'semantic_tool' => 'external.lookup',
+            ],
+            'error' => 'Worker stopped before recording its receipt.',
+            'started_at' => now()->subMilliseconds(450),
+            'completed_at' => now(),
+        ]);
+        $this->semanticRun($failedTurn, $admin, $session, 'composition', [
+            'lane' => 'semantic',
+            'handler' => 'semantic.compose',
+            'label' => 'Prepare response',
+            'status' => 'failed',
+            'metadata' => [
+                'role' => 'semantic_composition',
+                'semantic_sequence' => 1,
+                'operation_run_ids' => [$operationRun->id, $missingReceiptRun->id],
+            ],
+            'error' => 'Could not compose the weather failure.',
+            'started_at' => now()->subMilliseconds(400),
             'completed_at' => now(),
         ]);
 
         $events = [
-            ['turn_admitted', null, 'accepted', 1, 'admission', ['handler' => 'external.weather', 'audio_blob' => 'EVENT-RAW-AUDIO-DO-NOT-EXPOSE']],
-            ['state_transitioned', 'accepted', 'running', 2, 'worker', ['run_id' => $run->id]],
+            ['turn_admitted', null, 'accepted', 1, 'admission', ['audio_blob' => 'EVENT-RAW-AUDIO-DO-NOT-EXPOSE']],
+            ['semantic_interpretation_started', 'running', 'running', 2, 'semantic_interpreter', [
+                'run_id' => $interpretationRun->id,
+                'occurred_at_ms' => $transcriptFinalAt->copy()->addMilliseconds(100)->getTimestampMs(),
+            ]],
+            ['semantic_interpretation_completed', 'running', 'running', 2, 'semantic_interpreter', [
+                'run_id' => $interpretationRun->id,
+                'outcome' => 'execute',
+                'occurred_at_ms' => $transcriptFinalAt->copy()->addMilliseconds(450)->getTimestampMs(),
+            ]],
             ['acknowledgement_started', 'running', 'running', 3, 'browser', ['latency_ms' => 420, 'speech_item_id' => 'speech-ack-1']],
             ['stale_event_rejected', 'running', 'running', 3, 'browser', ['reason' => 'stale_generation']],
-            ['transition_rejected', 'running', 'accepted', 3, 'server', ['reason' => 'non_monotonic_transition']],
+            ['finalization_rejected', 'failed', 'completed', 5, 'finalizer', ['reason' => 'terminal_state_already_recorded']],
             ['playback_started', 'running', 'running', 3, 'browser', ['purpose' => 'final', 'latency_ms' => 800, 'speech_item_id' => 'speech-final-1']],
-            ['playback_stopped_for_interruption', 'running', 'running', 3, 'browser', ['purpose' => 'final', 'latency_ms' => 160, 'speech_item_id' => 'speech-final-1', 'reason' => 'meaningful_user_speech']],
-            ['turn_failed', 'running', 'failed', 5, 'finalizer', ['failure_category' => 'weather_provider_timeout', 'side_effect_status' => 'uncertain']],
+            ['playback_stopped_for_interruption', 'running', 'running', 3, 'browser', ['purpose' => 'final', 'latency_ms' => 160, 'speech_item_id' => 'speech-final-1']],
+            ['turn_failed', 'running', 'failed', 5, 'finalizer', ['failure_category' => 'weather_provider_timeout']],
             ['finalization_deduplicated', 'failed', 'failed', 5, 'finalizer', ['final_assistant_message_id' => $finalMessage->id]],
             ['final_text_delivered', 'failed', 'failed', 5, 'browser', ['latency_ms' => 1_050]],
         ];
@@ -419,8 +243,8 @@ class AdminVoiceQualityReportTest extends TestCase
             'user_id' => $admin->id,
             'workspace_id' => $session->workspace_id,
             'conversation_session_id' => $session->id,
-            'event_type' => 'runtime.tool_model_started',
-            'tool_name' => 'hermes.tools',
+            'event_type' => 'runtime.semantic_interpretation_started',
+            'tool_name' => 'hermes.semantic',
             'status' => 'started',
             'payload' => [
                 'message_id' => $userMessage->id,
@@ -440,92 +264,132 @@ class AdminVoiceQualityReportTest extends TestCase
                 'code' => 'AbortError',
                 'message' => 'Bearer abcdefghijklmnopqrstuvwxyz did not recover.',
                 'turn_id' => $failedTurn->turn_id,
-                'cause_chain' => [[
-                    'code' => 'AbortError',
-                    'message' => 'Bearer abcdefghijklmnopqrstuvwxyz did not recover.',
-                ]],
             ],
         ]);
-
-        $overdueTurn = VoiceTurn::create([
-            'turn_id' => 'v2-diagnostic-overdue-0002',
-            'user_id' => $admin->id,
-            'workspace_id' => $session->workspace_id,
-            'conversation_session_id' => $session->id,
-            'source' => 'browser_voice_v2',
-            'client_kind' => 'browser_voice',
-            'transcript' => 'Create a note.',
-            'sanitized_transcript' => 'Create a note.',
-            'lane' => 'app_write',
-            'handler' => 'app.note.create',
-            'state' => 'accepted',
-            'version' => 1,
-            'idempotency_key' => 'v2-diagnostic-overdue-0002',
-            'acknowledgement_required' => false,
+        $overdueTurn = $this->voiceTurn($admin, $session, 'v2-diagnostic-overdue-0002', [
+            'state' => 'running',
+            'version' => 3,
             'accepted_at' => now()->subSeconds(10),
             'hard_deadline_at' => now()->subSecond(),
             'no_progress_deadline_at' => now()->subSeconds(2),
-            'side_effect_status' => 'none',
-            'retry_count' => 0,
-            'metadata' => ['raw_audio_retained' => false],
+            'side_effect_status' => 'committed',
+            'metadata' => [
+                'transcript_timing' => ['final_at_ms' => now()->subMilliseconds(10_100)->getTimestampMs()],
+                'telemetry' => ['durable_admission_ms' => 100],
+            ],
         ]);
-        VoiceTurnEvent::create([
-            'voice_turn_id' => $overdueTurn->id,
-            'user_id' => $admin->id,
-            'workspace_id' => $session->workspace_id,
-            'conversation_session_id' => $session->id,
-            'sequence' => 1,
-            'event_type' => 'turn_admitted',
-            'from_state' => null,
-            'to_state' => 'accepted',
-            'version' => 1,
-            'source' => 'admission',
-            'payload' => ['handler' => 'app.note.create'],
+        $overdueInterpretation = $this->semanticRun($overdueTurn, $admin, $session, 'interpretation', [
+            'lane' => 'semantic',
+            'handler' => 'agent.semantic',
+            'status' => 'completed',
+            'metadata' => [
+                'role' => 'semantic_interpretation',
+                'semantic_sequence' => 1,
+                'semantic_outcome' => 'execute',
+            ],
+            'started_at' => now()->subSeconds(9),
+            'completed_at' => now()->subSeconds(8),
+        ]);
+        $writeRun = $this->semanticRun($overdueTurn, $admin, $session, 'note', [
+            'lane' => 'app_write',
+            'handler' => 'semantic.operation',
+            'label' => 'Create note',
+            'status' => 'completed',
+            'metadata' => [
+                'role' => 'semantic_operation',
+                'semantic_sequence' => 1,
+                'semantic_operation_id' => 'note',
+                'semantic_tool' => 'app.note.create',
+                'semantic_operation_receipt' => [
+                    'operation_id' => 'note',
+                    'tool' => 'app.note.create',
+                    'status' => 'completed',
+                    'data' => ['note_id' => 42],
+                    'side_effect_committed' => true,
+                    'completed_at' => now()->subSeconds(7)->toIso8601String(),
+                ],
+            ],
+            'started_at' => now()->subSeconds(8),
+            'completed_at' => now()->subSeconds(7),
+        ]);
+        $this->semanticRun($overdueTurn, $admin, $session, 'composition', [
+            'lane' => 'semantic',
+            'handler' => 'semantic.compose',
+            'label' => 'Prepare response',
+            'status' => 'queued',
+            'metadata' => [
+                'role' => 'semantic_composition',
+                'semantic_sequence' => 1,
+                'interpretation_run_id' => $overdueInterpretation->id,
+                'operation_run_ids' => [$writeRun->id],
+            ],
         ]);
 
-        $response = $this->withToken($adminToken)->getJson('/api/admin/voice-quality?days=1')
-            ->assertOk()
+        $response = $this->withToken($adminToken)->getJson('/api/admin/voice-quality?days=1');
+        $response->assertOk()
             ->assertJsonPath('data.browser_voice_v2.population.turn_count', 2)
-            ->assertJsonPath('data.browser_voice_v2.population.run_count', 1)
-            ->assertJsonPath('data.browser_voice_v2.population.state_counts.failed', 1)
-            ->assertJsonPath('data.browser_voice_v2.population.state_counts.accepted', 1)
-            ->assertJsonPath('data.browser_voice_v2.turns.0.user_id', $admin->id)
-            ->assertJsonPath('data.browser_voice_v2.turns.0.workspace_id', $session->workspace_id)
+            ->assertJsonPath('data.browser_voice_v2.population.run_count', 7)
+            ->assertJsonPath('data.browser_voice_v2.semantic_pipeline.run_role_counts.semantic_interpretation', 2)
+            ->assertJsonPath('data.browser_voice_v2.semantic_pipeline.run_role_counts.semantic_operation', 3)
+            ->assertJsonPath('data.browser_voice_v2.semantic_pipeline.run_role_counts.semantic_composition', 2)
+            ->assertJsonPath('data.browser_voice_v2.semantic_pipeline.typed_operation_lane_counts.external', 2)
+            ->assertJsonPath('data.browser_voice_v2.semantic_pipeline.typed_operation_lane_counts.app_write', 1)
+            ->assertJsonPath('data.browser_voice_v2.semantic_pipeline.receipts.expected_count', 3)
+            ->assertJsonPath('data.browser_voice_v2.semantic_pipeline.receipts.recorded_count', 2)
+            ->assertJsonPath('data.browser_voice_v2.semantic_pipeline.receipts.missing_count', 1)
+            ->assertJsonPath('data.browser_voice_v2.semantic_pipeline.receipts.committed_count', 1)
+            ->assertJsonPath('data.browser_voice_v2.semantic_pipeline.receipts.identity_mismatch_count', 0)
             ->assertJsonPath('data.browser_voice_v2.turns.0.sanitized_transcript', 'Weather for Orlando Bearer [redacted]')
-            ->assertJsonPath('data.browser_voice_v2.turns.0.lane', 'external')
-            ->assertJsonPath('data.browser_voice_v2.turns.0.handler', 'external.weather')
+            ->assertJsonPath('data.browser_voice_v2.turns.0.execution_profile.0', 'semantic_interpretation')
+            ->assertJsonPath('data.browser_voice_v2.turns.0.execution_profile.1', 'typed_external')
             ->assertJsonPath('data.browser_voice_v2.turns.0.latency_ms.transcript_to_durable_admission', 50)
             ->assertJsonPath('data.browser_voice_v2.turns.0.latency_ms.transcript_to_acknowledgement_audio_start', 420)
             ->assertJsonPath('data.browser_voice_v2.turns.0.latency_ms.transcript_to_final_audio_start', 800)
             ->assertJsonPath('data.browser_voice_v2.turns.0.latency_ms.confirmed_barge_in_to_playback_stop', 160)
-            ->assertJsonPath('data.browser_voice_v2.turns.0.deadlines.hard_status', 'failing')
-            ->assertJsonPath('data.browser_voice_v2.turns.0.deadlines.no_progress_status', 'failing')
             ->assertJsonPath('data.browser_voice_v2.turns.0.failure.category', 'weather_provider_timeout')
-            ->assertJsonPath('data.browser_voice_v2.turns.0.failure.side_effect_status', 'uncertain')
             ->assertJsonPath('data.browser_voice_v2.turns.0.browser.controller_generation', 7)
             ->assertJsonPath('data.browser_voice_v2.turns.0.browser.provider_connection_generation', 11)
             ->assertJsonPath('data.browser_voice_v2.turns.0.browser.rejected_stale_event_count', 1)
             ->assertJsonPath('data.browser_voice_v2.turns.0.delivery.final_text.state', 'delivered')
             ->assertJsonPath('data.browser_voice_v2.turns.0.delivery.final_audio.state', 'stopped')
-            ->assertJsonPath('data.browser_voice_v2.turns.0.jobs.0.execution_call.kind', 'typed_external_provider')
-            ->assertJsonPath('data.browser_voice_v2.turns.0.jobs.0.resource_lock_wait_ms', 1_000)
-            ->assertJsonPath('data.browser_voice_v2.turns.0.provider_and_tool_calls.1.name', 'hermes.tools')
-            ->assertJsonCount(10, 'data.browser_voice_v2.turns.0.lifecycle_timeline')
+            ->assertJsonPath('data.browser_voice_v2.turns.0.jobs.0.role', 'semantic_interpretation')
+            ->assertJsonPath('data.browser_voice_v2.turns.0.jobs.0.execution_call.kind', 'semantic_interpreter')
+            ->assertJsonPath('data.browser_voice_v2.turns.0.jobs.0.latency_ms.transcript_to_semantic_terminal', 450)
+            ->assertJsonPath('data.browser_voice_v2.turns.0.jobs.1.role', 'semantic_operation')
+            ->assertJsonPath('data.browser_voice_v2.turns.0.jobs.1.execution_call.kind', 'typed_external_provider')
+            ->assertJsonPath('data.browser_voice_v2.turns.0.jobs.1.semantic_operation.tool', 'external.lookup')
+            ->assertJsonPath('data.browser_voice_v2.turns.0.jobs.1.receipt.status', 'failed')
+            ->assertJsonPath('data.browser_voice_v2.turns.0.jobs.1.receipt_integrity.operation_and_tool_match', true)
+            ->assertJsonPath('data.browser_voice_v2.turns.0.jobs.2.receipt_integrity.recorded', false)
+            ->assertJsonPath('data.browser_voice_v2.turns.0.jobs.3.execution_call.kind', 'semantic_response_composer')
+            ->assertJsonPath('data.browser_voice_v2.turns.0.semantic_pipeline.receipts.status_counts.failed', 1)
+            ->assertJsonPath('data.browser_voice_v2.turns.0.semantic_pipeline.receipts.missing_run_ids.0', $missingReceiptRun->id)
+            ->assertJsonPath('data.browser_voice_v2.turns.0.retry_eligibility.typed_operations.0.reason', 'turn_terminal')
+            ->assertJsonPath('data.browser_voice_v2.turns.0.retry_eligibility.typed_operations.1.reason', 'missing_receipt_requires_reconciliation')
+            ->assertJsonPath('data.browser_voice_v2.turns.1.retry_eligibility.typed_operations.0.reason', 'committed_receipt_prevents_automatic_retry')
+            ->assertJsonPath('data.browser_voice_v2.turns.0.provider_and_tool_calls.4.name', 'hermes.semantic')
+            ->assertJsonCount(11, 'data.browser_voice_v2.turns.0.lifecycle_timeline')
+            ->assertJsonPath('data.browser_voice_v2.latency_metrics.semantic_interpretation_ms.sample_count', 1)
+            ->assertJsonPath('data.browser_voice_v2.latency_metrics.semantic_interpretation_ms.p50_ms', 450)
+            ->assertJsonPath('data.browser_voice_v2.latency_metrics.semantic_interpretation_ms.population_count', 2)
+            ->assertJsonPath('data.browser_voice_v2.telemetry_coverage.fields.semantic_interpretation_ms.coverage_percent', 50)
             ->assertJsonPath('data.browser_voice_v2.alerts.accepted_nonterminal_beyond_deadline.count', 1)
             ->assertJsonPath('data.browser_voice_v2.alerts.no_progress_deadline_exceeded.count', 1)
             ->assertJsonPath('data.browser_voice_v2.alerts.duplicate_finalization_attempt.count', 1)
             ->assertJsonPath('data.browser_voice_v2.alerts.lifecycle_regression_attempt.count', 1)
             ->assertJsonPath('data.browser_voice_v2.alerts.uncertain_side_effect_state.count', 1)
+            ->assertJsonPath('data.browser_voice_v2.alerts.missing_semantic_interpretation_run.count', 0)
+            ->assertJsonPath('data.browser_voice_v2.alerts.terminal_typed_operation_missing_receipt.count', 1)
+            ->assertJsonPath('data.browser_voice_v2.alerts.semantic_receipt_identity_mismatch.count', 0)
             ->assertJsonPath('data.browser_voice_v2.alerts.raw_audio_persistence_detected.count', 1)
             ->assertJsonPath('data.browser_voice_v2.client_failures.count', 1)
-            ->assertJsonPath('data.browser_voice_v2.client_failures.stage_counts.clarification', 1)
-            ->assertJsonPath('data.browser_voice_v2.client_failures.events.0.turn_id', $failedTurn->turn_id)
             ->assertJsonPath('data.browser_voice_v2.client_failures.events.0.message', 'Bearer [redacted] did not recover.')
-            ->assertJsonPath('data.browser_voice_v2.benchmark_gates.external_final_audio_start.status', 'insufficient_data')
-            ->assertJsonPath('data.browser_voice_v2.benchmark_gates.external_final_audio_start.sufficient_sample', false)
             ->assertJsonPath('data.browser_voice_v2.privacy.raw_transcript_exposed', false)
-            ->assertJsonPath('data.browser_voice_v2.privacy.raw_audio_retention_allowed', false)
-            ->assertJsonPath('data.browser_voice_v2.privacy.raw_audio_persistence_detection_count', 1);
+            ->assertJsonPath('data.browser_voice_v2.privacy.raw_audio_retention_allowed', false);
+
+        $this->assertArrayNotHasKey('lane_counts', $response->json('data.browser_voice_v2.population'));
+        $this->assertArrayNotHasKey('lane', $response->json('data.browser_voice_v2.turns.0'));
+        $this->assertArrayNotHasKey('handler', $response->json('data.browser_voice_v2.turns.0'));
 
         $content = $response->getContent();
         $this->assertStringNotContainsString('RAW transcript must not be projected', $content);
@@ -544,28 +408,56 @@ class AdminVoiceQualityReportTest extends TestCase
         $admin->forceFill(['is_admin' => true])->save();
         $session = ConversationSession::where('user_id', $admin->id)->firstOrFail();
 
-        for ($index = 1; $index <= 20; $index++) {
-            $turn = VoiceTurn::create([
-                'turn_id' => 'v2-benchmark-external-'.str_pad((string) $index, 4, '0', STR_PAD_LEFT),
-                'user_id' => $admin->id,
-                'workspace_id' => $session->workspace_id,
-                'conversation_session_id' => $session->id,
-                'source' => 'browser_voice_v2',
-                'client_kind' => 'browser_voice',
-                'transcript' => 'Weather elsewhere.',
-                'sanitized_transcript' => 'Weather elsewhere.',
-                'lane' => 'external',
-                'handler' => 'external.weather',
+        for ($index = 1; $index <= BrowserVoiceV2DiagnosticsReportService::MINIMUM_BENCHMARK_SAMPLES; $index++) {
+            $turn = $this->voiceTurn($admin, $session, 'v2-benchmark-external-'.str_pad((string) $index, 4, '0', STR_PAD_LEFT), [
                 'state' => 'completed',
-                'version' => 1,
-                'idempotency_key' => 'v2-benchmark-external-'.$index,
-                'acknowledgement_required' => false,
-                'accepted_at' => now(),
                 'terminal_at' => now(),
                 'hard_deadline_at' => now()->addSeconds(8),
-                'side_effect_status' => 'none',
-                'retry_count' => 0,
-                'metadata' => ['raw_audio_retained' => false],
+            ]);
+            $this->semanticRun($turn, $admin, $session, 'interpretation', [
+                'lane' => 'semantic',
+                'handler' => 'agent.semantic',
+                'status' => 'completed',
+                'metadata' => [
+                    'role' => 'semantic_interpretation',
+                    'semantic_sequence' => 1,
+                    'semantic_outcome' => 'execute',
+                ],
+                'started_at' => now()->subMilliseconds(600),
+                'completed_at' => now()->subMilliseconds(300),
+            ]);
+            $operation = $this->semanticRun($turn, $admin, $session, 'weather', [
+                'lane' => 'external',
+                'handler' => 'semantic.operation',
+                'status' => 'completed',
+                'metadata' => [
+                    'role' => 'semantic_operation',
+                    'semantic_sequence' => 1,
+                    'semantic_operation_id' => 'weather',
+                    'semantic_tool' => 'external.lookup',
+                    'semantic_operation_receipt' => [
+                        'operation_id' => 'weather',
+                        'tool' => 'external.lookup',
+                        'status' => 'completed',
+                        'data' => ['summary' => 'Clear'],
+                        'side_effect_committed' => false,
+                        'completed_at' => now()->toIso8601String(),
+                    ],
+                ],
+                'started_at' => now()->subMilliseconds(300),
+                'completed_at' => now()->subMilliseconds(100),
+            ]);
+            $this->semanticRun($turn, $admin, $session, 'composition', [
+                'lane' => 'semantic',
+                'handler' => 'semantic.compose',
+                'status' => 'completed',
+                'metadata' => [
+                    'role' => 'semantic_composition',
+                    'semantic_sequence' => 1,
+                    'operation_run_ids' => [$operation->id],
+                ],
+                'started_at' => now()->subMilliseconds(100),
+                'completed_at' => now(),
             ]);
             VoiceTurnEvent::create([
                 'voice_turn_id' => $turn->id,
@@ -588,43 +480,73 @@ class AdminVoiceQualityReportTest extends TestCase
 
         $this->withToken($adminToken)->getJson('/api/admin/voice-quality?days=1')
             ->assertOk()
-            ->assertJsonPath('data.browser_voice_v2.latency_metrics.external_final_audio_start_ms.sample_count', 20)
-            ->assertJsonPath('data.browser_voice_v2.latency_metrics.external_final_audio_start_ms.p50_ms', 2_000)
-            ->assertJsonPath('data.browser_voice_v2.latency_metrics.external_final_audio_start_ms.p95_ms', 4_500)
-            ->assertJsonPath('data.browser_voice_v2.benchmark_gates.external_final_audio_start.status', 'failing')
-            ->assertJsonPath('data.browser_voice_v2.benchmark_gates.external_final_audio_start.status_label', 'Failing')
-            ->assertJsonPath('data.browser_voice_v2.benchmark_gates.external_final_audio_start.sufficient_sample', true)
+            ->assertJsonPath('data.browser_voice_v2.latency_metrics.typed_external_final_audio_start_ms.sample_count', 20)
+            ->assertJsonPath('data.browser_voice_v2.latency_metrics.typed_external_final_audio_start_ms.p50_ms', 2_000)
+            ->assertJsonPath('data.browser_voice_v2.latency_metrics.typed_external_final_audio_start_ms.p95_ms', 4_500)
+            ->assertJsonPath('data.browser_voice_v2.benchmark_gates.typed_external_final_audio_start.status', 'failing')
+            ->assertJsonPath('data.browser_voice_v2.benchmark_gates.typed_external_final_audio_start.status_label', 'Failing')
+            ->assertJsonPath('data.browser_voice_v2.benchmark_gates.typed_external_final_audio_start.sufficient_sample', true)
             ->assertJsonPath('data.browser_voice_v2.alerts.benchmark_p95_regression.count', 1)
-            ->assertJsonPath('data.browser_voice_v2.alerts.benchmark_p95_regression.gate_ids.0', 'external_final_audio_start');
+            ->assertJsonPath('data.browser_voice_v2.alerts.benchmark_p95_regression.gate_ids.0', 'typed_external_final_audio_start');
     }
 
-    /**
-     * @param  array<string, int|string>  $quality
-     */
-    private function qualityMessage(
+    /** @param array<string, mixed> $overrides */
+    private function voiceTurn(
         User $user,
         ConversationSession $session,
-        string $role,
-        array $quality,
-        ?string $clientTurnId = null,
-        ?string $clientRequestId = null,
-        ?string $outcome = null,
-    ): ConversationMessage {
-        $metadata = ['voice_quality' => $quality];
-        if ($clientRequestId !== null) {
-            $metadata['client_request_id'] = $clientRequestId;
-        }
-        if ($outcome !== null) {
-            $metadata['voice_turn_outcome'] = ['status' => $outcome];
-        }
-
-        return ConversationMessage::create([
+        string $turnId,
+        array $overrides = [],
+    ): VoiceTurn {
+        return VoiceTurn::create([
+            'turn_id' => $turnId,
             'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
             'conversation_session_id' => $session->id,
-            'client_turn_id' => $clientTurnId,
-            'role' => $role,
-            'content' => $role.' voice quality sample',
-            'metadata' => $metadata,
+            'source' => 'browser_voice_v2',
+            'client_kind' => 'browser_voice',
+            'transcript' => 'Voice request.',
+            'sanitized_transcript' => 'Voice request.',
+            'state' => 'accepted',
+            'version' => 1,
+            'idempotency_key' => $turnId,
+            'acknowledgement_required' => false,
+            'accepted_at' => now(),
+            'hard_deadline_at' => now()->addSeconds(8),
+            'side_effect_status' => 'none',
+            'retry_count' => 0,
+            'metadata' => ['raw_audio_retained' => false],
+            ...$overrides,
+        ]);
+    }
+
+    /** @param array<string, mixed> $overrides */
+    private function semanticRun(
+        VoiceTurn $turn,
+        User $user,
+        ConversationSession $session,
+        string $key,
+        array $overrides = [],
+    ): AssistantRun {
+        return AssistantRun::create([
+            'voice_turn_id' => $turn->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'conversation_session_id' => $session->id,
+            'user_message_id' => $turn->user_message_id,
+            'source' => 'browser_voice_v2',
+            'lane' => 'semantic',
+            'handler' => 'agent.semantic',
+            'label' => ucfirst($key),
+            'priority' => 0,
+            'idempotency_key' => $turn->turn_id.':'.$key,
+            'hard_deadline_at' => $turn->hard_deadline_at,
+            'status' => 'queued',
+            'input' => '{}',
+            'metadata' => [
+                'role' => 'semantic_interpretation',
+                'semantic_sequence' => 1,
+            ],
+            ...$overrides,
         ]);
     }
 }

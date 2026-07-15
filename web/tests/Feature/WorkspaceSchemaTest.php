@@ -275,7 +275,7 @@ class WorkspaceSchemaTest extends TestCase
             'title' => 'Flight to LGA',
             'starts_at' => '2026-02-25 07:00:00',
             'ends_at' => '2026-02-25 09:39:00',
-            'status' => 'confirmed',
+            'status' => 'scheduled',
             'google_calendar_id' => $user->email,
             'google_event_id' => 'google-flight-1',
             'metadata' => ['source' => 'google_calendar'],
@@ -287,7 +287,7 @@ class WorkspaceSchemaTest extends TestCase
             'title' => 'Older copied title',
             'starts_at' => '2026-02-25 07:00:00',
             'ends_at' => '2026-02-25 09:39:00',
-            'status' => 'confirmed',
+            'status' => 'scheduled',
             'google_calendar_id' => $user->email,
             'google_event_id' => 'google-flight-1',
             'metadata' => ['source' => 'google_calendar'],
@@ -321,7 +321,7 @@ class WorkspaceSchemaTest extends TestCase
             'title' => 'Flight to LGA',
             'starts_at' => '2026-02-25 07:00:00',
             'ends_at' => '2026-02-25 09:39:00',
-            'status' => 'confirmed',
+            'status' => 'scheduled',
             'google_calendar_id' => $user->email,
             'google_event_id' => 'google-flight-stale-link',
             'metadata' => ['source' => 'google_calendar'],
@@ -333,7 +333,7 @@ class WorkspaceSchemaTest extends TestCase
             'title' => 'Deleted copied title',
             'starts_at' => '2026-02-25 07:00:00',
             'ends_at' => '2026-02-25 09:39:00',
-            'status' => 'confirmed',
+            'status' => 'scheduled',
             'google_calendar_id' => $user->email,
             'google_event_id' => 'google-flight-stale-link-deleted',
             'metadata' => ['source' => 'google_calendar'],
@@ -345,7 +345,7 @@ class WorkspaceSchemaTest extends TestCase
             'title' => 'Older copied title',
             'starts_at' => '2026-02-25 07:00:00',
             'ends_at' => '2026-02-25 09:39:00',
-            'status' => 'confirmed',
+            'status' => 'scheduled',
             'google_calendar_id' => $user->email,
             'google_event_id' => 'google-flight-stale-link',
             'metadata' => ['source' => 'google_calendar'],
@@ -387,6 +387,7 @@ class WorkspaceSchemaTest extends TestCase
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
             'workspace_id' => $personalWorkspaceId,
             'title' => 'School meeting',
+            'all_day' => false,
             'starts_at' => '2026-05-21T14:00:00Z',
             'sync_to_workspace_ids' => [$household->id],
         ])->assertCreated()->json('data.id');
@@ -634,12 +635,12 @@ class WorkspaceSchemaTest extends TestCase
         $this->assertDatabaseHas('reminders', ['id' => $familyCopyId, 'status' => 'completed']);
 
         $this->withToken($token)->patchJson('/api/reminders/'.$reminderId, [
-            'status' => 'pending',
+            'status' => 'scheduled',
         ])->assertOk()
-            ->assertJsonPath('data.status', 'pending');
+            ->assertJsonPath('data.status', 'scheduled');
 
-        $this->assertDatabaseHas('reminders', ['id' => $reminderId, 'status' => 'pending']);
-        $this->assertDatabaseHas('reminders', ['id' => $familyCopyId, 'status' => 'pending']);
+        $this->assertDatabaseHas('reminders', ['id' => $reminderId, 'status' => 'scheduled']);
+        $this->assertDatabaseHas('reminders', ['id' => $familyCopyId, 'status' => 'scheduled']);
     }
 
     public function test_calendar_event_update_can_replace_selected_linked_workspaces(): void
@@ -653,6 +654,7 @@ class WorkspaceSchemaTest extends TestCase
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
             'workspace_id' => $personalWorkspaceId,
             'title' => 'School meeting',
+            'all_day' => false,
             'starts_at' => '2026-05-21T14:00:00Z',
             'sync_to_workspace_ids' => [$family->id],
         ])->assertCreated()->json('data.id');

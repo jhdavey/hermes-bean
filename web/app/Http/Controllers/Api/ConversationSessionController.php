@@ -2,8 +2,11 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\ConversationSessionKind;
 use App\Http\Controllers\Controller;
 use App\Models\ConversationSession;
+use App\Rules\ClientTimezone;
+use App\Services\AssistantRunService;
 use App\Services\HermesRuntimeService;
 use App\Services\PlanHistoryService;
 use App\Services\PlanLimitService;
@@ -17,20 +20,21 @@ class ConversationSessionController extends Controller
         private readonly HermesRuntimeService $runtime,
         private readonly PlanHistoryService $history,
         private readonly PlanLimitService $planLimits,
+        private readonly AssistantRunService $runs,
     ) {}
 
     public function index(Request $request): JsonResponse
     {
         $data = $request->validate([
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
-            'date' => ['nullable', 'date_format:Y-m-d'],
-            'timezone' => ['nullable', 'timezone'],
+            'date' => ['nullable', 'required_with:timezone', 'date_format:Y-m-d'],
+            'timezone' => ['nullable', 'required_with:date', 'string', 'max:80', new ClientTimezone],
             'limit' => ['nullable', 'integer', 'min:1', 'max:50'],
         ]);
 
         $query = ConversationSession::query()
             ->where('user_id', $request->user()->id)
-            ->where('runtime_mode', '!=', 'onboarding')
+            ->where('session_kind', ConversationSessionKind::Conversation->value)
             ->with('latestMessage')
             ->withCount('messages');
 
@@ -48,7 +52,7 @@ class ConversationSessionController extends Controller
 
         $todaySession = null;
         if (! empty($data['date'])) {
-            $timezone = (string) ($data['timezone'] ?? config('app.timezone'));
+            $timezone = (string) $data['timezone'];
             $start = CarbonImmutable::createFromFormat('Y-m-d', $data['date'], $timezone)->startOfDay()->utc();
             $end = $start->setTimezone($timezone)->endOfDay()->utc();
             $todaySession = (clone $query)
@@ -73,7 +77,6 @@ class ConversationSessionController extends Controller
     {
         $data = $request->validate([
             'title' => ['nullable', 'string', 'max:255'],
-            'runtime_mode' => ['nullable', 'string', 'max:50'],
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'metadata' => ['nullable', 'array'],
         ]);
@@ -94,6 +97,8 @@ class ConversationSessionController extends Controller
                 : "Your current plan includes {$days} days of Bean conversation history.");
         }
 
+        $this->runs->prepareSessionRunsForResponse($ownedSession);
+
         $session = $this->runtime->resumeSession($ownedSession)
             ->load([
                 'messages' => function ($query) use ($request): void {
@@ -104,6 +109,12 @@ class ConversationSessionController extends Controller
                 'activityEvents' => function ($query) use ($request): void {
                     $cutoff = $this->history->cutoffFor($request->user());
                     $query->when($cutoff !== null, fn ($query) => $query->where('created_at', '>=', $cutoff))
+                        ->orderBy('id');
+                },
+                'assistantRuns' => function ($query): void {
+                    $query->whereNull('voice_turn_id')
+                        ->whereIn('status', ['queued', 'running'])
+                        ->with(['userMessage', 'assistantMessage'])
                         ->orderBy('id');
                 },
             ]);
@@ -119,6 +130,6 @@ class ConversationSessionController extends Controller
         ]);
         $clientRequestId = trim((string) ($data['client_request_id'] ?? '')) ?: null;
 
-        return response()->json(['data' => $this->runtime->cancelSession($ownedSession, $clientRequestId)], 202);
+        return response()->json(['data' => $this->runs->cancelSession($ownedSession, $clientRequestId)], 202);
     }
 }

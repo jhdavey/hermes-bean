@@ -8,14 +8,13 @@ use App\Models\User;
 use App\Services\AgentProfileService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\File;
 use Tests\TestCase;
 
 class AgentProfileTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_internal_user_provisioning_creates_unique_server_hosted_agent_profile(): void
+    public function test_internal_user_provisioning_creates_unique_agent_profile(): void
     {
         $token = $this->apiToken('harley@example.com');
         $user = User::where('email', 'harley@example.com')->firstOrFail();
@@ -23,14 +22,7 @@ class AgentProfileTest extends TestCase
         $profile = AgentProfile::query()->firstOrFail();
 
         $this->assertSame($user->id, $profile->user_id);
-        $this->assertSame('openai', $profile->provider);
-        $this->assertSame('gpt-5-mini', $profile->model);
-        $this->assertSame('agent', $profile->router_mode);
-        $this->assertStringContainsString($profile->slug, (string) $profile->runtime_home);
-        $this->assertTrue($profile->approval_policy['auto_approve_low_risk']);
-        $this->assertContains('outgoing_mail', $profile->approval_policy['require_approval_for']);
-        $this->assertContains('payments', $profile->approval_policy['require_approval_for']);
-        $this->assertSame('app_home_top_banner', $profile->approval_policy['approval_surface']);
+        $this->assertNotSame('', trim($profile->slug));
         $this->assertSame('balanced', $profile->settings['personality_type']);
         $this->assertSame('Balanced helper', $profile->settings['personality_label']);
         $this->assertStringContainsString('calm, practical, concise co-pilot', $profile->settings['personality_prompt']);
@@ -247,81 +239,6 @@ class AgentProfileTest extends TestCase
 
         $this->assertCount(2, $profiles);
         $this->assertNotSame($profiles[0]->slug, $profiles[1]->slug);
-        $this->assertNotSame($profiles[0]->runtime_home, $profiles[1]->runtime_home);
-    }
-
-    public function test_workspace_agent_bootstraps_builtin_hermes_memory_files_only(): void
-    {
-        $runtimeRoot = sys_get_temp_dir().'/hermes-bean-agent-memory-'.bin2hex(random_bytes(6));
-        config()->set('services.hermes_runtime.users_home', $runtimeRoot);
-        $this->beforeApplicationDestroyed(fn () => File::isDirectory($runtimeRoot) ? File::deleteDirectory($runtimeRoot) : null);
-
-        $user = User::factory()->create(['name' => 'Harley Davey']);
-        $workspace = app(WorkspaceService::class)->createHousehold($user, 'Davey House');
-        $profile = app(AgentProfileService::class)->ensureForWorkspace($workspace, $user);
-
-        $this->assertStringContainsString('/workspaces/'.$workspace->id.'/', $profile->runtime_home);
-        $this->assertFileExists($profile->runtime_home.'/memories/USER.md');
-        $this->assertFileExists($profile->runtime_home.'/memories/MEMORY.md');
-        $this->assertFileDoesNotExist($profile->runtime_home.'/memories/HOUSEHOLD.md');
-        $this->assertFileDoesNotExist($profile->runtime_home.'/memories/PREFERENCES.md');
-        foreach (['USER.md', 'MEMORY.md', 'HOUSEHOLD.md', 'PREFERENCES.md', 'bean-preferences-memory.json'] as $file) {
-            $this->assertFileDoesNotExist($profile->runtime_home.'/'.$file, $file.' should not be created at runtime home root.');
-        }
-
-        $this->assertStringContainsString('Davey House', File::get($profile->runtime_home.'/memories/MEMORY.md'));
-        $this->assertStringContainsString('workspace_id: '.$workspace->id, File::get($profile->runtime_home.'/memories/MEMORY.md'));
-        $this->assertStringContainsString('Harley Davey', File::get($profile->runtime_home.'/memories/USER.md'));
-    }
-
-    public function test_workspace_preference_updates_refresh_database_and_builtin_memory_without_cross_workspace_leakage(): void
-    {
-        $runtimeRoot = sys_get_temp_dir().'/hermes-bean-agent-memory-'.bin2hex(random_bytes(6));
-        config()->set('services.hermes_runtime.users_home', $runtimeRoot);
-        $this->beforeApplicationDestroyed(fn () => File::isDirectory($runtimeRoot) ? File::deleteDirectory($runtimeRoot) : null);
-
-        $user = User::factory()->create(['name' => 'Harley Davey']);
-        $service = app(AgentProfileService::class);
-        $workspaceService = app(WorkspaceService::class);
-        $personalProfile = $service->ensureForUser($user);
-        $household = $workspaceService->createHousehold($user, 'Davey House');
-        $householdProfile = $service->ensureForWorkspace($household, $user);
-
-        $service->mergeSettings($householdProfile, [
-            'personality_type' => 'organizer',
-            'onboarding' => [
-                'completed' => true,
-                'priorities' => ['School pickups', 'Family dinner'],
-                'context' => 'Lauren prefers reminders the night before.',
-            ],
-        ], 'agent');
-
-        $householdMemory = File::get($householdProfile->runtime_home.'/memories/MEMORY.md');
-        $householdUser = File::get($householdProfile->runtime_home.'/memories/USER.md');
-        $this->assertStringContainsString('organizer', $householdMemory);
-        $this->assertStringContainsString('School pickups', $householdMemory);
-        $this->assertStringContainsString('Lauren prefers reminders the night before.', $householdMemory);
-        $this->assertStringContainsString('Harley Davey', $householdUser);
-        $this->assertSame('Lauren prefers reminders the night before.', $householdProfile->refresh()->settings['memory']['user_preferences']['context']);
-
-        File::append($householdProfile->runtime_home.'/memories/MEMORY.md', PHP_EOL.'- Lauren likes dinner reminders before 5pm.'.PHP_EOL);
-        $service->mergeSettings($householdProfile->refresh(), [
-            'onboarding' => [
-                'completed' => true,
-                'priorities' => ['School pickups', 'Family dinner', 'Soccer'],
-                'context' => 'Lauren prefers reminders the night before.',
-            ],
-        ], 'settings');
-        $this->assertStringContainsString('Lauren likes dinner reminders before 5pm.', File::get($householdProfile->runtime_home.'/memories/MEMORY.md'));
-
-        $this->assertFileExists($personalProfile->runtime_home.'/memories/MEMORY.md');
-        $this->assertStringNotContainsString('Lauren prefers reminders the night before.', File::get($personalProfile->runtime_home.'/memories/MEMORY.md'));
-        foreach (['USER.md', 'MEMORY.md', 'HOUSEHOLD.md', 'PREFERENCES.md'] as $file) {
-            $this->assertFileDoesNotExist($householdProfile->runtime_home.'/'.$file);
-            $this->assertFileDoesNotExist($personalProfile->runtime_home.'/'.$file);
-        }
-        $this->assertFileDoesNotExist($householdProfile->runtime_home.'/memories/HOUSEHOLD.md');
-        $this->assertFileDoesNotExist($householdProfile->runtime_home.'/memories/PREFERENCES.md');
     }
 
     public function test_today_endpoint_includes_agent_profile(): void
@@ -331,10 +248,8 @@ class AgentProfileTest extends TestCase
         $this->withToken($token)
             ->getJson('/api/today')
             ->assertOk()
-            ->assertJsonPath('data.agent_profile.provider', 'openai')
-            ->assertJsonPath('data.agent_profile.model', 'gpt-5-mini')
             ->assertJsonPath('data.user.needs_bean_onboarding', true)
             ->assertJsonPath('data.user.bean_preferences_ready', false)
-            ->assertJsonPath('data.agent_profile.approval_policy.approval_surface', 'app_home_top_banner');
+            ->assertJsonPath('data.agent_profile.settings.personality_type', 'balanced');
     }
 }

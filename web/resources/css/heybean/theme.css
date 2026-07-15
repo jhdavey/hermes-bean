@@ -410,8 +410,7 @@
 }
 
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-growth-stats span,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-provider-card,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-hermes-status {
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-provider-card {
     border-color: var(--hb-border);
     background: rgba(24, 31, 40, .86);
 }

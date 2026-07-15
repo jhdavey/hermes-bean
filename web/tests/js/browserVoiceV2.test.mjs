@@ -7,14 +7,13 @@ import {
     BrowserVoiceControllerV2,
 } from '../../resources/js/heybean/browserVoiceControllerV2.js';
 import {
-    BROWSER_VOICE_FOLLOW_UP_RELEVANCE,
-    classifyBrowserVoiceFollowUpRelevance,
-} from '../../resources/js/heybean/browserVoiceFollowUpRelevanceV2.js';
-import {
     BROWSER_VOICE_PLAYBACK_STATES,
     BrowserVoicePlaybackAdapterV2,
     BrowserVoiceSpeechSchedulerV2,
 } from '../../resources/js/heybean/browserVoiceSpeechV2.js';
+
+globalThis.window = { matchMedia: () => null };
+const { browserVoiceV2LocalWakeMatchesCompletedBarge } = await import('../../resources/js/heybean/webApp.js');
 
 class FakeClock {
     constructor(now = 0) {
@@ -454,77 +453,53 @@ test('[BV2-FOLLOWUP-03] a second request is accepted while the first submitted j
     assert.ok(voice.snapshot().closedTurnIds.includes(firstTurnId));
 });
 
-test('[BV2-FOLLOWUP-04] deterministic relevance grammar fails closed for ambient speech and admits direct follow-ups', () => {
-    assert.equal(
-        classifyBrowserVoiceFollowUpRelevance('We should get dinner tonight'),
-        BROWSER_VOICE_FOLLOW_UP_RELEVANCE.PENDING,
-    );
-    assert.equal(
-        classifyBrowserVoiceFollowUpRelevance('We should get dinner tonight', { final: true }),
-        BROWSER_VOICE_FOLLOW_UP_RELEVANCE.REJECTED,
-    );
-    assert.equal(
-        classifyBrowserVoiceFollowUpRelevance('Um, yeah.', { final: true }),
-        BROWSER_VOICE_FOLLOW_UP_RELEVANCE.REJECTED,
-    );
-    assert.equal(
-        classifyBrowserVoiceFollowUpRelevance('Yes', { final: true }),
-        BROWSER_VOICE_FOLLOW_UP_RELEVANCE.REJECTED,
-    );
-    assert.equal(
-        classifyBrowserVoiceFollowUpRelevance('Yes', { final: true, responseExpected: true }),
-        BROWSER_VOICE_FOLLOW_UP_RELEVANCE.MEANINGFUL,
-    );
-    for (const meaningful of [
-        'Hey Bean',
+test('[BV2-SEMANTIC-01] activated follow-ups cross one admission boundary without a local intent grammar', () => {
+    const transcripts = [
         'What about today?',
         "What's on my to-do list for today?",
-        'Anything on my calendar tomorrow?',
-        'Also create a note',
         'Okay, great. Can you set a reminder at 5 p.m. for that task?',
         'A reminder for that task at five.',
-        'Also a reminder at 5 for that.',
-        'I wanna create a reminder for that task.',
-        'Now I need a reminder for that task at five.',
         'Set it for 5 p.m.',
         'Did you finish that?',
-        'Did you get the weather forecast for later?',
         'Is it going to rain tonight?',
         'Tomorrow at 4 p.m.',
-        'At noon',
         'And the date?',
-        'Put that on my calendar',
-        'Email me the list',
-        'Open my latest note',
-        'Please organize this for me',
+        'Move that',
+        'Stop',
+        "Don't create the note.",
+        'Cancel everything you are working on.',
         'Thanks',
-    ]) {
-        assert.equal(
-            classifyBrowserVoiceFollowUpRelevance(meaningful),
-            BROWSER_VOICE_FOLLOW_UP_RELEVANCE.MEANINGFUL,
-            meaningful,
-        );
-    }
-    for (const ambient of [
-        'Pretty girl',
-        'Pretty good',
-        'I was telling my dog she is a pretty girl',
-        'The movie was pretty good last night',
-    ]) {
-        assert.equal(
-            classifyBrowserVoiceFollowUpRelevance(ambient, { final: true }),
-            BROWSER_VOICE_FOLLOW_UP_RELEVANCE.REJECTED,
-            ambient,
-        );
+        'Um, yeah.',
+        'ありがとうございます。',
+    ];
+
+    for (const [index, transcript] of transcripts.entries()) {
+        const { voice, time } = createReadyVoice();
+        beginWakeCapture(voice, `first-${index}`);
+        finishUtterance(voice, time, 'Tell me something useful.');
+        voice.drainEffects();
+        voice.playbackFinished({ turnId: `first-${index}` });
+        voice.drainEffects();
+
+        const turnId = `semantic-${index}`;
+        voice.speechStarted({ turnId, providerItemId: `provider-${index}` });
+        voice.transcriptFinal(transcript);
+        voice.speechEnded({ observedSilenceMs: 2_000 });
+        time.advance(0);
+
+        const ready = voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY);
+        assert.equal(ready.length, 1, transcript);
+        assert.equal(ready[0].turnId, turnId, transcript);
+        assert.equal(ready[0].transcript, transcript, transcript);
     }
 });
 
-test('[BV2-FOLLOWUP-08] a one-word answer is accepted only when Bean actually asked a question', () => {
+test('[BV2-SEMANTIC-02] one-word follow-ups are admitted without client-side question inference', () => {
     const { voice, time } = createReadyVoice();
     beginWakeCapture(voice, 'question-turn');
     finishUtterance(voice, time, 'What is on my calendar tomorrow?');
     voice.drainEffects();
-    voice.playbackFinished({ turnId: 'question-turn', responseExpected: true });
+    voice.playbackFinished({ turnId: 'question-turn' });
     voice.drainEffects();
 
     voice.speechStarted({ turnId: 'answer-turn', providerItemId: 'provider-answer' });
@@ -538,20 +513,19 @@ test('[BV2-FOLLOWUP-08] a one-word answer is accepted only when Bean actually as
         1,
     );
 
-    voice.playbackFinished({ turnId: 'answer-turn', responseExpected: false });
+    voice.playbackFinished({ turnId: 'answer-turn' });
     voice.drainEffects();
     voice.speechStarted({ turnId: 'ambient-yes', providerItemId: 'provider-ambient-yes' });
     voice.transcriptFinal('Yes');
     voice.speechEnded({ observedSilenceMs: 2_000 });
-    assert.equal(voice.snapshot().activeTurn, null);
-    assert.equal(voice.snapshot().liveDraft, '');
+    time.advance(0);
     assert.equal(
-        voice.drainEffects().some((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY),
-        false,
+        voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY).length,
+        1,
     );
 });
 
-test('[BV2-FOLLOWUP-05] rejected room speech stays invisible and restores only the remaining follow-up time', () => {
+test('[BV2-SEMANTIC-03] conversational follow-up text reaches semantic admission exactly once', () => {
     const { voice, time } = createReadyVoice();
     beginWakeCapture(voice, 'initial-answer');
     finishUtterance(voice, time, 'What time is it?');
@@ -564,34 +538,20 @@ test('[BV2-FOLLOWUP-05] rejected room speech stays invisible and restores only t
     voice.drainEffects();
     voice.transcriptPartial('We should get dinner');
 
-    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP);
-    assert.equal(voice.snapshot().followUpCandidate.id, 'ambient-candidate');
-    assert.equal(voice.snapshot().liveDraft, '');
-    assert.equal(voice.drainEffects().some((item) => item.type === BROWSER_VOICE_EFFECTS.DRAFT_CHANGED), false);
+    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.CAPTURING);
+    assert.equal(voice.snapshot().activeTurn.id, 'ambient-candidate');
+    assert.equal(voice.snapshot().liveDraft, 'We should get dinner');
+    voice.drainEffects();
 
-    time.advance(2_000);
     voice.transcriptFinal('We should get dinner tonight');
-    const effects = voice.drainEffects();
-    assert.equal(voice.snapshot().followUpCandidate, null);
-    assert.equal(voice.snapshot().liveDraft, '');
-    assert.equal(effects.some((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY), false);
-    assert.deepEqual(
-        effects.find((item) => item.type === BROWSER_VOICE_EFFECTS.DISCARD_FOLLOW_UP_CANDIDATE),
-        {
-            type: BROWSER_VOICE_EFFECTS.DISCARD_FOLLOW_UP_CANDIDATE,
-            turnId: 'ambient-candidate',
-            providerItemId: 'provider-ambient',
-            reason: 'not_meaningful',
-        },
-    );
-
-    time.advance(4_999);
-    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP);
-    time.advance(1);
-    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
+    voice.speechEnded({ observedSilenceMs: 2_000 });
+    time.advance(0);
+    const ready = voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY);
+    assert.equal(ready.length, 1);
+    assert.equal(ready[0].transcript, 'We should get dinner tonight');
 });
 
-test('[BV2-FOLLOWUP-06] strict Hey Bean supersedes a hidden candidate immediately', () => {
+test('[BV2-FOLLOWUP-06] strict Hey Bean supersedes an active semantic candidate immediately', () => {
     const { voice, time } = createReadyVoice();
     beginWakeCapture(voice, 'initial-turn');
     finishUtterance(voice, time, 'What time is it?');
@@ -609,10 +569,10 @@ test('[BV2-FOLLOWUP-06] strict Hey Bean supersedes a hidden candidate immediatel
     assert.equal(wake.state.followUpCandidate, null);
     assert.equal(wake.state.liveDraft, '');
     assert.equal(wake.effects.some((item) => item.type === BROWSER_VOICE_EFFECTS.ACTIVATE_CAPTURE), true);
-    assert.equal(wake.effects.some((item) => item.type === BROWSER_VOICE_EFFECTS.DISCARD_FOLLOW_UP_CANDIDATE), true);
+    assert.equal(wake.effects.some((item) => item.type === BROWSER_VOICE_EFFECTS.DISCARD_FOLLOW_UP_CANDIDATE), false);
 });
 
-test('[BV2-FOLLOWUP-07] provider strict wake reuses its transcript item instead of deleting it', () => {
+test('[BV2-FOLLOWUP-07] locally confirmed strict wake reuses its transcript item instead of deleting it', () => {
     const { voice, time } = createReadyVoice();
     beginWakeCapture(voice, 'initial-turn');
     finishUtterance(voice, time, 'What time is it?');
@@ -622,12 +582,12 @@ test('[BV2-FOLLOWUP-07] provider strict wake reuses its transcript item instead 
 
     voice.speechStarted({ turnId: 'hidden-candidate', providerItemId: 'provider-strict-item' });
     const wake = voice.wakeConfirmed({
-        turnId: 'provider-wake-turn',
+        turnId: 'local-wake-turn',
         providerItemId: 'provider-strict-item',
-        source: 'provider_strict_wake',
+        source: 'local_strict_wake',
     });
 
-    assert.equal(wake.state.activeTurn.id, 'provider-wake-turn');
+    assert.equal(wake.state.activeTurn.id, 'local-wake-turn');
     assert.equal(wake.effects.some((item) => item.type === BROWSER_VOICE_EFFECTS.DISCARD_FOLLOW_UP_CANDIDATE), false);
 });
 
@@ -740,50 +700,39 @@ test('[BV2-RECOVERY-01] reconnect uses a new provider generation and preserves t
     assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
 });
 
-test('[BV2-CLARIFY-03] a syntactically open pause listens silently and admits one combined utterance', () => {
+test('[BV2-CLARIFY-03] the normal endpoint admits an open phrase without a browser grammar decision', () => {
     const { voice, time } = createReadyVoice();
     const turnId = beginWakeCapture(voice, 'uncertain-turn');
     finishUtterance(voice, time, 'Create a note about');
-    const pausedEffects = voice.drainEffects();
-    assert.equal(pausedEffects.some((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY), false);
-    assert.equal(pausedEffects.some((item) => item.type === BROWSER_VOICE_EFFECTS.SPEAK_CLARIFICATION), false);
-    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION);
-
-    time.advance(4_999);
-    voice.speechStarted();
-    voice.transcriptFinal('the launch checklist');
-    voice.speechEnded();
-    time.advance(2_000);
+    const endpointEffects = voice.drainEffects();
+    assert.equal(endpointEffects.some((item) => item.type === BROWSER_VOICE_EFFECTS.SPEAK_CLARIFICATION), false);
+    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP);
     assert.deepEqual(
-        voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY),
+        endpointEffects.filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY),
         [{
             type: BROWSER_VOICE_EFFECTS.TURN_READY,
             turnId,
-            transcript: 'Create a note about the launch checklist',
+            transcript: 'Create a note about',
             conversationContext: { mode: 'new_conversation', epoch: 1 },
         }],
     );
 });
 
-test('[BV2-CLARIFY-06] an abandoned syntactically open fragment expires locally without creating durable work', () => {
+test('[BV2-CLARIFY-06] an incomplete fragment is admitted once at two seconds so Hermes owns clarification', () => {
     const { voice, time } = createReadyVoice();
     const turnId = beginWakeCapture(voice, 'abandoned-uncertain-turn');
     finishUtterance(voice, time, 'Create a');
     const effects = voice.drainEffects();
-    assert.equal(effects.filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY).length, 0);
+    assert.equal(effects.filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY).length, 1);
     assert.equal(effects.some((item) => item.type === BROWSER_VOICE_EFFECTS.SPEAK_CLARIFICATION), false);
-    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION);
+    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP);
     assert.equal(voice.snapshot().activeTurn.id, turnId);
-    time.advance(5_000);
-    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
-    assert.equal(voice.snapshot().activeTurn, null);
-    assert.deepEqual(
-        voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.CLARIFICATION_EXPIRED),
-        [{
-            type: BROWSER_VOICE_EFFECTS.CLARIFICATION_EXPIRED,
-            turnId,
-            durable: false,
-        }],
+    time.advance(2_000);
+    assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP);
+    assert.equal(voice.snapshot().activeTurn.id, turnId);
+    assert.equal(
+        voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY).length,
+        0,
     );
 });
 
@@ -844,6 +793,34 @@ test('[BV2-STOP-02] Stop during an explicit clarification keeps the same clarifi
     assert.equal(voice.snapshot().activeTurn.id, turnId);
     time.advance(5_000);
     assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.WAKE_ONLY);
+});
+
+test('[BV2-STOP-06] spoken Stop after barge-in is admitted once and never becomes a local cancel', () => {
+    const { voice, time } = createReadyVoice();
+    beginWakeCapture(voice, 'speaking-turn');
+    finishUtterance(voice, time, 'Read my schedule.');
+    voice.drainEffects();
+    voice.playbackStarted({ turnId: 'speaking-turn' });
+    voice.drainEffects();
+
+    voice.potentialBargeIn('potential_speech');
+    const barge = voice.confirmBargeIn({ turnId: 'spoken-stop-turn', source: 'provider_transcript' });
+    assert.equal(barge.effects.some((item) => item.type === BROWSER_VOICE_EFFECTS.CONFIRM_INTERRUPTION), true);
+    assert.equal(barge.effects.some((item) => /cancel/i.test(item.type) && !item.type.includes('timer')), false);
+
+    // The production effect handler completes this transition on a microtask
+    // after capture activation. Keep the reducer test synchronous and explicit.
+    voice.activationReady({ source: 'local_wake_gate' });
+    voice.transcriptFinal('Stop');
+    voice.speechEnded({ observedSilenceMs: 2_000 });
+    time.advance(0);
+    const ready = voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY);
+    assert.deepEqual(ready, [{
+        type: BROWSER_VOICE_EFFECTS.TURN_READY,
+        turnId: 'spoken-stop-turn',
+        transcript: 'Stop',
+        conversationContext: { mode: 'contextual_follow_up', epoch: 1 },
+    }]);
 });
 
 test('[BV2-ACK-01] a final inside the acknowledgement grace window suppresses acknowledgement audio', () => {
@@ -951,6 +928,141 @@ test('[BV2-BARGE-03] the controller coordinates duck, rejection, and one replace
     assert.equal(voice.snapshot().closedTurnIds.includes('spoken-turn'), true);
 });
 
+test('[BV2-BARGE-04] provisional delta followed by transcription failure restores the same playback', () => {
+    const { time, playback, speech } = createSpeechHarness();
+    const voice = new BrowserVoiceControllerV2({
+        clock: time.clock,
+        timers: { setTimeout: time.setTimeout, clearTimeout: time.clearTimeout },
+        speechScheduler: speech,
+    });
+    voice.start();
+    voice.providerReady();
+    beginWakeCapture(voice, 'answer-turn');
+    finishUtterance(voice, time, 'Read my calendar');
+    voice.drainEffects();
+
+    speech.finalReady({ turnId: 'answer-turn', text: 'Here is the calendar answer.' });
+    const answer = playback.plays[0];
+    playback.start(answer);
+    voice.playbackStarted({ turnId: 'answer-turn' });
+    voice.drainEffects();
+
+    voice.potentialBargeIn('potential_speech');
+    // A provider delta updates only the live draft in webApp. It deliberately
+    // does not dispatch barge_in_confirmed into the lifecycle controller.
+    assert.equal(voice.snapshot().speechActive, true);
+    assert.equal(speech.snapshot().state, BROWSER_VOICE_PLAYBACK_STATES.POTENTIALLY_INTERRUPTED);
+    assert.equal(playback.volumes.at(-1).volume, 0.2);
+
+    voice.rejectBargeIn('transcription_failed', { source: 'provider_transcript' });
+
+    assert.equal(speech.snapshot().state, BROWSER_VOICE_PLAYBACK_STATES.PLAYING_FINAL);
+    assert.equal(playback.volumes.at(-1).volume, 1);
+    assert.equal(playback.stops.length, 0);
+    assert.equal(playback.plays.length, 1);
+    assert.equal(voice.snapshot().speechActive, true);
+    assert.equal(
+        voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY).length,
+        0,
+    );
+});
+
+test('[BV2-BARGE-05] repeated playback wording reaches one replacement Hermes turn', () => {
+    const { voice, time } = createReadyVoice();
+    beginWakeCapture(voice, 'original-turn');
+    finishUtterance(voice, time, 'Delete the first one.');
+    voice.drainEffects();
+    voice.playbackStarted({ turnId: 'original-turn' });
+    voice.drainEffects();
+
+    voice.potentialBargeIn('potential_speech');
+    voice.confirmBargeIn({ turnId: 'repeated-wording-turn', source: 'provider_transcript' });
+    voice.activationReady({ source: 'local_wake_gate' });
+    voice.transcriptFinal('Delete the first one.');
+    voice.speechEnded({ observedSilenceMs: 2_000 });
+    time.advance(0);
+
+    assert.deepEqual(
+        voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY),
+        [{
+            type: BROWSER_VOICE_EFFECTS.TURN_READY,
+            turnId: 'repeated-wording-turn',
+            transcript: 'Delete the first one.',
+            conversationContext: { mode: 'contextual_follow_up', epoch: 1 },
+        }],
+    );
+});
+
+test('[BV2-BARGE-06] active strict-wake wording completes once before a delayed or missing local callback', () => {
+    const calls = [];
+    const { voice, time } = createReadyVoice();
+    voice.speechScheduler = {
+        potentialInterruption: (reason) => calls.push(['duck', reason]),
+        confirmInterruption: (reason) => calls.push(['confirm', reason]),
+    };
+    beginWakeCapture(voice, 'old-answer-turn');
+    finishUtterance(voice, time, 'Tell me the weather');
+    voice.drainEffects();
+    voice.playbackStarted({ turnId: 'old-answer-turn' });
+    voice.drainEffects();
+
+    voice.potentialBargeIn('potential_speech');
+    // "Hey Bean" in a delta is still provisional transcript content. The
+    // active conversation, not those words, is what permits this barge path.
+    assert.equal(voice.snapshot().activeTurn.id, 'old-answer-turn');
+    assert.equal(voice.snapshot().speechActive, true);
+
+    const confirmed = voice.confirmBargeIn({ turnId: 'stable-barge-turn', source: 'provider_transcript' });
+    assert.equal(confirmed.state.conversationState, BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING);
+    voice.activationReady({ source: 'provider_transcript' });
+    voice.transcriptFinal('Hey Bean, delete the first one.', { source: 'provider_transcript' });
+    voice.speechEnded({ source: 'provider_vad', observedSilenceMs: 2_000 });
+    time.advance(0);
+
+    const ready = voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY);
+    assert.deepEqual(ready, [{
+        type: BROWSER_VOICE_EFFECTS.TURN_READY,
+        turnId: 'stable-barge-turn',
+        transcript: 'Hey Bean, delete the first one.',
+        conversationContext: { mode: 'contextual_follow_up', epoch: 1 },
+    }]);
+    assert.deepEqual(calls, [
+        ['duck', 'potential_speech'],
+        ['confirm', 'meaningful_barge_in'],
+    ]);
+
+    const snapshot = voice.snapshot();
+    const completedBarge = {
+        turnId: 'stable-barge-turn',
+        controllerGeneration: snapshot.generation,
+        connectionGeneration: snapshot.connectionGeneration,
+        gateGeneration: 7,
+        throughSourceSequence: 90,
+    };
+    const delayedSamePcm = browserVoiceV2LocalWakeMatchesCompletedBarge({
+        snapshot,
+        completedBarge,
+        connectionGeneration: snapshot.connectionGeneration,
+        gateGeneration: 7,
+        sourceSequence: 90,
+    });
+    if (!delayedSamePcm) voice.wakeConfirmed({ turnId: 'duplicate-local-turn', source: 'local_wake_gate' });
+
+    assert.equal(delayedSamePcm, true);
+    assert.equal(voice.snapshot().activeTurn.id, 'stable-barge-turn');
+    assert.equal(
+        voice.drainEffects().filter((item) => item.type === BROWSER_VOICE_EFFECTS.TURN_READY).length,
+        0,
+    );
+    assert.equal(browserVoiceV2LocalWakeMatchesCompletedBarge({
+        snapshot: voice.snapshot(),
+        completedBarge,
+        connectionGeneration: snapshot.connectionGeneration,
+        gateGeneration: 7,
+        sourceSequence: 91,
+    }), false, 'later local PCM must remain eligible to begin a genuinely new wake turn');
+});
+
 test('[BV2-WAKE-02] a strict wake while Bean is speaking stops playback and begins a fresh capture only once', () => {
     const calls = [];
     const { voice, time } = createReadyVoice();
@@ -978,19 +1090,19 @@ test('[BV2-WAKE-05] strict wake discards only current playback and preserves unr
     voice.start();
     voice.providerReady();
     voice.playbackStarted({ turnId: 'current-turn' });
-    voice.wakeConfirmed({ source: 'provider_strict_wake' });
+    voice.wakeConfirmed({ source: 'local_strict_wake' });
 
     assert.equal(playback.stops.at(-1).reason, 'wake');
     assert.deepEqual(speech.snapshot().pending.map((item) => item.turnId), ['queued-one', 'queued-two']);
     assert.equal(voice.snapshot().activeTurn.id, 'fresh-wake-turn');
 });
 
-test('[BV2-WAKE-06] strict provider wake replaces a capture or clarification with one fresh stable turn', () => {
+test('[BV2-WAKE-06] strict local wake replaces a capture or clarification with one fresh stable turn', () => {
     const { voice, time } = createReadyVoice();
     beginWakeCapture(voice, 'partial-old-turn');
     voice.transcriptPartial('Create a note');
-    voice.wakeConfirmed({ turnId: 'provider-wake-during-capture', source: 'provider_strict_wake' });
-    assert.equal(voice.snapshot().activeTurn.id, 'provider-wake-during-capture');
+    voice.wakeConfirmed({ turnId: 'local-wake-during-capture', source: 'local_strict_wake' });
+    assert.equal(voice.snapshot().activeTurn.id, 'local-wake-during-capture');
     assert.ok(voice.snapshot().closedTurnIds.includes('partial-old-turn'));
 
     voice.activationReady();
@@ -998,11 +1110,11 @@ test('[BV2-WAKE-06] strict provider wake replaces a capture or clarification wit
     voice.speechEnded();
     time.advance(2_000);
     voice.drainEffects();
-    voice.admissionClarificationRequired('When?', { turnId: 'provider-wake-during-capture' });
+    voice.admissionClarificationRequired('When?', { turnId: 'local-wake-during-capture' });
     assert.equal(voice.snapshot().conversationState, BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION);
-    voice.wakeConfirmed({ turnId: 'provider-wake-during-clarification', source: 'provider_strict_wake' });
-    assert.equal(voice.snapshot().activeTurn.id, 'provider-wake-during-clarification');
-    assert.ok(voice.snapshot().closedTurnIds.includes('provider-wake-during-capture'));
+    voice.wakeConfirmed({ turnId: 'local-wake-during-clarification', source: 'local_strict_wake' });
+    assert.equal(voice.snapshot().activeTurn.id, 'local-wake-during-clarification');
+    assert.ok(voice.snapshot().closedTurnIds.includes('local-wake-during-capture'));
 });
 
 test('[BV2-SPEECH-04] buffered TTS is canceled and deferred while capture owns audio', () => {
@@ -1036,7 +1148,7 @@ test('[BV2-SPEECH-05] strict wake discards the capture-deferred current item but
     });
     voice.start();
     voice.providerReady();
-    voice.wakeConfirmed({ source: 'provider_strict_wake' });
+    voice.wakeConfirmed({ source: 'local_strict_wake' });
 
     assert.equal(speech.snapshot().captureDeferredItemId, null);
     assert.deepEqual(speech.snapshot().pending.map((item) => item.turnId), ['unrelated-final']);

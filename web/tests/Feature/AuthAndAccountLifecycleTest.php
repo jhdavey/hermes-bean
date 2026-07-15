@@ -2,15 +2,20 @@
 
 namespace Tests\Feature;
 
-use App\Models\PersonalAccessToken;
+use App\Data\HermesSemanticComposition;
+use App\Data\HermesSemanticCompositionRequest;
+use App\Data\HermesSemanticInterpretation;
+use App\Data\HermesSemanticInterpretationRequest;
+use App\Data\HermesSemanticOperation;
 use App\Models\EarlyAccessSignup;
+use App\Models\PersonalAccessToken;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\ResetPasswordLink;
+use App\Services\HermesSemanticInterpreter;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Support\Facades\URL;
@@ -313,7 +318,6 @@ class AuthAndAccountLifecycleTest extends TestCase
         $this->assertDatabaseMissing('conversation_sessions', [
             'user_id' => User::where('email', 'clean@example.com')->value('id'),
             'title' => 'Welcome to Bean',
-            'runtime_mode' => 'onboarding',
         ]);
         $this->assertDatabaseCount('tasks', 0);
         $this->assertDatabaseCount('reminders', 0);
@@ -341,7 +345,6 @@ class AuthAndAccountLifecycleTest extends TestCase
         $this->assertDatabaseMissing('conversation_sessions', [
             'user_id' => $user->id,
             'title' => 'Welcome to Bean',
-            'runtime_mode' => 'onboarding',
         ]);
         $this->assertDatabaseCount('tasks', 0);
         $this->assertDatabaseCount('reminders', 0);
@@ -366,14 +369,15 @@ class AuthAndAccountLifecycleTest extends TestCase
         $this->withToken($bobToken)->getJson("/api/assistant/sessions/{$sessionId}")
             ->assertNotFound();
 
-        $this->withToken($bobToken)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $this->withToken($bobToken)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
             'content' => 'Try to write into Alice session',
         ])->assertNotFound();
 
         $this->configureTaskCreatingAgent();
 
-        $this->withToken($aliceToken)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $this->withToken($aliceToken)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
             'content' => 'Add task Follow up with Sam.',
+            'metadata' => ['client_request_id' => 'alice-follow-up-task'],
         ])->assertCreated();
 
         $this->assertDatabaseHas('conversation_messages', [
@@ -419,8 +423,9 @@ class AuthAndAccountLifecycleTest extends TestCase
         $aliceSessionId = $this->withToken($aliceToken)->postJson('/api/assistant/sessions', ['title' => 'Alice export'])
             ->assertCreated()->json('data.id');
         $this->configureTaskCreatingAgent();
-        $this->withToken($aliceToken)->postJson("/api/assistant/sessions/{$aliceSessionId}/messages", [
+        $this->withToken($aliceToken)->postJson("/api/assistant/sessions/{$aliceSessionId}/runs", [
             'content' => 'Add task Export Alice task.',
+            'metadata' => ['client_request_id' => 'alice-export-task'],
         ])->assertCreated();
 
         $this->withToken($bobToken)->postJson('/api/tasks', [
@@ -452,52 +457,51 @@ class AuthAndAccountLifecycleTest extends TestCase
 
     private function configureTaskCreatingAgent(): void
     {
-        config()->set('services.hermes_runtime.default_provider', 'openai');
-        config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
-        config()->set('services.hermes_runtime.api_key', 'test-key');
-        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
-
-        Http::fake(function ($request) {
-            $payload = $request->data();
-            $hasToolResult = collect($payload['messages'] ?? [])->contains(fn (array $message): bool => ($message['role'] ?? null) === 'tool');
-            if ($hasToolResult) {
-                return Http::response([
-                    'id' => 'chatcmpl-final',
-                    'model' => 'gpt-test-tools',
-                    'choices' => [[
-                        'finish_reason' => 'stop',
-                        'message' => ['role' => 'assistant', 'content' => 'Created the task.'],
-                    ]],
-                ]);
-            }
-
-            $content = (string) data_get($payload, 'messages.2.content', '');
-            $title = trim((string) preg_replace('/^Add task\s+/i', '', $content), " .\t\n\r\0\x0B");
-
-            return Http::response([
-                'id' => 'chatcmpl-tool-call',
-                'model' => 'gpt-test-tools',
-                'choices' => [[
-                    'finish_reason' => 'tool_calls',
-                    'message' => [
-                        'role' => 'assistant',
-                        'content' => null,
-                        'tool_calls' => [[
-                            'id' => 'call_task',
-                            'type' => 'function',
-                            'function' => [
-                                'name' => 'create_task',
-                                'arguments' => json_encode(['title' => $title, 'type' => 'todo'], JSON_THROW_ON_ERROR),
-                            ],
-                        ]],
-                    ],
-                ]],
-            ]);
-        });
+        $this->app->instance(
+            HermesSemanticInterpreter::class,
+            new AuthTaskSemanticInterpreter,
+        );
     }
 
     private function registerToken(string $email): string
     {
         return $this->apiToken($email);
+    }
+}
+
+final class AuthTaskSemanticInterpreter implements HermesSemanticInterpreter
+{
+    public function interpret(HermesSemanticInterpretationRequest $request): HermesSemanticInterpretation
+    {
+        $title = trim(
+            (string) preg_replace('/^Add task\s+/i', '', $request->transcript),
+            " .\t\n\r\0\x0B",
+        );
+
+        return new HermesSemanticInterpretation(
+            outcome: HermesSemanticInterpretation::OUTCOME_EXECUTE,
+            responseText: null,
+            clarificationQuestion: null,
+            acknowledgementText: 'I’ll add that task.',
+            closeAfterResponse: false,
+            responseExpected: false,
+            operations: [new HermesSemanticOperation('create-task', 'app.task.create', [
+                'title' => $title,
+                'type' => 'todo',
+                'status' => 'open',
+                'notes' => null,
+                'category' => null,
+                'color' => '#34C759',
+                'is_critical' => false,
+                'due_at' => null,
+                'completed_at' => null,
+                'recurrence' => 'none',
+            ])],
+        );
+    }
+
+    public function compose(HermesSemanticCompositionRequest $request): HermesSemanticComposition
+    {
+        return new HermesSemanticComposition('Created the task.', false, false);
     }
 }

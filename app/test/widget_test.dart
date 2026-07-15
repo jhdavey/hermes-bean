@@ -634,13 +634,13 @@ void main() {
 
     await tester.tap(find.byKey(const Key('guided-signup-action')));
     await tester.pumpAndSettle();
-    expect(find.text('Hello, please enter your name below.'), findsOneWidget);
-    expect(find.text('Bean setup'), findsNothing);
-    expect(find.byKey(const Key('guided-onboarding-input')), findsOneWidget);
-    expect(find.text('Name'), findsOneWidget);
-    expect(find.byKey(const Key('guided-initial-bean-button')), findsOneWidget);
+    expect(find.text('Bean setup'), findsOneWidget);
+    expect(find.text('What should Bean call you?'), findsOneWidget);
+    expect(find.byKey(const Key('guided-name-input')), findsOneWidget);
+    expect(find.byKey(const Key('guided-name-continue')), findsOneWidget);
+    expect(find.text('Step 1 of 8'), findsOneWidget);
     final initialBeanLogo = tester.widget<Image>(
-      find.byKey(const Key('heybean-center-bean-logo')),
+      find.byKey(const Key('guided-setup-bean-logo')),
     );
     expect(
       (initialBeanLogo.image as AssetImage).assetName,
@@ -648,70 +648,64 @@ void main() {
     );
 
     await tester.enterText(
-      find.byKey(const Key('guided-onboarding-input')),
+      find.byKey(const Key('guided-name-input')),
       'testing',
     );
-    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
+    await tester.tap(find.byKey(const Key('guided-name-continue')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('guided-initial-bean-button')), findsOneWidget);
-    expect(find.byKey(const Key('guided-onboarding-input')), findsOneWidget);
-    expect(
-      find.text(
-        'Nice to meet you, testing. Do you prefer light or dark mode? You can also choose Auto, and you can change this anytime in Appearance settings.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('guided-name-input')), findsNothing);
+    expect(find.text('Choose your appearance'), findsOneWidget);
+    expect(find.text('Step 2 of 8'), findsOneWidget);
     expect(find.byKey(const Key('guided-theme-mode-light')), findsOneWidget);
     expect(find.byKey(const Key('guided-theme-mode-dark')), findsOneWidget);
     expect(find.byKey(const Key('guided-theme-mode-auto')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('guided-theme-mode-dark')));
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(
       Theme.of(
-        tester.element(find.byKey(const Key('guided-onboarding-input'))),
+        tester.element(find.byKey(const Key('guided-email-input'))),
       ).brightness,
       Brightness.dark,
     );
     final darkBeanLogo = tester.widget<Image>(
-      find.byKey(const Key('heybean-center-bean-logo')),
+      find.byKey(const Key('guided-setup-bean-logo')),
     );
     expect(
       (darkBeanLogo.image as AssetImage).assetName,
       'assets/images/bean/bean-logo-white-overlay.png',
     );
-    await tester.pumpAndSettle();
-    expect(find.textContaining('What email address'), findsOneWidget);
+    expect(find.text('Add your email'), findsOneWidget);
+    expect(find.text('Step 3 of 8'), findsOneWidget);
 
     api.takenEmails.add('taken@example.com');
     await tester.enterText(
-      find.byKey(const Key('guided-onboarding-input')),
+      find.byKey(const Key('guided-email-input')),
       'taken@example.com',
     );
-    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
+    await tester.tap(find.byKey(const Key('guided-email-continue')));
     await tester.pumpAndSettle();
     expect(find.textContaining('already'), findsOneWidget);
     expect(find.textContaining('choose a password'), findsNothing);
     expect(api.registeredUsers, isEmpty);
 
     await tester.enterText(
-      find.byKey(const Key('guided-onboarding-input')),
+      find.byKey(const Key('guided-email-input')),
       'test@email.com',
     );
-    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
+    await tester.tap(find.byKey(const Key('guided-email-continue')));
     await tester.pumpAndSettle();
 
     await tester.enterText(
-      find.byKey(const Key('guided-onboarding-input')),
+      find.byKey(const Key('guided-password-input')),
       'password1234',
     );
-    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
+    await tester.tap(find.byKey(const Key('guided-password-continue')));
     await tester.pumpAndSettle();
 
+    expect(find.text('Choose Bean’s personality'), findsOneWidget);
     expect(
-      find.text(
-        'Your account has been created. Check your email to verify. Next, what personality type would you like me to have?',
-      ),
+      find.textContaining('Check your email to verify it'),
       findsOneWidget,
     );
     expect(api.registeredUsers, [
@@ -722,8 +716,7 @@ void main() {
       },
     ]);
     expect(api.updatedThemeMode, 'dark');
-    expect(find.byKey(const Key('guided-initial-bean-button')), findsOneWidget);
-    expect(find.byKey(const Key('guided-onboarding-input')), findsOneWidget);
+    expect(find.byKey(const Key('guided-password-input')), findsNothing);
     expect(
       find.byKey(const Key('guided-personality-balanced')),
       findsOneWidget,
@@ -761,12 +754,21 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Balanced helper'));
-    await tester.pump(const Duration(seconds: 6));
     await tester.pumpAndSettle();
+    expect(find.text('Share city-level location?'), findsOneWidget);
+    expect(find.byKey(const Key('guided-location-allow')), findsOneWidget);
+    expect(find.byKey(const Key('guided-location-skip')), findsOneWidget);
     await tester.tap(find.byKey(const Key('guided-location-skip')));
     await tester.pumpAndSettle();
     expect(api.updatedAgentPersonality, 'balanced');
     expect(api.updatedContext, contains('guided Bean signup onboarding'));
+
+    expect(find.text('Take a quick tour?'), findsOneWidget);
+    expect(find.byKey(const Key('guided-tour-start')), findsOneWidget);
+    expect(find.byKey(const Key('guided-tour-skip')), findsOneWidget);
+    expect(find.byKey(const Key('guided-onboarding-input')), findsNothing);
+    await tester.tap(find.byKey(const Key('guided-tour-skip')));
+    await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('signup-plan-base')), findsOneWidget);
     expect(
@@ -926,7 +928,7 @@ void main() {
     );
   });
 
-  testWidgets('guided Bean signup keeps light mode copy for light selection', (
+  testWidgets('guided Bean signup uses exact theme buttons', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -941,22 +943,77 @@ void main() {
     await tester.tap(find.byKey(const Key('guided-signup-action')));
     await tester.pumpAndSettle();
     await tester.enterText(
-      find.byKey(const Key('guided-onboarding-input')),
+      find.byKey(const Key('guided-name-input')),
       'testing',
     );
-    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
+    await tester.tap(find.byKey(const Key('guided-name-continue')));
     await tester.pumpAndSettle();
 
+    expect(find.byKey(const Key('guided-onboarding-input')), findsNothing);
+    expect(find.byKey(const Key('guided-theme-mode-light')), findsOneWidget);
+    expect(find.byKey(const Key('guided-theme-mode-dark')), findsOneWidget);
+    expect(find.byKey(const Key('guided-theme-mode-auto')), findsOneWidget);
     await tester.tap(find.byKey(const Key('guided-theme-mode-light')));
     await tester.pumpAndSettle();
 
+    expect(find.byKey(const Key('guided-email-input')), findsOneWidget);
+    expect(find.text('Add your email'), findsOneWidget);
     expect(
-      find.text(
-        'Ok, I\'ll keep it in Light mode. What email address should I use for your account? Please text it here.',
-      ),
-      findsOneWidget,
+      Theme.of(
+        tester.element(find.byKey(const Key('guided-email-input'))),
+      ).brightness,
+      Brightness.light,
     );
-    expect(find.textContaining('switched to Light'), findsNothing);
+    expect(find.textContaining('Bean - '), findsNothing);
+    expect(find.byKey(const Key('guided-bean-thinking')), findsNothing);
+  });
+
+  testWidgets('guided Bean signup starts the tour from the exact tour action', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _FakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+        stripePaymentHandler: _FakeStripePaymentHandler(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('guided-signup-action')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('guided-name-input')),
+      'testing',
+    );
+    await tester.tap(find.byKey(const Key('guided-name-continue')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('guided-theme-mode-auto')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('guided-email-input')),
+      'tour@example.com',
+    );
+    await tester.tap(find.byKey(const Key('guided-email-continue')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('guided-password-input')),
+      'password1234',
+    );
+    await tester.tap(find.byKey(const Key('guided-password-continue')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('guided-personality-balanced')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('guided-location-skip')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('guided-tour-start')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('guided-tour-start')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('command-center-home')), findsOneWidget);
+    expect(find.byKey(const Key('onboarding-tour-overlay')), findsOneWidget);
+    expect(find.byKey(const Key('signup-plan-base')), findsNothing);
   });
 
   testWidgets('guided Bean signup explains invalid email format', (
@@ -975,29 +1032,35 @@ void main() {
     await tester.tap(find.byKey(const Key('guided-signup-action')));
     await tester.pumpAndSettle();
     await tester.enterText(
-      find.byKey(const Key('guided-onboarding-input')),
+      find.byKey(const Key('guided-name-input')),
       'testing',
     );
-    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
+    await tester.tap(find.byKey(const Key('guided-name-continue')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('guided-theme-mode-light')));
     await tester.pumpAndSettle();
 
     await tester.enterText(
-      find.byKey(const Key('guided-onboarding-input')),
+      find.byKey(const Key('guided-email-input')),
       'teston@email.com,',
     );
-    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
+    await tester.tap(find.byKey(const Key('guided-email-continue')));
     await tester.pumpAndSettle();
 
-    expect(find.text('teston@email.com,'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('guided-email-input')))
+          .controller!
+          .text,
+      'teston@email.com,',
+    );
     expect(
       find.text(
-        'That email format does not look right. Please send it like name@example.com, without extra punctuation.',
+        'Enter an email in the format name@example.com, without extra punctuation.',
       ),
       findsOneWidget,
     );
-    expect(find.textContaining('could not check that email'), findsNothing);
+    expect(find.byKey(const Key('guided-setup-error')), findsOneWidget);
     expect(api.emailAvailabilityChecks, isEmpty);
   });
 
@@ -1078,7 +1141,6 @@ void main() {
       expect(find.text("Hi, I'm Bean. What is your name?"), findsNothing);
 
       expect(api.sentMessages, isEmpty);
-      expect(api.sendMessageCalls, 0);
       expect(api.queueMessageCalls, 0);
       expect(find.byKey(const Key('onboarding-tour-overlay')), findsNothing);
 
@@ -1105,7 +1167,8 @@ void main() {
 
       expect(api.sentMessages, contains('Schedule dentist tomorrow at 3pm'));
       final scheduleMetadata = api.sentMessageMetadata.last;
-      expect(scheduleMetadata?['source'], 'flutter_routed_chat');
+      expect(scheduleMetadata, isNot(contains('source')));
+      expect(scheduleMetadata?['client_request_id'], isNotNull);
       final clientContext = scheduleMetadata?['client_context'];
       expect(clientContext, isA<Map<String, Object?>>());
       final typedClientContext = clientContext! as Map<String, Object?>;
@@ -1122,7 +1185,10 @@ void main() {
         const Offset(0, -1000),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Done — I updated your day.'), findsOneWidget);
+      expect(
+        find.textContaining('Done — I updated your day.', findRichText: true),
+        findsOneWidget,
+      );
       expect(find.text('gpt-5.4'), findsNothing);
       expect(
         find.byKey(const Key('assistant-message-model-label')),
@@ -1358,8 +1424,14 @@ void main() {
     await tester.tap(find.byKey(const Key('nav-bean')));
     await tester.pumpAndSettle();
 
-    expect(find.text('what did we discuss'), findsOneWidget);
-    expect(find.text('We talked about dinner.'), findsOneWidget);
+    expect(
+      find.textContaining('what did we discuss', findRichText: true),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('We talked about dinner.', findRichText: true),
+      findsOneWidget,
+    );
     expect(api.startedSessionCount, 0);
   });
 
@@ -2708,10 +2780,10 @@ void main() {
       expect(find.text('I need approval'), findsOneWidget);
       expect(find.text("Approve or deny Bean's next action"), findsOneWidget);
       expect(find.textContaining('high risk'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('approval-always-approve-action')));
+      expect(find.text('Always approve'), findsNothing);
+      await tester.tap(find.byKey(const Key('approval-approve-action')));
       await tester.pumpAndSettle();
       expect(api.approvedApprovalId, 7);
-      expect(api.alwaysApprovedApproval, isTrue);
 
       expect(find.text('HeyBean'), findsNothing);
       expect(find.text('Bean assistant'), findsNothing);
@@ -2760,7 +2832,7 @@ void main() {
   );
 
   testWidgets(
-    'empty Bean chat intro stays concise with saved Bean preferences',
+    'empty Bean chat does not manufacture a personalized assistant greeting',
     (WidgetTester tester) async {
       final api = _SignedInFakeHermesApiClient()
         ..updatedAgentPersonality = 'organizer'
@@ -2774,7 +2846,8 @@ void main() {
       await tester.tap(find.byKey(const Key('nav-bean')));
       await tester.pumpAndSettle();
 
-      expect(find.text('What should Bean organize first?'), findsOneWidget);
+      expect(find.text('What should Bean organize first?'), findsNothing);
+      expect(find.byKey(const Key('chat-message-list')), findsOneWidget);
       expect(find.textContaining('Organizer style'), findsNothing);
       expect(find.textContaining('Family'), findsNothing);
       expect(find.textContaining('Protect dinner'), findsNothing);
@@ -2793,7 +2866,7 @@ void main() {
     },
   );
 
-  testWidgets('typed Bean chat uses queued model route', (
+  testWidgets('typed Bean chat uses the queued Hermes semantic path', (
     WidgetTester tester,
   ) async {
     final api = _SignedInFakeHermesApiClient();
@@ -2809,14 +2882,20 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.sentMessages, ['Plan today']);
-    final assistantReply = find.text('Done — I updated your day.');
+    final assistantReply = find.textContaining(
+      'Done — I updated your day.',
+      findRichText: true,
+    );
     expect(assistantReply, findsOneWidget);
-    expect(find.text('Plan today'), findsOneWidget);
+    expect(
+      find.textContaining('Plan today', findRichText: true),
+      findsOneWidget,
+    );
     final messageListBottom = tester
         .getRect(find.byKey(const Key('chat-message-list')))
         .bottom;
     final replyBottom = tester.getRect(assistantReply).bottom;
-    expect(messageListBottom - replyBottom, lessThan(56));
+    expect(messageListBottom - replyBottom, lessThan(80));
   });
 
   testWidgets('Bean chat input wraps before scrolling', (
@@ -2876,24 +2955,20 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.ensureVisible(
-      find.byKey(const Key('sent-message-actions-trigger')).first,
+      find.byKey(const Key('user-message-bubble')).first,
     );
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const Key('sent-message-actions-trigger')).first,
-    );
+    await tester.longPress(find.byKey(const Key('user-message-bubble')).first);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('chat-copy-sent-message-action')));
     await tester.pumpAndSettle();
     expect(copiedText, 'Plan today');
 
     await tester.ensureVisible(
-      find.byKey(const Key('sent-message-actions-trigger')).first,
+      find.byKey(const Key('user-message-bubble')).first,
     );
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const Key('sent-message-actions-trigger')).first,
-    );
+    await tester.longPress(find.byKey(const Key('user-message-bubble')).first);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('chat-edit-sent-message-action')));
     await tester.pumpAndSettle();
@@ -2916,11 +2991,17 @@ void main() {
     expect(api.branchMessageCalls, 1);
     expect(api.branchedFromMessageId, 7001);
     expect(api.sentMessages, ['Plan today', 'Plan tomorrow']);
-    expect(find.text('Plan today'), findsNothing);
-    expect(find.text('Plan tomorrow'), findsOneWidget);
+    expect(
+      find.textContaining('Plan today', findRichText: true),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('Plan tomorrow', findRichText: true),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('declining optional Bean setup uses routed simple chat', (
+  testWidgets('declining optional Bean setup uses queued Hermes chat', (
     WidgetTester tester,
   ) async {
     final api = _OptionalSetupDeclineFakeHermesApiClient();
@@ -2932,8 +3013,9 @@ void main() {
     await tester.tap(find.byKey(const Key('nav-bean')));
     await tester.pumpAndSettle();
     expect(
-      find.text(
+      find.textContaining(
         'All set — I’ll use the Detail organizer personality. Want me to help set up a few reminders or import existing lists now?',
+        findRichText: true,
       ),
       findsOneWidget,
     );
@@ -2943,14 +3025,16 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.sentMessages, ['no thanks']);
-    expect(api.sendMessageCalls, 0);
     expect(api.queueMessageCalls, 1);
     expect(find.text('I’m working on that in the background.'), findsNothing);
-    expect(find.text('No problem — we can skip that.'), findsOneWidget);
+    expect(
+      find.textContaining('No problem — we can skip that.', findRichText: true),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
-    'post-action thanks uses routed simple chat without visible work',
+    'post-action thanks uses queued Hermes chat without visible work',
     (WidgetTester tester) async {
       final api = _PostActionThanksFakeHermesApiClient();
       await tester.pumpWidget(
@@ -2970,7 +3054,6 @@ void main() {
       expect(api.sentMessages, [
         'That’s awesome, thanks for writing that note',
       ]);
-      expect(api.sendMessageCalls, 0);
       expect(api.queueMessageCalls, 1);
       expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
       expect(find.byKey(const Key('heybean-working-ring')), findsNothing);
@@ -2978,7 +3061,7 @@ void main() {
     },
   );
 
-  testWidgets('queued Bean chat waits for backend-routed acknowledgement', (
+  testWidgets('queued Bean chat waits for the durable backend final', (
     WidgetTester tester,
   ) async {
     final api = _DelayedQueueFakeHermesApiClient();
@@ -2999,15 +3082,71 @@ void main() {
     expect(api.queueMessageCalls, 1);
     expect(find.text('working...'), findsNothing);
     expect(find.text('Let me check the forecast.'), findsNothing);
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(find.text('Working on request'), findsOneWidget);
     expect(find.byKey(const Key('heybean-working-ring')), findsOneWidget);
     expect(find.textContaining('Checking weather'), findsNothing);
 
     api.completeQueue();
     await tester.pumpAndSettle();
 
-    expect(find.text('It should be warm and cloudy tomorrow.'), findsOneWidget);
+    expect(
+      find.textContaining(
+        'It should be warm and cloudy tomorrow.',
+        findRichText: true,
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
   });
+
+  testWidgets(
+    'rapid Bean submits are admitted immediately and out-of-order finals stay with their stable requests',
+    (WidgetTester tester) async {
+      final api = _RapidChatFakeHermesApiClient();
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-bean')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'First request',
+      );
+      await tester.tap(find.byKey(const Key('primary-chat-action')));
+      await tester.pump();
+      await tester.enterText(
+        find.byKey(const Key('chat-input')),
+        'Second request',
+      );
+      await tester.tap(find.byKey(const Key('primary-chat-action')));
+      await tester.pump();
+
+      expect(api.queueMessageCalls, 2);
+      expect(api.clientRequestIds.toSet(), hasLength(2));
+
+      api.complete(1);
+      await tester.pump();
+      expect(
+        find.textContaining('Second final', findRichText: true),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('heybean-working-ring')), findsOneWidget);
+
+      api.complete(0);
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('First final', findRichText: true),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('Second final', findRichText: true),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets('queued Bean chat recovers completed response from session', (
     WidgetTester tester,
@@ -3034,10 +3173,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.text('Tomorrow dinner is the lemon chicken sheet-pan meal.'),
+      find.textContaining(
+        'Tomorrow dinner is the lemon chicken sheet-pan meal.',
+        findRichText: true,
+      ),
       findsOneWidget,
     );
-    expect(find.byKey(const Key('bean-work-dock-strip')), findsOneWidget);
+    expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
   });
 
   testWidgets(
@@ -3059,7 +3201,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Yes, I can help with calendar events.'),
+        find.textContaining(
+          'Yes, I can help with calendar events.',
+          findRichText: true,
+        ),
         findsOneWidget,
       );
       expect(find.byKey(const Key('bean-work-dock-strip')), findsNothing);
@@ -3067,7 +3212,7 @@ void main() {
     },
   );
 
-  testWidgets('Bean work dock uses backend work plan labels in order', (
+  testWidgets('Bean work dock uses canonical operation receipt labels', (
     WidgetTester tester,
   ) async {
     final api = _BeanWorkPlanFakeHermesApiClient();
@@ -3125,7 +3270,10 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('You have two tasks due today.'), findsOneWidget);
+    expect(
+      find.textContaining('You have two tasks due today.', findRichText: true),
+      findsOneWidget,
+    );
     expect(find.textContaining('Create task'), findsNothing);
     expect(find.textContaining('Creating task'), findsNothing);
   });
@@ -3349,7 +3497,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 250));
 
     expect(
-      find.text('Done — I added the take out trash task.'),
+      find.textContaining(
+        'Done — I added the take out trash task.',
+        findRichText: true,
+      ),
       findsOneWidget,
     );
 
@@ -3381,7 +3532,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 250));
 
       expect(find.text('Create note: Shopping list'), findsOneWidget);
-      expect(find.text('Done'), findsOneWidget);
+      expect(find.byIcon(Icons.check_box_rounded), findsOneWidget);
       expect(find.text('1/1'), findsOneWidget);
       expect(find.byKey(const Key('heybean-working-ring')), findsOneWidget);
       expect(api.noteListIncludedCreatedNote, isTrue);
@@ -3390,7 +3541,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 250));
 
       expect(
-        find.text('Done - I created the shopping list note.'),
+        find.textContaining(
+          'Done - I created the shopping list note.',
+          findRichText: true,
+        ),
         findsOneWidget,
       );
     },
@@ -3418,7 +3572,7 @@ void main() {
     expect(api.cancelledSessionCalls, 1);
     expect(
       find.text('Stopped. That request will not update your day.'),
-      findsOneWidget,
+      findsNothing,
     );
     expect(find.byKey(const Key('primary-chat-action')), findsOneWidget);
 
@@ -3584,7 +3738,7 @@ void main() {
         findsNothing,
       );
       expect(find.byKey(const Key('reminders-screen-loading')), findsOneWidget);
-      expect(find.text('No pending reminders'), findsNothing);
+      expect(find.text('No scheduled reminders'), findsNothing);
 
       api.completeDashboardLoad();
       await tester.pumpAndSettle();
@@ -4433,7 +4587,7 @@ void main() {
       expect(find.byKey(const Key('reminders-view')), findsOneWidget);
       expect(find.text('Reminders'), findsWidgets);
       expect(find.text('Stand up'), findsOneWidget);
-      expect(find.text('Pending'), findsWidgets);
+      expect(find.text('Scheduled'), findsWidgets);
 
       await tester.tap(find.byKey(const Key('nav-bean')));
       await tester.pumpAndSettle();
@@ -4465,7 +4619,10 @@ void main() {
       await tester.tap(find.byKey(const Key('primary-chat-action')));
       await tester.pumpAndSettle();
       expect(api.sentMessages, ['Help me plan today']);
-      expect(find.text('Done — I updated your day.'), findsOneWidget);
+      expect(
+        find.textContaining('Done — I updated your day.', findRichText: true),
+        findsOneWidget,
+      );
 
       await openSettingsFromBottomNav(tester);
       expect(find.byKey(const Key('settings-view')), findsOneWidget);
@@ -5894,8 +6051,9 @@ void main() {
 
       expect(api.sentMessages, ['Send the contract to Lauren']);
       expect(
-        find.text(
+        find.textContaining(
           'Bean is paused because Gmail OAuth is not connected. Please check Settings or approvals, then try again.',
+          findRichText: true,
         ),
         findsOneWidget,
       );
@@ -5903,7 +6061,7 @@ void main() {
   );
 
   testWidgets(
-    'chat failure message keeps Bean in a recoverable checking state',
+    'chat transport failure is UI status and not an assistant message',
     (WidgetTester tester) async {
       await tester.pumpWidget(
         HermesBeanApp(
@@ -5927,6 +6085,13 @@ void main() {
       expect(find.textContaining('I’m still checking'), findsNothing);
       expect(
         find.textContaining('I hit a snag while working on that'),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('chat-message-list')),
+          matching: find.textContaining('could not confirm that message'),
+        ),
         findsNothing,
       );
     },
@@ -5958,7 +6123,10 @@ void main() {
       api.queuedMetadata[0]?['client_request_id'],
       api.queuedMetadata[1]?['client_request_id'],
     );
-    expect(find.text('Done - I queued that request.'), findsOneWidget);
+    expect(
+      find.textContaining('Done - I queued that request.', findRichText: true),
+      findsOneWidget,
+    );
     expect(
       find.textContaining('I hit a snag while working on that'),
       findsNothing,
@@ -5991,48 +6159,23 @@ void main() {
       api.lookupClientRequestId,
       api.queuedMetadata.first?['client_request_id'],
     );
-    expect(find.text('Done - I found that queued request.'), findsOneWidget);
+    expect(
+      find.textContaining(
+        'Done - I found that queued request.',
+        findRichText: true,
+      ),
+      findsOneWidget,
+    );
     expect(
       find.textContaining('I hit a snag while working on that'),
       findsNothing,
     );
   });
 
-  testWidgets(
-    'chat keeps retrying when queued lookup returns bridge response',
-    (WidgetTester tester) async {
-      final api = _BridgeLookupThenSuccessHermesApiClient();
-      await tester.pumpWidget(
-        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('nav-bean')));
-      await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const Key('chat-input')),
-        'Please add Dr Chen Cardio on 7/9 at 3pm',
-      );
-      await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
-      await tester.tap(find.byKey(const Key('primary-chat-action')));
-      await tester.pumpAndSettle(const Duration(seconds: 4));
-
-      expect(api.queueMessageCalls, 3);
-      expect(api.lookupQueuedMessageCalls, 2);
-      expect(api.issueReports, isEmpty);
-      expect(find.text('Done - I added Dr Chen Cardio.'), findsOneWidget);
-      expect(find.textContaining('Bean could not finish'), findsNothing);
-      expect(
-        find.textContaining('I didn’t receive that request'),
-        findsNothing,
-      );
-    },
-  );
-
-  testWidgets('chat waits through bridge-only completed run recovery', (
+  testWidgets('chat renders the single durable failed-run final', (
     WidgetTester tester,
   ) async {
-    final api = _CompletedRunBridgeThenVisibleHermesApiClient();
+    final api = _FailedRunFaultFinalHermesApiClient();
     await tester.pumpWidget(
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
     );
@@ -6042,21 +6185,25 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const Key('chat-input')),
-      'Please add a reminder to call Joe tomorrow at 8am',
+      'Move the first task to tomorrow',
     );
     await tester.ensureVisible(find.byKey(const Key('primary-chat-action')));
     await tester.tap(find.byKey(const Key('primary-chat-action')));
-    await tester.pumpAndSettle(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
 
     expect(api.queueMessageCalls, 1);
-    expect(api.resumeSessionDetailsCalls, greaterThanOrEqualTo(2));
-    expect(find.text('Done - I added the reminder.'), findsOneWidget);
-    expect(find.textContaining('I didn’t receive that request'), findsNothing);
-    expect(find.textContaining('Bean could not finish'), findsNothing);
+    expect(api.lookupQueuedMessageCalls, 0);
+    expect(
+      find.textContaining(
+        'I couldn’t complete that request because Bean is temporarily unavailable. Please try again.',
+        findRichText: true,
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
-    'chat recovers direct Bean work through lookup after parse failure',
+    'chat recovers durable queued work through lookup after parse failure',
     (WidgetTester tester) async {
       final api = _LookupRecoveryAfterParseFailureHermesApiClient();
       await tester.pumpWidget(
@@ -6074,10 +6221,16 @@ void main() {
       await tester.tap(find.byKey(const Key('primary-chat-action')));
       await tester.pumpAndSettle(const Duration(seconds: 2));
 
-      expect(api.sendMessageCalls, 1);
+      expect(api.queueMessageCalls, 1);
       expect(api.lookupQueuedMessageCalls, 1);
       expect(api.issueReports, isEmpty);
-      expect(find.text('Done - I recovered that request.'), findsOneWidget);
+      expect(
+        find.textContaining(
+          'Done - I recovered that request.',
+          findRichText: true,
+        ),
+        findsOneWidget,
+      );
       expect(find.textContaining('Bean could not finish'), findsNothing);
       expect(
         find.textContaining('I hit a snag while working on that'),
@@ -6105,11 +6258,17 @@ void main() {
       await tester.tap(find.byKey(const Key('primary-chat-action')));
       await tester.pumpAndSettle(const Duration(seconds: 2));
 
-      expect(api.sendMessageCalls, 1);
+      expect(api.queueMessageCalls, 1);
       expect(api.lookupQueuedMessageCalls, 2);
       expect(api.resumeSessionDetailsCalls, 1);
       expect(api.issueReports, isEmpty);
-      expect(find.text('Done - I found the saved response.'), findsOneWidget);
+      expect(
+        find.textContaining(
+          'Done - I found the saved response.',
+          findRichText: true,
+        ),
+        findsOneWidget,
+      );
       expect(find.textContaining('Bean could not finish'), findsNothing);
       expect(
         find.textContaining('I hit a snag while working on that'),
@@ -6118,10 +6277,10 @@ void main() {
     },
   );
 
-  testWidgets('chat completes routed replies without direct send fallback', (
+  testWidgets('chat completes Hermes replies through canonical run admission', (
     WidgetTester tester,
   ) async {
-    final api = _TransientDirectSendFailureHermesApiClient();
+    final api = _CanonicalQueueHermesApiClient();
     await tester.pumpWidget(
       HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
     );
@@ -6138,9 +6297,11 @@ void main() {
     await tester.pumpAndSettle(const Duration(seconds: 2));
 
     expect(api.queueMessageCalls, 1);
-    expect(api.sendMessageCalls, 0);
     expect(api.queuedMetadata.single?['client_request_id'], isNotNull);
-    expect(find.text('Done - I queued that request.'), findsOneWidget);
+    expect(
+      find.textContaining('Done - I queued that request.', findRichText: true),
+      findsOneWidget,
+    );
     expect(
       find.textContaining('I hit a snag while working on that'),
       findsNothing,
@@ -6249,9 +6410,24 @@ void main() {
       find.byKey(const Key('event-title-field')),
       'Client kickoff',
     );
-    await tester.enterText(
-      find.byKey(const Key('event-start-field')),
-      '4:00 PM',
+    final localToday = DateTime.now();
+    final exactStart = DateTime(
+      localToday.year,
+      localToday.month,
+      localToday.day,
+      16,
+    );
+    final exactEnd = exactStart.add(const Duration(hours: 1));
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('event-start-field')))
+          .readOnly,
+      isTrue,
+    );
+    await _chooseEventDateTime(
+      tester,
+      const Key('event-start-field'),
+      hour: 16,
     );
     final autoEndEditor = tester.widget<EditableText>(
       find.descendant(
@@ -6259,27 +6435,13 @@ void main() {
         matching: find.byType(EditableText),
       ),
     );
-    expect(
-      autoEndEditor.controller.text,
-      'today at ${_testNaturalTimeLabel(DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day, 17))}',
-    );
-    await tester.enterText(find.byKey(const Key('event-end-field')), '5:00 PM');
+    expect(autoEndEditor.controller.text, _testExactDateTimeInput(exactEnd));
     await tester.tap(find.byKey(const Key('event-save-action')));
     await tester.pumpAndSettle();
 
     expect(api.createdEvent?.title, 'Client kickoff');
-    final typedStart = DateTime(
-      DateTime.now().year,
-      DateTime.now().month,
-      DateTime.now().day,
-      16,
-    ).toUtc().toIso8601String();
-    final typedEnd = DateTime(
-      DateTime.now().year,
-      DateTime.now().month,
-      DateTime.now().day,
-      17,
-    ).toUtc().toIso8601String();
+    final typedStart = exactStart.toUtc().toIso8601String();
+    final typedEnd = exactEnd.toUtc().toIso8601String();
     expect(api.createdEvent?.startsAt, typedStart);
     expect(api.createdEvent?.endsAt, typedEnd);
     expect(api.createdEvent?.metadata?['google_calendar_ids'], isNull);
@@ -6380,8 +6542,6 @@ void main() {
       'minutes_before': 15,
       'recurrence': 'specific_days',
       'days': ['mon', 'wed'],
-      'interval': 1,
-      'unit': 'days',
     });
   });
 
@@ -6837,7 +6997,12 @@ void main() {
 
       await tester.tap(find.byKey(eventKey));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('event-end-field')), '5 PM');
+      await _chooseEventDateTime(
+        tester,
+        const Key('event-end-field'),
+        date: today,
+        hour: 17,
+      );
       await tester.tap(find.byKey(const Key('event-save-action')));
       await tester.pumpAndSettle();
 
@@ -6996,30 +7161,33 @@ void main() {
           matching: find.byType(EditableText),
         ),
       );
-      final initialStartTime = _testNaturalTimeLabel(
-        DateTime.utc(
-          DateTime.now().year,
-          DateTime.now().month,
-          DateTime.now().day,
-          14,
-          30,
-        ).toLocal(),
+      final initialStart = DateTime.utc(
+        DateTime.now().year,
+        DateTime.now().month,
+        DateTime.now().day,
+        14,
+        30,
+      ).toLocal();
+      expect(
+        startEditor.controller.text,
+        _testExactDateTimeInput(initialStart),
       );
-      expect(startEditor.controller.text, 'today at $initialStartTime');
-      expect(startEditor.controller.text, isNot(contains('T14:30')));
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('event-start-field')))
+            .readOnly,
+        isTrue,
+      );
 
       await tester.enterText(
         find.byKey(const Key('event-title-field')),
         'Design sync',
       );
       final eventDate = DateTime.now();
-      await tester.enterText(
-        find.byKey(const Key('event-start-field')),
-        '4:00 PM',
-      );
-      await tester.enterText(
-        find.byKey(const Key('event-end-field')),
-        '5:00 PM',
+      await _chooseEventDateTime(
+        tester,
+        const Key('event-start-field'),
+        hour: 16,
       );
       await tester.enterText(
         find.byKey(const Key('event-notes-field')),
@@ -7033,7 +7201,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('event-status-field')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Tentative').last);
+      await tester.tap(find.text('Scheduled').last);
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.byKey(const Key('event-recurrence-field')),
@@ -7132,14 +7300,11 @@ void main() {
         'Bring launch notes and room setup details.',
       );
       expect(api.updatedEvent?.location, 'Conference Room B');
-      expect(api.updatedEvent?.status, 'tentative');
+      expect(api.updatedEvent?.status, 'scheduled');
       expect(api.updatedEvent?.color, '#007AFF');
       expect(api.updatedEvent?.recurrence, 'specific_days');
       expect(api.updatedEvent?.metadata, {
-        'recurrence': 'specific_days',
         'days': ['thu', 'tue'],
-        'interval': 1,
-        'unit': 'days',
         'place_id': null,
         'place_formatted_address': null,
         'place_lat': null,
@@ -7161,8 +7326,6 @@ void main() {
         'minutes_before': 15,
         'recurrence': 'specific_days',
         'days': ['thu', 'tue'],
-        'interval': 1,
-        'unit': 'days',
       });
     },
   );
@@ -7192,14 +7355,28 @@ void main() {
     final today = DateTime.now();
     final dateLabel =
         '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
-    await tester.enterText(
-      find.byKey(const Key('event-start-field')),
+    expect(
+      tester
+          .widget<EditableText>(
+            find.descendant(
+              of: find.byKey(const Key('event-start-field')),
+              matching: find.byType(EditableText),
+            ),
+          )
+          .controller
+          .text,
       dateLabel,
     );
-    expect(find.byKey(const Key('event-end-field')), findsNothing);
+    expect(find.byKey(const Key('event-end-field')), findsOneWidget);
+    await _chooseEventDateTime(
+      tester,
+      const Key('event-end-field'),
+      date: today.add(const Duration(days: 1)),
+    );
     await tester.tap(find.byKey(const Key('event-save-action')));
     await tester.pumpAndSettle();
 
+    expect(api.updatedAllDay, isTrue);
     expect(api.updatedEvent?.metadata?['all_day'], isTrue);
     expect(
       api.updatedEvent?.startsAt,
@@ -7210,15 +7387,270 @@ void main() {
       DateTime(
         today.year,
         today.month,
-        today.day,
-        23,
-        59,
+        today.day + 1,
       ).toUtc().toIso8601String(),
     );
     expect(find.byKey(const Key('calendar-all-day-event-3')), findsOneWidget);
     expect(
       find.byKey(const Key('calendar-event-block-design-review')),
       findsNothing,
+    );
+  });
+
+  testWidgets('all day edits preserve Hermes literal multi-day bounds', (
+    WidgetTester tester,
+  ) async {
+    final today = DateTime.now();
+    final literalStart = DateTime(
+      today.year,
+      today.month,
+      today.day,
+      6,
+      17,
+    ).toUtc().toIso8601String();
+    final literalEnd = DateTime(
+      today.year,
+      today.month,
+      today.day + 2,
+      20,
+      43,
+    ).toUtc().toIso8601String();
+    final api = _EditableCalendarFakeHermesApiClient(
+      initialEvent: HermesCalendarEvent(
+        id: 3,
+        title: 'Literal retreat',
+        startsAt: literalStart,
+        endsAt: literalEnd,
+        status: 'scheduled',
+        metadata: const {'all_day': true},
+      ),
+    );
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('calendar-today-button')));
+    await tester.pumpAndSettle();
+
+    final multiDayEvent = find
+        .byKey(const Key('calendar-all-day-event-3'))
+        .first;
+    await tester.ensureVisible(multiDayEvent);
+    await tester.tap(multiDayEvent);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('event-start-field')), findsOneWidget);
+    expect(find.byKey(const Key('event-end-field')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('event-save-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedAllDay, isTrue);
+    expect(api.updatedEvent?.startsAt, literalStart);
+    expect(api.updatedEvent?.endsAt, literalEnd);
+  });
+
+  testWidgets(
+    'all day title edits preserve same-local-day offset-bearing literal bounds',
+    (WidgetTester tester) async {
+      final today = DateTime.now();
+      final localStart = DateTime(today.year, today.month, today.day, 12, 17);
+      final localEnd = DateTime(today.year, today.month, today.day, 12, 43);
+      String atFixedOffset(DateTime localValue) {
+        const offset = Duration(hours: 5, minutes: 30);
+        final shifted = localValue.toUtc().add(offset);
+        String twoDigits(int value) => value.toString().padLeft(2, '0');
+        return '${shifted.year}-${twoDigits(shifted.month)}-'
+            '${twoDigits(shifted.day)}T${twoDigits(shifted.hour)}:'
+            '${twoDigits(shifted.minute)}:${twoDigits(shifted.second)}+05:30';
+      }
+
+      final literalStart = atFixedOffset(localStart);
+      final literalEnd = atFixedOffset(localEnd);
+      expect(
+        DateTime.parse(literalEnd).isAfter(DateTime.parse(literalStart)),
+        isTrue,
+      );
+      expect(
+        DateTime.parse(literalStart).toLocal().day,
+        DateTime.parse(literalEnd).toLocal().day,
+      );
+      final api = _EditableCalendarFakeHermesApiClient(
+        initialEvent: HermesCalendarEvent(
+          id: 3,
+          title: 'Literal same-day retreat',
+          startsAt: literalStart,
+          endsAt: literalEnd,
+          status: 'scheduled',
+          metadata: const {'all_day': true},
+        ),
+      );
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('calendar-today-button')));
+      await tester.pumpAndSettle();
+
+      final mixedBoundEvent = find
+          .byKey(const Key('calendar-all-day-event-3'))
+          .first;
+      await tester.ensureVisible(mixedBoundEvent);
+      await tester.tap(mixedBoundEvent);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const Key('event-title-field')),
+        'Updated literal same-day retreat',
+      );
+      await tester.tap(find.byKey(const Key('event-save-action')));
+      await tester.pumpAndSettle();
+
+      expect(api.updatedEvent?.title, 'Updated literal same-day retreat');
+      expect(api.updatedEvent?.startsAt, literalStart);
+      expect(api.updatedEvent?.endsAt, literalEnd);
+    },
+  );
+
+  testWidgets(
+    'all day start-only edits validate the resolved literal end instant',
+    (WidgetTester tester) async {
+      final today = DateTime.now();
+      final originalStart = DateTime(
+        today.year,
+        today.month,
+        today.day - 1,
+        12,
+        17,
+      ).toUtc().toIso8601String();
+      final literalEnd = DateTime(
+        today.year,
+        today.month,
+        today.day,
+        12,
+        43,
+      ).toUtc().toIso8601String();
+      final api = _EditableCalendarFakeHermesApiClient(
+        initialEvent: HermesCalendarEvent(
+          id: 3,
+          title: 'Literal mixed-bound retreat',
+          startsAt: originalStart,
+          endsAt: literalEnd,
+          status: 'scheduled',
+          metadata: const {'all_day': true},
+        ),
+      );
+      await tester.pumpWidget(
+        HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('calendar-today-button')));
+      await tester.pumpAndSettle();
+
+      final mixedBoundEvent = find
+          .byKey(const Key('calendar-all-day-event-3'))
+          .last;
+      await tester.ensureVisible(mixedBoundEvent);
+      await tester.tap(mixedBoundEvent);
+      await tester.pumpAndSettle();
+
+      await _chooseEventDateTime(
+        tester,
+        const Key('event-start-field'),
+        date: today,
+      );
+      await tester.tap(find.byKey(const Key('event-save-action')));
+      await tester.pumpAndSettle();
+
+      final expectedStart = DateTime(
+        today.year,
+        today.month,
+        today.day,
+      ).toUtc().toIso8601String();
+      expect(
+        DateTime.parse(literalEnd).isAfter(DateTime.parse(expectedStart)),
+        isTrue,
+      );
+      expect(api.updatedEvent?.startsAt, expectedStart);
+      expect(api.updatedEvent?.endsAt, literalEnd);
+    },
+  );
+
+  testWidgets('all day date fields are read-only and picker-backed', (
+    WidgetTester tester,
+  ) async {
+    final today = DateTime.now();
+    final literalStart = DateTime(
+      today.year,
+      today.month,
+      today.day,
+    ).toUtc().toIso8601String();
+    final literalEnd = DateTime(
+      today.year,
+      today.month,
+      today.day + 1,
+    ).toUtc().toIso8601String();
+    final api = _EditableCalendarFakeHermesApiClient(
+      initialEvent: HermesCalendarEvent(
+        id: 3,
+        title: 'Literal validation retreat',
+        startsAt: literalStart,
+        endsAt: literalEnd,
+        status: 'scheduled',
+        metadata: const {'all_day': true},
+      ),
+    );
+    await tester.pumpWidget(
+      HermesBeanApp(apiClient: api, tokenStore: _MemoryAuthTokenStore()),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('calendar-today-button')));
+    await tester.pumpAndSettle();
+
+    final event = find.byKey(const Key('calendar-all-day-event-3')).first;
+    await tester.ensureVisible(event);
+    await tester.tap(event);
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('event-start-field')))
+          .readOnly,
+      isTrue,
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('event-end-field')))
+          .readOnly,
+      isTrue,
+    );
+    final expectedStartText =
+        '${today.year}-${today.month.toString().padLeft(2, '0')}-'
+        '${today.day.toString().padLeft(2, '0')}';
+    final startEditor = tester.widget<EditableText>(
+      find.descendant(
+        of: find.byKey(const Key('event-start-field')),
+        matching: find.byType(EditableText),
+      ),
+    );
+    expect(startEditor.controller.text, expectedStartText);
+
+    final selectedEnd = today.add(const Duration(days: 2));
+    await _chooseEventDateTime(
+      tester,
+      const Key('event-end-field'),
+      date: selectedEnd,
+    );
+    await tester.tap(find.byKey(const Key('event-save-action')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedEvent?.startsAt, literalStart);
+    expect(
+      api.updatedEvent?.endsAt,
+      DateTime(
+        selectedEnd.year,
+        selectedEnd.month,
+        selectedEnd.day,
+      ).toUtc().toIso8601String(),
     );
   });
 
@@ -7258,6 +7690,26 @@ void main() {
     );
   });
 
+  testWidgets('all-day rendering ignores camel-case metadata aliases', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      HermesBeanApp(
+        apiClient: _AliasAllDayCalendarFakeHermesApiClient(),
+        tokenStore: _MemoryAuthTokenStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('calendar-today-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('calendar-all-day-event-906')), findsNothing);
+    expect(
+      find.byKey(const Key('calendar-event-block-alias-only-event')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('all day UTC midnight events stay on their stored date', (
     WidgetTester tester,
   ) async {
@@ -7271,8 +7723,13 @@ void main() {
     await tester.tap(find.byKey(const Key('calendar-today-button')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('calendar-all-day-event-905')), findsOneWidget);
-    expect(find.text('Moving out of shop'), findsOneWidget);
+    expect(find.byKey(const Key('calendar-all-day-event-905')), findsWidgets);
+    expect(
+      find.byKey(const Key('calendar-all-day-event-905')).hitTestable(),
+      findsOneWidget,
+    );
+    expect(find.text('Moving out of shop'), findsWidgets);
+    expect(find.text('Moving out of shop').hitTestable(), findsOneWidget);
   });
 
   testWidgets('multi-day timed events render in the multi-day row only', (
@@ -7389,23 +7846,11 @@ void main() {
     await tester.tap(eventBlock);
     await tester.pumpAndSettle();
     final end = DateTime.now().add(const Duration(days: 2));
-    const monthNames = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-    await tester.enterText(
-      find.byKey(const Key('event-end-field')),
-      '${monthNames[end.month - 1]} ${end.day} at 1pm',
+    await _chooseEventDateTime(
+      tester,
+      const Key('event-end-field'),
+      date: end,
+      hour: 13,
     );
     await tester.tap(find.byKey(const Key('event-save-action')));
     await tester.pumpAndSettle();
@@ -7490,7 +7935,7 @@ void main() {
     );
     expect(
       startEditor.controller.text,
-      contains(_testNaturalTimeLabel(wallClockStart)),
+      _testExactDateTimeInput(wallClockStart),
     );
   });
 
@@ -7848,7 +8293,7 @@ void main() {
         updatedStartEditor.controller.text,
         contains('${DateTime.now().year + 1}'),
       );
-      expect(updatedStartEditor.controller.text, contains('1:05pm'));
+      expect(updatedStartEditor.controller.text, contains('13:05'));
     },
   );
 
@@ -7870,13 +8315,15 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.enterText(
-        find.byKey(const Key('event-start-field')),
-        '4:00 PM',
+      await _chooseEventDateTime(
+        tester,
+        const Key('event-start-field'),
+        hour: 16,
       );
-      await tester.enterText(
-        find.byKey(const Key('event-end-field')),
-        '4:00 PM',
+      await _chooseEventDateTime(
+        tester,
+        const Key('event-end-field'),
+        hour: 16,
       );
       await tester.tap(find.byKey(const Key('event-save-action')));
       await tester.pumpAndSettle();
@@ -8101,9 +8548,27 @@ void main() {
           .value,
       isTrue,
     );
+
+    await tester.tap(find.byKey(const Key('reminder-complete-checkbox-401')));
+    await tester.pumpAndSettle();
+
+    expect(api.updatedReminder?.status, 'scheduled');
+    expect(find.text('Refill dog food'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('reminder-filter-scheduled')));
+    await tester.pumpAndSettle();
+    expect(find.text('Refill dog food'), findsOneWidget);
+    expect(
+      tester
+          .widget<Checkbox>(
+            find.byKey(const Key('reminder-complete-checkbox-401')),
+          )
+          .value,
+      isFalse,
+    );
   });
 
-  testWidgets('chat renders backend JSON message envelopes as natural language', (
+  testWidgets('chat preserves the literal durable Hermes final', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -8125,12 +8590,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.text(
+      find.textContaining(
+        '{"id":75}\n'
+        '{"tool":"calendar_events.create","ok":true}\n'
         'Added Workout to this week on Monday, Wednesday, and Friday from 9:00 AM to 10:00 AM. Should I make it repeat every week?',
+        findRichText: true,
       ),
       findsOneWidget,
     );
-    expect(find.textContaining('{"message"'), findsNothing);
   });
 }
 
@@ -8197,7 +8664,7 @@ class _StaleTodayPersistedResourcesFakeHermesApiClient
       id: 902,
       title: 'Persisted reminder',
       dueAt: DateTime.now().toIso8601String(),
-      status: 'pending',
+      status: 'scheduled',
     ),
   ];
 
@@ -8255,7 +8722,7 @@ class _CommandCenterAgendaFakeHermesApiClient
       HermesReminder(
         id: 502,
         title: 'Send recap',
-        status: 'pending',
+        status: 'scheduled',
         dueAt: _todayFutureTime(60).toIso8601String(),
       ),
     ];
@@ -8348,7 +8815,7 @@ class _CommandCenterOverdueAgendaFakeHermesApiClient
       HermesReminder(
         id: 512,
         title: 'Overdue nudge',
-        status: 'pending',
+        status: 'scheduled',
         dueAt: _relativeTime(-60).toIso8601String(),
       ),
     ];
@@ -8392,7 +8859,7 @@ class _CommandCenterDeleteRefreshEmptyFakeHermesApiClient
       HermesReminder(
         id: 601,
         title: 'Grocery shopping reminder',
-        status: 'pending',
+        status: 'scheduled',
         dueAt: _todayFutureTime(20).toIso8601String(),
         workspaceId: 1,
       ),
@@ -8555,6 +9022,53 @@ class _PastTasksUnavailableHermesApiClient extends _FakeHermesApiClient {
   }
 }
 
+HermesActivityEvent _semanticReceiptEvent({
+  required int id,
+  required int runId,
+  required String operationId,
+  required String tool,
+  String receiptStatus = 'completed',
+  String? title,
+  String? resourceEventType,
+  String? clientRequestId,
+}) {
+  final completed = receiptStatus == 'completed';
+  return HermesActivityEvent(
+    id: id,
+    eventType: 'assistant.semantic_operation.receipt',
+    status: completed ? 'succeeded' : receiptStatus,
+    toolName: tool,
+    payload: {
+      'assistant_run_id': runId,
+      'operation_id': operationId,
+      'tool': tool,
+      if (clientRequestId != null) 'client_request_id': clientRequestId,
+      'receipt': {
+        'operation_id': operationId,
+        'tool': tool,
+        'status': receiptStatus,
+        'data': {
+          if (title != null || resourceEventType != null)
+            'events': [
+              {
+                'id': id + 1000,
+                'type': resourceEventType ?? 'assistant.operation.completed',
+                'status': completed ? 'succeeded' : receiptStatus,
+                'data': {if (title != null) 'title': title},
+              },
+            ],
+        },
+        'side_effect_committed':
+            completed &&
+            (tool.endsWith('.create') ||
+                tool.endsWith('.update') ||
+                tool.endsWith('.delete') ||
+                tool.endsWith('.resolve')),
+      },
+    },
+  );
+}
+
 class _SignedInFakeHermesApiClient extends _FakeHermesApiClient {
   _SignedInFakeHermesApiClient() {
     bearerToken = 'existing-token';
@@ -8587,8 +9101,8 @@ class _DelayedQueueFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) {
     queueMessageCalls++;
     sentMessages.add(content);
@@ -8617,41 +9131,100 @@ class _DelayedQueueFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   }
 }
 
+class _RapidChatFakeHermesApiClient extends _SignedInFakeHermesApiClient {
+  final List<Completer<HermesMessageResult>> _completers = [];
+  final List<String> clientRequestIds = [];
+
+  @override
+  Future<HermesMessageResult> queueMessage({
+    required int sessionId,
+    required String content,
+    required String clientRequestId,
+    Map<String, Object?>? metadata,
+  }) {
+    queueMessageCalls++;
+    sentMessages.add(content);
+    clientRequestIds.add(clientRequestId);
+    final completer = Completer<HermesMessageResult>();
+    _completers.add(completer);
+    return completer.future;
+  }
+
+  void complete(int index) {
+    final messageNumber = index + 1;
+    _completers[index].complete(
+      HermesMessageResult(
+        status: 'completed',
+        session: const HermesSession(id: 42, status: 'active', title: 'Today'),
+        userMessage: HermesMessage(
+          id: 7200 + messageNumber,
+          role: 'user',
+          content: sentMessages[index],
+          metadata: {'client_request_id': clientRequestIds[index]},
+        ),
+        assistantMessage: HermesMessage(
+          id: 7300 + messageNumber,
+          role: 'assistant',
+          content: messageNumber == 1 ? 'First final' : 'Second final',
+        ),
+        run: HermesAssistantRun(
+          id: 7400 + messageNumber,
+          status: 'completed',
+          source: 'flutter',
+          clientRequestId: clientRequestIds[index],
+          userMessageId: 7200 + messageNumber,
+          assistantMessageId: 7300 + messageNumber,
+        ),
+        events: const [],
+      ),
+    );
+  }
+}
+
 class _SessionRecoveryQueuedRunFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
-  static const _userMessage = HermesMessage(
-    id: 7601,
-    role: 'user',
-    content: 'whats for dinner tomorrow according to my meal plan note?',
-    metadata: {'client_request_id': 'test-request'},
-  );
+  String? _clientRequestId;
 
   static const _assistantMessage = HermesMessage(
     id: 7602,
     role: 'assistant',
     content: 'Tomorrow dinner is the lemon chicken sheet-pan meal.',
+    metadata: {'assistant_run_id': 76, 'final_status': 'completed'},
   );
 
   @override
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
     queueMessageCalls++;
     sentMessages.add(content);
     sentMessageMetadata.add(metadata);
-    return const HermesMessageResult(
+    _clientRequestId = clientRequestId;
+    return HermesMessageResult(
       status: 'queued',
-      session: HermesSession(id: 42, status: 'queued', title: 'Today'),
-      userMessage: _userMessage,
-      run: HermesAssistantRun(id: 76, status: 'running', source: 'flutter'),
-      events: [
+      session: const HermesSession(id: 42, status: 'queued', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 7601,
+        role: 'user',
+        content: content,
+        metadata: {'client_request_id': clientRequestId},
+      ),
+      run: HermesAssistantRun(
+        id: 76,
+        status: 'running',
+        source: 'conversation_message',
+        clientRequestId: clientRequestId,
+        userMessageId: 7601,
+      ),
+      events: const [
         HermesActivityEvent(
           id: 76,
           eventType: 'runtime.run_queued',
           status: 'queued',
+          payload: {'run_id': 76, 'message_id': 7601},
         ),
       ],
     );
@@ -8671,7 +9244,16 @@ class _SessionRecoveryQueuedRunFakeHermesApiClient
   Future<HermesSessionDetails> resumeSessionDetails(int sessionId) async =>
       HermesSessionDetails(
         session: HermesSession(id: sessionId, status: 'active', title: 'Today'),
-        messages: const [_userMessage, _assistantMessage],
+        messages: [
+          HermesMessage(
+            id: 7601,
+            role: 'user',
+            content:
+                'whats for dinner tomorrow according to my meal plan note?',
+            metadata: {'client_request_id': _clientRequestId},
+          ),
+          _assistantMessage,
+        ],
       );
 }
 
@@ -8825,7 +9407,7 @@ class _FutureCriticalFakeHermesApiClient extends _SignedInFakeHermesApiClient {
     HermesReminder(
       id: 102,
       title: 'Future reminder',
-      status: 'pending',
+      status: 'scheduled',
       dueAt: DateTime.now().add(const Duration(days: 3)).toIso8601String(),
       isCritical: true,
     ),
@@ -8865,7 +9447,7 @@ class _NonCriticalOverdueFakeHermesApiClient
     HermesReminder(
       id: 105,
       title: 'Overdue regular reminder',
-      status: 'pending',
+      status: 'scheduled',
       dueAt: DateTime.now().subtract(const Duration(days: 2)).toIso8601String(),
       isCritical: false,
     ),
@@ -9179,7 +9761,6 @@ class _PostLoginRefreshTimeoutHermesApiClient extends _FakeHermesApiClient {
   @override
   Future<HermesSession> startSession({
     String? title,
-    String? runtimeMode,
     int? workspaceId,
     Map<String, Object?>? metadata,
   }) async {
@@ -9248,7 +9829,6 @@ class _FakeHermesApiClient extends HermesApiClient {
   final takenEmails = <String>{};
   final emailAvailabilityChecks = <String>[];
   final checkoutRequests = <Map<String, String>>[];
-  int sendMessageCalls = 0;
   int branchMessageCalls = 0;
   int? branchedFromMessageId;
   int queueMessageCalls = 0;
@@ -9262,7 +9842,6 @@ class _FakeHermesApiClient extends HermesApiClient {
   HermesReminder? bannerUpdatedReminder;
   List<HermesApproval> approvals = const [];
   int? approvedApprovalId;
-  bool alwaysApprovedApproval = false;
   int? deniedApprovalId;
 
   HermesSubscriptionSummary get _billingSubscriptionSummary =>
@@ -9534,7 +10113,6 @@ class _FakeHermesApiClient extends HermesApiClient {
   @override
   Future<HermesSession> startSession({
     String? title,
-    String? runtimeMode,
     int? workspaceId,
     Map<String, Object?>? metadata,
   }) async {
@@ -9575,7 +10153,10 @@ class _FakeHermesApiClient extends HermesApiClient {
   }
 
   @override
-  Future<HermesSession> cancelSession(int sessionId) async {
+  Future<HermesSession> cancelSession(
+    int sessionId, {
+    String? clientRequestId,
+  }) async {
     cancelledSessionCalls++;
     return HermesSession(id: sessionId, status: 'cancelling', title: 'Today');
   }
@@ -9631,7 +10212,7 @@ class _FakeHermesApiClient extends HermesApiClient {
         title: 'Stand up',
         isCritical: true,
         dueAt: dueAt.toIso8601String(),
-        status: bannerUpdatedReminder?.status ?? 'pending',
+        status: bannerUpdatedReminder?.status ?? 'scheduled',
       ),
     ];
   }
@@ -9654,7 +10235,7 @@ class _FakeHermesApiClient extends HermesApiClient {
     bannerUpdatedReminder = HermesReminder(
       id: reminderId,
       title: title ?? 'Stand up',
-      status: status ?? 'pending',
+      status: status ?? 'scheduled',
       dueAt: remindAt ?? DateTime.now().toIso8601String(),
       isCritical: isCritical ?? true,
       category: clearCategory ? null : category,
@@ -9668,22 +10249,24 @@ class _FakeHermesApiClient extends HermesApiClient {
   @override
   Future<List<HermesCalendarEvent>> listCalendarEvents({
     bool skipExternalSync = false,
-  }) async => plannedToday
-      ? const [
-          HermesCalendarEvent(
-            id: 30,
-            title: 'Updated focus block',
-            startsAt: '2:30 PM',
-          ),
-        ]
-      : const [
-          HermesCalendarEvent(
-            id: 3,
-            title: 'Design review',
-            startsAt: '2:30 PM',
-            isCritical: true,
-          ),
-        ];
+  }) async {
+    final now = DateTime.now();
+    final startsAt = DateTime(
+      now.year,
+      now.month,
+      now.day,
+      14,
+      30,
+    ).toUtc().toIso8601String();
+    return [
+      HermesCalendarEvent(
+        id: plannedToday ? 30 : 3,
+        title: plannedToday ? 'Updated focus block' : 'Design review',
+        startsAt: startsAt,
+        isCritical: !plannedToday,
+      ),
+    ];
+  }
 
   @override
   Future<HermesTodaySummary> todaySummary({int? workspaceId}) async {
@@ -9699,12 +10282,8 @@ class _FakeHermesApiClient extends HermesApiClient {
   }
 
   @override
-  Future<HermesApprovalResult> approveApproval(
-    int approvalId, {
-    bool alwaysApprove = false,
-  }) async {
+  Future<HermesApprovalResult> approveApproval(int approvalId) async {
     approvedApprovalId = approvalId;
-    alwaysApprovedApproval = alwaysApprove;
     final approval = approvals.firstWhere((item) => item.id == approvalId);
     approvals = approvals
         .where((item) => item.id != approvalId)
@@ -9917,13 +10496,12 @@ class _FakeHermesApiClient extends HermesApiClient {
     return outlookCalendarStatus();
   }
 
-  @override
-  Future<HermesMessageResult> sendMessage({
+  Future<HermesMessageResult> _completeSemanticMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
   }) async {
-    sendMessageCalls++;
     sentMessages.add(content);
     sentMessageMetadata.add(metadata);
     var isPreferenceOnlyMessage = false;
@@ -9952,7 +10530,7 @@ class _FakeHermesApiClient extends HermesApiClient {
       status: 'completed',
       session: const HermesSession(id: 42, status: 'active', title: 'Today'),
       userMessage: HermesMessage(
-        id: 7000 + sendMessageCalls + branchMessageCalls,
+        id: 7000 + sentMessages.length + branchMessageCalls,
         role: 'user',
         content: content,
         metadata: metadata ?? const {},
@@ -9979,13 +10557,15 @@ class _FakeHermesApiClient extends HermesApiClient {
     required int sessionId,
     required int messageId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
   }) {
     branchMessageCalls++;
     branchedFromMessageId = messageId;
-    return sendMessage(
+    return _completeSemanticMessage(
       sessionId: sessionId,
       content: content,
+      clientRequestId: clientRequestId,
       metadata: metadata,
     );
   }
@@ -10000,13 +10580,14 @@ class _FakeHermesApiClient extends HermesApiClient {
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) {
     queueMessageCalls++;
-    return sendMessage(
+    return _completeSemanticMessage(
       sessionId: sessionId,
       content: content,
+      clientRequestId: clientRequestId,
       metadata: metadata,
     );
   }
@@ -10023,28 +10604,16 @@ class _SlowChatFakeHermesApiClient extends _SignedInFakeHermesApiClient {
       Completer<HermesMessageResult>();
 
   @override
-  Future<HermesMessageResult> sendMessage({
-    required int sessionId,
-    required String content,
-    Map<String, Object?>? metadata,
-  }) {
-    sentMessages.add(content);
-    sentMessageMetadata.add(metadata);
-    return _messageCompleter.future;
-  }
-
-  @override
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) {
-    return sendMessage(
-      sessionId: sessionId,
-      content: content,
-      metadata: metadata,
-    );
+    queueMessageCalls++;
+    sentMessages.add(content);
+    sentMessageMetadata.add(metadata);
+    return _messageCompleter.future;
   }
 
   void completeMessage() {
@@ -10067,58 +10636,36 @@ class _SlowChatFakeHermesApiClient extends _SignedInFakeHermesApiClient {
 class _BeanWorkPlanFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   bool _messageSent = false;
 
-  static const _workEvents = [
-    HermesActivityEvent(
+  static final _workEvents = [
+    _semanticReceiptEvent(
       id: 2,
-      eventType: 'assistant.work_item.planned',
-      status: 'planned',
-      toolName: 'assistant.work',
-      payload: {
-        'work_item_id': 'tool-call-event',
-        'work_order': 0,
-        'action_type': 'calendar_event.create',
-        'label': 'Create calendar event: Deep work',
-      },
+      runId: 90,
+      operationId: 'create-deep-work-event',
+      tool: 'app.calendar.create',
+      title: 'Deep work',
+      resourceEventType: 'assistant.calendar_event.created',
     ),
-    HermesActivityEvent(
+    _semanticReceiptEvent(
       id: 3,
-      eventType: 'assistant.work_item.planned',
-      status: 'planned',
-      toolName: 'assistant.work',
-      payload: {
-        'work_item_id': 'tool-call-reminder',
-        'work_order': 1,
-        'action_type': 'reminder.create',
-        'label': 'Create reminder: Deep work',
-      },
+      runId: 90,
+      operationId: 'create-deep-work-reminder',
+      tool: 'app.reminder.create',
+      title: 'Deep work',
+      resourceEventType: 'assistant.reminder.created',
     ),
     HermesActivityEvent(
       id: 4,
       eventType: 'assistant.calendar_event.created',
       status: 'succeeded',
       toolName: 'calendar.create',
-      payload: {
-        'calendar_event_id': 30,
-        'title': 'Deep work',
-        'work_item_id': 'tool-call-event',
-        'work_order': 0,
-        'work_label': 'Create calendar event: Deep work',
-        'action_type': 'calendar_event.create',
-      },
+      payload: {'calendar_event_id': 30, 'title': 'Deep work'},
     ),
     HermesActivityEvent(
       id: 5,
       eventType: 'assistant.reminder.created',
       status: 'succeeded',
       toolName: 'reminders.create',
-      payload: {
-        'reminder_id': 20,
-        'title': 'Reminder: Deep work',
-        'work_item_id': 'tool-call-reminder',
-        'work_order': 1,
-        'work_label': 'Create reminder: Deep work',
-        'action_type': 'reminder.create',
-      },
+      payload: {'reminder_id': 20, 'title': 'Reminder: Deep work'},
     ),
   ];
 
@@ -10134,8 +10681,8 @@ class _BeanWorkPlanFakeHermesApiClient extends _SignedInFakeHermesApiClient {
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
     queueMessageCalls++;
     sentMessages.add(content);
@@ -10156,6 +10703,12 @@ class _BeanWorkPlanFakeHermesApiClient extends _SignedInFakeHermesApiClient {
         role: 'assistant',
         content: 'Done — I added the deep work block and reminder.',
       ),
+      run: HermesAssistantRun(
+        id: 90,
+        status: 'completed',
+        source: 'conversation_message',
+        clientRequestId: clientRequestId,
+      ),
       events: _workEvents,
     );
   }
@@ -10163,32 +10716,21 @@ class _BeanWorkPlanFakeHermesApiClient extends _SignedInFakeHermesApiClient {
 
 class _StaleBeanWorkEventsFakeHermesApiClient
     extends _SignedInFakeHermesApiClient {
-  static const _staleEvents = [
-    HermesActivityEvent(
+  static final _staleEvents = [
+    _semanticReceiptEvent(
       id: 12,
-      eventType: 'assistant.work_item.planned',
-      status: 'planned',
-      toolName: 'assistant.work',
-      payload: {
-        'work_item_id': 'old-task',
-        'work_order': 0,
-        'action_type': 'task.create',
-        'label': 'Create task: Old stale task',
-      },
+      runId: 12,
+      operationId: 'old-task',
+      tool: 'app.task.create',
+      title: 'Old stale task',
+      resourceEventType: 'assistant.task.created',
     ),
     HermesActivityEvent(
       id: 13,
       eventType: 'assistant.task.created',
       status: 'succeeded',
       toolName: 'tasks.create',
-      payload: {
-        'task_id': 999,
-        'title': 'Old stale task',
-        'work_item_id': 'old-task',
-        'work_order': 0,
-        'work_label': 'Create task: Old stale task',
-        'action_type': 'task.create',
-      },
+      payload: {'task_id': 999, 'title': 'Old stale task'},
     ),
   ];
 
@@ -10201,38 +10743,24 @@ class _StaleBeanWorkEventsFakeHermesApiClient
   }) async => _staleEvents;
 
   @override
-  Future<HermesMessageResult> sendMessage({
+  Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
   }) async {
-    sendMessageCalls++;
+    queueMessageCalls++;
     sentMessages.add(content);
     sentMessageMetadata.add(metadata);
-    return const HermesMessageResult(
+    return HermesMessageResult(
       status: 'completed',
-      session: HermesSession(id: 42, status: 'active', title: 'Today'),
-      assistantMessage: HermesMessage(
+      session: const HermesSession(id: 42, status: 'active', title: 'Today'),
+      assistantMessage: const HermesMessage(
         id: 8200,
         role: 'assistant',
         content: 'Yes, I can help with calendar events.',
       ),
       events: _staleEvents,
-    );
-  }
-
-  @override
-  Future<HermesMessageResult> queueMessage({
-    required int sessionId,
-    required String content,
-    Map<String, Object?>? metadata,
-    String source = 'flutter',
-  }) {
-    queueMessageCalls++;
-    return sendMessage(
-      sessionId: sessionId,
-      content: content,
-      metadata: metadata,
     );
   }
 }
@@ -10243,8 +10771,8 @@ class _ReadOnlyQuestionFakeHermesApiClient
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
     queueMessageCalls++;
     sentMessages.add(content);
@@ -10263,18 +10791,18 @@ class _ReadOnlyQuestionFakeHermesApiClient
         role: 'assistant',
         content: 'You have two tasks due today.',
       ),
-      events: const [
-        HermesActivityEvent(
+      run: HermesAssistantRun(
+        id: 83,
+        status: 'completed',
+        source: 'conversation_message',
+        clientRequestId: clientRequestId,
+      ),
+      events: [
+        _semanticReceiptEvent(
           id: 8302,
-          eventType: 'assistant.work_item.planned',
-          status: 'planned',
-          toolName: 'assistant.work',
-          payload: {
-            'work_item_id': 'read-tasks',
-            'work_order': 0,
-            'action_type': 'task.read',
-            'label': 'Checking tasks',
-          },
+          runId: 83,
+          operationId: 'read-tasks',
+          tool: 'app.task.search',
         ),
       ],
     );
@@ -10290,8 +10818,8 @@ class _DashboardRefreshBeanWorkFakeHermesApiClient
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
     queueMessageCalls++;
     sentMessages.add(content);
@@ -10306,7 +10834,7 @@ class _DashboardRefreshBeanWorkFakeHermesApiClient
         metadata: metadata ?? const {},
       ),
       run: const HermesAssistantRun(
-        id: 64,
+        id: 90,
         status: 'running',
         source: 'flutter',
       ),
@@ -10324,7 +10852,7 @@ class _DashboardRefreshBeanWorkFakeHermesApiClient
   Future<HermesAssistantRun> getAssistantRun(int runId) async =>
       _dashboardRefreshRequested
       ? const HermesAssistantRun(
-          id: 64,
+          id: 90,
           status: 'completed',
           source: 'flutter',
           assistantMessage: HermesMessage(
@@ -10333,7 +10861,7 @@ class _DashboardRefreshBeanWorkFakeHermesApiClient
             content: 'Done — I added the deep work block and reminder.',
           ),
         )
-      : const HermesAssistantRun(id: 64, status: 'running', source: 'flutter');
+      : const HermesAssistantRun(id: 90, status: 'running', source: 'flutter');
 
   @override
   Future<HermesSessionDetails> resumeSessionDetails(int sessionId) async =>
@@ -10392,7 +10920,15 @@ class _ReminderBeforeMeetingFakeHermesApiClient
   bool _messageSent = false;
   bool _workEventsReturned = false;
 
-  static const _workEvents = [
+  static final _workEvents = [
+    _semanticReceiptEvent(
+      id: 39,
+      runId: 96,
+      operationId: 'reminder-parent-teacher',
+      tool: 'app.reminder.create',
+      title: 'Parent-teacher check-in - 1 hour before',
+      resourceEventType: 'assistant.reminder.created',
+    ),
     HermesActivityEvent(
       id: 40,
       eventType: 'assistant.reminder.created',
@@ -10401,11 +10937,6 @@ class _ReminderBeforeMeetingFakeHermesApiClient
       payload: {
         'reminder_id': 77,
         'title': 'Parent-teacher check-in - 1 hour before',
-        'work_item_id': 'reminder-parent-teacher',
-        'work_order': 0,
-        'work_label':
-            'Create reminder: Parent-teacher check-in - 1 hour before',
-        'action_type': 'reminder.create',
       },
     ),
   ];
@@ -10414,8 +10945,8 @@ class _ReminderBeforeMeetingFakeHermesApiClient
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
     queueMessageCalls++;
     sentMessages.add(content);
@@ -10440,18 +10971,6 @@ class _ReminderBeforeMeetingFakeHermesApiClient
           id: 38,
           eventType: 'runtime.run_queued',
           status: 'queued',
-        ),
-        HermesActivityEvent(
-          id: 39,
-          eventType: 'assistant.work_item.planned',
-          status: 'planned',
-          toolName: 'assistant.work',
-          payload: {
-            'work_item_id': 'reminder-parent-teacher',
-            'work_order': 0,
-            'action_type': 'reminder.create',
-            'label': 'Create reminder: Parent-teacher check-in - 1 hour before',
-          },
         ),
       ],
     );
@@ -10515,32 +11034,21 @@ class _BeanMutationRefreshFakeHermesApiClient
   bool _workEventsReturned = false;
   bool taskListIncludedCreatedTask = false;
 
-  static const _workEvents = [
-    HermesActivityEvent(
+  static final _workEvents = [
+    _semanticReceiptEvent(
       id: 20,
-      eventType: 'assistant.work_item.planned',
-      status: 'planned',
-      toolName: 'assistant.work',
-      payload: {
-        'work_item_id': 'task-create-trash',
-        'work_order': 0,
-        'action_type': 'task.create',
-        'label': 'Create task: Take out trash',
-      },
+      runId: 92,
+      operationId: 'task-create-trash',
+      tool: 'app.task.create',
+      title: 'Take out trash',
+      resourceEventType: 'assistant.task.created',
     ),
     HermesActivityEvent(
       id: 21,
       eventType: 'assistant.task.created',
       status: 'succeeded',
       toolName: 'tasks.create',
-      payload: {
-        'task_id': 440,
-        'title': 'Take out trash',
-        'work_item_id': 'task-create-trash',
-        'work_order': 0,
-        'work_label': 'Create task: Take out trash',
-        'action_type': 'task.create',
-      },
+      payload: {'task_id': 440, 'title': 'Take out trash'},
     ),
   ];
 
@@ -10548,8 +11056,8 @@ class _BeanMutationRefreshFakeHermesApiClient
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
     queueMessageCalls++;
     sentMessages.add(content);
@@ -10641,32 +11149,21 @@ class _NoteMutationStillRunningFakeHermesApiClient
   int _runPolls = 0;
   bool noteListIncludedCreatedNote = false;
 
-  static const _workEvents = [
-    HermesActivityEvent(
+  static final _workEvents = [
+    _semanticReceiptEvent(
       id: 24,
-      eventType: 'assistant.work_item.planned',
-      status: 'planned',
-      toolName: 'assistant.work',
-      payload: {
-        'work_item_id': 'note-create-shopping',
-        'work_order': 0,
-        'action_type': 'note.create',
-        'label': 'Create note: Shopping list',
-      },
+      runId: 93,
+      operationId: 'note-create-shopping',
+      tool: 'app.note.create',
+      title: 'Shopping list',
+      resourceEventType: 'assistant.note.created',
     ),
     HermesActivityEvent(
       id: 25,
       eventType: 'assistant.note.created',
       status: 'succeeded',
       toolName: 'notes.create',
-      payload: {
-        'note_id': 512,
-        'title': 'Shopping list',
-        'work_item_id': 'note-create-shopping',
-        'work_order': 0,
-        'work_label': 'Create note: Shopping list',
-        'action_type': 'note.create',
-      },
+      payload: {'note_id': 512, 'title': 'Shopping list'},
     ),
   ];
 
@@ -10674,8 +11171,8 @@ class _NoteMutationStillRunningFakeHermesApiClient
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
     queueMessageCalls++;
     sentMessages.add(content);
@@ -10759,60 +11256,38 @@ class _PartialBeanWorkEventsFakeHermesApiClient
   int _activityPollsAfterMessage = 0;
   int _runPolls = 0;
 
-  static const _calendarPlanEvent = HermesActivityEvent(
+  static final _calendarReceiptEvent = _semanticReceiptEvent(
     id: 30,
-    eventType: 'assistant.work_item.planned',
-    status: 'planned',
-    toolName: 'assistant.work',
-    payload: {
-      'work_item_id': 'calendar-miata',
-      'work_order': 0,
-      'action_type': 'calendar_event.create',
-      'label': 'Create calendar event: Miata engine swap',
-    },
+    runId: 94,
+    operationId: 'calendar-miata',
+    tool: 'app.calendar.create',
+    title: 'Miata engine swap',
+    resourceEventType: 'assistant.calendar_event.created',
   );
 
-  static const _allEvents = [
-    _calendarPlanEvent,
-    HermesActivityEvent(
+  static final _allEvents = [
+    _calendarReceiptEvent,
+    _semanticReceiptEvent(
       id: 31,
-      eventType: 'assistant.work_item.planned',
-      status: 'planned',
-      toolName: 'assistant.work',
-      payload: {
-        'work_item_id': 'reminder-miata',
-        'work_order': 1,
-        'action_type': 'reminder.create',
-        'label': 'Create reminder: Miata engine swap',
-      },
+      runId: 94,
+      operationId: 'reminder-miata',
+      tool: 'app.reminder.create',
+      title: 'Miata engine swap',
+      resourceEventType: 'assistant.reminder.created',
     ),
     HermesActivityEvent(
       id: 32,
       eventType: 'assistant.calendar_event.created',
       status: 'succeeded',
       toolName: 'calendar.create',
-      payload: {
-        'calendar_event_id': 61,
-        'title': 'Miata engine swap',
-        'work_item_id': 'calendar-miata',
-        'work_order': 0,
-        'work_label': 'Create calendar event: Miata engine swap',
-        'action_type': 'calendar_event.create',
-      },
+      payload: {'calendar_event_id': 61, 'title': 'Miata engine swap'},
     ),
     HermesActivityEvent(
       id: 33,
       eventType: 'assistant.reminder.created',
       status: 'succeeded',
       toolName: 'reminders.create',
-      payload: {
-        'reminder_id': 62,
-        'title': 'Miata engine swap',
-        'work_item_id': 'reminder-miata',
-        'work_order': 1,
-        'work_label': 'Create reminder: Miata engine swap',
-        'action_type': 'reminder.create',
-      },
+      payload: {'reminder_id': 62, 'title': 'Miata engine swap'},
     ),
   ];
 
@@ -10820,8 +11295,8 @@ class _PartialBeanWorkEventsFakeHermesApiClient
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
     queueMessageCalls++;
     sentMessages.add(content);
@@ -10861,7 +11336,7 @@ class _PartialBeanWorkEventsFakeHermesApiClient
     if (!_messageSent) return const [];
     _activityPollsAfterMessage++;
     if (_activityPollsAfterMessage == 1) {
-      return const [_calendarPlanEvent];
+      return [_calendarReceiptEvent];
     }
     if (_activityPollsAfterMessage < 4) {
       return const [];
@@ -10997,7 +11472,7 @@ class _EditableReminderFakeHermesApiClient
     HermesReminder(
       id: 401,
       title: 'Refill dog food',
-      status: 'pending',
+      status: 'scheduled',
       dueAt: DateTime.now().add(const Duration(hours: 2)).toIso8601String(),
     ),
   ];
@@ -11138,7 +11613,7 @@ class _TaskReminderCategoryFakeHermesApiClient
           HermesReminder(
             id: 601,
             title: 'Categorize reminder',
-            status: 'pending',
+            status: 'scheduled',
             category: 'Work',
             color: '#007AFF',
             dueAt: DateTime.now()
@@ -11182,7 +11657,7 @@ class _TaskReminderCategoryFakeHermesApiClient
   Future<HermesReminder> createReminder({
     required String title,
     required String remindAt,
-    String status = 'pending',
+    String status = 'scheduled',
     int? calendarEventId,
     String? category,
     String? color,
@@ -11449,6 +11924,26 @@ class _UtcMidnightAllDayCalendarFakeHermesApiClient
         startsAt: startUtc.toIso8601String(),
         endsAt: startUtc.add(const Duration(days: 1)).toIso8601String(),
         metadata: const {'all_day': true},
+      ),
+    ];
+  }
+}
+
+class _AliasAllDayCalendarFakeHermesApiClient
+    extends _SignedInFakeHermesApiClient {
+  @override
+  Future<List<HermesCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
+    final today = DateTime.now();
+    final start = DateTime(today.year, today.month, today.day, 10);
+    return [
+      HermesCalendarEvent(
+        id: 906,
+        title: 'Alias only event',
+        startsAt: start.toIso8601String(),
+        endsAt: start.add(const Duration(hours: 1)).toIso8601String(),
+        metadata: const {'allDay': true},
       ),
     ];
   }
@@ -11741,11 +12236,13 @@ class _ChatRefreshOverdueTaskFakeHermesApiClient
       );
 
   @override
-  Future<HermesMessageResult> sendMessage({
+  Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
   }) async {
+    queueMessageCalls++;
     sentMessages.add(content);
     _askedAboutDay = true;
     return const HermesMessageResult(
@@ -11776,32 +12273,11 @@ class _OptionalSetupDeclineFakeHermesApiClient
   }
 
   @override
-  Future<HermesMessageResult> sendMessage({
-    required int sessionId,
-    required String content,
-    Map<String, Object?>? metadata,
-  }) async {
-    sendMessageCalls++;
-    sentMessages.add(content);
-    sentMessageMetadata.add(metadata);
-    return const HermesMessageResult(
-      status: 'completed',
-      session: HermesSession(id: 42, status: 'active', title: 'Bean'),
-      assistantMessage: HermesMessage(
-        id: 71,
-        role: 'assistant',
-        content: 'No problem — we can skip that.',
-      ),
-      events: [],
-    );
-  }
-
-  @override
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
     queueMessageCalls++;
     sentMessages.add(content);
@@ -11838,32 +12314,11 @@ class _PostActionThanksFakeHermesApiClient
   }
 
   @override
-  Future<HermesMessageResult> sendMessage({
-    required int sessionId,
-    required String content,
-    Map<String, Object?>? metadata,
-  }) async {
-    sendMessageCalls++;
-    sentMessages.add(content);
-    sentMessageMetadata.add(metadata);
-    return const HermesMessageResult(
-      status: 'completed',
-      session: HermesSession(id: 42, status: 'active', title: 'Bean'),
-      assistantMessage: HermesMessage(
-        id: 72,
-        role: 'assistant',
-        content: "You're welcome.",
-      ),
-      events: [],
-    );
-  }
-
-  @override
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
     queueMessageCalls++;
     sentMessages.add(content);
@@ -11883,11 +12338,13 @@ class _PostActionThanksFakeHermesApiClient
 
 class _BlockedRequestHermesApiClient extends _SignedInFakeHermesApiClient {
   @override
-  Future<HermesMessageResult> sendMessage({
+  Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
   }) async {
+    queueMessageCalls++;
     sentMessages.add(content);
     return const HermesMessageResult(
       status: 'blocked',
@@ -11896,8 +12353,14 @@ class _BlockedRequestHermesApiClient extends _SignedInFakeHermesApiClient {
         status: 'blocked',
         title: 'Session blocked',
       ),
+      assistantMessage: HermesMessage(
+        id: 8801,
+        role: 'assistant',
+        content:
+            'Bean is paused because Gmail OAuth is not connected. Please check Settings or approvals, then try again.',
+        metadata: {'assistant_run_id': 880, 'final_status': 'blocked'},
+      ),
       events: [],
-      blocker: {'reason': 'Gmail OAuth is not connected.'},
     );
   }
 }
@@ -11912,6 +12375,8 @@ class _EditableCalendarFakeHermesApiClient
   final HermesCalendarEvent? _initialEvent;
   HermesCalendarEvent? updatedEvent;
   HermesCalendarEvent? createdEvent;
+  bool? updatedAllDay;
+  bool? createdAllDay;
   List<HermesWorkspace>? workspaceOverrides;
   int? createdEventWorkspaceId;
   List<Object> createdEventSyncWorkspaceIds = const [];
@@ -11954,6 +12419,7 @@ class _EditableCalendarFakeHermesApiClient
     int eventId, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -11968,6 +12434,9 @@ class _EditableCalendarFakeHermesApiClient
     bool clearLocation = false,
   }) async {
     await updateEventCompleter?.future;
+    updatedAllDay = allDay;
+    final eventMetadata = <String, Object?>{...?metadata};
+    if (allDay) eventMetadata['all_day'] = true;
     updatedEvent = HermesCalendarEvent(
       id: eventId,
       title: title,
@@ -11975,12 +12444,12 @@ class _EditableCalendarFakeHermesApiClient
       endsAt: endsAt,
       notes: clearNotes ? null : notes,
       location: clearLocation ? null : location,
-      status: status,
+      status: status ?? 'scheduled',
       category: category,
       color: color,
       recurrence: recurrence,
       isCritical: isCritical ?? false,
-      metadata: metadata,
+      metadata: eventMetadata,
     );
     return updatedEvent!;
   }
@@ -11989,6 +12458,7 @@ class _EditableCalendarFakeHermesApiClient
   Future<HermesCalendarEvent> createCalendarEvent({
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -12002,8 +12472,11 @@ class _EditableCalendarFakeHermesApiClient
     List<Object> syncToWorkspaceIds = const [],
   }) async {
     await createEventCompleter?.future;
+    createdAllDay = allDay;
     createdEventWorkspaceId = workspaceId;
     createdEventSyncWorkspaceIds = syncToWorkspaceIds;
+    final eventMetadata = <String, Object?>{...?metadata};
+    if (allDay) eventMetadata['all_day'] = true;
     createdEvent = HermesCalendarEvent(
       id: 44,
       title: title,
@@ -12011,12 +12484,12 @@ class _EditableCalendarFakeHermesApiClient
       endsAt: endsAt,
       notes: notes,
       location: location,
-      status: status,
+      status: status ?? 'scheduled',
       category: category,
       color: color,
       recurrence: recurrence,
       isCritical: isCritical ?? false,
-      metadata: metadata,
+      metadata: eventMetadata,
     );
     return createdEvent!;
   }
@@ -12435,11 +12908,13 @@ class _OffsetCalendarFakeHermesApiClient extends _SignedInFakeHermesApiClient {
 
 class _JsonEnvelopeMessageHermesApiClient extends _SignedInFakeHermesApiClient {
   @override
-  Future<HermesMessageResult> sendMessage({
+  Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
   }) async {
+    queueMessageCalls++;
     sentMessages.add(content);
     return const HermesMessageResult(
       status: 'completed',
@@ -12465,6 +12940,61 @@ String _testNaturalTimeLabel(DateTime value) {
       : ':${value.minute.toString().padLeft(2, '0')}';
   final meridiem = value.hour >= 12 ? 'pm' : 'am';
   return '$hour$minute$meridiem';
+}
+
+String _testExactDateTimeInput(DateTime value) =>
+    '${value.year.toString().padLeft(4, '0')}-'
+    '${value.month.toString().padLeft(2, '0')}-'
+    '${value.day.toString().padLeft(2, '0')} '
+    '${value.hour.toString().padLeft(2, '0')}:'
+    '${value.minute.toString().padLeft(2, '0')}';
+
+Future<void> _chooseEventDateTime(
+  WidgetTester tester,
+  Key fieldKey, {
+  DateTime? date,
+  int? hour,
+  int minute = 0,
+}) async {
+  await tester.ensureVisible(find.byKey(fieldKey));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(fieldKey));
+  await tester.pumpAndSettle();
+  final keyPrefix =
+      find.byKey(const Key('event-date-time-dock')).evaluate().isNotEmpty
+      ? 'event-date'
+      : 'event';
+  if (date != null) {
+    final dateKey = Key(
+      '$keyPrefix-date-day-${date.year.toString().padLeft(4, '0')}-'
+      '${date.month.toString().padLeft(2, '0')}-'
+      '${date.day.toString().padLeft(2, '0')}',
+    );
+    expect(find.byKey(dateKey), findsOneWidget);
+    await tester.tap(find.byKey(dateKey));
+    await tester.pumpAndSettle();
+  }
+  if (hour == null) {
+    await tester.tap(find.byKey(Key('$keyPrefix-time-dock-done')));
+    await tester.pumpAndSettle();
+    return;
+  }
+  final hour12 = hour % 12 == 0 ? 12 : hour % 12;
+  tester
+      .widget<CupertinoPicker>(find.byKey(Key('$keyPrefix-time-hour-dial')))
+      .onSelectedItemChanged
+      ?.call(hour12 - 1);
+  tester
+      .widget<CupertinoPicker>(find.byKey(Key('$keyPrefix-time-minute-dial')))
+      .onSelectedItemChanged
+      ?.call(minute ~/ 5);
+  tester
+      .widget<CupertinoPicker>(find.byKey(Key('$keyPrefix-time-meridiem-dial')))
+      .onSelectedItemChanged
+      ?.call(hour >= 12 ? 1 : 0);
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(Key('$keyPrefix-time-dock-done')));
+  await tester.pumpAndSettle();
 }
 
 String _testIsoWithOffset(
@@ -12662,11 +13192,13 @@ class _FailingRequestHermesApiClient extends _SignedInFakeHermesApiClient {
   int lookupQueuedMessageCalls = 0;
 
   @override
-  Future<HermesMessageResult> sendMessage({
+  Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
   }) async {
+    queueMessageCalls++;
     throw const HermesApiException(504, '{"message":"Hermes timed out."}');
   }
 
@@ -12688,8 +13220,8 @@ class _TransientQueueFailureHermesApiClient
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
     queueMessageCalls++;
     sentMessages.add(content);
@@ -12725,8 +13257,8 @@ class _LostQueueResponseHermesApiClient extends _SignedInFakeHermesApiClient {
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
     queueMessageCalls++;
     sentMessages.add(content);
@@ -12759,20 +13291,36 @@ class _LostQueueResponseHermesApiClient extends _SignedInFakeHermesApiClient {
   }
 }
 
-class _BridgeLookupThenSuccessHermesApiClient
-    extends _SignedInFakeHermesApiClient {
+class _FailedRunFaultFinalHermesApiClient extends _SignedInFakeHermesApiClient {
   int lookupQueuedMessageCalls = 0;
 
   @override
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
     queueMessageCalls++;
     sentMessages.add(content);
-    throw const HermesApiException(502, '{"message":"Bad gateway"}');
+    sentMessageMetadata.add(metadata);
+    return const HermesMessageResult(
+      status: 'failed',
+      session: HermesSession(id: 42, status: 'active', title: 'Today'),
+      userMessage: HermesMessage(
+        id: 9170,
+        role: 'user',
+        content: 'Move the first task to tomorrow',
+      ),
+      assistantMessage: HermesMessage(
+        id: 9171,
+        role: 'assistant',
+        content:
+            'I couldn’t complete that request because Bean is temporarily unavailable. Please try again.',
+        metadata: {'assistant_run_id': 917, 'final_status': 'failed'},
+      ),
+      events: [],
+    );
   }
 
   @override
@@ -12781,100 +13329,7 @@ class _BridgeLookupThenSuccessHermesApiClient
     required String clientRequestId,
   }) async {
     lookupQueuedMessageCalls++;
-    if (lookupQueuedMessageCalls == 1) {
-      return const HermesMessageResult(
-        status: 'completed',
-        session: HermesSession(id: 42, status: 'active', title: 'Today'),
-        assistantMessage: HermesMessage(
-          id: 9160,
-          role: 'assistant',
-          content:
-              'I didn’t receive that request cleanly. Please send it once more and I’ll take it from there.',
-          metadata: {'runtime': 'missing_run_bridge'},
-        ),
-        events: [],
-      );
-    }
-
-    return const HermesMessageResult(
-      status: 'completed',
-      session: HermesSession(id: 42, status: 'active', title: 'Today'),
-      userMessage: HermesMessage(
-        id: 9161,
-        role: 'user',
-        content: 'Please add Dr Chen Cardio on 7/9 at 3pm',
-      ),
-      assistantMessage: HermesMessage(
-        id: 9162,
-        role: 'assistant',
-        content: 'Done - I added Dr Chen Cardio.',
-      ),
-      events: [],
-    );
-  }
-}
-
-class _CompletedRunBridgeThenVisibleHermesApiClient
-    extends _SignedInFakeHermesApiClient {
-  int resumeSessionDetailsCalls = 0;
-
-  static const _userMessage = HermesMessage(
-    id: 9180,
-    role: 'user',
-    content: 'Please add a reminder to call Joe tomorrow at 8am',
-  );
-
-  @override
-  Future<HermesMessageResult> queueMessage({
-    required int sessionId,
-    required String content,
-    Map<String, Object?>? metadata,
-    String source = 'flutter',
-  }) async {
-    queueMessageCalls++;
-    sentMessages.add(content);
-    sentMessageMetadata.add(metadata);
-    return const HermesMessageResult(
-      status: 'queued',
-      session: HermesSession(id: 42, status: 'queued', title: 'Today'),
-      userMessage: _userMessage,
-      run: HermesAssistantRun(id: 918, status: 'running', source: 'flutter'),
-      events: [],
-    );
-  }
-
-  @override
-  Future<HermesAssistantRun> getAssistantRun(int runId) async =>
-      const HermesAssistantRun(
-        id: 918,
-        status: 'completed',
-        source: 'flutter',
-        userMessageId: 9180,
-      );
-
-  @override
-  Future<HermesSessionDetails> resumeSessionDetails(int sessionId) async {
-    resumeSessionDetailsCalls++;
-    return HermesSessionDetails(
-      session: HermesSession(id: sessionId, status: 'active', title: 'Today'),
-      messages: [
-        _userMessage,
-        if (resumeSessionDetailsCalls == 1)
-          const HermesMessage(
-            id: 9181,
-            role: 'assistant',
-            content:
-                'I didn’t receive that request cleanly. Please send it once more and I’ll take it from there.',
-            metadata: {'runtime': 'missing_run_bridge'},
-          )
-        else
-          const HermesMessage(
-            id: 9182,
-            role: 'assistant',
-            content: 'Done - I added the reminder.',
-          ),
-      ],
-    );
+    throw StateError('A terminal durable final must not be retried.');
   }
 }
 
@@ -12883,12 +13338,13 @@ class _LookupRecoveryAfterParseFailureHermesApiClient
   int lookupQueuedMessageCalls = 0;
 
   @override
-  Future<HermesMessageResult> sendMessage({
+  Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
   }) async {
-    sendMessageCalls++;
+    queueMessageCalls++;
     sentMessages.add(content);
     sentMessageMetadata.add(metadata);
     throw const FormatException('Expected top-level JSON object');
@@ -12926,12 +13382,13 @@ class _SessionRefreshRecoveryAfterParseFailureHermesApiClient
   String? _clientRequestId;
 
   @override
-  Future<HermesMessageResult> sendMessage({
+  Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
   }) async {
-    sendMessageCalls++;
+    queueMessageCalls++;
     sentMessages.add(content);
     sentMessageMetadata.add(metadata);
     _clientRequestId = metadata?['client_request_id']?.toString();
@@ -12963,34 +13420,34 @@ class _SessionRefreshRecoveryAfterParseFailureHermesApiClient
           id: 9301,
           role: 'assistant',
           content: 'Done - I found the saved response.',
+          metadata: {'assistant_run_id': 930, 'final_status': 'completed'},
+        ),
+      ],
+      activityEvents: [
+        HermesActivityEvent(
+          id: 9302,
+          eventType: 'runtime.run_completed',
+          status: 'completed',
+          payload: {
+            'run_id': 930,
+            'message_id': 9300,
+            'client_request_id': _clientRequestId,
+          },
         ),
       ],
     );
   }
 }
 
-class _TransientDirectSendFailureHermesApiClient
-    extends _SignedInFakeHermesApiClient {
+class _CanonicalQueueHermesApiClient extends _SignedInFakeHermesApiClient {
   final queuedMetadata = <Map<String, Object?>?>[];
-
-  @override
-  Future<HermesMessageResult> sendMessage({
-    required int sessionId,
-    required String content,
-    Map<String, Object?>? metadata,
-  }) async {
-    sendMessageCalls++;
-    sentMessages.add(content);
-    sentMessageMetadata.add(metadata);
-    throw const HermesApiException(502, '{"message":"Bad gateway"}');
-  }
 
   @override
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
     queueMessageCalls++;
     queuedMetadata.add(metadata);

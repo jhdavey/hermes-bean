@@ -145,11 +145,18 @@ test('admission sends one stable browser turn to the v2 boundary', async () => {
     });
 });
 
-test('admission rejects incomplete logical requests before network dispatch', async () => {
+test('admission rejects a missing required transcript before network dispatch', async () => {
     let called = false;
     const client = new BrowserVoiceV2Client({ request: async () => { called = true; } });
     await assert.rejects(() => client.admit({ turnId: 'voice-1', sessionId: 41 }), /requires/);
     assert.equal(called, false);
+});
+
+test('admission keeps an unavailable browser timezone unknown instead of inventing UTC', async () => {
+    const calls = [];
+    const client = new BrowserVoiceV2Client({ request: async (...args) => calls.push(args) });
+    await client.admit({ turnId: 'voice-no-zone', sessionId: 41, transcript: 'What time is it?' });
+    assert.equal(calls[0][1].body.timezone, '');
 });
 
 test('[BV2-ADMISSION-02] an accepted request whose POST timed out is recovered with the same stable turn ID', async () => {
@@ -312,14 +319,42 @@ test('[BV2-RELOAD-02] a full event page is identified so reload waits for delive
     assert.equal(projection.turns[0].finalAudioStarted, false);
 });
 
+test('[BV2-CLARIFICATION-RECOVERY-01] reload exposes only exact durable clarification resolution IDs', () => {
+    const projection = normalizeVoiceV2Snapshot({
+        turns: [{
+            turn_id: 'clarified-turn',
+            state: 'accepted',
+            transcript: 'Create a reminder. At five.',
+            resolved_clarification_ids: ['clarified-turn:clarification:1', '', 'clarified-turn:clarification:1'],
+        }],
+    });
+
+    assert.deepEqual(projection.turns[0].resolvedClarificationIds, ['clarified-turn:clarification:1']);
+});
+
+test('[BV2-STOP-08] a durable semantic Stop directive is normalized with its exactly-once identity', () => {
+    const projection = normalizeVoiceV2Snapshot({
+        turns: [{
+            turn_id: 'semantic-stop-turn',
+            state: 'completed',
+            final_text: 'Stopped.',
+            stop_playback: true,
+            stop_playback_directive_id: 'semantic-stop-turn:1:stop',
+        }],
+    });
+
+    assert.equal(projection.turns[0].stopPlayback, true);
+    assert.equal(projection.turns[0].stopPlaybackDirectiveId, 'semantic-stop-turn:1:stop');
+    assert.equal(projection.turns[0].finalText, 'Stopped.');
+    assert.equal('suppressFinalAudio' in projection.turns[0], false);
+});
+
 test('[BV2-ADMISSION-01] a singular admission projection immediately replaces the optimistic turn', () => {
     const projection = normalizeVoiceV2Snapshot({
         data: {
             turn: {
                 turn_id: 'browser-voice-v2-admitted-1',
                 state: 'accepted',
-                lane: 'app_read',
-                handler: 'app.calendar.read',
                 version: 1,
                 transcript: 'What is on my calendar tomorrow?',
             },
@@ -344,6 +379,18 @@ test('[BV2-ADMISSION-01] a singular admission projection immediately replaces th
     assert.equal(projection.activeTurns.length, 1);
     assert.equal(projection.activeJobs.length, 1);
     assert.equal(projection.messages.length, 1);
+});
+
+test('pre-admission capture is never projected as an active durable turn', () => {
+    const projection = normalizeVoiceV2Snapshot({
+        turns: [{
+            turn_id: 'browser-private-capture',
+            state: 'capturing',
+        }],
+    });
+
+    assert.equal(projection.turns.length, 1);
+    assert.equal(projection.activeTurns.length, 0);
 });
 
 test('polling ignores an old response after stop and a new session starts', async () => {

@@ -87,7 +87,10 @@ class GoogleCalendarSyncTest extends TestCase
             'google_event_id' => 'google-event-1',
             'category' => 'Primary',
             'color' => '#4285F4',
+            'status' => 'scheduled',
         ]);
+        $event = CalendarEvent::where('google_event_id', 'google-event-1')->sole();
+        $this->assertSame('confirmed', $event->metadata['google_event_status']);
 
         $connection = GoogleCalendarConnection::firstOrFail();
         $this->assertSame('refresh-token', Crypt::decryptString($connection->refresh_token_encrypted));
@@ -813,6 +816,7 @@ class GoogleCalendarSyncTest extends TestCase
 
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Local client meeting',
+            'all_day' => false,
             'starts_at' => '2026-05-20T15:00:00Z',
             'ends_at' => '2026-05-20T16:00:00Z',
             'metadata' => ['google_calendar_id' => 'work@example.com'],
@@ -858,6 +862,7 @@ class GoogleCalendarSyncTest extends TestCase
 
         $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Local only planning',
+            'all_day' => false,
             'starts_at' => '2026-05-20T15:00:00Z',
             'ends_at' => '2026-05-20T16:00:00Z',
             'metadata' => ['google_calendar_ids' => []],

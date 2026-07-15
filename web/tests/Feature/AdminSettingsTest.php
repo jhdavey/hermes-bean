@@ -2,14 +2,9 @@
 
 namespace Tests\Feature;
 
-use App\Models\AdminCommandRun;
-use App\Models\AdminSetting;
-use App\Models\AgentProfile;
 use App\Models\AiUsageLog;
 use App\Models\User;
-use App\Services\AdminCommandRunService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -17,7 +12,7 @@ class AdminSettingsTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_admin_can_update_runtime_models_and_usage_limits(): void
+    public function test_admin_can_update_external_lookup_model_and_usage_limits(): void
     {
         config()->set('services.hermes_runtime.api_key', '');
         $adminToken = $this->apiToken('settings-admin@example.com');
@@ -29,7 +24,6 @@ class AdminSettingsTest extends TestCase
             ->assertForbidden();
 
         $this->withToken($adminToken)->patchJson('/api/admin/settings', $this->settingsPayload([
-            'main_model' => 'gpt-5-mini',
             'external_lookup_model' => 'gpt-5-mini',
         ], [
             'base_cost_limit' => 1.25,
@@ -38,10 +32,10 @@ class AdminSettingsTest extends TestCase
             'premium_external_cost_limit' => 1.25,
             'pro_cost_limit' => 30.00,
             'pro_external_cost_limit' => 7.50,
-        ], true, [
+        ], [
             'bean_chat_enabled' => false,
         ]))->assertOk()
-            ->assertJsonPath('data.models.main_model.value', 'gpt-5-mini')
+            ->assertJsonPath('data.models.external_lookup_model.value', 'gpt-5-mini')
             ->assertJsonPath('data.usage_limits.base_cost_limit.value', 1.25)
             ->assertJsonPath('data.usage_limits.base_external_cost_limit.value', 0.35)
             ->assertJsonPath('data.usage_limits.premium_cost_limit.value', 6.5)
@@ -49,15 +43,13 @@ class AdminSettingsTest extends TestCase
             ->assertJsonPath('data.kill_switches.bean_chat_enabled.value', false);
 
         $this->assertDatabaseHas('admin_settings', [
-            'key' => 'models.main',
+            'key' => 'models.external_lookup',
             'updated_by_user_id' => $admin->id,
         ]);
-        $this->assertSame('gpt-5-mini', AdminSetting::where('key', 'models.main')->firstOrFail()->value['value']);
-        $this->assertTrue(AgentProfile::query()->where('model', 'gpt-5-mini')->exists());
 
         $this->withToken($adminToken)->getJson('/api/admin/usage/summary')
             ->assertOk()
-            ->assertJsonPath('data.settings.models.main_model.value', 'gpt-5-mini')
+            ->assertJsonPath('data.settings.models.external_lookup_model.value', 'gpt-5-mini')
             ->assertJsonPath('data.settings.usage_limits.base_cost_limit.value', 1.25)
             ->assertJsonPath('data.settings.kill_switches.bean_chat_enabled.value', false);
     }
@@ -89,75 +81,9 @@ class AdminSettingsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.source', 'openai_and_curated')
             ->assertJsonPath('data.openai_available', true)
-            ->assertJsonPath('data.groups.main_model.label', 'Main Bean reasoning/chat')
-            ->assertJsonFragment(['id' => 'gpt-5.2', 'source' => 'openai'])
+            ->assertJsonPath('data.groups.external_lookup_model.label', 'External lookup')
+            ->assertJsonFragment(['id' => 'gpt-5-mini', 'source' => 'openai'])
             ->assertJsonFragment(['id' => 'gpt-4o-mini-search-preview', 'source' => 'openai']);
-    }
-
-    public function test_admin_can_view_and_update_hermes_runtime(): void
-    {
-        $runtimeRoot = sys_get_temp_dir().'/hermes-admin-runtime-'.bin2hex(random_bytes(6));
-        File::ensureDirectoryExists($runtimeRoot);
-        $script = $runtimeRoot.'/fake-hermes';
-        File::put($script, <<<'SH'
-#!/bin/sh
-if [ "$1" = "--version" ]; then
-  echo "Hermes Agent v1.2.3 (test)"
-  echo "Project: $HERMES_BASE_HOME"
-  echo "Update available: test"
-  exit 0
-fi
-if [ "$1" = "update" ]; then
-  echo "updated users at $HERMES_USERS_HOME"
-  exit 0
-fi
-echo "unexpected command: $*" >&2
-exit 2
-SH);
-        chmod($script, 0755);
-
-        config()->set('services.hermes_runtime.cli_path', $script);
-        config()->set('services.hermes_runtime.cli_workdir', $runtimeRoot);
-        config()->set('services.hermes_runtime.users_home', $runtimeRoot.'/users');
-        config()->set('services.hermes_runtime.base_home', $runtimeRoot.'/base');
-
-        $adminToken = $this->apiToken('hermes-admin@example.com');
-        $userToken = $this->apiToken('hermes-user@example.com');
-        User::where('email', 'hermes-admin@example.com')->firstOrFail()->forceFill(['is_admin' => true])->save();
-
-        $this->beforeApplicationDestroyed(fn () => File::isDirectory($runtimeRoot) ? File::deleteDirectory($runtimeRoot) : null);
-
-        $this->withToken($userToken)->getJson('/api/admin/hermes/status')
-            ->assertForbidden();
-
-        $this->withToken($adminToken)->getJson('/api/admin/hermes/status')
-            ->assertOk()
-            ->assertJsonPath('data.version', 'Hermes Agent v1.2.3 (test)')
-            ->assertJsonPath('data.update_available', true)
-            ->assertJsonPath('data.cli_path', $script);
-
-        $runId = $this->withToken($adminToken)->postJson('/api/admin/hermes/update')
-            ->assertAccepted()
-            ->assertJsonPath('data.status', 'queued')
-            ->assertJsonPath('data.command_key', 'hermes_update')
-            ->json('data.id');
-
-        $this->withToken($userToken)->getJson("/api/admin/command-runs/{$runId}")
-            ->assertForbidden();
-
-        $run = app(AdminCommandRunService::class)->execute(AdminCommandRun::findOrFail($runId));
-
-        $this->assertSame('completed', $run->status);
-        $this->assertSame(0, $run->exit_code);
-        $this->assertStringContainsString('updated users at '.$runtimeRoot.'/users', (string) $run->output);
-
-        $this->withToken($adminToken)->getJson("/api/admin/command-runs/{$runId}")
-            ->assertOk()
-            ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.exit_code', 0)
-            ->assertJsonPath('data.metadata.cwd', $runtimeRoot)
-            ->assertJsonPath('data.metadata.command_line', $script.' update --yes')
-            ->assertJsonPath('data.output', 'updated users at '.$runtimeRoot.'/users'."\n");
     }
 
     public function test_admin_can_view_live_lookup_provider_status_and_usage(): void
@@ -246,11 +172,10 @@ SH);
             ->assertJsonPath('data.providers.4.usage.failed', 1);
     }
 
-    private function settingsPayload(array $models = [], array $usageLimits = [], bool $apply = false, array $killSwitches = []): array
+    private function settingsPayload(array $models = [], array $usageLimits = [], array $killSwitches = []): array
     {
         return [
             'model_settings' => [
-                'main_model' => $models['main_model'] ?? 'gpt-5-mini',
                 'external_lookup_model' => $models['external_lookup_model'] ?? 'gpt-5-mini',
             ],
             'kill_switches' => [
@@ -264,7 +189,6 @@ SH);
                 'pro_cost_limit' => $usageLimits['pro_cost_limit'] ?? 20.00,
                 'pro_external_cost_limit' => $usageLimits['pro_external_cost_limit'] ?? 5.00,
             ],
-            'apply_main_model_to_profiles' => $apply,
         ];
     }
 }

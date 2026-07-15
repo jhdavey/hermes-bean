@@ -22,9 +22,13 @@ class BrowserVoiceProjectionService
             ->where('voice_turn_id', $turn->id)
             ->orderBy('id')
             ->get();
+        $finalAudioStarted = $events->contains(
+            fn (VoiceTurnEvent $event): bool => $event->event_type === 'final_audio_started'
+                || ($event->event_type === 'playback_started' && data_get($event->payload, 'purpose') === 'final'),
+        );
 
         return [
-            'turn' => $this->turn($turn),
+            'turn' => $this->turn($turn, $finalAudioStarted),
             'jobs' => $turn->runs->map(fn (AssistantRun $run): array => $this->job($run, $turn))->values()->all(),
             'messages' => $this->messages(collect([$turn])),
             'events' => $events->map(fn (VoiceTurnEvent $event): array => $this->event($event, $turn->turn_id))->values()->all(),
@@ -62,6 +66,11 @@ class BrowserVoiceProjectionService
         $turns->load(['userMessage', 'finalAssistantMessage', 'runs']);
         $turnIds = $turns->pluck('id');
         $turnIdByDatabaseId = $turns->pluck('turn_id', 'id');
+        $finalAudioStartedTurnIds = VoiceTurnEvent::query()
+            ->whereIn('voice_turn_id', $turnIds)
+            ->finalAudioStarted()
+            ->pluck('voice_turn_id')
+            ->unique();
         $eventBatch = VoiceTurnEvent::query()
             ->where('conversation_session_id', $session->id)
             ->where('id', '>', $afterCursor)
@@ -81,7 +90,10 @@ class BrowserVoiceProjectionService
 
         return [
             'turn' => null,
-            'turns' => $turns->map(fn (VoiceTurn $turn): array => $this->turn($turn))->values()->all(),
+            'turns' => $turns->map(fn (VoiceTurn $turn): array => $this->turn(
+                $turn,
+                $finalAudioStartedTurnIds->contains($turn->id),
+            ))->values()->all(),
             'jobs' => $turns->flatMap(fn (VoiceTurn $turn) => $turn->runs->map(
                 fn (AssistantRun $run): array => $this->job($run, $turn)
             ))->values()->all(),
@@ -95,8 +107,21 @@ class BrowserVoiceProjectionService
     }
 
     /** @return array<string, mixed> */
-    private function turn(VoiceTurn $turn): array
+    private function turn(VoiceTurn $turn, bool $finalAudioStarted): array
     {
+        $stopDirective = data_get($turn->metadata, 'playback_stop_directive');
+        $stopDirectivePending = is_array($stopDirective)
+            && filled($stopDirective['id'] ?? null)
+            && blank($stopDirective['acknowledged_at'] ?? null);
+        $clarificationResolutions = data_get($turn->metadata, 'clarification_resolutions');
+        $resolvedClarificationIds = is_array($clarificationResolutions)
+            ? collect(array_keys($clarificationResolutions))
+                ->map(fn (mixed $id): string => trim((string) $id))
+                ->filter()
+                ->values()
+                ->all()
+            : [];
+
         return [
             'id' => $turn->id,
             'turn_id' => $turn->turn_id,
@@ -104,8 +129,6 @@ class BrowserVoiceProjectionService
             'workspace_id' => $turn->workspace_id,
             'source' => $turn->source,
             'state' => $turn->state->value,
-            'lane' => $turn->lane->value,
-            'handler' => $turn->handler,
             'transcript' => $turn->transcript,
             'version' => $turn->version,
             'acknowledgement_required' => $turn->acknowledgement_required,
@@ -116,6 +139,7 @@ class BrowserVoiceProjectionService
             'first_progress_at' => $turn->first_progress_at?->toIso8601String(),
             'terminal_at' => $turn->terminal_at?->toIso8601String(),
             'final_delivered_at' => $turn->final_delivered_at?->toIso8601String(),
+            'final_audio_started' => $finalAudioStarted,
             'hard_deadline_at' => $turn->hard_deadline_at?->toIso8601String(),
             'no_progress_deadline_at' => $turn->no_progress_deadline_at?->toIso8601String(),
             'deadlines' => [
@@ -132,6 +156,13 @@ class BrowserVoiceProjectionService
             'user_message_id' => $turn->user_message_id,
             'final_assistant_message_id' => $turn->final_assistant_message_id,
             'final_text' => $turn->finalAssistantMessage?->content,
+            'resolved_clarification_ids' => $resolvedClarificationIds,
+            'close_after_response' => (bool) data_get($turn->metadata, 'response_directives.close_after_response', false),
+            'response_expected' => (bool) data_get($turn->metadata, 'response_directives.response_expected', false),
+            'stop_playback' => $stopDirectivePending,
+            'stop_playback_directive_id' => $stopDirectivePending
+                ? (string) ($stopDirective['id'] ?? '')
+                : null,
             'clarification' => $turn->state === VoiceTurnState::AwaitingClarification ? [
                 'question' => (string) data_get($turn->metadata, 'clarification_question', ''),
                 'sequence' => (int) data_get($turn->metadata, 'clarification_sequence', 1),
@@ -151,8 +182,14 @@ class BrowserVoiceProjectionService
             'turn_id' => $turn->turn_id,
             'label' => $run->label ?: 'Work on request',
             'status' => $run->status === 'cancelled' ? 'canceled' : $run->status,
-            'lane' => $run->lane ?: $turn->lane->value,
-            'handler' => $run->handler ?: $turn->handler,
+            'lane' => $run->lane,
+            'handler' => $run->handler,
+            'role' => data_get($run->metadata, 'role'),
+            'operation_id' => data_get($run->metadata, 'semantic_operation_id'),
+            'tool' => data_get($run->metadata, 'semantic_tool'),
+            'dependency_run_ids' => is_array(data_get($run->metadata, 'dependency_run_ids'))
+                ? data_get($run->metadata, 'dependency_run_ids')
+                : [],
             'priority' => $run->priority,
             'resource_lock_key' => $run->resource_lock_key,
             'hard_deadline_at' => $run->hard_deadline_at?->toIso8601String(),

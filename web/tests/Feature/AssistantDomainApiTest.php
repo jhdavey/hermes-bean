@@ -2,17 +2,29 @@
 
 namespace Tests\Feature;
 
+use App\Data\HermesSemanticComposition;
+use App\Data\HermesSemanticCompositionRequest;
+use App\Data\HermesSemanticInterpretation;
+use App\Data\HermesSemanticInterpretationRequest;
+use App\Data\HermesSemanticOperation;
+use App\Jobs\ProcessAssistantRun;
 use App\Models\ActivityEvent;
+use App\Models\AssistantRun;
 use App\Models\CalendarEvent;
 use App\Models\GoogleCalendarConnection;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\AssistantRunService;
+use App\Services\HermesRuntimeService;
+use App\Services\HermesSemanticInterpreter;
+use Closure;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use RuntimeException;
 use Tests\TestCase;
 
 class AssistantDomainApiTest extends TestCase
@@ -27,6 +39,7 @@ class AssistantDomainApiTest extends TestCase
 
         $this->tempDir = sys_get_temp_dir().'/assistant-domain-api-test-'.bin2hex(random_bytes(6));
         File::makeDirectory($this->tempDir, 0755, true);
+        Queue::fake();
     }
 
     protected function tearDown(): void
@@ -76,6 +89,7 @@ class AssistantDomainApiTest extends TestCase
 
         $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Dentist',
+            'all_day' => false,
             'starts_at' => '2026-05-14T15:00:00Z',
             'ends_at' => '2026-05-14T16:00:00Z',
             'location' => 'Main Street',
@@ -120,6 +134,7 @@ class AssistantDomainApiTest extends TestCase
 
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Offset event',
+            'all_day' => false,
             'starts_at' => '2026-05-18T13:45:00-07:00',
             'ends_at' => '2026-05-18T14:00:00-07:00',
         ])->assertCreated()->json('data.id');
@@ -153,6 +168,7 @@ class AssistantDomainApiTest extends TestCase
 
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'No category event',
+            'all_day' => false,
             'starts_at' => '2026-05-18T13:45:00Z',
             'ends_at' => '2026-05-18T14:45:00Z',
         ])->assertCreated()
@@ -218,6 +234,7 @@ class AssistantDomainApiTest extends TestCase
 
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Soccer practice',
+            'all_day' => false,
             'starts_at' => '2026-05-14T15:00:00Z',
             'ends_at' => '2026-05-14T16:00:00Z',
             'category' => 'Family',
@@ -244,6 +261,7 @@ class AssistantDomainApiTest extends TestCase
 
         $recurringEventId = $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Piano lesson',
+            'all_day' => false,
             'starts_at' => '2026-05-15T15:00:00Z',
             'ends_at' => '2026-05-15T16:00:00Z',
             'recurrence' => 'weekly',
@@ -280,15 +298,13 @@ class AssistantDomainApiTest extends TestCase
             'metadata' => [
                 'recurrence' => 'specific_days',
                 'days' => ['mon', 'wed', 'fri'],
-                'interval' => 2,
-                'unit' => 'weeks',
             ],
         ])->assertCreated()
             ->assertJsonPath('data.calendar_event_id', $eventId)
             ->assertJsonPath('data.category', 'Kids')
             ->assertJsonPath('data.color', '#007AFF')
             ->assertJsonPath('data.metadata.recurrence', 'specific_days')
-            ->assertJsonPath('data.metadata.unit', 'weeks');
+            ->assertJsonPath('data.metadata.days', ['mon', 'wed', 'fri']);
 
         $taskId = $this->withToken($token)->postJson('/api/tasks', [
             'title' => 'Wash soccer kit',
@@ -329,8 +345,9 @@ class AssistantDomainApiTest extends TestCase
 
     public function test_agent_can_update_calendar_event_metadata_and_create_event_reminder(): void
     {
-        $this->fakeAgentToolCalls([
-            $this->toolCall('call_event', 'update_calendar_event', [
+        Carbon::setTestNow('2026-05-14T14:00:00Z');
+        $this->fakeSemanticExecution([
+            new HermesSemanticOperation('update-event', 'app.calendar.update', [
                 'id' => 1,
                 'title' => 'Updated design review',
                 'starts_at' => '2026-05-14T17:00:00Z',
@@ -339,16 +356,23 @@ class AssistantDomainApiTest extends TestCase
                 'color' => '#FF9500',
                 'recurrence' => 'weekly',
             ]),
-            $this->toolCall('call_reminder', 'create_reminder', [
+            new HermesSemanticOperation('create-reminder', 'app.reminder.create', [
                 'calendar_event_id' => 1,
                 'title' => 'Prep for updated design review',
+                'notes' => null,
+                'status' => 'scheduled',
+                'category' => null,
+                'color' => '#34C759',
+                'is_critical' => false,
                 'remind_at' => '2026-05-14T16:45:00Z',
+                'recurrence' => 'none',
             ]),
         ], 'Updated the event and added a reminder.');
 
         $token = $this->premiumApiToken('agent-calendar-recurrence@example.com');
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Design review',
+            'all_day' => false,
             'starts_at' => '2026-05-14T15:00:00Z',
         ])->assertCreated()->json('data.id');
         $this->assertSame(1, $eventId);
@@ -357,9 +381,11 @@ class AssistantDomainApiTest extends TestCase
             'title' => 'Calendar edits',
         ])->assertCreated()->json('data.id');
 
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Move design review, make it weekly orange work, and remind me 15 min before',
-        ])->assertCreated();
+        $this->queueAndRun(
+            $token,
+            $sessionId,
+            'Move design review, make it weekly orange work, and remind me 15 min before',
+        );
 
         $this->assertDatabaseHas('calendar_events', [
             'id' => $eventId,
@@ -374,24 +400,54 @@ class AssistantDomainApiTest extends TestCase
         ]);
     }
 
-    public function test_agent_can_move_named_calendar_event_from_relative_source_day_without_id(): void
+    public function test_agent_rejects_named_calendar_update_without_concrete_id(): void
     {
         Carbon::setTestNow('2026-05-19T19:09:00Z');
-        $this->fakeAgentToolCalls([
-            $this->toolCall('call_event', 'update_calendar_event', [
-                'match_title' => 'lunch',
-                'starts_at' => '2026-05-25T12:00:00-04:00',
-            ]),
-        ], 'Quick Lunch is moved to next Monday at 12:00 PM.');
+        $interpreter = $this->fakeSemanticInterpretations(function (
+            HermesSemanticInterpretationRequest $request,
+            int $index,
+        ): HermesSemanticInterpretation {
+            if ($index === 0) {
+                return new HermesSemanticInterpretation(
+                    outcome: HermesSemanticInterpretation::OUTCOME_EXECUTE,
+                    responseText: null,
+                    clarificationQuestion: null,
+                    acknowledgementText: 'I’ll move that event.',
+                    closeAfterResponse: false,
+                    responseExpected: false,
+                    operations: [new HermesSemanticOperation('update-event', 'app.calendar.update', [
+                        'match_title' => 'lunch',
+                        'starts_at' => '2026-05-25T12:00:00-04:00',
+                    ])],
+                );
+            }
+
+            $this->assertSame(
+                'deterministic_validation_failure',
+                data_get($request->context, 'prior_interpretation_feedback.kind'),
+            );
+
+            return new HermesSemanticInterpretation(
+                outcome: HermesSemanticInterpretation::OUTCOME_CLARIFY,
+                responseText: null,
+                clarificationQuestion: 'Which Quick Lunch event do you want me to move?',
+                acknowledgementText: null,
+                closeAfterResponse: false,
+                responseExpected: true,
+                operations: [],
+            );
+        });
 
         $token = $this->apiToken();
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Quick Lunch',
+            'all_day' => false,
             'starts_at' => '2026-05-20T12:30:00-04:00',
             'ends_at' => '2026-05-20T13:15:00-04:00',
         ])->assertCreated()->json('data.id');
         $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Quick Lunch',
+            'all_day' => false,
             'starts_at' => '2026-05-27T12:30:00-04:00',
             'ends_at' => '2026-05-27T13:15:00-04:00',
         ])->assertCreated();
@@ -400,46 +456,45 @@ class AssistantDomainApiTest extends TestCase
             'title' => 'Calendar edits',
         ])->assertCreated()->json('data.id');
 
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Move lunch tomorrow to next Monday at 12',
-            'metadata' => [
-                'source' => 'web',
-                'client_context' => [
-                    'current_local_time' => '2026-05-19T15:09:00-04:00',
-                    'timezone_offset' => '-04:00',
-                    'timezone_offset_minutes' => -240,
-                ],
+        $run = $this->queueAndRun($token, $sessionId, 'Move lunch tomorrow to next Monday at 12', [
+            'source' => 'web',
+            'client_context' => [
+                'current_local_time' => '2026-05-19T15:09:00-04:00',
+                'timezone_offset' => '-04:00',
+                'timezone_offset_minutes' => -240,
             ],
-        ])->assertCreated();
+        ]);
+        $this->assertSame('Which Quick Lunch event do you want me to move?', $run->assistantMessage?->content);
 
         $event = CalendarEvent::findOrFail($eventId);
-        $this->assertSame('2026-05-25T16:00:00+00:00', $event->starts_at->utc()->toIso8601String());
-        $this->assertSame('2026-05-25T16:45:00+00:00', $event->ends_at->utc()->toIso8601String());
-        $this->assertDatabaseHas('activity_events', [
+        $this->assertSame('2026-05-20T16:30:00+00:00', $event->starts_at->utc()->toIso8601String());
+        $this->assertSame('2026-05-20T17:15:00+00:00', $event->ends_at->utc()->toIso8601String());
+        $this->assertCount(2, $interpreter->interpretationRequests);
+        $this->assertCount(0, $interpreter->compositionRequests);
+        $this->assertDatabaseMissing('activity_events', [
             'conversation_session_id' => $sessionId,
             'event_type' => 'assistant.calendar_event.updated',
-            'status' => 'succeeded',
         ]);
     }
 
     public function test_agent_calendar_update_does_not_export_to_google_calendar(): void
     {
         Carbon::setTestNow('2026-05-19T19:09:00Z');
-        $this->fakeAgentToolCalls([
-            $this->toolCall('call_event', 'update_calendar_event', [
-                'match_title' => 'lunch',
-                'from_date' => '2026-05-20',
-                'starts_at' => '2026-05-25T12:00:00-04:00',
-            ]),
-        ], 'Quick Lunch is moved to next Monday at 12:00 PM.');
-
         $token = $this->apiToken('google-export-ignored@example.com');
         $user = User::where('email', 'google-export-ignored@example.com')->firstOrFail();
         $eventId = $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Quick Lunch',
+            'all_day' => false,
             'starts_at' => '2026-05-20T12:30:00-04:00',
             'ends_at' => '2026-05-20T13:15:00-04:00',
         ])->assertCreated()->json('data.id');
+        $this->fakeSemanticExecution([
+            new HermesSemanticOperation('update-event', 'app.calendar.update', [
+                'id' => $eventId,
+                'starts_at' => '2026-05-25T12:00:00-04:00',
+                'ends_at' => '2026-05-25T12:45:00-04:00',
+            ]),
+        ], 'Quick Lunch is moved to next Monday at 12:00 PM.');
 
         GoogleCalendarConnection::create([
             'user_id' => $user->id,
@@ -457,19 +512,15 @@ class AssistantDomainApiTest extends TestCase
             'title' => 'Calendar edits',
         ])->assertCreated()->json('data.id');
 
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => "move tomorrow's lunch to next Monday at 12",
-            'metadata' => [
-                'source' => 'web',
-                'client_context' => [
-                    'current_local_time' => '2026-05-19T15:25:00-04:00',
-                    'timezone_offset' => '-04:00',
-                    'timezone_offset_minutes' => -240,
-                ],
+        $run = $this->queueAndRun($token, $sessionId, "move tomorrow's lunch to next Monday at 12", [
+            'source' => 'web',
+            'client_context' => [
+                'current_local_time' => '2026-05-19T15:25:00-04:00',
+                'timezone_offset' => '-04:00',
+                'timezone_offset_minutes' => -240,
             ],
-        ])->assertCreated()
-            ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.assistant_message.content', 'Done - I updated lunch for May 25, 12:00 PM.');
+        ]);
+        $this->assertSame('Quick Lunch is moved to next Monday at 12:00 PM.', $run->assistantMessage?->content);
 
         $event = CalendarEvent::findOrFail($eventId);
         $this->assertSame('2026-05-25T16:00:00+00:00', $event->starts_at->utc()->toIso8601String());
@@ -606,7 +657,7 @@ class AssistantDomainApiTest extends TestCase
             'type' => 'maintenance',
             'status' => 'open',
             'due_at' => '2026-05-15T08:00:00-04:00',
-            'metadata' => ['recurrence' => 'interval', 'interval' => 2, 'interval_unit' => 'months'],
+            'metadata' => ['recurrence' => 'interval', 'interval' => 2, 'unit' => 'months'],
         ])->assertCreated()->json('data.id');
 
         $yearlyTaskId = $this->withToken($token)->postJson('/api/tasks', [
@@ -686,7 +737,7 @@ class AssistantDomainApiTest extends TestCase
     public function test_agent_runtime_handles_100_complex_requests_through_structured_actions(): void
     {
         Carbon::setTestNow('2026-05-19T19:25:00Z');
-        $this->fakeComplexSweepAgent();
+        $this->fakeComplexSweepSemanticInterpreter();
 
         config()->set('security.rate_limits.api_per_minute', 500);
         config()->set('services.ai_usage.limits.base_cost_limit', 100);
@@ -698,19 +749,15 @@ class AssistantDomainApiTest extends TestCase
         ])->assertCreated()->json('data.id');
 
         foreach ($this->complexRequestSweepPrompts() as $prompt) {
-            $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-                'content' => $prompt,
-                'metadata' => [
-                    'source' => 'web',
-                    'client_context' => [
-                        'current_local_time' => '2026-05-19T15:25:00-04:00',
-                        'timezone_offset' => '-04:00',
-                        'timezone_offset_minutes' => -240,
-                    ],
+            $run = $this->queueAndRun($token, $sessionId, $prompt, [
+                'source' => 'web',
+                'client_context' => [
+                    'current_local_time' => '2026-05-19T15:25:00-04:00',
+                    'timezone_offset' => '-04:00',
+                    'timezone_offset_minutes' => -240,
                 ],
             ]);
-            $response->assertCreated()
-                ->assertJsonPath('data.status', 'completed');
+            $this->assertSame('completed', $run->status);
         }
 
         $this->assertSame(100, Task::where('category', 'Complex Sweep')->count());
@@ -719,10 +766,10 @@ class AssistantDomainApiTest extends TestCase
         $this->assertDatabaseCount('conversation_messages', 200);
         $this->assertDatabaseHas('activity_events', [
             'conversation_session_id' => $sessionId,
-            'event_type' => 'runtime.tool_model_started',
+            'event_type' => 'runtime.semantic_interpretation_started',
             'status' => 'started',
         ]);
-        $this->assertSame(100, ActivityEvent::where('conversation_session_id', $sessionId)->where('event_type', 'runtime.tool_model_started')->count());
+        $this->assertSame(100, ActivityEvent::where('conversation_session_id', $sessionId)->where('event_type', 'runtime.semantic_interpretation_started')->count());
     }
 
     /**
@@ -753,7 +800,7 @@ class AssistantDomainApiTest extends TestCase
 
     public function test_activity_events_can_be_polled_for_a_session(): void
     {
-        $this->fakeAgentResponse('Planning complete.');
+        $this->fakeSemanticResponse('Planning complete.');
 
         $token = $this->apiToken();
 
@@ -761,141 +808,207 @@ class AssistantDomainApiTest extends TestCase
             'title' => 'Morning planning',
         ])->assertCreated()->json('data.id');
 
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Plan out my day with tasks, reminders, and calendar priorities.',
-        ])->assertCreated();
+        $this->queueAndRun(
+            $token,
+            $sessionId,
+            'Plan out my day with tasks, reminders, and calendar priorities.',
+        );
 
         $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/events")
             ->assertOk()
             ->assertJsonPath('data.0.event_type', 'runtime.session_started')
-            ->assertJsonFragment(['event_type' => 'runtime.message_received'])
-            ->assertJsonFragment(['event_type' => 'runtime.tool_model_started'])
-            ->assertJsonFragment(['event_type' => 'runtime.tool_model_completed']);
+            ->assertJsonFragment(['event_type' => 'runtime.run_queued'])
+            ->assertJsonFragment(['event_type' => 'runtime.run_started'])
+            ->assertJsonFragment(['event_type' => 'runtime.semantic_interpretation_started'])
+            ->assertJsonFragment(['event_type' => 'runtime.semantic_interpretation_completed']);
     }
 
-    private function fakeAgentResponse(string $content): void
+    private function fakeSemanticResponse(string $content): AssistantDomainSemanticInterpreter
     {
-        $this->configureAgentHttp();
-        Http::fake(fn ($request) => str_contains($request->url(), 'googleapis.com')
-            ? Http::response(['error' => ['message' => 'Forbidden']], 403)
-            : Http::response($this->assistantResponse($content), 200));
+        return $this->fakeSemanticInterpretations(
+            static fn (): HermesSemanticInterpretation => new HermesSemanticInterpretation(
+                outcome: HermesSemanticInterpretation::OUTCOME_RESPOND,
+                responseText: $content,
+                clarificationQuestion: null,
+                acknowledgementText: null,
+                closeAfterResponse: false,
+                responseExpected: false,
+                operations: [],
+            ),
+        );
     }
 
-    private function fakeAgentToolCalls(array $toolCalls, string $finalContent): void
+    private function queueAndRun(string $token, int $sessionId, string $content, array $metadata = []): AssistantRun
     {
-        $this->configureAgentHttp();
-        Http::fake(function ($request) use ($toolCalls, $finalContent) {
-            if (str_contains($request->url(), 'googleapis.com')) {
-                return Http::response(['error' => ['message' => 'Forbidden']], 403);
-            }
+        $metadata = array_merge([
+            'client_request_id' => 'test-'.str()->uuid(),
+        ], $metadata);
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => $content,
+            'metadata' => $metadata,
+        ])->assertCreated()
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.assistant_message', null);
+        $runId = (int) $response->json('data.run.id');
 
-            $hasToolResult = collect($request->data()['messages'] ?? [])->contains(fn (array $message): bool => ($message['role'] ?? null) === 'tool');
+        $queuedRun = AssistantRun::findOrFail($runId);
+        (new ProcessAssistantRun($runId, (int) $queuedRun->execution_generation + 1))->handle(
+            app(HermesRuntimeService::class),
+            app(AssistantRunService::class),
+        );
 
-            return Http::response($hasToolResult
-                ? $this->assistantResponse($finalContent)
-                : $this->toolCallResponse($toolCalls), 200);
-        });
+        $run = AssistantRun::with(['assistantMessage', 'userMessage'])->findOrFail($runId);
+        $this->assertSame('completed', $run->status);
+        $this->assertNotNull($run->assistantMessage);
+
+        return $run;
     }
 
-    private function fakeComplexSweepAgent(): void
-    {
-        $this->configureAgentHttp();
-        Http::fake(function ($request) {
-            if (str_contains($request->url(), 'googleapis.com')) {
-                return Http::response(['error' => ['message' => 'Forbidden']], 403);
-            }
-
-            $messages = $request->data()['messages'] ?? [];
-            $hasToolResult = collect($messages)->contains(fn (array $message): bool => ($message['role'] ?? null) === 'tool');
-            $content = (string) collect($messages)->firstWhere('role', 'user')['content'];
-            preg_match('/REQ-(\d{3})/', $content, $matches);
-            $index = (int) ($matches[1] ?? 1);
-
-            if ($hasToolResult) {
-                return Http::response($this->assistantResponse(sprintf('Handled REQ-%03d with a plan, task, reminder, and calendar block.', $index)), 200);
-            }
-
-            $day = 20 + (($index - 1) % 8);
-            $hour = 8 + (($index - 1) % 9);
-            $minute = (($index * 5) % 60);
-            $toolCalls = [
-                $this->toolCall('call_category', 'create_event_category', ['name' => 'Complex Sweep', 'color' => '#34C759', 'metadata' => ['request_index' => $index]]),
-                $this->toolCall('call_event', 'create_calendar_event', [
-                    'title' => sprintf('REQ-%03d planning block', $index),
-                    'description' => $content,
-                    'category' => 'Complex Sweep',
-                    'color' => '#34C759',
-                    'is_critical' => $index % 10 === 0,
-                    'starts_at' => sprintf('2026-05-%02dT%02d:%02d:00-04:00', $day, $hour, $minute),
-                    'ends_at' => sprintf('2026-05-%02dT%02d:%02d:00-04:00', $day, $hour + 1, $minute),
-                    'metadata' => ['request_index' => $index, 'source' => 'complex_sweep'],
-                ]),
-                $this->toolCall('call_task', 'create_task', [
-                    'title' => sprintf('REQ-%03d follow-up task', $index),
-                    'type' => $index % 3 === 0 ? 'maintenance' : 'todo',
-                    'status' => 'open',
-                    'notes' => 'Generated by complex request sweep from the agent response.',
-                    'category' => 'Complex Sweep',
-                    'color' => '#34C759',
-                    'is_critical' => $index % 9 === 0,
-                    'due_at' => sprintf('2026-05-%02dT17:00:00-04:00', $day),
-                    'metadata' => ['request_index' => $index, 'source' => 'complex_sweep'],
-                ]),
-                $this->toolCall('call_reminder', 'create_reminder', [
-                    'title' => sprintf('REQ-%03d reminder', $index),
-                    'notes' => 'Generated by complex request sweep from the agent response.',
-                    'category' => 'Complex Sweep',
-                    'color' => '#34C759',
-                    'remind_at' => sprintf('2026-05-%02dT07:30:00-04:00', $day),
-                    'metadata' => ['request_index' => $index, 'source' => 'complex_sweep'],
-                ]),
-            ];
-
-            return Http::response($this->toolCallResponse($toolCalls), 200);
-        });
+    /** @param list<HermesSemanticOperation> $operations */
+    private function fakeSemanticExecution(
+        array $operations,
+        string $finalContent,
+    ): AssistantDomainSemanticInterpreter {
+        return $this->fakeSemanticInterpretations(
+            static fn (): HermesSemanticInterpretation => new HermesSemanticInterpretation(
+                outcome: HermesSemanticInterpretation::OUTCOME_EXECUTE,
+                responseText: null,
+                clarificationQuestion: null,
+                acknowledgementText: 'I’ll take care of that.',
+                closeAfterResponse: false,
+                responseExpected: false,
+                operations: $operations,
+            ),
+            static fn (): HermesSemanticComposition => new HermesSemanticComposition(
+                $finalContent,
+                false,
+                false,
+            ),
+        );
     }
 
-    private function configureAgentHttp(): void
+    private function fakeComplexSweepSemanticInterpreter(): AssistantDomainSemanticInterpreter
     {
-        config()->set('services.hermes_runtime.default_provider', 'openai');
-        config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
-        config()->set('services.hermes_runtime.api_key', 'test-key');
-        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+        return $this->fakeSemanticInterpretations(
+            static function (HermesSemanticInterpretationRequest $request): HermesSemanticInterpretation {
+                preg_match('/REQ-(\d{3})/', $request->transcript, $matches);
+                $index = (int) ($matches[1] ?? 1);
+                $day = 20 + (($index - 1) % 8);
+                $hour = 8 + (($index - 1) % 9);
+                $minute = ($index * 5) % 60;
+
+                return new HermesSemanticInterpretation(
+                    outcome: HermesSemanticInterpretation::OUTCOME_EXECUTE,
+                    responseText: null,
+                    clarificationQuestion: null,
+                    acknowledgementText: 'I’ll build that plan.',
+                    closeAfterResponse: false,
+                    responseExpected: false,
+                    operations: [
+                        new HermesSemanticOperation('create-category', 'app.event_category.create', [
+                            'name' => 'Complex Sweep',
+                            'color' => '#34C759',
+                        ]),
+                        new HermesSemanticOperation('create-event', 'app.calendar.create', [
+                            'title' => sprintf('REQ-%03d planning block', $index),
+                            'description' => $request->transcript,
+                            'location' => null,
+                            'category' => 'Complex Sweep',
+                            'color' => '#34C759',
+                            'is_critical' => $index % 10 === 0,
+                            'recurrence' => 'none',
+                            'starts_at' => sprintf('2026-05-%02dT%02d:%02d:00-04:00', $day, $hour, $minute),
+                            'ends_at' => sprintf('2026-05-%02dT%02d:%02d:00-04:00', $day, $hour + 1, $minute),
+                            'status' => 'scheduled',
+                            'all_day' => false,
+                        ]),
+                        new HermesSemanticOperation('create-task', 'app.task.create', [
+                            'title' => sprintf('REQ-%03d follow-up task', $index),
+                            'type' => $index % 3 === 0 ? 'maintenance' : 'todo',
+                            'status' => 'open',
+                            'notes' => 'Generated by the complex request semantic plan.',
+                            'category' => 'Complex Sweep',
+                            'color' => '#34C759',
+                            'is_critical' => $index % 9 === 0,
+                            'due_at' => sprintf('2026-05-%02dT17:00:00-04:00', $day),
+                            'completed_at' => null,
+                            'recurrence' => 'none',
+                        ]),
+                        new HermesSemanticOperation('create-reminder', 'app.reminder.create', [
+                            'title' => sprintf('REQ-%03d reminder', $index),
+                            'notes' => 'Generated by the complex request semantic plan.',
+                            'status' => 'scheduled',
+                            'category' => 'Complex Sweep',
+                            'color' => '#34C759',
+                            'is_critical' => false,
+                            'remind_at' => sprintf('2026-05-%02dT07:30:00-04:00', $day),
+                            'recurrence' => 'none',
+                            'calendar_event_id' => null,
+                        ]),
+                    ],
+                );
+            },
+            static function (HermesSemanticCompositionRequest $request): HermesSemanticComposition {
+                preg_match('/REQ-(\d{3})/', $request->transcript, $matches);
+                $index = (int) ($matches[1] ?? 1);
+
+                return new HermesSemanticComposition(
+                    sprintf('Handled REQ-%03d with a plan, task, reminder, and calendar block.', $index),
+                    false,
+                    false,
+                );
+            },
+        );
     }
 
-    private function assistantResponse(string $content): array
+    private function fakeSemanticInterpretations(
+        Closure $interpretation,
+        ?Closure $composition = null,
+    ): AssistantDomainSemanticInterpreter {
+        $interpreter = new AssistantDomainSemanticInterpreter($interpretation, $composition);
+        $this->app->instance(HermesSemanticInterpreter::class, $interpreter);
+
+        return $interpreter;
+    }
+}
+
+final class AssistantDomainSemanticInterpreter implements HermesSemanticInterpreter
+{
+    /** @var list<HermesSemanticInterpretationRequest> */
+    public array $interpretationRequests = [];
+
+    /** @var list<HermesSemanticCompositionRequest> */
+    public array $compositionRequests = [];
+
+    public function __construct(
+        private readonly Closure $interpretation,
+        private readonly ?Closure $composition = null,
+    ) {}
+
+    public function interpret(HermesSemanticInterpretationRequest $request): HermesSemanticInterpretation
     {
-        return [
-            'id' => 'chatcmpl-test',
-            'model' => 'gpt-test-tools',
-            'choices' => [[
-                'finish_reason' => 'stop',
-                'message' => ['role' => 'assistant', 'content' => $content],
-            ]],
-        ];
+        $index = count($this->interpretationRequests);
+        $this->interpretationRequests[] = $request;
+        $result = ($this->interpretation)($request, $index);
+        if (! $result instanceof HermesSemanticInterpretation) {
+            throw new RuntimeException('The assistant-domain semantic fake returned no interpretation.');
+        }
+
+        return $result;
     }
 
-    private function toolCallResponse(array $toolCalls): array
+    public function compose(HermesSemanticCompositionRequest $request): HermesSemanticComposition
     {
-        return [
-            'id' => 'chatcmpl-tool-call',
-            'model' => 'gpt-test-tools',
-            'choices' => [[
-                'finish_reason' => 'tool_calls',
-                'message' => ['role' => 'assistant', 'content' => null, 'tool_calls' => $toolCalls],
-            ]],
-        ];
-    }
+        $index = count($this->compositionRequests);
+        $this->compositionRequests[] = $request;
+        if (! $this->composition instanceof Closure) {
+            throw new RuntimeException('The assistant-domain semantic fake received an unexpected composition request.');
+        }
+        $result = ($this->composition)($request, $index);
+        if (! $result instanceof HermesSemanticComposition) {
+            throw new RuntimeException('The assistant-domain semantic fake returned no composition.');
+        }
 
-    private function toolCall(string $id, string $name, array $arguments): array
-    {
-        return [
-            'id' => $id,
-            'type' => 'function',
-            'function' => [
-                'name' => $name,
-                'arguments' => json_encode($arguments, JSON_THROW_ON_ERROR),
-            ],
-        ];
+        return $result;
     }
 }

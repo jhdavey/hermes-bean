@@ -2,10 +2,15 @@
 
 namespace Tests\Feature;
 
+use App\Data\HermesSemanticComposition;
+use App\Data\HermesSemanticCompositionRequest;
+use App\Data\HermesSemanticInterpretation;
+use App\Data\HermesSemanticInterpretationRequest;
+use App\Data\HermesSemanticOperation;
 use App\Models\User;
+use App\Services\HermesSemanticInterpreter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class DailyAssistantFlowTest extends TestCase
@@ -31,25 +36,66 @@ class DailyAssistantFlowTest extends TestCase
             'metadata' => ['intent' => 'daily_planning'],
         ])->assertCreated()->json('data.id');
 
-        config()->set('services.hermes_runtime.default_provider', 'openai');
-        config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
-        config()->set('services.hermes_runtime.api_key', 'test-key');
-        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
-        Http::fakeSequence()
-            ->push($this->toolCallResponse([
-                $this->toolCall('call_task', 'create_task', ['title' => 'Review launch notes', 'type' => 'todo']),
-                $this->toolCall('call_reminder', 'create_reminder', ['title' => 'pack laptop', 'remind_at' => '2026-05-13T09:00:00Z']),
-                $this->toolCall('call_event', 'create_calendar_event', ['title' => 'Focus block', 'starts_at' => '2026-05-13T09:00:00Z', 'ends_at' => '2026-05-13T10:00:00Z']),
-            ]), 200)
-            ->push($this->assistantResponse('Planned your day.'), 200);
+        $interpreter = new DailyAssistantSemanticInterpreter(
+            new HermesSemanticInterpretation(
+                outcome: HermesSemanticInterpretation::OUTCOME_EXECUTE,
+                responseText: null,
+                clarificationQuestion: null,
+                acknowledgementText: 'I’ll plan that now.',
+                closeAfterResponse: false,
+                responseExpected: false,
+                operations: [
+                    new HermesSemanticOperation('create-task', 'app.task.create', [
+                        'title' => 'Review launch notes',
+                        'type' => 'todo',
+                        'status' => 'open',
+                        'notes' => null,
+                        'category' => null,
+                        'color' => '#34C759',
+                        'is_critical' => false,
+                        'due_at' => null,
+                        'completed_at' => null,
+                        'recurrence' => 'none',
+                    ]),
+                    new HermesSemanticOperation('create-reminder', 'app.reminder.create', [
+                        'title' => 'pack laptop',
+                        'notes' => null,
+                        'status' => 'scheduled',
+                        'category' => null,
+                        'color' => '#34C759',
+                        'is_critical' => false,
+                        'remind_at' => '2026-05-13T09:00:00Z',
+                        'recurrence' => 'none',
+                        'calendar_event_id' => null,
+                    ]),
+                    new HermesSemanticOperation('create-event', 'app.calendar.create', [
+                        'title' => 'Focus block',
+                        'description' => null,
+                        'location' => null,
+                        'category' => null,
+                        'color' => '#34C759',
+                        'is_critical' => false,
+                        'recurrence' => 'none',
+                        'starts_at' => '2026-05-13T09:00:00Z',
+                        'ends_at' => '2026-05-13T10:00:00Z',
+                        'status' => 'scheduled',
+                        'all_day' => false,
+                    ]),
+                ],
+            ),
+            new HermesSemanticComposition('Planned your day.', false, false),
+        );
+        $this->app->instance(HermesSemanticInterpreter::class, $interpreter);
 
-        $this->withToken($aliceToken)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $this->withToken($aliceToken)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
             'content' => 'Plan my day: add task Review launch notes; remind me tomorrow to pack laptop; schedule Focus block tomorrow at 9am.',
+            'metadata' => ['client_request_id' => 'daily-plan-1'],
         ])->assertCreated()
-            ->assertJsonPath('data.status', 'completed')
-            ->assertJsonFragment(['event_type' => 'assistant.task.created'])
-            ->assertJsonFragment(['event_type' => 'assistant.reminder.created'])
-            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
+            ->assertJsonPath('data.status', 'completed');
+
+        foreach (['assistant.task.created', 'assistant.reminder.created', 'assistant.calendar_event.created'] as $eventType) {
+            $this->assertDatabaseHas('activity_events', ['event_type' => $eventType]);
+        }
 
         $summary = $this->withToken($aliceToken)->getJson('/api/today')
             ->assertOk()
@@ -70,6 +116,9 @@ class DailyAssistantFlowTest extends TestCase
             ->assertJsonPath('data.user.email', 'bob@example.com')
             ->assertJsonPath('data.counts.tasks', 0)
             ->assertJsonMissing(['title' => 'Review launch notes']);
+
+        $this->assertCount(1, $interpreter->interpretationRequests);
+        $this->assertCount(1, $interpreter->compositionRequests);
     }
 
     public function test_live_resource_list_endpoints_are_user_scoped(): void
@@ -95,40 +144,32 @@ class DailyAssistantFlowTest extends TestCase
             ->assertJsonPath('data.0.title', 'Bob private task')
             ->assertJsonMissing(['title' => 'Alice private task']);
     }
+}
 
-    private function assistantResponse(string $content): array
+final class DailyAssistantSemanticInterpreter implements HermesSemanticInterpreter
+{
+    /** @var list<HermesSemanticInterpretationRequest> */
+    public array $interpretationRequests = [];
+
+    /** @var list<HermesSemanticCompositionRequest> */
+    public array $compositionRequests = [];
+
+    public function __construct(
+        private readonly HermesSemanticInterpretation $interpretation,
+        private readonly HermesSemanticComposition $composition,
+    ) {}
+
+    public function interpret(HermesSemanticInterpretationRequest $request): HermesSemanticInterpretation
     {
-        return [
-            'id' => 'chatcmpl-test',
-            'model' => 'gpt-test-tools',
-            'choices' => [[
-                'finish_reason' => 'stop',
-                'message' => ['role' => 'assistant', 'content' => $content],
-            ]],
-        ];
+        $this->interpretationRequests[] = $request;
+
+        return $this->interpretation;
     }
 
-    private function toolCallResponse(array $toolCalls): array
+    public function compose(HermesSemanticCompositionRequest $request): HermesSemanticComposition
     {
-        return [
-            'id' => 'chatcmpl-tool-call',
-            'model' => 'gpt-test-tools',
-            'choices' => [[
-                'finish_reason' => 'tool_calls',
-                'message' => ['role' => 'assistant', 'content' => null, 'tool_calls' => $toolCalls],
-            ]],
-        ];
-    }
+        $this->compositionRequests[] = $request;
 
-    private function toolCall(string $id, string $name, array $arguments): array
-    {
-        return [
-            'id' => $id,
-            'type' => 'function',
-            'function' => [
-                'name' => $name,
-                'arguments' => json_encode($arguments, JSON_THROW_ON_ERROR),
-            ],
-        ];
+        return $this->composition;
     }
 }

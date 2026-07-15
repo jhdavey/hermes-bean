@@ -212,6 +212,7 @@ class GoogleCalendarSyncService
                 $calendarSummary = $this->calendarSummary($connection, $calendarId);
                 $eventMetadata = array_merge($existingMetadata, [
                     'source' => $preserveHeyBeanSource ? ($existingMetadata['source'] ?? 'heybean') : 'google_calendar',
+                    'google_event_status' => $item['status'] ?? null,
                     'google_html_link' => $item['htmlLink'] ?? null,
                     'google_calendar_id' => $calendarId,
                     'google_calendar_summary' => $calendarSummary,
@@ -231,7 +232,7 @@ class GoogleCalendarSyncService
                     'color' => $preserveEventCategory ? $event->color : ($this->calendarColor($connection, $calendarId) ?? '#4285F4'),
                     'starts_at' => $startsAt,
                     'ends_at' => $endsAt,
-                    'status' => $item['status'] ?? 'confirmed',
+                    'status' => 'scheduled',
                     'google_updated_at' => isset($item['updated']) ? Carbon::parse($item['updated']) : null,
                     'metadata' => $eventMetadata,
                 ])->save();

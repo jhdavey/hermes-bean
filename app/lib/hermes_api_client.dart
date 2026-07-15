@@ -795,7 +795,7 @@ class HermesApiClient {
   Future<HermesReminder> createReminder({
     required String title,
     required String remindAt,
-    String status = 'pending',
+    String status = 'scheduled',
     int? calendarEventId,
     String? category,
     String? color,
@@ -883,6 +883,7 @@ class HermesApiClient {
   Future<HermesCalendarEvent> createCalendarEvent({
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -901,10 +902,11 @@ class HermesApiClient {
       body: {
         'title': title,
         'starts_at': startsAt,
+        'all_day': allDay,
         'ends_at': endsAt,
         'description': notes,
         if (location != null) 'location': location,
-        if (status != null) 'status': status,
+        'status': status ?? 'scheduled',
         'category': category,
         'color': color,
         'recurrence': recurrence,
@@ -1105,6 +1107,7 @@ class HermesApiClient {
     int eventId, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -1124,6 +1127,7 @@ class HermesApiClient {
       body: {
         'title': title,
         'starts_at': startsAt,
+        'all_day': allDay,
         'ends_at': endsAt,
         if (notes != null || clearNotes) 'description': notes,
         if (location != null || clearLocation) 'location': location,
@@ -1152,6 +1156,7 @@ class HermesApiClient {
       'calendar_event_id': calendarEventId,
       'title': title,
       'remind_at': remindAt,
+      'status': 'scheduled',
       if (workspaceId != null) 'workspace_id': workspaceId,
       if (syncToWorkspaceIds.isNotEmpty)
         'sync_to_workspace_ids': syncToWorkspaceIds,
@@ -1163,13 +1168,11 @@ class HermesApiClient {
 
   Future<HermesSession> startSession({
     String? title,
-    String? runtimeMode,
     int? workspaceId,
     Map<String, Object?>? metadata,
   }) async {
     final body = <String, Object?>{};
     if (title != null) body['title'] = title;
-    if (runtimeMode != null) body['runtime_mode'] = runtimeMode;
     if (workspaceId != null) body['workspace_id'] = workspaceId;
     if (metadata != null) body['metadata'] = metadata;
 
@@ -1205,39 +1208,31 @@ class HermesApiClient {
     return HermesSessionDetails.fromJson(_expectMap(data['data']));
   }
 
-  Future<HermesSession> cancelSession(int sessionId) async {
+  Future<HermesSession> cancelSession(
+    int sessionId, {
+    String? clientRequestId,
+  }) async {
     final data = await _sendJson(
       'POST',
       '/assistant/sessions/$sessionId/cancel',
+      body: clientRequestId == null
+          ? null
+          : {'client_request_id': clientRequestId},
     );
     return HermesSession.fromJson(_expectMap(data['data']));
-  }
-
-  Future<HermesMessageResult> sendMessage({
-    required int sessionId,
-    required String content,
-    Map<String, Object?>? metadata,
-  }) async {
-    final body = <String, Object?>{'content': content};
-    if (metadata != null) body['metadata'] = metadata;
-
-    final data = await _sendJson(
-      'POST',
-      '/assistant/sessions/$sessionId/messages',
-      body: body,
-      responseTimeout: _assistantApiResponseTimeout,
-    );
-    return HermesMessageResult.fromJson(_expectMap(data['data']));
   }
 
   Future<HermesMessageResult> branchMessage({
     required int sessionId,
     required int messageId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
   }) async {
-    final body = <String, Object?>{'content': content};
-    if (metadata != null) body['metadata'] = metadata;
+    final body = <String, Object?>{
+      'content': content,
+      'metadata': _assistantRequestMetadata(clientRequestId, metadata),
+    };
 
     final data = await _sendJson(
       'POST',
@@ -1251,11 +1246,13 @@ class HermesApiClient {
   Future<HermesMessageResult> queueMessage({
     required int sessionId,
     required String content,
+    required String clientRequestId,
     Map<String, Object?>? metadata,
-    String source = 'flutter',
   }) async {
-    final body = <String, Object?>{'content': content, 'source': source};
-    if (metadata != null) body['metadata'] = metadata;
+    final body = <String, Object?>{
+      'content': content,
+      'metadata': _assistantRequestMetadata(clientRequestId, metadata),
+    };
 
     final data = await _sendJson(
       'POST',
@@ -1263,6 +1260,22 @@ class HermesApiClient {
       body: body,
     );
     return HermesMessageResult.fromJson(_expectMap(data['data']));
+  }
+
+  Map<String, Object?> _assistantRequestMetadata(
+    String clientRequestId,
+    Map<String, Object?>? metadata,
+  ) {
+    final stableId = clientRequestId.trim();
+    if (stableId.isEmpty) {
+      throw ArgumentError.value(
+        clientRequestId,
+        'clientRequestId',
+        'A stable assistant request ID is required.',
+      );
+    }
+
+    return <String, Object?>{...?metadata, 'client_request_id': stableId};
   }
 
   Future<HermesMessageResult> lookupQueuedMessage({
@@ -1310,15 +1323,8 @@ class HermesApiClient {
     ).map((json) => HermesActivityEvent.fromJson(_expectMap(json))).toList();
   }
 
-  Future<HermesApprovalResult> approveApproval(
-    int approvalId, {
-    bool alwaysApprove = false,
-  }) async {
-    final data = await _sendJson(
-      'POST',
-      '/approvals/$approvalId/approve',
-      body: {if (alwaysApprove) 'always_approve': true},
-    );
+  Future<HermesApprovalResult> approveApproval(int approvalId) async {
+    final data = await _sendJson('POST', '/approvals/$approvalId/approve');
     return HermesApprovalResult.fromJson(_expectMap(data['data']));
   }
 
@@ -2856,7 +2862,7 @@ class HermesMemoryItem {
   factory HermesMemoryItem.fromJson(Map<String, Object?> json) =>
       HermesMemoryItem(
         id: _readIntOrNull(json['id']) ?? 0,
-        type: _readString(json['type']) ?? 'fact',
+        type: _expectString(json['type']),
         content: _readString(json['content']) ?? '',
         title: _readString(json['title']),
         status: _readString(json['status']) ?? 'active',
@@ -2926,7 +2932,7 @@ class HermesTask {
   const HermesTask({
     required this.id,
     required this.title,
-    this.status,
+    this.status = 'open',
     this.dueAt,
     this.notes,
     this.category,
@@ -2940,7 +2946,7 @@ class HermesTask {
 
   final int id;
   final String title;
-  final String? status;
+  final String status;
   final String? dueAt;
   final String? notes;
   final String? category;
@@ -2971,7 +2977,7 @@ class HermesTask {
     return HermesTask(
       id: _expectInt(json['id']),
       title: _readTitle(json),
-      status: json['status'] as String?,
+      status: _canonicalTaskStatus(json['status']),
       dueAt: (json['due_at'] ?? json['dueAt']) as String?,
       notes: json['notes'] as String?,
       category:
@@ -3033,7 +3039,7 @@ class HermesReminder {
     this.category,
     this.color,
     this.isCritical = false,
-    this.status,
+    this.status = 'scheduled',
     this.completedAt,
     this.calendarEventId,
     this.metadata,
@@ -3047,7 +3053,7 @@ class HermesReminder {
   final String? category;
   final String? color;
   final bool isCritical;
-  final String? status;
+  final String status;
   final String? completedAt;
   final int? calendarEventId;
   final Map<String, Object?>? metadata;
@@ -3072,7 +3078,7 @@ class HermesReminder {
             metadata?['is_critical'] ??
             metadata?['isCritical'],
       ),
-      status: json['status'] as String?,
+      status: _canonicalReminderStatus(json['status']),
       completedAt: (json['completed_at'] ?? json['completedAt']) as String?,
       calendarEventId: json['calendar_event_id'] == null
           ? null
@@ -3166,7 +3172,7 @@ class HermesCalendarEvent {
     this.endsAt,
     this.notes,
     this.location,
-    this.status,
+    this.status = 'scheduled',
     this.category,
     this.color,
     this.isCritical = false,
@@ -3182,7 +3188,7 @@ class HermesCalendarEvent {
   final String? endsAt;
   final String? notes;
   final String? location;
-  final String? status;
+  final String status;
   final String? category;
   final String? color;
   final bool isCritical;
@@ -3227,19 +3233,24 @@ class HermesCalendarEvent {
 
   factory HermesCalendarEvent.fromJson(Map<String, Object?> json) {
     final parsedMetadata = _expectMapOrNull(json['metadata']);
+    final canonicalAllDay = json['all_day'];
+    if (canonicalAllDay != null && canonicalAllDay is! bool) {
+      throw FormatException('Expected all_day to be a boolean');
+    }
     final isGeneratedOccurrence =
-        _readBool(
-          parsedMetadata?['recurrence_generated'] ??
-              parsedMetadata?['recurrenceGenerated'],
-        ) ||
-        parsedMetadata?['recurrence_parent_event_id'] != null ||
-        parsedMetadata?['recurrenceParentEventId'] != null;
+        parsedMetadata?['recurrence_generated'] == true ||
+        parsedMetadata?['recurrence_parent_event_id'] != null;
     final googleCalendarId = json['google_calendar_id']?.toString();
-    final metadata = googleCalendarId == null
-        ? parsedMetadata
+    final metadata =
+        parsedMetadata == null &&
+            googleCalendarId == null &&
+            canonicalAllDay == null
+        ? null
         : <String, Object?>{
             ...?parsedMetadata,
-            'google_calendar_id': googleCalendarId,
+            if (googleCalendarId != null)
+              'google_calendar_id': googleCalendarId,
+            if (canonicalAllDay != null) 'all_day': canonicalAllDay,
           };
     return HermesCalendarEvent(
       id: _expectInt(json['id']),
@@ -3252,7 +3263,7 @@ class HermesCalendarEvent {
       endsAt: (json['ends_at'] ?? json['endsAt']) as String?,
       notes: (json['description'] ?? json['notes']) as String?,
       location: json['location'] as String?,
-      status: json['status'] as String?,
+      status: _canonicalCalendarStatus(json['status']),
       category:
           json['category'] as String? ?? (metadata?['category'] as String?),
       color: json['color'] as String? ?? (metadata?['color'] as String?),
@@ -3262,10 +3273,7 @@ class HermesCalendarEvent {
             metadata?['is_critical'] ??
             metadata?['isCritical'],
       ),
-      recurrence: isGeneratedOccurrence
-          ? null
-          : json['recurrence'] as String? ??
-                (metadata?['recurrence'] as String?),
+      recurrence: isGeneratedOccurrence ? null : json['recurrence'] as String?,
       metadata: metadata,
     );
   }
@@ -3287,7 +3295,6 @@ class HermesCalendarEvent {
     bool clearCategory = false,
     bool clearColor = false,
     bool clearLocation = false,
-    bool clearStatus = false,
     bool clearRecurrence = false,
     bool clearMetadata = false,
   }) => HermesCalendarEvent(
@@ -3299,7 +3306,7 @@ class HermesCalendarEvent {
     endsAt: clearEndsAt ? null : endsAt ?? this.endsAt,
     notes: clearNotes ? null : notes ?? this.notes,
     location: clearLocation ? null : location ?? this.location,
-    status: clearStatus ? null : status ?? this.status,
+    status: status ?? this.status,
     category: clearCategory ? null : category ?? this.category,
     color: clearColor ? null : color ?? this.color,
     isCritical: isCritical ?? this.isCritical,
@@ -3353,11 +3360,13 @@ class HermesSessionDetails {
     required this.session,
     this.messages = const [],
     this.activityEvents = const [],
+    this.activeRuns = const [],
   });
 
   final HermesSession session;
   final List<HermesMessage> messages;
   final List<HermesActivityEvent> activityEvents;
+  final List<HermesAssistantRun> activeRuns;
 
   factory HermesSessionDetails.fromJson(Map<String, Object?> json) {
     final session = HermesSession.fromJson(json);
@@ -3372,6 +3381,9 @@ class HermesSessionDetails {
               )
               .map((event) => HermesActivityEvent.fromJson(_expectMap(event)))
               .toList(),
+      activeRuns: _expectList(
+        json['assistant_runs'] ?? json['assistantRuns'] ?? const [],
+      ).map((run) => HermesAssistantRun.fromJson(_expectMap(run))).toList(),
     );
   }
 }
@@ -3420,8 +3432,11 @@ class HermesAssistantRun {
     required this.id,
     required this.status,
     required this.source,
+    this.clientRequestId,
+    this.input,
     this.userMessageId,
     this.assistantMessageId,
+    this.userMessage,
     this.assistantMessage,
     this.error,
   });
@@ -3429,8 +3444,11 @@ class HermesAssistantRun {
   final int id;
   final String status;
   final String source;
+  final String? clientRequestId;
+  final String? input;
   final int? userMessageId;
   final int? assistantMessageId;
+  final HermesMessage? userMessage;
   final HermesMessage? assistantMessage;
   final String? error;
 
@@ -3439,8 +3457,14 @@ class HermesAssistantRun {
         id: _expectInt(json['id']),
         status: _expectString(json['status']),
         source: _expectString(json['source']),
+        clientRequestId: (json['client_request_id'] ?? json['clientRequestId'])
+            ?.toString(),
+        input: json['input']?.toString(),
         userMessageId: _readIntOrNull(json['user_message_id']),
         assistantMessageId: _readIntOrNull(json['assistant_message_id']),
+        userMessage: json['user_message'] == null
+            ? null
+            : HermesMessage.fromJson(_expectMap(json['user_message'])),
         assistantMessage: json['assistant_message'] == null
             ? null
             : HermesMessage.fromJson(_expectMap(json['assistant_message'])),
@@ -3638,6 +3662,24 @@ double? _readDoubleOrNull(Object? value) {
 String _expectString(Object? value) {
   if (value is String) return value;
   throw FormatException('Expected string, got ${value.runtimeType}');
+}
+
+String _canonicalReminderStatus(Object? value) {
+  final status = _expectString(value);
+  if (status == 'scheduled' || status == 'completed') return status;
+  throw FormatException('Expected canonical reminder status, got $status');
+}
+
+String _canonicalTaskStatus(Object? value) {
+  final status = _expectString(value);
+  if (status == 'open' || status == 'completed') return status;
+  throw FormatException('Expected canonical task status, got $status');
+}
+
+String _canonicalCalendarStatus(Object? value) {
+  final status = _expectString(value);
+  if (status == 'scheduled' || status == 'cancelled') return status;
+  throw FormatException('Expected canonical calendar status, got $status');
 }
 
 String _readStringOrDefault(Object? value, String fallback) {

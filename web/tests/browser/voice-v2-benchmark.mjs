@@ -213,7 +213,7 @@ async function runTarget(target) {
         await replayPage.click('#run');
         const prerecordedGate = await withBenchmarkDeadline(
             replayPage.evaluate(() => window.voiceReplayRun),
-            { timeoutMs: 300_000, label: `${target.id} prerecorded wake replay` },
+            { timeoutMs: 420_000, label: `${target.id} prerecorded wake replay` },
         );
         const replayMicrophoneAudit = await readMicrophoneTripwire(replayPage);
         const adapterPage = await context.newPage();

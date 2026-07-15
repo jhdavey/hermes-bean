@@ -10,6 +10,12 @@ All Bean voice behavior and voice implementation work is governed by [`bean-voic
 
 The user talks to a powerful Hermes agent, and the agent owns a workspace it can read, write, and operate. The UI shows the agent doing work instead of hiding it behind generic chatbot responses.
 
+## Semantic architecture
+
+Hermes is the sole interpreter for Bean conversation, whether the request comes from voice, web chat, or Flutter chat. Hermes decides what the user means, whether a detail is missing, which typed operations are intended, how conversational references resolve, and what Bean says back. If meaning is unresolved, Hermes asks one focused follow-up instead of application code guessing.
+
+Deterministic application code owns only trusted ingress and privacy gates, tool schemas, authorization and subscription checks, database/provider execution, idempotency, lifecycle, cancellation, deadlines, recovery, and durable response delivery. It does not route conversational prose, answer time/date locally, infer mutation targets or temporal values, split multi-clause requests, or repair Hermes output with phrase rules.
+
 ## MVP scope
 
 Personal assistant only — no project management in the MVP.
@@ -40,13 +46,11 @@ Deferred until after MVP:
 ## Directory layout
 
 - `app/` — Flutter mobile app / consumer command center
-- `web/` — Laravel API + web dashboard + Hermes runtime bridge
+- `web/` — Laravel API + web dashboard + Hermes semantic runtime
 
 ## Runtime architecture decision
 
-No separate runtime-manager service for the MVP.
-
-Laravel should own the app-facing runtime/session API and call Hermes through a dedicated adapter/service layer. Flutter should remain a thin client for chat, approvals, dashboard views, notifications, and workspace state. If the Hermes process lifecycle becomes too complex later, we can extract a separate runtime-manager service from the Laravel adapter without changing the Flutter contract.
+Laravel owns the app-facing runtime/session API and calls the configured OpenAI semantic interpreter through one Hermes adapter. Hermes owns understanding and response composition; schema-validated application services own execution, safety, idempotency, and durable lifecycle state. There is no local Hermes process or CLI runtime. Flutter remains a thin client for chat, approvals, dashboard views, notifications, and workspace state.
 
 ## Development
 

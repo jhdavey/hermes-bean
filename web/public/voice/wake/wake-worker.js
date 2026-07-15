@@ -35,7 +35,7 @@ const FIRST_PARTY_ADDRESS_INTERVAL_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.3
 const KEYWORD_ALIAS = 'HEY_BEAN';
 const STRICT_WAKE_ALIAS = 'HEY_BEAN';
 const ADDRESS_WAKE_ALIAS = 'BEAN';
-const RUNTIME_VERSION = '13';
+const RUNTIME_VERSION = '14';
 
 // The timing detector proposes only the product wake phrase. It never embeds
 // incident-specific negative phrases. The first-party classifier below owns
@@ -364,11 +364,12 @@ function classifyFirstPartyAddressPrefix({ addressCandidate = false } = {}) {
     const missedHeyIndex = beanWakeModel.classes.indexOf(missedHeyClass);
     const strictWakeIndex = beanWakeModel.classes.indexOf(strictWakeClass);
     const winningIndex = probabilities.indexOf(Math.max(...probabilities));
-    // Never let the fallback preempt the timing detector while the utterance
-    // is still in progress. Four local silent chunks give the strict decoder
-    // its trailing-blank window first; only a genuinely missed timing result
-    // reaches this acoustic recovery path.
-    const strictWakeAccepted = silentChunksAfterSpeech >= STRICT_PREFIX_FALLBACK_SILENCE_CHUNKS
+    // Neither recovery class may open the gate from classifier evidence alone.
+    // The proposal-only Bean timing stream must independently establish that
+    // the utterance contained the product address. Four local silent chunks
+    // also give the strict decoder its trailing-blank window before recovery.
+    const strictWakeAccepted = addressCandidate
+        && silentChunksAfterSpeech >= STRICT_PREFIX_FALLBACK_SILENCE_CHUNKS
         && winningIndex === strictWakeIndex
         && probabilities[strictWakeIndex] >= STRICT_PREFIX_ACCEPTANCE_PROBABILITY;
     const missedHeyAccepted = addressCandidate

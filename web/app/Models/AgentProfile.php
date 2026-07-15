@@ -13,13 +13,7 @@ class AgentProfile extends Model
         'slug',
         'display_name',
         'status',
-        'provider',
-        'model',
-        'router_mode',
-        'runtime_home',
         'settings',
-        'tool_policy',
-        'approval_policy',
         'metadata',
     ];
 
@@ -27,8 +21,6 @@ class AgentProfile extends Model
     {
         return [
             'settings' => 'array',
-            'tool_policy' => 'array',
-            'approval_policy' => 'array',
             'metadata' => 'array',
         ];
     }

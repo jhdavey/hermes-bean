@@ -35,7 +35,7 @@ class ActivityEventController extends Controller
         $deadline = microtime(true) + $waitSeconds;
 
         do {
-            $this->runs->closeExpiredStaleRunsForSession($ownedSession);
+            $this->runs->prepareSessionRunsForResponse($ownedSession);
 
             $events = $this->history->filterActivityEvents(
                 $ownedSession->activityEvents()

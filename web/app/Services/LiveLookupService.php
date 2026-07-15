@@ -2,11 +2,11 @@
 
 namespace App\Services;
 
-use App\Models\AgentProfile;
 use App\Models\AiUsageLog;
 use App\Models\ConversationSession;
 use App\Models\User;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -19,17 +19,90 @@ class LiveLookupService
         private readonly OpenMeteoWeatherService $weatherService,
     ) {}
 
-    public function lookup(ConversationSession $session, array $arguments): array
-    {
+    /**
+     * Execute a Hermes-selected provider route without inferring a second
+     * intent from the query prose.
+     *
+     * @param  array<string, mixed>  $arguments
+     */
+    public function lookupTyped(
+        ConversationSession $session,
+        array $arguments,
+        ?Carbon $hardDeadlineAt = null,
+        ?string $trustedTimezone = null,
+    ): array {
+        return $this->lookupInternal($session, $arguments, $hardDeadlineAt, $trustedTimezone);
+    }
+
+    /** @param array<string, mixed> $arguments */
+    private function lookupInternal(
+        ConversationSession $session,
+        array $arguments,
+        ?Carbon $hardDeadlineAt,
+        ?string $trustedTimezone,
+    ): array {
+        $unknown = array_values(array_diff(array_keys($arguments), [
+            'query', 'context', 'kind', 'location', 'latitude', 'longitude', 'date', 'time',
+            'units', 'topic',
+        ]));
+        if ($unknown !== []) {
+            return [
+                'ok' => false,
+                'tool' => 'external_lookup',
+                'error_code' => 'typed_lookup_arguments_invalid',
+                'unsupported_fields' => $unknown,
+            ];
+        }
+
         $query = trim((string) ($arguments['query'] ?? ''));
         if ($query === '') {
-            return ['ok' => false, 'tool' => 'external_lookup', 'error_code' => 'missing_query', 'message' => 'A lookup query is required.'];
+            return [
+                'ok' => false,
+                'tool' => 'external_lookup',
+                'error_code' => 'missing_query',
+                'required_fields' => ['query'],
+            ];
+        }
+
+        $kind = mb_strtolower(trim((string) ($arguments['kind'] ?? '')));
+        $allowedKinds = ['weather', 'forecast', 'places', 'web', 'general'];
+        if (! in_array($kind, $allowedKinds, true)) {
+            return [
+                'ok' => false,
+                'tool' => 'external_lookup',
+                'error_code' => 'typed_lookup_kind_invalid',
+                'field' => 'kind',
+                'allowed_values' => $allowedKinds,
+            ];
+        }
+        $topic = mb_strtolower(trim((string) ($arguments['topic'] ?? '')));
+        $allowedTopics = ['general', 'news', 'finance'];
+        if (in_array($kind, ['web', 'general'], true)
+            && ! in_array($topic, $allowedTopics, true)) {
+            return [
+                'ok' => false,
+                'tool' => 'external_lookup',
+                'error_code' => 'typed_lookup_topic_invalid',
+                'field' => 'topic',
+                'allowed_values' => $allowedTopics,
+            ];
         }
 
         $startedAt = microtime(true);
         $user = User::findOrFail($session->user_id);
         $context = trim((string) ($arguments['context'] ?? ''));
         $location = trim((string) ($arguments['location'] ?? ''));
+        if ($kind === 'places' && $location === '') {
+            return [
+                'ok' => false,
+                'tool' => 'external_lookup',
+                'error_code' => 'typed_places_arguments_invalid',
+                'required_fields' => ['location'],
+            ];
+        }
+        if ($this->deadlineExpired($hardDeadlineAt)) {
+            return $this->deadlineFailure();
+        }
         $cacheKey = $this->cacheKey($query, $context, $location, $arguments);
         $cached = Cache::get($cacheKey);
         if (is_array($cached)) {
@@ -59,17 +132,36 @@ class LiveLookupService
                 'latency_ms' => (int) round((microtime(true) - $startedAt) * 1000),
             ], ['external_lookup'], 'blocked');
 
-            return ['ok' => false, 'tool' => 'external_lookup', 'provider' => 'budget_guard', 'error_code' => 'external_lookup_limit', 'message' => $externalPreflight['reason']];
+            return [
+                'ok' => false,
+                'tool' => 'external_lookup',
+                'provider' => 'budget_guard',
+                'error_code' => 'external_lookup_limit',
+                'limit_scope' => 'external_lookup',
+                'blocked' => true,
+            ];
         }
 
-        if ((bool) config('services.hermes_runtime.weather_lookup_enabled', true)) {
-            $timezone = $this->sessionTimezone($session);
-            $weatherResult = $this->weatherService->weatherForIntent($arguments, $timezone, [
+        $weatherSelected = in_array($kind, ['weather', 'forecast'], true);
+        if ((bool) config('services.hermes_runtime.weather_lookup_enabled', true)
+            && $weatherSelected) {
+            $timezone = $this->validTrustedTimezone($trustedTimezone);
+            $weatherLogContext = [
                 'source' => 'live_lookup_gateway',
                 'session_id' => $session->id,
                 'workspace_id' => $session->workspace_id,
                 'timezone' => $timezone,
-            ]);
+                'location_label' => $arguments['location'] ?? null,
+                'latitude' => $arguments['latitude'] ?? null,
+                'longitude' => $arguments['longitude'] ?? null,
+                'units' => $arguments['units'] ?? null,
+            ];
+            $weatherResult = $this->weatherService->weatherForStructuredIntent(
+                $arguments,
+                $timezone ?? '',
+                $weatherLogContext,
+                $hardDeadlineAt,
+            );
             if ($weatherResult !== null) {
                 $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
                 $result = [
@@ -101,24 +193,98 @@ class LiveLookupService
             }
         }
 
-        if ($this->shouldUsePlaceLookup($query, $context, $location)) {
-            $placesResult = $this->googlePlacesLookup($session, $user, $query, $context, $location, $startedAt, $cacheKey);
-            if ($this->shouldReturnProviderResult($placesResult)) {
-                return $placesResult;
-            }
-
-            $placesResult = $this->osmPlacesLookup($session, $user, $query, $context, $location, $startedAt, $cacheKey);
-            if ($this->shouldReturnProviderResult($placesResult)) {
-                return $placesResult;
-            }
+        if ($weatherSelected) {
+            return [
+                'ok' => false,
+                'tool' => 'external_lookup',
+                'provider' => 'open_meteo',
+                'error_code' => (bool) config('services.hermes_runtime.weather_lookup_enabled', true)
+                    ? 'typed_weather_arguments_invalid'
+                    : 'weather_lookup_disabled',
+                'weather_lookup_enabled' => (bool) config('services.hermes_runtime.weather_lookup_enabled', true),
+            ];
         }
 
-        $tavilyResult = $this->tavilySearchLookup($session, $user, $query, $context, $location, $startedAt, $cacheKey);
+        if ($kind === 'places') {
+            // Hermes has already resolved the user's prose into these two
+            // schema fields. The provider gateway must use them verbatim and
+            // never run the nonvoice place-intent parser a second time.
+            $placeFailures = [];
+
+            $placesResult = $this->googlePlacesLookup(
+                $session,
+                $user,
+                $query,
+                $context,
+                $query,
+                $location,
+                $startedAt,
+                $cacheKey,
+                $hardDeadlineAt,
+            );
+            if ($this->shouldReturnProviderResult($placesResult)) {
+                return $placesResult;
+            }
+            if (is_array($placesResult)) {
+                $placeFailures[] = $placesResult;
+            }
+            if ($this->deadlineExpired($hardDeadlineAt)) {
+                return $this->deadlineFailure();
+            }
+
+            $placesResult = $this->osmPlacesLookup(
+                $session,
+                $user,
+                $query,
+                $context,
+                $query,
+                $location,
+                $startedAt,
+                $cacheKey,
+                $hardDeadlineAt,
+            );
+            if ($this->shouldReturnProviderResult($placesResult)) {
+                return $placesResult;
+            }
+            if (is_array($placesResult)) {
+                $placeFailures[] = $placesResult;
+            }
+            if ($this->deadlineExpired($hardDeadlineAt)) {
+                return $this->deadlineFailure();
+            }
+
+            return $this->terminalPlacesFailure($query, $location, $placeFailures, $startedAt);
+        }
+
+        $tavilyResult = $this->tavilySearchLookup(
+            $session,
+            $user,
+            $query,
+            $context,
+            $location,
+            $topic,
+            $startedAt,
+            $cacheKey,
+            $hardDeadlineAt,
+        );
         if ($this->shouldReturnProviderResult($tavilyResult)) {
             return $tavilyResult;
         }
+        if ($this->deadlineExpired($hardDeadlineAt)) {
+            return $this->deadlineFailure();
+        }
 
-        return $this->webSearchLookup($session, $user, $query, $context, $location, $startedAt, $cacheKey);
+        return $this->webSearchLookup(
+            $session,
+            $user,
+            $query,
+            $context,
+            $location,
+            $startedAt,
+            $cacheKey,
+            $hardDeadlineAt,
+            $this->validTrustedTimezone($trustedTimezone),
+        );
     }
 
     public function providers(): array
@@ -188,22 +354,47 @@ class LiveLookupService
         ];
     }
 
-    private function googlePlacesLookup(ConversationSession $session, User $user, string $query, string $context, string $location, float $startedAt, string $cacheKey): ?array
-    {
+    private function googlePlacesLookup(
+        ConversationSession $session,
+        User $user,
+        string $query,
+        string $context,
+        string $placeName,
+        string $locationQuery,
+        float $startedAt,
+        string $cacheKey,
+        ?Carbon $hardDeadlineAt,
+    ): ?array {
         if (! (bool) config('services.hermes_runtime.google_places_enabled', true) || $this->googleMapsApiKey() === '') {
             return null;
         }
 
-        $placeName = $this->placeSearchName($query);
-        $locationQuery = $this->placeLocationQuery($query, $location);
         if ($placeName === '' || $locationQuery === '') {
             return null;
         }
 
         try {
-            $origin = $this->googleGeocodeLocation($locationQuery);
-            if ($origin === null) {
-                return $this->providerFailure($user, $session, 'google_places', 'google-geocoding', $query, 'places_location_not_found', 'The location needs a more specific city, zip code, or address.', $startedAt, null, ['stage' => 'geocode']);
+            $geocode = $this->googleGeocodeLocation($locationQuery, $hardDeadlineAt);
+            if ($this->deadlineExpired($hardDeadlineAt)) {
+                return $this->deadlineFailure();
+            }
+            if (($geocode['error_code'] ?? null) === 'places_location_ambiguous') {
+                return $this->providerFailure(
+                    $user,
+                    $session,
+                    'google_places',
+                    'google-geocoding',
+                    $query,
+                    'places_location_ambiguous',
+                    $startedAt,
+                    metadata: ['stage' => 'geocode'],
+                    fallbackAllowed: false,
+                    details: ['candidates' => $geocode['candidates'] ?? []],
+                );
+            }
+            $origin = $geocode['origin'] ?? null;
+            if (! is_array($origin)) {
+                return $this->providerFailure($user, $session, 'google_places', 'google-geocoding', $query, 'places_location_not_found', $startedAt, null, ['stage' => 'geocode']);
             }
 
             $requestedPostalCode = $this->postalCodeFromLocation($locationQuery);
@@ -218,16 +409,24 @@ class LiveLookupService
             ])));
 
             foreach ($searchQueries as $textQuery) {
+                if ($this->deadlineExpired($hardDeadlineAt)) {
+                    return $this->deadlineFailure();
+                }
                 $searchAttempts++;
                 $lastTextQuery = $textQuery;
+                $timeouts = $this->httpTimeouts(
+                    (float) config('services.hermes_runtime.google_places_connect_timeout', 2),
+                    (float) config('services.hermes_runtime.google_places_timeout', 6),
+                    $hardDeadlineAt,
+                );
                 $response = Http::acceptJson()
                     ->asJson()
                     ->withHeaders([
                         'X-Goog-Api-Key' => $this->googleMapsApiKey(),
                         'X-Goog-FieldMask' => 'places.id,places.displayName,places.formattedAddress,places.location,places.googleMapsUri,places.businessStatus,places.types',
                     ])
-                    ->connectTimeout((float) config('services.hermes_runtime.google_places_connect_timeout', 2))
-                    ->timeout((float) config('services.hermes_runtime.google_places_timeout', 6))
+                    ->connectTimeout($timeouts['connect'])
+                    ->timeout($timeouts['total'])
                     ->post('https://places.googleapis.com/v1/places:searchText', [
                         'textQuery' => $textQuery,
                         'pageSize' => 10,
@@ -277,7 +476,7 @@ class LiveLookupService
             $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
 
             if ($places === []) {
-                return $this->providerFailure($user, $session, 'google_places', 'google-places-text-search', $query, $lastStatus === null ? 'places_not_found' : 'places_lookup_failed', 'I need a more specific place name or a wider location to narrow that down.', $startedAt, $lastStatus, [
+                return $this->providerFailure($user, $session, 'google_places', 'google-places-text-search', $query, $lastStatus === null ? 'places_not_found' : 'places_lookup_failed', $startedAt, $lastStatus, [
                     'stage' => 'text_search',
                     'location_query' => $locationQuery,
                     'search_attempts' => $searchAttempts,
@@ -325,32 +524,62 @@ class LiveLookupService
                 'exception' => $exception->getMessage(),
             ]);
 
-            return $this->providerFailure($user, $session, 'google_places', 'google-places', $query, 'places_lookup_timeout', 'The places lookup is taking longer than expected; continue with another source or ask one focused follow-up.', $startedAt);
+            return $this->providerFailure($user, $session, 'google_places', 'google-places', $query, 'places_lookup_timeout', $startedAt);
         }
     }
 
-    private function osmPlacesLookup(ConversationSession $session, User $user, string $query, string $context, string $location, float $startedAt, string $cacheKey): ?array
-    {
+    private function osmPlacesLookup(
+        ConversationSession $session,
+        User $user,
+        string $query,
+        string $context,
+        string $placeName,
+        string $locationQuery,
+        float $startedAt,
+        string $cacheKey,
+        ?Carbon $hardDeadlineAt,
+    ): ?array {
         if (! (bool) config('services.hermes_runtime.osm_places_enabled', true)) {
             return null;
         }
 
-        $placeName = $this->placeSearchName($query);
-        $locationQuery = $this->placeLocationQuery($query, $location);
         if ($placeName === '' || $locationQuery === '') {
             return null;
         }
 
         try {
-            $origin = $this->osmLocationOrigin($locationQuery);
-            if ($origin === null) {
-                return $this->providerFailure($user, $session, 'osm_places', 'openstreetmap-photon', $query, 'osm_location_not_found', 'The location needs a more specific city, zip code, or address.', $startedAt, null, ['stage' => 'origin']);
+            $originResult = $this->osmLocationOrigin($locationQuery, $hardDeadlineAt);
+            if ($this->deadlineExpired($hardDeadlineAt)) {
+                return $this->deadlineFailure();
+            }
+            if (($originResult['error_code'] ?? null) === 'places_location_ambiguous') {
+                return $this->providerFailure(
+                    $user,
+                    $session,
+                    'osm_places',
+                    'openstreetmap-photon',
+                    $query,
+                    'places_location_ambiguous',
+                    $startedAt,
+                    metadata: ['stage' => 'origin'],
+                    fallbackAllowed: false,
+                    details: ['candidates' => $originResult['candidates'] ?? []],
+                );
+            }
+            $origin = $originResult['origin'] ?? null;
+            if (! is_array($origin)) {
+                return $this->providerFailure($user, $session, 'osm_places', 'openstreetmap-photon', $query, 'osm_location_not_found', $startedAt, null, ['stage' => 'origin']);
             }
 
+            $timeouts = $this->httpTimeouts(
+                (float) config('services.hermes_runtime.osm_places_connect_timeout', 2),
+                (float) config('services.hermes_runtime.osm_places_timeout', 5),
+                $hardDeadlineAt,
+            );
             $response = Http::acceptJson()
                 ->withUserAgent('HeyBean/1.0')
-                ->connectTimeout((float) config('services.hermes_runtime.osm_places_connect_timeout', 2))
-                ->timeout((float) config('services.hermes_runtime.osm_places_timeout', 5))
+                ->connectTimeout($timeouts['connect'])
+                ->timeout($timeouts['total'])
                 ->get(rtrim((string) config('services.hermes_runtime.osm_photon_base', 'https://photon.komoot.io'), '/').'/api/', [
                     'q' => trim($placeName.' '.$locationQuery),
                     'limit' => 10,
@@ -360,7 +589,7 @@ class LiveLookupService
                 ]);
 
             if (! $response->successful()) {
-                return $this->providerFailure($user, $session, 'osm_places', 'openstreetmap-photon', $query, 'osm_places_lookup_failed', 'The OpenStreetMap places lookup failed.', $startedAt, $response->status(), ['stage' => 'photon']);
+                return $this->providerFailure($user, $session, 'osm_places', 'openstreetmap-photon', $query, 'osm_places_lookup_failed', $startedAt, $response->status(), ['stage' => 'photon']);
             }
 
             $requestedPostalCode = $this->postalCodeFromLocation($locationQuery);
@@ -385,7 +614,7 @@ class LiveLookupService
                 ->all();
 
             if ($places === []) {
-                return $this->providerFailure($user, $session, 'osm_places', 'openstreetmap-photon', $query, 'osm_places_not_found', 'I need a more specific place name or a wider location to narrow that down.', $startedAt, null, [
+                return $this->providerFailure($user, $session, 'osm_places', 'openstreetmap-photon', $query, 'osm_places_not_found', $startedAt, null, [
                     'stage' => 'photon',
                     'location_query' => $locationQuery,
                     'place_name' => $placeName,
@@ -431,12 +660,21 @@ class LiveLookupService
                 'exception' => $exception->getMessage(),
             ]);
 
-            return $this->providerFailure($user, $session, 'osm_places', 'openstreetmap-photon', $query, 'osm_places_lookup_timeout', 'The OpenStreetMap places lookup is taking longer than expected.', $startedAt);
+            return $this->providerFailure($user, $session, 'osm_places', 'openstreetmap-photon', $query, 'osm_places_lookup_timeout', $startedAt);
         }
     }
 
-    private function tavilySearchLookup(ConversationSession $session, User $user, string $query, string $context, string $location, float $startedAt, string $cacheKey): ?array
-    {
+    private function tavilySearchLookup(
+        ConversationSession $session,
+        User $user,
+        string $query,
+        string $context,
+        string $location,
+        string $topic,
+        float $startedAt,
+        string $cacheKey,
+        ?Carbon $hardDeadlineAt,
+    ): ?array {
         if (! (bool) config('services.hermes_runtime.tavily_search_enabled', true) || $this->tavilyApiKey() === '') {
             return null;
         }
@@ -444,15 +682,23 @@ class LiveLookupService
         $searchQuery = trim(implode(' ', array_filter([$query, $location !== '' ? "near {$location}" : null])));
 
         try {
+            if ($this->deadlineExpired($hardDeadlineAt)) {
+                return $this->deadlineFailure();
+            }
+            $timeouts = $this->httpTimeouts(
+                (float) config('services.hermes_runtime.tavily_search_connect_timeout', 2),
+                (float) config('services.hermes_runtime.tavily_search_timeout', 6),
+                $hardDeadlineAt,
+            );
             $response = Http::withToken($this->tavilyApiKey())
                 ->acceptJson()
                 ->asJson()
-                ->connectTimeout((float) config('services.hermes_runtime.tavily_search_connect_timeout', 2))
-                ->timeout((float) config('services.hermes_runtime.tavily_search_timeout', 6))
+                ->connectTimeout($timeouts['connect'])
+                ->timeout($timeouts['total'])
                 ->post('https://api.tavily.com/search', [
                     'query' => $searchQuery,
                     'search_depth' => (string) config('services.hermes_runtime.tavily_search_depth', 'ultra-fast'),
-                    'topic' => $this->tavilyTopic($query),
+                    'topic' => $topic,
                     'include_answer' => 'basic',
                     'include_raw_content' => false,
                     'include_images' => false,
@@ -463,17 +709,17 @@ class LiveLookupService
 
             $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
             if (! $response->successful()) {
-                return $this->providerFailure($user, $session, 'tavily_search', 'tavily-search', $query, 'tavily_lookup_failed', 'The web provider needs another lookup attempt or a narrower query.', $startedAt, $response->status());
+                return $this->providerFailure($user, $session, 'tavily_search', 'tavily-search', $query, 'tavily_lookup_failed', $startedAt, $response->status());
             }
 
             $decoded = $response->json();
             if (! is_array($decoded)) {
-                return $this->providerFailure($user, $session, 'tavily_search', 'tavily-search', $query, 'tavily_lookup_non_json', 'Tavily returned an unreadable response.', $startedAt);
+                return $this->providerFailure($user, $session, 'tavily_search', 'tavily-search', $query, 'tavily_lookup_non_json', $startedAt);
             }
 
             $text = $this->tavilyText($decoded);
             if ($text === '') {
-                return $this->providerFailure($user, $session, 'tavily_search', 'tavily-search', $query, 'tavily_lookup_empty', 'The web provider returned no direct answer, so use another lookup route or ask one focused follow-up.', $startedAt);
+                return $this->providerFailure($user, $session, 'tavily_search', 'tavily-search', $query, 'tavily_lookup_empty', $startedAt);
             }
 
             $credits = (float) data_get($decoded, 'usage.credits', 0);
@@ -484,6 +730,7 @@ class LiveLookupService
                 'provider' => 'tavily',
                 'live_lookup_provider' => 'tavily_search',
                 'query' => $query,
+                'topic' => $topic,
                 'request_id' => data_get($decoded, 'request_id'),
                 'response_time' => data_get($decoded, 'response_time'),
                 'credits' => $credits,
@@ -495,6 +742,7 @@ class LiveLookupService
                 'tool' => 'external_lookup',
                 'provider' => 'tavily_search',
                 'query' => $query,
+                'topic' => $topic,
                 'context' => $context !== '' ? $context : null,
                 'location' => $location !== '' ? $location : null,
                 'text' => $text,
@@ -511,12 +759,21 @@ class LiveLookupService
                 'exception' => $exception->getMessage(),
             ]);
 
-            return $this->providerFailure($user, $session, 'tavily_search', 'tavily-search', $query, 'tavily_lookup_timeout', 'The web lookup is taking longer than expected; continue with another source or ask one focused follow-up.', $startedAt);
+            return $this->providerFailure($user, $session, 'tavily_search', 'tavily-search', $query, 'tavily_lookup_timeout', $startedAt);
         }
     }
 
-    private function webSearchLookup(ConversationSession $session, User $user, string $query, string $context, string $location, float $startedAt, string $cacheKey): array
-    {
+    private function webSearchLookup(
+        ConversationSession $session,
+        User $user,
+        string $query,
+        string $context,
+        string $location,
+        float $startedAt,
+        string $cacheKey,
+        ?Carbon $hardDeadlineAt,
+        ?string $trustedTimezone,
+    ): array {
         $toolType = (string) config('services.hermes_runtime.external_lookup_tool', 'web_search');
         $webSearchPreflight = $this->usageService->preflightDirect(
             $user,
@@ -538,7 +795,14 @@ class LiveLookupService
                 'latency_ms' => (int) round((microtime(true) - $startedAt) * 1000),
             ], ['external_lookup', 'web_search'], 'blocked');
 
-            return ['ok' => false, 'tool' => 'external_lookup', 'provider' => 'openai_web_search', 'error_code' => 'web_search_limit', 'message' => $webSearchPreflight['reason']];
+            return [
+                'ok' => false,
+                'tool' => 'external_lookup',
+                'provider' => 'openai_web_search',
+                'error_code' => 'web_search_limit',
+                'limit_scope' => 'web_search',
+                'blocked' => true,
+            ];
         }
 
         $payload = [
@@ -548,19 +812,27 @@ class LiveLookupService
             ],
             'tool_choice' => 'auto',
             'instructions' => 'You are a concise live lookup helper for Bean. Search the web when needed, answer only from current external results, and include citations in the response annotations when available. If results are incomplete or uncertain, say so plainly.',
-            'input' => $this->externalLookupPrompt($session, $query, $context, $location),
+            'input' => $this->externalLookupPrompt($session, $query, $context, $location, $trustedTimezone),
         ];
 
         $attempts = max(1, (int) config('services.hermes_runtime.external_lookup_attempts', 1));
         $response = null;
         $lastException = null;
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+            if ($this->deadlineExpired($hardDeadlineAt)) {
+                return $this->deadlineFailure();
+            }
             try {
+                $timeouts = $this->httpTimeouts(
+                    (float) config('services.hermes_runtime.external_lookup_connect_timeout', 3),
+                    (float) config('services.hermes_runtime.external_lookup_timeout', 8),
+                    $hardDeadlineAt,
+                );
                 $response = Http::withToken($this->providerApiKey())
                     ->acceptJson()
                     ->asJson()
-                    ->connectTimeout((float) config('services.hermes_runtime.external_lookup_connect_timeout', 3))
-                    ->timeout((float) config('services.hermes_runtime.external_lookup_timeout', 8))
+                    ->connectTimeout($timeouts['connect'])
+                    ->timeout($timeouts['total'])
                     ->post(rtrim((string) config('services.hermes_runtime.api_base'), '/').'/responses', $payload);
                 $lastException = null;
                 break;
@@ -582,7 +854,7 @@ class LiveLookupService
 
         $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
         if ($lastException !== null || $response === null) {
-            return $this->webSearchFailure($user, $session, $query, $toolType, 'external_lookup_timeout', 'The live lookup is still taking longer than expected; continue with another available source or ask one focused follow-up.', $latencyMs);
+            return $this->webSearchFailure($user, $session, $query, $toolType, 'external_lookup_timeout', $latencyMs);
         }
 
         if (! $response->successful()) {
@@ -596,17 +868,17 @@ class LiveLookupService
                 'tool_type' => $toolType,
             ]);
 
-            return $this->webSearchFailure($user, $session, $query, $toolType, 'external_lookup_failed', 'The external lookup needs another attempt or a narrower query.', $latencyMs, $response->status());
+            return $this->webSearchFailure($user, $session, $query, $toolType, 'external_lookup_failed', $latencyMs, $response->status());
         }
 
         $decoded = $response->json();
         if (! is_array($decoded)) {
-            return $this->webSearchFailure($user, $session, $query, $toolType, 'external_lookup_non_json', 'The external lookup returned an unreadable response.', $latencyMs);
+            return $this->webSearchFailure($user, $session, $query, $toolType, 'external_lookup_non_json', $latencyMs);
         }
 
         $text = $this->extractResponseText($decoded);
         if ($text === '') {
-            return $this->webSearchFailure($user, $session, $query, $toolType, 'external_lookup_empty', 'The external lookup returned no direct answer; continue with another available source or ask one focused follow-up.', $latencyMs);
+            return $this->webSearchFailure($user, $session, $query, $toolType, 'external_lookup_empty', $latencyMs);
         }
 
         $this->usageService->recordDirectCall($user, $session->workspace_id, 'web_search', (string) data_get($decoded, 'model', $this->adminSettings->externalLookupModel()), [
@@ -639,10 +911,20 @@ class LiveLookupService
         return $result;
     }
 
-    private function providerFailure(User $user, ConversationSession $session, string $providerKey, string $model, string $query, string $errorCode, string $message, float $startedAt, ?int $status = null, array $metadata = []): array
-    {
+    private function providerFailure(
+        User $user,
+        ConversationSession $session,
+        string $providerKey,
+        string $model,
+        string $query,
+        string $errorCode,
+        float $startedAt,
+        ?int $status = null,
+        array $metadata = [],
+        bool $fallbackAllowed = true,
+        array $details = [],
+    ): array {
         $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
-        $userMessage = $this->lookupContinuationMessage($query);
         $payload = [
             ...$metadata,
             'conversation_session_id' => $session->id,
@@ -665,10 +947,9 @@ class LiveLookupService
             'tool' => 'external_lookup',
             'provider' => $providerKey,
             'error_code' => $errorCode,
-            'message' => $userMessage,
-            'diagnostic_message' => $message,
             'latency_ms' => $latencyMs,
-            'fallback_allowed' => true,
+            'fallback_allowed' => $fallbackAllowed,
+            ...$details,
         ];
         if ($status !== null) {
             $result['status'] = $status;
@@ -686,112 +967,85 @@ class LiveLookupService
         return ($result['ok'] ?? false) === true || ($result['fallback_allowed'] ?? false) !== true;
     }
 
-    private function shouldUsePlaceLookup(string $query, string $context, string $location): bool
-    {
-        if ($location !== '') {
-            if ((bool) preg_match('/\b(nearest|closest|nearby|near me|near|around|local|store|restaurant|coffee|gas|pharmacy|address|location|hours|open|closed)\b/i', $query.' '.$context)) {
-                return true;
-            }
-
-            $placeName = $this->placeSearchName($query);
-            $wordCount = str_word_count($placeName);
-
-            return $placeName !== ''
-                && $wordCount > 0
-                && $wordCount <= 4
-                && ! (bool) preg_match('/\b(news|latest|today|stock|stocks|market|earnings|weather|score|price|headline)\b/i', $query.' '.$context);
-        }
-
-        return (bool) preg_match('/\b(nearest|closest|nearby|near me|near \d{5}|around \d{5}|to \d{5}|in \d{5}|local)\b/i', $query.' '.$context);
-    }
-
-    private function placeSearchName(string $query): string
-    {
-        if (preg_match('/\b(?:find\s+)?(?:the\s+)?(?:nearest|closest|nearby)\s+([a-z0-9&.\'\s-]+?)\s+(?:to|near|around|in)\b/i', $query, $matches)) {
-            $candidate = $this->cleanPlaceNameCandidate((string) ($matches[1] ?? ''));
-            if ($candidate !== '') {
-                return mb_substr($candidate, 0, 80);
-            }
-        }
-
-        if (preg_match('/\b([a-z0-9&.\'\s-]{1,80}?)\s+(?:to|near|around|in)\s+(?:zip\s+code\s+)?\d{5}(?:-\d{4})?\b/i', $query, $matches)) {
-            $candidate = $this->cleanPlaceNameCandidate((string) ($matches[1] ?? ''));
-            if ($candidate !== '') {
-                return mb_substr($candidate, 0, 80);
-            }
-        }
-
-        $clean = mb_strtolower($query);
-        $clean = preg_replace('/\b(what|where|which|who|can you|could you|please|find|look up|search for|tell me|return|is|are|the|a|an|and|full|street|zip|code)\b/i', ' ', $clean) ?? $clean;
-        $clean = preg_replace('/\b(nearest|closest|nearby|near me|near|around|to me|from me|local|location|locations|address|addresses|city|state|hours|open|closed|right now|today)\b/i', ' ', $clean) ?? $clean;
-        $clean = preg_replace('/\b(in|at|by|to)\s+[a-z\s,.-]*\d{5}(?:-\d{4})?\b/i', ' ', $clean) ?? $clean;
-        $clean = preg_replace('/\b\d{5}(?:-\d{4})?\b/', ' ', $clean) ?? $clean;
-        $clean = preg_replace('/[^a-z0-9&.\'\s-]/i', ' ', $clean) ?? $clean;
-        $clean = trim((string) preg_replace('/\s+/', ' ', $clean));
-
-        return mb_substr($this->stripGenericPlaceNameWords($clean), 0, 80);
-    }
-
-    private function cleanPlaceNameCandidate(string $candidate): string
-    {
-        $candidate = preg_replace('/\b(what|where|which|who|can you|could you|please|find|look up|search for|tell me|return|is|are|the|a|an|and|nearest|closest|nearby|near me|near|around|to me|from me|local|full|street|zip|code|city|state|address|addresses|location|locations|store|stores)\b/i', ' ', $candidate) ?? $candidate;
-        $candidate = preg_replace('/[^a-z0-9&.\'\s-]/i', ' ', $candidate) ?? $candidate;
-
-        return mb_strtolower($this->stripGenericPlaceNameWords(trim((string) preg_replace('/\s+/', ' ', $candidate))));
-    }
-
-    private function stripGenericPlaceNameWords(string $candidate): string
-    {
-        $candidate = trim((string) preg_replace('/\s+/', ' ', $candidate));
-        if ($candidate === '') {
-            return '';
-        }
-
-        $tokens = preg_split('/\s+/', $candidate) ?: [];
-        if (count($tokens) <= 1) {
-            return $candidate;
-        }
-
-        $generic = [
-            'address',
-            'addresses',
-            'business',
-            'businesses',
-            'location',
-            'locations',
-            'place',
-            'places',
-            'shop',
-            'shops',
-            'store',
-            'stores',
+    /**
+     * @param  list<array<string,mixed>>  $providerFailures
+     * @return array<string,mixed>
+     */
+    private function terminalPlacesFailure(
+        string $query,
+        string $location,
+        array $providerFailures,
+        float $startedAt,
+    ): array {
+        $failures = collect($providerFailures)
+            ->map(fn (array $failure): array => array_filter([
+                'provider' => $failure['provider'] ?? null,
+                'error_code' => $failure['error_code'] ?? null,
+                'status' => $failure['status'] ?? null,
+            ], fn (mixed $value): bool => $value !== null && $value !== ''))
+            ->values()
+            ->all();
+        $notFoundCodes = [
+            'places_location_not_found',
+            'places_not_found',
+            'osm_location_not_found',
+            'osm_places_not_found',
         ];
-        $filtered = array_values(array_filter(
-            $tokens,
-            fn (string $token): bool => ! in_array(mb_strtolower($token), $generic, true),
-        ));
+        $onlyNotFound = $failures !== [] && collect($failures)->every(
+            fn (array $failure): bool => in_array($failure['error_code'] ?? null, $notFoundCodes, true),
+        );
 
-        return $filtered !== [] ? implode(' ', $filtered) : $candidate;
+        return [
+            'ok' => false,
+            'tool' => 'external_lookup',
+            'provider' => 'places',
+            'kind' => 'places',
+            'query' => $query,
+            'location' => $location,
+            'error_code' => $failures === []
+                ? 'places_lookup_unavailable'
+                : ($onlyNotFound ? 'places_not_found' : 'places_lookup_failed'),
+            'fallback_allowed' => false,
+            'provider_failures' => $failures,
+            'latency_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+        ];
     }
 
-    private function placeLocationQuery(string $query, string $location): string
+    private function deadlineExpired(?Carbon $hardDeadlineAt): bool
     {
-        if ($location !== '') {
-            return $location;
-        }
-
-        if (preg_match('/\b\d{5}(?:-\d{4})?\b/', $query, $matches)) {
-            return $matches[0];
-        }
-
-        if (preg_match('/\b(?:near|around|in)\s+([a-z][a-z\s,.-]+)$/i', $query, $matches)) {
-            return trim($matches[1]);
-        }
-
-        return '';
+        return $hardDeadlineAt instanceof Carbon && ! $hardDeadlineAt->isFuture();
     }
 
-    private function googleGeocodeLocation(string $locationQuery): ?array
+    /** @return array{connect:float,total:float} */
+    private function httpTimeouts(
+        float $configuredConnectSeconds,
+        float $configuredTotalSeconds,
+        ?Carbon $hardDeadlineAt,
+    ): array {
+        $remainingSeconds = $hardDeadlineAt instanceof Carbon
+            ? max(0.001, now()->diffInMilliseconds($hardDeadlineAt, false) / 1000)
+            : INF;
+        $total = max(0.001, min(max(0.001, $configuredTotalSeconds), $remainingSeconds));
+        $connect = max(0.001, min(max(0.001, $configuredConnectSeconds), $total));
+
+        return ['connect' => $connect, 'total' => $total];
+    }
+
+    /** @return array<string,mixed> */
+    private function deadlineFailure(): array
+    {
+        return [
+            'ok' => false,
+            'tool' => 'external_lookup',
+            'provider' => 'deadline_guard',
+            'error_code' => 'external_lookup_deadline',
+            'deadline_reached' => true,
+            'fallback_allowed' => false,
+        ];
+    }
+
+    /** @return array{origin:?array,error_code:?string,candidates:list<array<string,mixed>>} */
+    private function googleGeocodeLocation(string $locationQuery, ?Carbon $hardDeadlineAt): array
     {
         $params = [
             'address' => $this->googleLocationAddress($locationQuery),
@@ -803,27 +1057,57 @@ class LiveLookupService
             $params['components'] = "postal_code:{$postalCode}|country:US";
         }
 
+        $timeouts = $this->httpTimeouts(
+            (float) config('services.hermes_runtime.google_places_connect_timeout', 2),
+            (float) config('services.hermes_runtime.google_places_timeout', 6),
+            $hardDeadlineAt,
+        );
         $response = Http::acceptJson()
-            ->connectTimeout((float) config('services.hermes_runtime.google_places_connect_timeout', 2))
-            ->timeout((float) config('services.hermes_runtime.google_places_timeout', 6))
+            ->connectTimeout($timeouts['connect'])
+            ->timeout($timeouts['total'])
             ->get('https://maps.googleapis.com/maps/api/geocode/json', $params);
 
         if (! $response->successful() || data_get($response->json(), 'status') !== 'OK') {
-            return null;
+            return ['origin' => null, 'error_code' => 'places_location_not_found', 'candidates' => []];
         }
 
-        $result = collect((array) data_get($response->json(), 'results'))->first();
-        $lat = data_get($result, 'geometry.location.lat');
-        $lon = data_get($result, 'geometry.location.lng');
-        if (! is_numeric($lat) || ! is_numeric($lon)) {
-            return null;
+        $candidates = collect((array) data_get($response->json(), 'results'))
+            ->map(function (mixed $result): ?array {
+                if (! is_array($result)) {
+                    return null;
+                }
+                $lat = data_get($result, 'geometry.location.lat');
+                $lon = data_get($result, 'geometry.location.lng');
+                if (! is_numeric($lat) || ! is_numeric($lon)) {
+                    return null;
+                }
+
+                return [
+                    'lat' => (float) $lat,
+                    'lon' => (float) $lon,
+                    'formatted_address' => data_get($result, 'formatted_address'),
+                    'postal_code' => $this->postalCodeFromAddressComponents(
+                        (array) data_get($result, 'address_components', []),
+                    ),
+                ];
+            })
+            ->filter()
+            ->unique(fn (array $candidate): string => $candidate['lat'].'|'.$candidate['lon'].'|'.($candidate['formatted_address'] ?? ''))
+            ->values();
+        if ($candidates->count() !== 1) {
+            return [
+                'origin' => null,
+                'error_code' => $candidates->count() > 1
+                    ? 'places_location_ambiguous'
+                    : 'places_location_not_found',
+                'candidates' => $candidates->take(5)->all(),
+            ];
         }
 
         return [
-            'lat' => (float) $lat,
-            'lon' => (float) $lon,
-            'formatted_address' => data_get($result, 'formatted_address'),
-            'postal_code' => $this->postalCodeFromAddressComponents((array) data_get($result, 'address_components', [])),
+            'origin' => $candidates->first(),
+            'error_code' => null,
+            'candidates' => [],
         ];
     }
 
@@ -836,56 +1120,103 @@ class LiveLookupService
         return $locationQuery;
     }
 
-    private function osmLocationOrigin(string $locationQuery): ?array
+    /** @return array{origin:?array,error_code:?string,candidates:list<array<string,mixed>>} */
+    private function osmLocationOrigin(string $locationQuery, ?Carbon $hardDeadlineAt): array
     {
         $postalCode = $this->postalCodeFromLocation($locationQuery);
         if ($postalCode !== null) {
-            $zipOrigin = $this->zippopotamOrigin($postalCode);
+            $zipOrigin = $this->zippopotamOrigin($postalCode, $hardDeadlineAt);
             if ($zipOrigin !== null) {
-                return $zipOrigin;
+                return ['origin' => $zipOrigin, 'error_code' => null, 'candidates' => []];
             }
         }
 
         try {
+            if ($this->deadlineExpired($hardDeadlineAt)) {
+                return ['origin' => null, 'error_code' => 'places_location_not_found', 'candidates' => []];
+            }
+            $timeouts = $this->httpTimeouts(
+                (float) config('services.hermes_runtime.osm_places_connect_timeout', 2),
+                (float) config('services.hermes_runtime.osm_places_timeout', 5),
+                $hardDeadlineAt,
+            );
             $response = Http::acceptJson()
                 ->withUserAgent('HeyBean/1.0')
-                ->connectTimeout((float) config('services.hermes_runtime.osm_places_connect_timeout', 2))
-                ->timeout((float) config('services.hermes_runtime.osm_places_timeout', 5))
+                ->connectTimeout($timeouts['connect'])
+                ->timeout($timeouts['total'])
                 ->get(rtrim((string) config('services.hermes_runtime.osm_photon_base', 'https://photon.komoot.io'), '/').'/api/', [
                     'q' => $locationQuery,
-                    'limit' => 1,
+                    'limit' => 5,
                     'lang' => 'en',
                 ]);
         } catch (ConnectionException) {
-            return null;
+            return ['origin' => null, 'error_code' => 'places_location_not_found', 'candidates' => []];
         }
 
         if (! $response->successful()) {
-            return null;
+            return ['origin' => null, 'error_code' => 'places_location_not_found', 'candidates' => []];
         }
 
-        $feature = collect((array) data_get($response->json(), 'features'))->first();
-        $coordinates = (array) data_get($feature, 'geometry.coordinates', []);
-        $lon = $coordinates[0] ?? null;
-        $lat = $coordinates[1] ?? null;
-        if (! is_numeric($lat) || ! is_numeric($lon)) {
-            return null;
+        $candidates = collect((array) data_get($response->json(), 'features'))
+            ->map(function (mixed $feature) use ($locationQuery): ?array {
+                if (! is_array($feature)) {
+                    return null;
+                }
+                $coordinates = (array) data_get($feature, 'geometry.coordinates', []);
+                $lon = $coordinates[0] ?? null;
+                $lat = $coordinates[1] ?? null;
+                if (! is_numeric($lat) || ! is_numeric($lon)) {
+                    return null;
+                }
+                $properties = (array) data_get($feature, 'properties', []);
+                $formattedAddress = trim(implode(', ', array_unique(array_filter([
+                    data_get($properties, 'name'),
+                    data_get($properties, 'city'),
+                    data_get($properties, 'state'),
+                    data_get($properties, 'country'),
+                ]))));
+
+                return [
+                    'lat' => (float) $lat,
+                    'lon' => (float) $lon,
+                    'formatted_address' => $formattedAddress !== '' ? $formattedAddress : $locationQuery,
+                    'postal_code' => (string) data_get($properties, 'postcode', ''),
+                ];
+            })
+            ->filter()
+            ->unique(fn (array $candidate): string => $candidate['lat'].'|'.$candidate['lon'].'|'.$candidate['formatted_address'])
+            ->values();
+        if ($candidates->count() !== 1) {
+            return [
+                'origin' => null,
+                'error_code' => $candidates->count() > 1
+                    ? 'places_location_ambiguous'
+                    : 'places_location_not_found',
+                'candidates' => $candidates->take(5)->all(),
+            ];
         }
 
         return [
-            'lat' => (float) $lat,
-            'lon' => (float) $lon,
-            'formatted_address' => (string) data_get($feature, 'properties.name', $locationQuery),
-            'postal_code' => (string) data_get($feature, 'properties.postcode', ''),
+            'origin' => $candidates->first(),
+            'error_code' => null,
+            'candidates' => [],
         ];
     }
 
-    private function zippopotamOrigin(string $postalCode): ?array
+    private function zippopotamOrigin(string $postalCode, ?Carbon $hardDeadlineAt): ?array
     {
         try {
+            if ($this->deadlineExpired($hardDeadlineAt)) {
+                return null;
+            }
+            $timeouts = $this->httpTimeouts(
+                (float) config('services.hermes_runtime.osm_places_connect_timeout', 2),
+                (float) config('services.hermes_runtime.osm_places_timeout', 5),
+                $hardDeadlineAt,
+            );
             $response = Http::acceptJson()
-                ->connectTimeout((float) config('services.hermes_runtime.osm_places_connect_timeout', 2))
-                ->timeout((float) config('services.hermes_runtime.osm_places_timeout', 5))
+                ->connectTimeout($timeouts['connect'])
+                ->timeout($timeouts['total'])
                 ->get(rtrim((string) config('services.hermes_runtime.zippopotam_base', 'https://api.zippopotam.us'), '/').'/us/'.$postalCode);
         } catch (ConnectionException) {
             return null;
@@ -1101,19 +1432,6 @@ class LiveLookupService
         return implode("\n", $lines);
     }
 
-    private function tavilyTopic(string $query): string
-    {
-        if ((bool) preg_match('/\b(stock|stocks|market|earnings|revenue|share price|crypto|bitcoin|nasdaq|dow|s&p)\b/i', $query)) {
-            return 'finance';
-        }
-
-        if ((bool) preg_match('/\b(news|latest|today|breaking|election|sports|score|happened)\b/i', $query)) {
-            return 'news';
-        }
-
-        return 'general';
-    }
-
     private function tavilyText(array $response): string
     {
         $answer = trim((string) ($response['answer'] ?? ''));
@@ -1147,9 +1465,8 @@ class LiveLookupService
             ->all();
     }
 
-    private function webSearchFailure(User $user, ConversationSession $session, string $query, string $toolType, string $errorCode, string $message, int $latencyMs, ?int $status = null): array
+    private function webSearchFailure(User $user, ConversationSession $session, string $query, string $toolType, string $errorCode, int $latencyMs, ?int $status = null): array
     {
-        $userMessage = $this->lookupContinuationMessage($query);
         $metadata = [
             'conversation_session_id' => $session->id,
             'query' => $query,
@@ -1168,8 +1485,6 @@ class LiveLookupService
             'tool' => 'external_lookup',
             'provider' => 'openai_web_search',
             'error_code' => $errorCode,
-            'message' => $userMessage,
-            'diagnostic_message' => $message,
             'latency_ms' => $latencyMs,
         ];
         if ($status !== null) {
@@ -1179,26 +1494,19 @@ class LiveLookupService
         return $result;
     }
 
-    private function lookupContinuationMessage(string $query): string
-    {
-        $topic = str($query)->squish()->limit(80, '')->toString();
-
-        return $topic === ''
-            ? 'I’m checking live sources now. Send me one more detail if you want me to narrow it down further.'
-            : "I’m checking live sources for {$topic}. Send me one more detail if you want me to narrow it down further.";
-    }
-
-    private function externalLookupPrompt(ConversationSession $session, string $query, string $context, string $location): string
-    {
+    private function externalLookupPrompt(
+        ConversationSession $session,
+        string $query,
+        string $context,
+        string $location,
+        ?string $trustedTimezone,
+    ): string {
         $user = User::find($session->user_id);
-        $profile = $this->profileForSession($session);
-        $profileSettings = $profile?->settings ?? [];
-        $timezone = (string) data_get($profileSettings, 'timezone', config('app.timezone'));
-        $now = now($timezone);
+        $timezone = $this->validTrustedTimezone($trustedTimezone);
         $parts = [
             "Lookup query: {$query}",
-            'Current date/time: '.$now->toIso8601String(),
-            'Timezone: '.$timezone,
+            'Current server time (UTC): '.now('UTC')->toIso8601String(),
+            'User timezone: '.($timezone ?? 'unknown'),
         ];
         if ($location !== '') {
             $parts[] = "User/location hint: {$location}";
@@ -1268,7 +1576,10 @@ class LiveLookupService
     private function cacheKey(string $query, string $context, string $location, array $arguments = []): string
     {
         $structured = collect($arguments)
-            ->only(['domain', 'intent', 'date', 'date_range', 'time'])
+            ->only([
+                'kind', 'domain', 'intent', 'date', 'date_range', 'time', 'topic',
+                'latitude', 'longitude', 'units',
+            ])
             ->filter(fn (mixed $value): bool => is_scalar($value) && trim((string) $value) !== '')
             ->map(fn (mixed $value): string => mb_strtolower(trim((string) $value)))
             ->all();
@@ -1276,27 +1587,20 @@ class LiveLookupService
         return 'live_lookup:'.sha1(mb_strtolower(trim($query.'|'.$context.'|'.$location.'|'.json_encode($structured))));
     }
 
-    private function sessionTimezone(ConversationSession $session): string
+    private function validTrustedTimezone(?string $timezone): ?string
     {
-        $profileSettings = $this->profileForSession($session)?->settings ?? [];
-        $timezone = (string) data_get($profileSettings, 'timezone', config('app.timezone'));
+        $timezone = trim((string) $timezone);
+        if ($timezone === '') {
+            return null;
+        }
 
         try {
             new \DateTimeZone($timezone);
 
             return $timezone;
         } catch (\Throwable) {
-            return (string) config('app.timezone');
+            return null;
         }
-    }
-
-    private function profileForSession(ConversationSession $session): ?AgentProfile
-    {
-        if ($session->workspace_id) {
-            return AgentProfile::where('workspace_id', $session->workspace_id)->first();
-        }
-
-        return AgentProfile::where('user_id', $session->user_id)->first();
     }
 
     private function providerApiKey(): string

@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Enums\VoiceTurnLane;
 use App\Enums\VoiceTurnSideEffectStatus;
 use App\Enums\VoiceTurnState;
 use Illuminate\Database\Eloquent\Model;
@@ -12,6 +11,8 @@ use LogicException;
 
 class VoiceTurn extends Model
 {
+    protected $dateFormat = 'Y-m-d H:i:s.u';
+
     protected $fillable = [
         'turn_id',
         'user_id',
@@ -23,8 +24,6 @@ class VoiceTurn extends Model
         'client_kind',
         'transcript',
         'sanitized_transcript',
-        'lane',
-        'handler',
         'state',
         'version',
         'idempotency_key',
@@ -58,8 +57,6 @@ class VoiceTurn extends Model
                 'client_kind',
                 'transcript',
                 'sanitized_transcript',
-                'lane',
-                'handler',
                 'idempotency_key',
                 'acknowledgement_required',
                 'acknowledgement_text',
@@ -78,7 +75,6 @@ class VoiceTurn extends Model
     protected function casts(): array
     {
         return [
-            'lane' => VoiceTurnLane::class,
             'state' => VoiceTurnState::class,
             'side_effect_status' => VoiceTurnSideEffectStatus::class,
             'version' => 'integer',

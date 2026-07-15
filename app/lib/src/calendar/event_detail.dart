@@ -5,6 +5,7 @@ typedef _CalendarEventSaveCallback =
       HermesCalendarEvent event, {
       required String title,
       required String startsAt,
+      required bool allDay,
       String? endsAt,
       String? notes,
       String? location,
@@ -200,8 +201,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
   ];
 
   static const _statuses = <({String value, String label})>[
-    (value: 'confirmed', label: 'Confirmed'),
-    (value: 'tentative', label: 'Tentative'),
+    (value: 'scheduled', label: 'Scheduled'),
     (value: 'cancelled', label: 'Cancelled'),
   ];
 
@@ -230,6 +230,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     (value: 'days', label: 'days'),
     (value: 'weeks', label: 'weeks'),
     (value: 'months', label: 'months'),
+    (value: 'years', label: 'years'),
   ];
 
   @override
@@ -247,12 +248,12 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     _startsAt = TextEditingController(
       text: _allDay
           ? _formatCalendarAllDayEventDate(event.startsAt)
-          : _formatCalendarEventDateTime(event.startsAt),
+          : _formatCalendarDateTimeInput(event.startsAt),
     );
     _endsAt = TextEditingController(
       text: _allDay
-          ? _formatCalendarAllDayEventEndDate(event.startsAt, event.endsAt)
-          : _formatCalendarEventDateTime(event.endsAt),
+          ? _formatCalendarAllDayEventDate(event.endsAt ?? event.startsAt)
+          : _formatCalendarDateTimeInput(event.endsAt),
     );
     _notes = TextEditingController(text: event.notes ?? '');
     _location = TextEditingController(text: event.location ?? '');
@@ -291,8 +292,8 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         ? event.recurrence!
         : 'none';
     _status = _statuses.any((status) => status.value == event.status)
-        ? event.status!
-        : 'confirmed';
+        ? event.status
+        : 'scheduled';
     _eventSpecificDays.addAll(
       ((eventMetadata['days'] as List?) ?? const <Object?>[])
           .whereType<String>(),
@@ -468,24 +469,52 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     DateTime? parsedEnd;
 
     if (_allDay) {
+      final originalWasAllDay = _eventIsAllDay(widget.event);
+      final originalStartsAt = widget.event.startsAt;
+      final originalEndsAt = widget.event.endsAt;
+      final startIsUnchanged =
+          originalWasAllDay &&
+          originalStartsAt != null &&
+          _startsAt.text.trim() ==
+              _formatCalendarAllDayEventDate(originalStartsAt);
+      final endIsUnchanged =
+          originalWasAllDay &&
+          originalEndsAt != null &&
+          _endsAt.text.trim() == _formatCalendarAllDayEventDate(originalEndsAt);
       final startDate = _calendarEventDateInputToDate(
         _startsAt.text,
-        originalValue: widget.event.startsAt,
+        originalValue: originalStartsAt,
       );
-      if (startDate == null) {
-        setState(() => _validationError = 'Enter a valid date, like May 18.');
+      final endDate = _calendarEventDateInputToDate(
+        _endsAt.text,
+        originalValue: originalEndsAt,
+      );
+      if (startDate == null || endDate == null) {
+        setState(() => _validationError = 'Choose valid start and end dates.');
         return;
       }
-      parsedStart = DateTime(startDate.year, startDate.month, startDate.day);
-      parsedEnd = DateTime(
+      final inputStart = DateTime(
         startDate.year,
         startDate.month,
         startDate.day,
-        23,
-        59,
       );
-      startsAt = parsedStart.toUtc().toIso8601String();
-      endsAt = parsedEnd.toUtc().toIso8601String();
+      final inputEnd = DateTime(endDate.year, endDate.month, endDate.day);
+      startsAt = startIsUnchanged
+          ? originalStartsAt
+          : inputStart.toUtc().toIso8601String();
+      endsAt = endIsUnchanged
+          ? originalEndsAt
+          : inputEnd.toUtc().toIso8601String();
+      parsedStart = _parseCalendarEventDateTime(startsAt);
+      parsedEnd = _parseCalendarEventDateTime(endsAt);
+      if (parsedStart == null ||
+          parsedEnd == null ||
+          !parsedEnd.isAfter(parsedStart)) {
+        setState(
+          () => _validationError = 'Ends before must be after the start date.',
+        );
+        return;
+      }
     } else {
       final wireStartsAt = _calendarEventInputToWireValue(
         _startsAt.text,
@@ -494,18 +523,14 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
       final wireEndsAt = _calendarEventInputToWireValue(
         _endsAt.text,
         originalValue: widget.event.endsAt,
-        referenceValue: wireStartsAt,
         allowEmpty: true,
       );
       parsedStart = _parseCalendarEventDateTime(wireStartsAt);
-      parsedEnd = _parseCalendarEventDateTime(wireEndsAt, wireStartsAt);
+      parsedEnd = _parseCalendarEventDateTime(wireEndsAt);
       if (wireStartsAt == null ||
           wireStartsAt.trim().isEmpty ||
           parsedStart == null) {
-        setState(
-          () => _validationError =
-              'Enter a valid start time, like May 18 9:00 AM.',
-        );
+        setState(() => _validationError = 'Choose a valid start time.');
         return;
       }
       if (wireEndsAt != null && parsedEnd == null) {
@@ -541,21 +566,21 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         (workspaceId) => _workspaceValuesMatch(workspaceId, primaryWorkspaceId),
       );
     }
-    final eventMetadata = <String, Object?>{
-      ...?widget.event.metadata,
-      'recurrence': _recurrence,
-      if (_allDay ||
-          (widget.event.metadata?.containsKey('all_day') ?? false) ||
-          (widget.event.metadata?.containsKey('allDay') ?? false))
-        'all_day': _allDay,
-      if (_recurrence == 'specific_days')
-        'days': _eventSpecificDays.toList()..sort(),
-      if (_recurrence == 'specific_days' || _recurrence == 'interval')
-        'interval': eventInterval,
-      if (_recurrence == 'specific_days' || _recurrence == 'interval')
-        'unit': _eventIntervalUnit,
-      ..._placeMetadataForSave(),
-    };
+    final eventMetadata = <String, Object?>{...?widget.event.metadata};
+    eventMetadata
+      ..remove('recurrence')
+      ..remove('days')
+      ..remove('interval')
+      ..remove('unit');
+    if (_recurrence == 'specific_days') {
+      eventMetadata['days'] = _eventSpecificDays.toList()..sort();
+    }
+    if (_recurrence == 'interval') {
+      eventMetadata['interval'] = eventInterval;
+      eventMetadata['unit'] = _eventIntervalUnit;
+    }
+    eventMetadata.addAll(_placeMetadataForSave());
+    eventMetadata.remove('all_day');
 
     setState(() {
       _saving = true;
@@ -568,6 +593,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
             ? widget.event.title
             : _title.text.trim(),
         startsAt: startsAt,
+        allDay: _allDay,
         endsAt: endsAt,
         notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
         location: _location.text.trim().isEmpty ? null : _location.text.trim(),
@@ -731,7 +757,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     );
     final start = _parseCalendarEventDateTime(wireStart);
     if (start == null) return;
-    _endsAt.text = _formatCalendarEventDateTime(
+    _endsAt.text = _formatCalendarDateTimeInput(
       start.add(const Duration(hours: 1)).toIso8601String(),
     );
     _validationError = null;
@@ -1040,7 +1066,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     );
     if (selected != null && mounted) {
       setState(() {
-        controller.text = _formatCalendarEventDateTime(
+        controller.text = _formatCalendarDateTimeInput(
           selected.toIso8601String(),
         );
         if (updateEndFromStart) _setEndOneHourAfterStart();
@@ -1063,7 +1089,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     );
     if (selected != null && mounted) {
       setState(() {
-        controller.text = _formatCalendarDateLabel(selected);
+        controller.text = _formatCalendarDateInput(selected);
       });
     }
   }
@@ -1074,18 +1100,28 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
       _allDay = value;
       _validationError = null;
       final start =
-          _parseCalendarEventDateTime(_startsAt.text, widget.event.startsAt) ??
+          _parseCalendarEventDateTime(_startsAt.text) ??
           _parseCalendarEventDateTime(widget.event.startsAt) ??
           DateTime.now();
+      final end =
+          _parseCalendarEventDateTime(_endsAt.text) ??
+          _parseCalendarEventDateTime(widget.event.endsAt) ??
+          start;
 
       if (value) {
-        _startsAt.text = _formatCalendarDateLabel(start);
-        _endsAt.text = _formatCalendarDateLabel(start);
+        _startsAt.text = _formatCalendarDateInput(start);
+        final startDay = _dateOnly(start);
+        final endDay = _dateOnly(end);
+        _endsAt.text = _formatCalendarDateInput(
+          endDay.isAfter(startDay)
+              ? endDay
+              : startDay.add(const Duration(days: 1)),
+        );
       } else {
         final startDate =
             _calendarEventDateInputToDate(_startsAt.text) ?? start;
         final endDate = _calendarEventDateInputToDate(_endsAt.text);
-        _startsAt.text = _formatCalendarEventDateTime(
+        _startsAt.text = _formatCalendarDateTimeInput(
           DateTime(
             startDate.year,
             startDate.month,
@@ -1097,7 +1133,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
         if (endDate == null) {
           _endsAt.clear();
         } else {
-          _endsAt.text = _formatCalendarEventDateTime(
+          _endsAt.text = _formatCalendarDateTimeInput(
             DateTime(
               endDate.year,
               endDate.month,
@@ -1324,15 +1360,14 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                     children: [
                       _MobileFormSection(
                         title: 'Schedule',
-                        subtitle:
-                            'Use exact times or natural entries from the agent.',
+                        subtitle: 'Choose exact dates and times.',
                         icon: Icons.schedule_rounded,
                         infoKey: const Key('event-schedule-info'),
                         infoTitle: 'Event schedule',
                         infoBullets: const [
                           'Turn on All day for date-only events with no start or end time.',
                           'Tap a time field to use the date and time picker.',
-                          'You can also type natural entries like today at 2pm or May 18 at 9am.',
+                          'Use the picker so the app sends an exact date and time.',
                           'End time must be after the start time; leave it blank for a simple reminder-style event.',
                         ],
                         primary: true,
@@ -1415,11 +1450,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                           TextField(
                             key: const Key('event-start-field'),
                             controller: _startsAt,
-                            onChanged: (_) {
-                              if (!_allDay) {
-                                setState(_setEndOneHourAfterStart);
-                              }
-                            },
+                            readOnly: true,
                             onTap: () => _showTimeDock(
                               _startsAt,
                               originalValue: widget.event.startsAt,
@@ -1435,21 +1466,21 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                               suffixIcon: Icon(Icons.expand_less_rounded),
                             ),
                           ),
-                          if (!_allDay)
-                            TextField(
-                              key: const Key('event-end-field'),
-                              controller: _endsAt,
-                              onTap: () => _showTimeDock(
-                                _endsAt,
-                                originalValue: widget.event.endsAt,
-                                referenceValue: _startsAt.text,
-                              ),
-                              decoration: const InputDecoration(
-                                labelText: 'End time',
-                                prefixIcon: Icon(Icons.stop_rounded),
-                                suffixIcon: Icon(Icons.expand_less_rounded),
-                              ),
+                          TextField(
+                            key: const Key('event-end-field'),
+                            controller: _endsAt,
+                            readOnly: true,
+                            onTap: () => _showTimeDock(
+                              _endsAt,
+                              originalValue: widget.event.endsAt,
+                              referenceValue: _startsAt.text,
                             ),
+                            decoration: InputDecoration(
+                              labelText: _allDay ? 'Ends before' : 'End time',
+                              prefixIcon: const Icon(Icons.stop_rounded),
+                              suffixIcon: const Icon(Icons.expand_less_rounded),
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 14),

@@ -2,30 +2,31 @@
 
 namespace App\Jobs;
 
-use App\Enums\VoiceTurnLane;
+use App\Data\AssistantRunExecutionClaim;
+use App\Data\HermesSemanticCompositionRequest;
+use App\Data\HermesSemanticInterpretation;
+use App\Data\HermesSemanticInterpretationRequest;
+use App\Data\HermesSemanticOperation;
+use App\Data\HermesSemanticOperationResult;
 use App\Enums\VoiceTurnSideEffectStatus;
 use App\Enums\VoiceTurnState;
-use App\Exceptions\BrowserVoiceHandlerException;
+use App\Exceptions\HermesSemanticOperationException;
+use App\Exceptions\HermesSemanticProviderException;
+use App\Exceptions\HermesSemanticUsageLimitException;
 use App\Exceptions\VoiceTurnConflictException;
-use App\Models\ActivityEvent;
 use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
-use App\Models\ConversationSession;
-use App\Models\MemoryEvent;
 use App\Models\VoiceTurn;
 use App\Services\AssistantRunService;
 use App\Services\BeanMemoryService;
-use App\Services\FastCalendarReadService;
-use App\Services\FastDomainReadService;
-use App\Services\FastDomainWriteService;
-use App\Services\FastWeatherReadService;
 use App\Services\HermesRuntimeService;
-use App\Services\PlanLimitService;
+use App\Services\HermesSemanticContextService;
+use App\Services\HermesSemanticInterpreter;
+use App\Services\HermesSemanticOperationExecutor;
 use App\Services\VoiceTurnLifecycleService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class ProcessAssistantRun implements ShouldQueue
@@ -33,7 +34,7 @@ class ProcessAssistantRun implements ShouldQueue
     use Queueable;
 
     // Browser Voice v2 uses these attempts only for lifecycle-scheduler waits.
-    // Legacy runs still use queue middleware below.
+    // Nonvoice assistant runs still use queue middleware below.
     public int $tries = 120;
 
     public int $maxExceptions = 1;
@@ -42,7 +43,10 @@ class ProcessAssistantRun implements ShouldQueue
 
     public bool $failOnTimeout = true;
 
-    public function __construct(public readonly int $assistantRunId) {}
+    public function __construct(
+        public readonly int $assistantRunId,
+        public readonly ?int $executionGeneration = null,
+    ) {}
 
     public function middleware(): array
     {
@@ -73,11 +77,9 @@ class ProcessAssistantRun implements ShouldQueue
         HermesRuntimeService $runtime,
         AssistantRunService $runs,
         ?VoiceTurnLifecycleService $voiceTurns = null,
-        ?FastCalendarReadService $calendarReads = null,
-        ?FastWeatherReadService $weatherReads = null,
-        ?FastDomainReadService $domainReads = null,
-        ?FastDomainWriteService $domainWrites = null,
-        ?PlanLimitService $planLimits = null,
+        ?HermesSemanticInterpreter $semanticInterpreter = null,
+        ?HermesSemanticContextService $semanticContext = null,
+        ?HermesSemanticOperationExecutor $semanticOperations = null,
     ): void {
         $run = AssistantRun::with('session', 'userMessage')->find($this->assistantRunId);
         if (! $run || ! $run->session || ! $run->userMessage) {
@@ -87,135 +89,58 @@ class ProcessAssistantRun implements ShouldQueue
         if ($run->voice_turn_id !== null) {
             $this->handleBrowserVoiceV2(
                 $run,
-                $runtime,
                 $voiceTurns ?? app(VoiceTurnLifecycleService::class),
-                $calendarReads ?? app(FastCalendarReadService::class),
-                $weatherReads ?? app(FastWeatherReadService::class),
-                $domainReads ?? app(FastDomainReadService::class),
-                $domainWrites ?? app(FastDomainWriteService::class),
-                $planLimits ?? app(PlanLimitService::class),
+                $semanticInterpreter ?? app(HermesSemanticInterpreter::class),
+                $semanticContext ?? app(HermesSemanticContextService::class),
+                $semanticOperations ?? app(HermesSemanticOperationExecutor::class),
             );
 
             return;
         }
 
-        $supersedesRunId = (int) data_get($run->metadata, 'supersedes_run_id', 0);
-        if ($supersedesRunId > 0) {
-            $predecessor = AssistantRun::query()
-                ->whereKey($supersedesRunId)
-                ->where('user_id', $run->user_id)
-                ->where('conversation_session_id', $run->conversation_session_id)
-                ->first();
-            if ($predecessor instanceof AssistantRun && $runs->runHasCompletedMutatingWork($predecessor)) {
-                $this->markSupersessionConflict($run, $predecessor);
-
-                return;
-            }
-        }
-
         if ($run->status === 'cancelled') {
-            $this->markCancelled($run);
+            return;
+        }
+
+        if ($run->status === 'running') {
+            $runs->prepareRunForBackgroundResponse($run);
 
             return;
         }
 
-        $started = DB::transaction(function () use ($run): bool {
-            $session = ConversationSession::query()->lockForUpdate()->find($run->conversation_session_id);
-            $lockedRun = AssistantRun::query()->lockForUpdate()->find($run->id);
-            if (! $session instanceof ConversationSession || ! $lockedRun instanceof AssistantRun || ! in_array($lockedRun->status, ['queued', 'running'], true)) {
-                return false;
-            }
-
-            $lockedRun->update([
-                'status' => 'running',
-                'started_at' => $lockedRun->started_at ?? now(),
-            ]);
-            $this->updateVoiceTurnState($lockedRun, 'running');
-            $session->update([
-                'status' => 'running',
-                'last_activity_at' => now(),
-            ]);
-            $this->recordEvent($lockedRun, 'runtime.run_started', [
-                'run_id' => $lockedRun->id,
-                'source' => $lockedRun->source,
-                'message_id' => $lockedRun->user_message_id,
-                'queue_wait_ms' => $this->elapsedMilliseconds($lockedRun->created_at),
-            ], 'hermes.runs', 'started');
-
-            return true;
-        }, 3);
-
-        if (! $started) {
+        if ($run->status !== 'queued') {
             return;
         }
 
-        $run->refresh()->load(['session', 'userMessage']);
+        if ($this->executionGeneration === null) {
+            return;
+        }
 
-        $userMessageMetadata = is_array($run->userMessage->metadata) ? $run->userMessage->metadata : [];
-        $run->userMessage->setAttribute('metadata', array_merge($userMessageMetadata, [
-            'assistant_run_id' => $run->id,
-            'defer_memory_candidate' => true,
-        ]));
+        $run = $runs->prepareRunForBackgroundResponse($run)
+            ->load(['session', 'userMessage']);
+        if ($run->status !== 'queued' || ! $run->session || ! $run->userMessage) {
+            return;
+        }
+
+        $claim = $runs->claimRunExecution($run, $this->executionGeneration);
+        if (! $claim instanceof AssistantRunExecutionClaim) {
+            return;
+        }
+
+        $run = AssistantRun::with(['session', 'userMessage'])->find($claim->runId);
+        if (! $run instanceof AssistantRun || ! $run->session || ! $run->userMessage) {
+            return;
+        }
 
         try {
-            $result = $runtime->sendExistingMessage($run->session->refresh(), $run->userMessage);
-            $assistantMessage = $result['assistant_message'] ?? null;
-            $completionWon = DB::transaction(function () use ($run, $result, $assistantMessage): bool {
-                $session = ConversationSession::query()->lockForUpdate()->find($run->conversation_session_id);
-                $lockedRun = AssistantRun::query()->lockForUpdate()->find($run->id);
-                if (! $session instanceof ConversationSession || ! $lockedRun instanceof AssistantRun || $lockedRun->status !== 'running') {
-                    $alreadyReconciled = $assistantMessage instanceof ConversationMessage
-                        && $lockedRun instanceof AssistantRun
-                        && $lockedRun->status === 'completed'
-                        && (int) $lockedRun->assistant_message_id === (int) $assistantMessage->id;
-                    if ($assistantMessage instanceof ConversationMessage && ! $alreadyReconciled) {
-                        $assistantMessage->delete();
-                    }
-                    if ($session instanceof ConversationSession && $lockedRun instanceof AssistantRun) {
-                        $session->update([
-                            'status' => $this->sessionStatusForActiveRuns($session->id, $lockedRun->id),
-                            'last_activity_at' => now(),
-                        ]);
-                    }
-
-                    return false;
-                }
-
-                $status = ($result['status'] ?? null) === 'cancelled' ? 'cancelled' : 'completed';
-                $lockedRun->update([
-                    'status' => $status,
-                    'assistant_message_id' => $assistantMessage instanceof ConversationMessage ? $assistantMessage->id : null,
-                    'result' => [
-                        'status' => $result['status'] ?? null,
-                        'assistant_message_id' => $assistantMessage instanceof ConversationMessage ? $assistantMessage->id : null,
-                        'event_ids' => collect($result['events'] ?? [])->pluck('id')->filter()->values()->all(),
-                    ],
-                    'cancelled_at' => $status === 'cancelled' ? now() : null,
-                    'completed_at' => now(),
-                ]);
-                $this->updateVoiceTurnState($lockedRun, $status === 'completed' ? 'completed' : 'cancelled', terminal: true);
-                $session->update([
-                    'status' => $this->sessionStatusForActiveRuns($session->id, $lockedRun->id),
-                    'last_activity_at' => now(),
-                ]);
-                $this->recordEvent($lockedRun, 'runtime.run_completed', [
-                    'run_id' => $lockedRun->id,
-                    'status' => $status,
-                    'assistant_message_id' => $lockedRun->assistant_message_id,
-                    'run_duration_ms' => $this->elapsedMilliseconds($lockedRun->started_at),
-                ], 'hermes.runs', $status === 'completed' ? 'succeeded' : 'cancelled');
-
-                return $status === 'completed';
-            }, 3);
-
-            if ($completionWon && $assistantMessage instanceof ConversationMessage) {
-                $persistedUserMessage = ConversationMessage::find($run->user_message_id);
-                if ($persistedUserMessage instanceof ConversationMessage) {
-                    app(BeanMemoryService::class)->recordTurnCandidate($run->session->refresh(), $persistedUserMessage, $assistantMessage);
-                }
-            }
+            $result = $runtime->sendExistingMessage($run->session->refresh(), $run->userMessage, $claim);
+            $runs->finishRuntimeResult($claim, $result);
         } catch (\Throwable $exception) {
-            $this->markFailed($run, $exception->getMessage());
+            $runs->finishRuntimeResult($claim, [
+                'status' => 'failed',
+                'error' => $exception->getMessage(),
+                'events' => [],
+            ]);
         }
     }
 
@@ -227,23 +152,39 @@ class ProcessAssistantRun implements ShouldQueue
         }
 
         if ($run->voice_turn_id !== null) {
-            $this->markBrowserVoiceV2Failed($run, $exception, app(VoiceTurnLifecycleService::class));
+            $this->markBrowserVoiceV2Failed(
+                $run,
+                $exception,
+                app(VoiceTurnLifecycleService::class),
+                app(HermesSemanticOperationExecutor::class),
+            );
 
             return;
         }
 
-        $this->markFailed($run, $exception->getMessage());
+        if ($this->executionGeneration === null || (int) $run->user_message_id <= 0) {
+            return;
+        }
+
+        $claim = new AssistantRunExecutionClaim(
+            runId: $run->id,
+            sessionId: $run->conversation_session_id,
+            userMessageId: (int) $run->user_message_id,
+            generation: $this->executionGeneration,
+        );
+        app(AssistantRunService::class)->finishRuntimeResult($claim, [
+            'status' => 'failed',
+            'error' => $exception->getMessage(),
+            'events' => [],
+        ]);
     }
 
     private function handleBrowserVoiceV2(
         AssistantRun $run,
-        HermesRuntimeService $runtime,
         VoiceTurnLifecycleService $lifecycle,
-        FastCalendarReadService $calendarReads,
-        FastWeatherReadService $weatherReads,
-        FastDomainReadService $domainReads,
-        FastDomainWriteService $domainWrites,
-        PlanLimitService $planLimits,
+        HermesSemanticInterpreter $semanticInterpreter,
+        HermesSemanticContextService $semanticContext,
+        HermesSemanticOperationExecutor $semanticOperations,
     ): void {
         $turn = VoiceTurn::find($run->voice_turn_id);
         if (! $turn instanceof VoiceTurn) {
@@ -253,270 +194,615 @@ class ProcessAssistantRun implements ShouldQueue
             return;
         }
 
-        $started = $lifecycle->claimJobExecution($run);
-        if (! $started) {
-            $currentRun = $run->fresh();
-            $currentTurn = $turn->fresh();
-            if ($currentRun instanceof AssistantRun
-                && $currentTurn instanceof VoiceTurn
-                && $currentRun->status === 'queued'
-                && ! $currentTurn->state->isTerminal()) {
-                $this->job?->release(1);
-            }
-
-            return;
-        }
-
-        $provisional = null;
-        try {
-            $turn = $lifecycle->markProgress($turn, [
-                'run_id' => $run->id,
-                'label' => $run->label,
-            ], 'worker');
-            $runtimeUserMessage = $run->userMessage->refresh();
-            $runtimeUserMessage->setAttribute('metadata', [
-                ...(is_array($runtimeUserMessage->metadata) ? $runtimeUserMessage->metadata : []),
-                'assistant_run_id' => $run->id,
-                'defer_memory_candidate' => true,
-                'defer_response_persistence' => true,
-            ]);
-            $typedFinalText = $this->executeBrowserVoiceTypedHandler(
+        match ($run->handler) {
+            HermesSemanticOperationExecutor::INTERPRETATION_HANDLER => $this->handleBrowserVoiceSemanticRun(
                 $run,
                 $turn,
                 $lifecycle,
-                $calendarReads,
-                $weatherReads,
-                $domainReads,
-                $domainWrites,
-            );
-            $runLane = $this->browserVoiceRunLane($run, $turn);
-            $runHandler = trim((string) ($run->handler ?: $turn->handler));
-            if ($runHandler === 'agent.generate_note') {
-                $message = $planLimits->noteCreationUpgradeMessage($turn->user()->firstOrFail());
-                if ($message !== null) {
-                    throw new BrowserVoiceHandlerException(
-                        'subscription_limit_reached',
-                        $message,
-                        $message,
-                    );
-                }
-            }
-            $typedHandler = in_array($runHandler, [
-                'app.calendar.read',
-                'app.reminder.read',
-                'app.task.read',
-                'app.note.read',
-                'external.weather',
-            ], true);
-            $typedHandler = $typedHandler || $runLane === VoiceTurnLane::AppWrite;
-            if ($typedHandler && $typedFinalText === null) {
-                throw new BrowserVoiceHandlerException(
-                    'direct_request_incomplete',
-                    "The persisted typed handler {$runHandler} could not resolve the required fields or one unambiguous target.",
-                    'I’m missing a required detail or a clear target for that change. Please tell me exactly which item and what to change.',
-                );
-            }
-            $result = $typedHandler
-                ? [
-                    'status' => 'completed',
-                    'assistant_message' => null,
-                    'events' => collect(),
-                ]
-                : $runtime->sendExistingMessage($run->session->refresh(), $runtimeUserMessage);
-            $provisional = $result['assistant_message'] ?? null;
-            $finalText = $typedHandler
-                ? trim((string) $typedFinalText)
-                : trim((string) ($result['assistant_content']
-                    ?? ($provisional instanceof ConversationMessage ? $provisional->content : '')));
-            $runtimeStatus = $this->browserVoiceRuntimeStatus($result);
-            $runtimeCanceled = in_array($runtimeStatus, ['cancelled', 'canceled'], true);
-            $runtimeFailed = in_array($runtimeStatus, ['failed', 'blocked', 'error'], true);
-            if (! $runtimeCanceled && ! $runtimeFailed && $runHandler === 'agent.generate_note') {
-                $saved = $domainWrites->createGeneratedNote($turn, $run, $finalText);
-                if ($saved === null) {
-                    throw new BrowserVoiceHandlerException(
-                        'generated_note_not_committed',
-                        'The generated note did not cross the typed write receipt boundary.',
-                        'I drafted that, but I couldn’t save the note. Would you like me to try again?',
-                    );
-                }
-                $finalText = $saved;
-            }
-
-            $mayFinalize = DB::transaction(function () use ($run, $provisional): bool {
-                $lockedRun = AssistantRun::query()->whereKey($run->id)->lockForUpdate()->first();
-                if (! $lockedRun instanceof AssistantRun || $lockedRun->status !== 'running') {
-                    if ($provisional instanceof ConversationMessage) {
-                        $provisional->delete();
-                    }
-
-                    return false;
-                }
-
-                $lockedRun->update([
-                    'status' => 'finalizing',
-                    'last_progress_at' => now(),
-                ]);
-                if ($provisional instanceof ConversationMessage) {
-                    $provisional->delete();
-                }
-
-                return true;
-            }, 3);
-            if (! $mayFinalize) {
-                return;
-            }
-
-            if ($runtimeCanceled) {
-                $terminal = $lifecycle->finishJob(
-                    $run,
-                    'cancelled',
-                    metadata: [
-                        'run_id' => $run->id,
-                        'reason' => 'runtime_canceled',
-                        'event_ids' => collect($result['events'] ?? [])->pluck('id')->filter()->values()->all(),
-                    ],
-                );
-            } elseif ($runtimeFailed) {
-                $terminal = $lifecycle->finishJob(
-                    $run,
-                    'failed',
-                    failureCategory: 'runtime_'.$runtimeStatus,
-                    internalDetail: trim((string) data_get($result, 'blocker.reason'))
-                        ?: "The runtime returned {$runtimeStatus}.",
-                    userFacingFailure: $this->browserVoiceRuntimeFailureText($finalText),
-                    sideEffectStatus: $this->failureSideEffectStatus($turn, $run),
-                    metadata: [
-                        'run_id' => $run->id,
-                        'runtime_status' => $runtimeStatus,
-                        'event_ids' => collect($result['events'] ?? [])->pluck('id')->filter()->values()->all(),
-                    ],
-                );
-            } elseif ($finalText === '') {
-                $terminal = $lifecycle->finishJob(
-                    $run,
-                    'failed',
-                    failureCategory: 'empty_runtime_result',
-                    internalDetail: 'The runtime completed without a usable final response.',
-                    userFacingFailure: 'I couldn’t finish that request. Would you like me to try again?',
-                    sideEffectStatus: $this->failureSideEffectStatus($turn, $run),
-                    metadata: [
-                        'run_id' => $run->id,
-                        'event_ids' => collect($result['events'] ?? [])->pluck('id')->filter()->values()->all(),
-                    ],
-                );
-            } else {
-                $terminal = $lifecycle->finishJob(
-                    $run,
-                    'completed',
-                    finalText: $finalText,
-                    sideEffectStatus: $this->isReceiptBackedWriteRun($run, $turn)
-                        ? VoiceTurnSideEffectStatus::Committed
-                        : VoiceTurnSideEffectStatus::None,
-                    metadata: [
-                        'run_id' => $run->id,
-                        'event_ids' => collect($result['events'] ?? [])->pluck('id')->filter()->values()->all(),
-                    ],
-                );
-            }
-
-            if ($terminal->state === VoiceTurnState::Completed
-                && $terminal->finalAssistantMessage instanceof ConversationMessage
-                && $terminal->userMessage instanceof ConversationMessage) {
-                app(BeanMemoryService::class)->recordTurnCandidate(
-                    $run->session->refresh(),
-                    $terminal->userMessage,
-                    $terminal->finalAssistantMessage,
-                );
-            }
-        } catch (\Throwable $exception) {
-            if ($provisional instanceof ConversationMessage) {
-                $freshTurn = $turn->fresh();
-                if (! $freshTurn instanceof VoiceTurn
-                    || (int) $freshTurn->final_assistant_message_id !== (int) $provisional->id) {
-                    $provisional->delete();
-                }
-            }
-            if ($this->isReceiptBackedWriteRun($run, $turn)
-                && ($reconciled = $domainWrites->reconcile($turn->fresh(), $run->fresh())) !== null) {
-                try {
-                    $lifecycle->finishJob(
-                        $run,
-                        'completed',
-                        finalText: $reconciled,
-                        sideEffectStatus: VoiceTurnSideEffectStatus::Committed,
-                        metadata: ['reconciled_after_worker_exception' => true, 'run_id' => $run->id],
-                    );
-
-                    return;
-                } catch (VoiceTurnConflictException) {
-                    // A competing finalizer already recorded the authoritative outcome.
-                }
-            }
-            $this->markBrowserVoiceV2Failed($run, $exception, $lifecycle);
-        }
+                $semanticInterpreter,
+                $semanticContext,
+                $semanticOperations,
+            ),
+            HermesSemanticOperationExecutor::OPERATION_HANDLER => $this->handleBrowserVoiceSemanticOperationRun(
+                $run,
+                $turn,
+                $lifecycle,
+                $semanticOperations,
+            ),
+            HermesSemanticOperationExecutor::COMPOSITION_HANDLER => $this->handleBrowserVoiceSemanticCompositionRun(
+                $run,
+                $turn,
+                $lifecycle,
+                $semanticInterpreter,
+                $semanticContext,
+                $semanticOperations,
+            ),
+            default => $this->markBrowserVoiceV2Failed(
+                $run,
+                new \RuntimeException("Unsupported Browser Voice handler {$run->handler}."),
+                $lifecycle,
+                $semanticOperations,
+            ),
+        };
     }
 
-    private function executeBrowserVoiceTypedHandler(
+    private function handleBrowserVoiceSemanticRun(
         AssistantRun $run,
         VoiceTurn $turn,
         VoiceTurnLifecycleService $lifecycle,
-        FastCalendarReadService $calendarReads,
-        FastWeatherReadService $weatherReads,
-        FastDomainReadService $domainReads,
-        FastDomainWriteService $domainWrites,
-    ): ?string {
-        $lane = $this->browserVoiceRunLane($run, $turn);
-        $handler = trim((string) ($run->handler ?: $turn->handler));
-        $input = trim((string) ($run->input ?: $turn->transcript));
-        $typed = in_array($lane, [VoiceTurnLane::AppRead, VoiceTurnLane::AppWrite, VoiceTurnLane::External], true);
-        if (! $typed) {
-            return null;
+        HermesSemanticInterpreter $interpreter,
+        HermesSemanticContextService $contextService,
+        HermesSemanticOperationExecutor $operations,
+    ): void {
+        if (! $this->claimBrowserVoiceRun($run, $turn, $lifecycle)) {
+            return;
         }
 
-        $attempt = 0;
-        while (true) {
-            try {
-                return match ($handler) {
-                    'app.calendar.read' => $calendarReads->resolve($run->session->refresh(), $input, [
-                        'client_timezone' => data_get($turn->metadata, 'timezone'),
-                        'allow_prior_context' => data_get($turn->metadata, 'prior_context_authorized') === true,
-                        'prior_transcript' => data_get($turn->metadata, 'prior_transcript'),
-                    ]),
-                    'external.weather' => $weatherReads->resolve($run->session->refresh(), $input, [
-                        'client_timezone' => data_get($turn->metadata, 'timezone'),
-                        'location_context' => data_get($turn->metadata, 'location_context'),
-                        'allow_prior_context' => data_get($turn->metadata, 'prior_context_authorized') === true,
-                        'prior_transcript' => data_get($turn->metadata, 'prior_transcript'),
-                    ]),
-                    'app.reminder.read', 'app.task.read', 'app.note.read' => $domainReads->resolve(
-                        $run->session->refresh(),
-                        $handler,
-                        $input,
-                        ['client_timezone' => data_get($turn->metadata, 'timezone')],
-                    ),
-                    default => $lane === VoiceTurnLane::AppWrite
-                        ? $domainWrites->execute($turn, $run)
-                        : null,
-                };
-            } catch (\Throwable $exception) {
-                $retriable = in_array($lane, [VoiceTurnLane::AppRead, VoiceTurnLane::External], true)
-                    && (! $exception instanceof BrowserVoiceHandlerException || $exception->retriable)
-                    && $attempt === 0
-                    && (($run->hard_deadline_at ?? $turn->hard_deadline_at) === null
-                        || now()->diffInMilliseconds($run->hard_deadline_at ?? $turn->hard_deadline_at, false) >= ($lane === VoiceTurnLane::External ? 3500 : 250));
-                if (! $retriable) {
-                    throw $exception;
+        $interpretation = null;
+        $semanticDeadlineAt = $this->semanticPhaseDeadlineTimestamp($run);
+        try {
+            $turn = $lifecycle->markProgress($turn, [
+                'run_id' => $run->id,
+                'phase' => 'semantic_interpretation',
+                'model' => (string) config('services.hermes_runtime.semantic_interpretation_model', 'gpt-5.6-luna'),
+            ], 'semantic_interpreter');
+            $lifecycle->recordSemanticEvent($turn, 'semantic_interpretation_started', [
+                'run_id' => $run->id,
+                'semantic_sequence' => (int) data_get($run->metadata, 'semantic_sequence', 1),
+                'model' => (string) config('services.hermes_runtime.semantic_interpretation_model', 'gpt-5.6-luna'),
+                'phase_deadline_ms' => 2000,
+            ]);
+
+            $timezone = $this->semanticTimezone($turn);
+            $baseContext = [
+                ...$contextService->forVoiceTurn($turn),
+                'logical_request' => [
+                    'utterances' => data_get($turn->metadata, 'semantic_utterances', []),
+                    'clarification_history' => data_get($turn->metadata, 'semantic_clarification_history', []),
+                    'capture_origin' => data_get($turn->metadata, 'conversation_context.mode', 'new_conversation'),
+                    'authorized_prior_turn_id' => data_get($turn->metadata, 'prior_turn_id'),
+                ],
+            ];
+            $feedback = null;
+
+            while (true) {
+                $requestContext = $feedback === null
+                    ? $baseContext
+                    : [...$baseContext, 'prior_interpretation_feedback' => $feedback];
+                $request = new HermesSemanticInterpretationRequest(
+                    user: $turn->user()->firstOrFail(),
+                    workspaceId: $turn->workspace_id,
+                    stableTurnId: $turn->turn_id,
+                    transcript: $turn->transcript,
+                    currentTime: now('UTC')->toIso8601String(),
+                    timezone: $timezone,
+                    context: $requestContext,
+                    locale: 'en-US',
+                    conversationSessionId: $turn->conversation_session_id,
+                    conversationMessageId: $turn->user_message_id,
+                );
+
+                try {
+                    $this->assertSemanticInterpretationBudget($semanticDeadlineAt);
+                    $interpretation = $interpreter->interpret($request);
+                    $this->assertSemanticInterpretationCompletedInTime($semanticDeadlineAt);
+                } catch (HermesSemanticProviderException $exception) {
+                    if (! $exception->retriable || ! $this->beginSemanticRetry(
+                        $turn,
+                        $run,
+                        $lifecycle,
+                        $exception->category,
+                        $semanticDeadlineAt,
+                    )) {
+                        throw $exception;
+                    }
+
+                    $turn = $turn->fresh();
+                    $feedback = [
+                        'kind' => 'provider_retry',
+                        'instruction' => 'Interpret the same logical request again. Do not change its meaning.',
+                    ];
+
+                    continue;
                 }
 
-                $attempt++;
-                $turn = $lifecycle->markRetryAttempt($turn->fresh(), [
+                $lifecycle->recordSemanticEvent($turn, 'semantic_interpretation_provider_response', [
                     'run_id' => $run->id,
-                    'attempt' => $attempt,
-                    'exception_class' => $exception::class,
-                    'reason' => $exception->getMessage(),
+                    'outcome' => $interpretation->outcome,
+                    'operation_tools' => collect($interpretation->operations)->pluck('tool')->values()->all(),
+                ]);
+
+                if ($interpretation->outcome === HermesSemanticInterpretation::OUTCOME_CLARIFY) {
+                    $awaiting = $lifecycle->withClaimedJobExecution(
+                        $turn,
+                        $run,
+                        function (VoiceTurn $_lockedTurn, AssistantRun $lockedRun) use ($lifecycle, $interpretation): VoiceTurn {
+                            $lifecycle->publishSemanticResponseDirectives(
+                                $lockedRun,
+                                $interpretation->closeAfterResponse,
+                                $interpretation->responseExpected,
+                            );
+
+                            return $lifecycle->requestSemanticClarification(
+                                $lockedRun,
+                                (string) $interpretation->clarificationQuestion,
+                                [
+                                    'outcome' => $interpretation->outcome,
+                                    'model' => (string) config('services.hermes_runtime.semantic_interpretation_model', 'gpt-5.6-luna'),
+                                ],
+                            );
+                        },
+                    );
+                    $lifecycle->recordSemanticEvent($awaiting, 'semantic_interpretation_completed', [
+                        'run_id' => $run->id,
+                        'outcome' => $interpretation->outcome,
+                        'operation_tools' => [],
+                    ]);
+
+                    return;
+                }
+
+                if ($interpretation->outcome === HermesSemanticInterpretation::OUTCOME_RESPOND) {
+                    $terminal = $lifecycle->withClaimedJobExecution(
+                        $turn,
+                        $run,
+                        function (VoiceTurn $_lockedTurn, AssistantRun $lockedRun) use ($lifecycle, $interpretation): VoiceTurn {
+                            $lifecycle->publishSemanticResponseDirectives(
+                                $lockedRun,
+                                $interpretation->closeAfterResponse,
+                                $interpretation->responseExpected,
+                            );
+                            $lifecycle->markJobFinalizing($lockedRun, [
+                                'semantic_outcome' => $interpretation->outcome,
+                                'semantic_operation_tools' => [],
+                            ]);
+
+                            return $lifecycle->finishJob(
+                                $lockedRun,
+                                'completed',
+                                finalText: (string) $interpretation->responseText,
+                                metadata: [
+                                    'run_id' => $lockedRun->id,
+                                    'semantic_outcome' => $interpretation->outcome,
+                                ],
+                            );
+                        },
+                    );
+                    $lifecycle->recordSemanticEvent($terminal, 'semantic_interpretation_completed', [
+                        'run_id' => $run->id,
+                        'outcome' => $interpretation->outcome,
+                        'operation_tools' => [],
+                    ]);
+                    $this->recordCompletedTurnActivity($run, $terminal);
+
+                    return;
+                }
+
+                try {
+                    $staged = $operations->stage($turn->fresh(), $run->fresh(), $interpretation, $baseContext);
+                } catch (HermesSemanticOperationException $exception) {
+                    $canReinterpret = $exception->category === 'invalid_semantic_operation'
+                        && $this->beginSemanticRetry(
+                            $turn,
+                            $run,
+                            $lifecycle,
+                            $exception->category,
+                            $semanticDeadlineAt,
+                        );
+                    if (! $canReinterpret) {
+                        throw $exception;
+                    }
+
+                    $turn = $turn->fresh();
+                    $feedback = [
+                        'kind' => 'deterministic_validation_failure',
+                        'detail' => mb_substr($exception->getMessage(), 0, 500),
+                        'instruction' => 'Return a corrected schema-valid plan, or ask one specific clarification question if the target or required detail is unresolved.',
+                    ];
+
+                    continue;
+                }
+
+                $lifecycle->recordSemanticEvent($turn->fresh(), 'semantic_interpretation_completed', [
+                    'run_id' => $run->id,
+                    'outcome' => $interpretation->outcome,
+                    'operation_tools' => collect($interpretation->operations)->pluck('tool')->values()->all(),
+                ]);
+
+                foreach ([...$staged['operation_runs'], $staged['composition_run']] as $stagedRun) {
+                    try {
+                        $this->dispatchBrowserVoiceRun($stagedRun, $lifecycle);
+                    } catch (\Throwable $dispatchException) {
+                        // The sealed job remains queued without a dispatch
+                        // stamp. Reload recovery can safely enqueue it by its
+                        // durable run identity without repeating interpretation.
+                        $lifecycle->recordSemanticEvent($turn->fresh(), 'semantic_dispatch_deferred', [
+                            'run_id' => $stagedRun->id,
+                            'category' => 'queue_dispatch_failure',
+                        ]);
+                        Log::warning('Browser Voice semantic job dispatch deferred to recovery.', [
+                            'run_id' => $stagedRun->id,
+                            'voice_turn_id' => $turn->id,
+                            'exception' => $dispatchException->getMessage(),
+                        ]);
+                    }
+                }
+
+                return;
+            }
+        } catch (\Throwable $exception) {
+            $lifecycle->enforceDeadlines($turn->id);
+            $freshTurn = $turn->fresh();
+            if (! $freshTurn instanceof VoiceTurn || $freshTurn->state->isTerminal()) {
+                return;
+            }
+
+            $category = match (true) {
+                $exception instanceof HermesSemanticProviderException => 'semantic_'.$exception->category,
+                $exception instanceof HermesSemanticOperationException => $exception->category,
+                default => 'semantic_worker_failure',
+            };
+            $userFacing = $exception instanceof HermesSemanticUsageLimitException
+                ? $exception->userFacingText
+                : AssistantRunService::SYSTEM_FAILURE_FINAL;
+
+            try {
+                $lifecycle->recordSemanticEvent($freshTurn, 'semantic_interpretation_failed', [
+                    'run_id' => $run->id,
+                    'category' => $category,
+                    'side_effect_status' => VoiceTurnSideEffectStatus::None->value,
+                ]);
+                $lifecycle->finishJob(
+                    $run,
+                    'failed',
+                    failureCategory: $category,
+                    internalDetail: $exception->getMessage(),
+                    userFacingFailure: $userFacing,
+                    sideEffectStatus: VoiceTurnSideEffectStatus::None,
+                    metadata: [
+                        'run_id' => $run->id,
+                        'exception_class' => $exception::class,
+                        'semantic_outcome' => $interpretation?->outcome,
+                    ],
+                );
+            } catch (VoiceTurnConflictException) {
+                // Cancellation or another finalizer already won the durable turn.
+            }
+
+            Log::error('Browser Voice semantic run failed.', [
+                'run_id' => $run->id,
+                'voice_turn_id' => $turn->id,
+                'category' => $category,
+                'exception' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function handleBrowserVoiceSemanticOperationRun(
+        AssistantRun $run,
+        VoiceTurn $turn,
+        VoiceTurnLifecycleService $lifecycle,
+        HermesSemanticOperationExecutor $operations,
+    ): void {
+        if (! $this->claimBrowserVoiceRun($run, $turn, $lifecycle)) {
+            return;
+        }
+
+        try {
+            $turn = $lifecycle->markProgress($turn, [
+                'run_id' => $run->id,
+                'phase' => 'typed_operation',
+                'operation_id' => data_get($run->metadata, 'semantic_operation_id'),
+                'tool' => data_get($run->metadata, 'semantic_tool'),
+            ], 'semantic_executor');
+            $receipt = $operations->executeRun($turn, $run->fresh());
+            $this->finishSemanticOperationReceipt($run, $receipt, $lifecycle, $operations);
+        } catch (\Throwable $exception) {
+            try {
+                $receipt = $operations->recordFailureReceipt($run->fresh(), $exception);
+                $this->finishSemanticOperationReceipt($run, $receipt, $lifecycle, $operations);
+            } catch (VoiceTurnConflictException) {
+                // A post-execution deadline guard rolls back the typed side
+                // effect and receipt together. Close that elapsed deadline
+                // here even when the scheduled enforcer has not run yet.
+                $lifecycle->enforceDeadlines($turn->id);
+            }
+
+            Log::error('Browser Voice semantic operation failed.', [
+                'run_id' => $run->id,
+                'voice_turn_id' => $turn->id,
+                'operation_id' => data_get($run->metadata, 'semantic_operation_id'),
+                'exception' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    /** @param array<string,mixed> $receipt */
+    private function finishSemanticOperationReceipt(
+        AssistantRun $run,
+        array $receipt,
+        VoiceTurnLifecycleService $lifecycle,
+        HermesSemanticOperationExecutor $operations,
+    ): void {
+        $receiptStatus = (string) ($receipt['status'] ?? 'failed');
+        $status = match ($receiptStatus) {
+            'completed', 'skipped' => 'completed',
+            'canceled' => 'cancelled',
+            'failed' => data_get($receipt, 'data.failure_scope') === 'operation'
+                ? 'completed'
+                : 'failed',
+            default => 'failed',
+        };
+        $category = trim((string) data_get($receipt, 'data.category')) ?: null;
+        $lifecycle->finishJob(
+            $run,
+            $status,
+            finalText: $this->semanticOperationReceiptText($run, $receipt),
+            failureCategory: $status === 'failed' ? $category : null,
+            internalDetail: $status === 'failed'
+                ? trim((string) data_get($receipt, 'data.internal_detail'))
+                : null,
+            userFacingFailure: null,
+            sideEffectStatus: $operations->receiptSideEffectStatus($receipt),
+            metadata: [
+                'run_id' => $run->id,
+                'semantic_operation_receipt' => $receipt,
+            ],
+        );
+    }
+
+    private function handleBrowserVoiceSemanticCompositionRun(
+        AssistantRun $run,
+        VoiceTurn $turn,
+        VoiceTurnLifecycleService $lifecycle,
+        HermesSemanticInterpreter $interpreter,
+        HermesSemanticContextService $contextService,
+        HermesSemanticOperationExecutor $operations,
+    ): void {
+        if (! $this->claimBrowserVoiceRun($run, $turn, $lifecycle)) {
+            return;
+        }
+
+        $receipts = [];
+        try {
+            $turn = $lifecycle->markProgress($turn, [
+                'run_id' => $run->id,
+                'phase' => 'semantic_composition',
+            ], 'semantic_interpreter');
+            $interpretation = $this->semanticInterpretationFromRun($run);
+            $receipts = $this->semanticCompositionReceipts($run, $interpretation, $operations);
+            $timezone = $this->semanticTimezone($turn);
+            $context = [
+                ...$contextService->forVoiceTurn($turn),
+                'logical_request' => [
+                    'utterances' => data_get($turn->metadata, 'semantic_utterances', []),
+                    'clarification_history' => data_get($turn->metadata, 'semantic_clarification_history', []),
+                    'capture_origin' => data_get($turn->metadata, 'conversation_context.mode', 'new_conversation'),
+                    'authorized_prior_turn_id' => data_get($turn->metadata, 'prior_turn_id'),
+                ],
+            ];
+            $compositionRequest = new HermesSemanticCompositionRequest(
+                user: $turn->user()->firstOrFail(),
+                workspaceId: $turn->workspace_id,
+                stableTurnId: $turn->turn_id,
+                transcript: $turn->transcript,
+                currentTime: now('UTC')->toIso8601String(),
+                timezone: $timezone,
+                interpretation: $interpretation,
+                results: $receipts,
+                context: $context,
+                locale: 'en-US',
+                conversationSessionId: $turn->conversation_session_id,
+                conversationMessageId: $turn->user_message_id,
+            );
+            $compositionDeadlineAt = $this->semanticPhaseDeadlineTimestamp($run);
+            while (true) {
+                try {
+                    $composition = $interpreter->compose($compositionRequest);
+                    $this->assertSemanticCompositionCompletedInTime($compositionDeadlineAt);
+
+                    break;
+                } catch (HermesSemanticProviderException $exception) {
+                    if (! $exception->retriable || ! $this->beginSemanticRetry(
+                        $turn,
+                        $run,
+                        $lifecycle,
+                        $exception->category,
+                        $compositionDeadlineAt,
+                        'semantic_composition',
+                        (float) config('services.hermes_runtime.semantic_composition_timeout', 2),
+                    )) {
+                        throw $exception;
+                    }
+
+                    $turn = $turn->fresh() ?? $turn;
+                }
+            }
+            $terminal = $lifecycle->withClaimedJobExecution(
+                $turn,
+                $run,
+                function (VoiceTurn $_lockedTurn, AssistantRun $lockedRun) use ($lifecycle, $composition, $receipts): VoiceTurn {
+                    $lifecycle->publishSemanticResponseDirectives(
+                        $lockedRun,
+                        $composition->closeAfterResponse,
+                        $composition->responseExpected,
+                    );
+                    $lifecycle->markJobFinalizing($lockedRun, [
+                        'semantic_outcome' => HermesSemanticInterpretation::OUTCOME_EXECUTE,
+                        'semantic_operation_count' => count($receipts),
+                    ]);
+
+                    return $lifecycle->finishJob(
+                        $lockedRun,
+                        'completed',
+                        finalText: $composition->responseText,
+                        metadata: [
+                            'run_id' => $lockedRun->id,
+                            'operation_count' => count($receipts),
+                            'operation_statuses' => collect($receipts)->mapWithKeys(
+                                fn (HermesSemanticOperationResult $result): array => [$result->operationId => $result->status],
+                            )->all(),
+                        ],
+                    );
+                },
+            );
+            $this->recordCompletedTurnActivity($run, $terminal);
+        } catch (\Throwable $exception) {
+            $lifecycle->enforceDeadlines($turn->id);
+            $freshTurn = $turn->fresh();
+            if (! $freshTurn instanceof VoiceTurn || $freshTurn->state->isTerminal()) {
+                return;
+            }
+
+            $committed = $this->compositionHasCommittedReceipt($run, $operations);
+            $category = $exception instanceof HermesSemanticProviderException
+                ? 'semantic_composition_'.$exception->category
+                : 'semantic_composition_worker_failure';
+            $userFacing = $exception instanceof HermesSemanticUsageLimitException
+                ? $exception->userFacingText
+                : AssistantRunService::SYSTEM_FAILURE_FINAL;
+            try {
+                $lifecycle->finishJob(
+                    $run,
+                    'failed',
+                    failureCategory: $category,
+                    internalDetail: $exception->getMessage(),
+                    userFacingFailure: $userFacing,
+                    sideEffectStatus: $committed
+                        ? VoiceTurnSideEffectStatus::Committed
+                        : VoiceTurnSideEffectStatus::NotCommitted,
+                    metadata: [
+                        'run_id' => $run->id,
+                        'exception_class' => $exception::class,
+                        'committed_operation_receipt_present' => $committed,
+                    ],
+                );
+            } catch (VoiceTurnConflictException) {
+                // Cancellation or another finalizer already won.
+            }
+
+            Log::error('Browser Voice semantic composition failed.', [
+                'run_id' => $run->id,
+                'voice_turn_id' => $turn->id,
+                'category' => $category,
+                'exception' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function beginSemanticRetry(
+        VoiceTurn $turn,
+        AssistantRun $run,
+        VoiceTurnLifecycleService $lifecycle,
+        string $reason,
+        float $phaseDeadlineAt,
+        string $phase = 'semantic_interpretation',
+        ?float $providerTimeoutSeconds = null,
+    ): bool {
+        $fresh = $turn->fresh();
+        $remainingMilliseconds = (int) floor(($phaseDeadlineAt - microtime(true)) * 1000);
+        $providerTimeoutMilliseconds = (int) ceil(max(
+            0.1,
+            $providerTimeoutSeconds
+                ?? (float) config('services.hermes_runtime.semantic_interpretation_timeout', 0.9),
+        ) * 1000);
+        $minimumRetryBudgetMilliseconds = $providerTimeoutMilliseconds + 100;
+        if (! $fresh instanceof VoiceTurn
+            || $fresh->retry_count >= 1
+            || $remainingMilliseconds < $minimumRetryBudgetMilliseconds) {
+            if ($fresh instanceof VoiceTurn) {
+                $lifecycle->recordSemanticEvent($fresh, 'semantic_retry_denied', [
+                    'run_id' => $run->id,
+                    'phase' => $phase,
+                    'reason' => $reason,
+                    'remaining_phase_ms' => max(0, $remainingMilliseconds),
+                    'minimum_retry_budget_ms' => $minimumRetryBudgetMilliseconds,
                 ]);
             }
+
+            return false;
+        }
+
+        $retried = $lifecycle->markRetryAttempt($fresh, [
+            'run_id' => $run->id,
+            'phase' => $phase,
+            'reason' => $reason,
+            'remaining_phase_ms' => $remainingMilliseconds,
+        ], 'semantic_interpreter');
+
+        return $retried->retry_count > $fresh->retry_count;
+    }
+
+    private function semanticPhaseDeadlineTimestamp(AssistantRun $run): float
+    {
+        $deadline = $run->hard_deadline_at;
+        if ($deadline === null) {
+            return microtime(true) + 2.0;
+        }
+
+        $remainingMilliseconds = now()->diffInMilliseconds($deadline, false);
+
+        return microtime(true) + (max(0, $remainingMilliseconds) / 1000);
+    }
+
+    private function assertSemanticInterpretationBudget(float $deadlineAt): void
+    {
+        $providerTimeoutMilliseconds = (int) ceil(max(
+            0.1,
+            (float) config('services.hermes_runtime.semantic_interpretation_timeout', 0.9),
+        ) * 1000);
+        $remainingMilliseconds = (int) floor(($deadlineAt - microtime(true)) * 1000);
+        if ($remainingMilliseconds >= $providerTimeoutMilliseconds + 100) {
+            return;
+        }
+
+        throw new HermesSemanticProviderException(
+            category: 'deadline',
+            internalDetail: 'The semantic interpretation deadline did not have enough budget for another provider call.',
+        );
+    }
+
+    private function assertSemanticInterpretationCompletedInTime(float $deadlineAt): void
+    {
+        if (microtime(true) <= $deadlineAt) {
+            return;
+        }
+
+        throw new HermesSemanticProviderException(
+            category: 'deadline',
+            internalDetail: 'The semantic provider response arrived after the interpretation deadline.',
+        );
+    }
+
+    private function assertSemanticCompositionCompletedInTime(float $deadlineAt): void
+    {
+        if (microtime(true) <= $deadlineAt) {
+            return;
+        }
+
+        throw new HermesSemanticProviderException(
+            category: 'deadline',
+            internalDetail: 'The semantic composition provider response arrived after the final-response deadline.',
+        );
+    }
+
+    private function semanticTimezone(VoiceTurn $turn): ?string
+    {
+        $timezone = trim((string) (
+            data_get($turn->metadata, 'timezone')
+            ?? data_get($turn->metadata, 'client_context.timezone')
+            ?? data_get($turn->metadata, 'client_context.timezone_offset')
+            ?? ''
+        ));
+        if ($timezone === '') {
+            return null;
+        }
+        try {
+            new \DateTimeZone($timezone);
+
+            return $timezone;
+        } catch (\Throwable) {
+            return null;
         }
     }
 
@@ -524,6 +810,7 @@ class ProcessAssistantRun implements ShouldQueue
         AssistantRun $run,
         \Throwable $exception,
         VoiceTurnLifecycleService $lifecycle,
+        HermesSemanticOperationExecutor $operations,
     ): void {
         $run->refresh();
         $turn = VoiceTurn::find($run->voice_turn_id);
@@ -531,20 +818,13 @@ class ProcessAssistantRun implements ShouldQueue
             return;
         }
         if ($turn->state->isTerminal()) {
-            $this->reconcileBrowserVoiceV2RunTerminal($run, $turn);
-
             return;
         }
-        if ($this->isReceiptBackedWriteRun($run, $turn)
-            && ($reconciled = app(FastDomainWriteService::class)->reconcile($turn, $run)) !== null) {
+
+        if ($run->handler === HermesSemanticOperationExecutor::OPERATION_HANDLER) {
             try {
-                $lifecycle->finishJob(
-                    $run,
-                    'completed',
-                    finalText: $reconciled,
-                    sideEffectStatus: VoiceTurnSideEffectStatus::Committed,
-                    metadata: ['reconciled_during_worker_failure' => true, 'run_id' => $run->id],
-                );
+                $receipt = $operations->recordFailureReceipt($run, $exception);
+                $this->finishSemanticOperationReceipt($run, $receipt, $lifecycle, $operations);
 
                 return;
             } catch (VoiceTurnConflictException) {
@@ -553,19 +833,20 @@ class ProcessAssistantRun implements ShouldQueue
         }
 
         try {
-            $category = $exception instanceof BrowserVoiceHandlerException
+            $compositionCommitted = $run->handler === HermesSemanticOperationExecutor::COMPOSITION_HANDLER
+                && $this->compositionHasCommittedReceipt($run, $operations);
+            $category = $exception instanceof HermesSemanticOperationException
                 ? $exception->category
                 : 'worker_failure';
-            $userFacing = $exception instanceof BrowserVoiceHandlerException
-                ? $exception->userFacingText
-                : 'I couldn’t finish that request. Would you like me to try again?';
             $lifecycle->finishJob(
                 $run,
                 'failed',
                 failureCategory: $category,
                 internalDetail: $exception->getMessage(),
-                userFacingFailure: $userFacing,
-                sideEffectStatus: $this->failureSideEffectStatus($turn, $run),
+                userFacingFailure: AssistantRunService::SYSTEM_FAILURE_FINAL,
+                sideEffectStatus: $compositionCommitted
+                    ? VoiceTurnSideEffectStatus::Committed
+                    : VoiceTurnSideEffectStatus::NotCommitted,
                 metadata: ['run_id' => $run->id, 'exception_class' => $exception::class],
             );
         } catch (VoiceTurnConflictException) {
@@ -579,314 +860,159 @@ class ProcessAssistantRun implements ShouldQueue
         ]);
     }
 
-    private function failureSideEffectStatus(VoiceTurn $turn, ?AssistantRun $run = null): VoiceTurnSideEffectStatus
-    {
-        if ($run instanceof AssistantRun && ! $this->isReceiptBackedWriteRun($run, $turn)) {
-            return VoiceTurnSideEffectStatus::NotCommitted;
-        }
-        if (! $run instanceof AssistantRun && $turn->lane !== VoiceTurnLane::AppWrite) {
-            return VoiceTurnSideEffectStatus::NotCommitted;
-        }
-
-        return app(FastDomainWriteService::class)->reconcile($turn->fresh(), $run?->fresh()) !== null
-            ? VoiceTurnSideEffectStatus::Committed
-            : VoiceTurnSideEffectStatus::NotCommitted;
-    }
-
-    private function browserVoiceRunLane(AssistantRun $run, VoiceTurn $turn): VoiceTurnLane
-    {
-        return VoiceTurnLane::tryFrom((string) $run->lane) ?? $turn->lane;
-    }
-
-    /** @param array<string, mixed> $result */
-    private function browserVoiceRuntimeStatus(array $result): string
-    {
-        $status = mb_strtolower(trim((string) ($result['status'] ?? 'completed')));
-        if (in_array($status, ['cancelled', 'canceled', 'failed', 'blocked', 'error'], true)) {
-            return $status;
-        }
-
-        $events = collect($result['events'] ?? []);
-        if ($events->contains(fn (mixed $event): bool => in_array(
-            (string) data_get($event, 'event_type'),
-            ['runtime.fast_response_failed_terminal', 'runtime.tool_model_failed'],
-            true,
-        ))) {
-            return 'failed';
-        }
-        if ($events->contains(fn (mixed $event): bool => in_array(
-            (string) data_get($event, 'event_type'),
-            ['runtime.usage_blocked', 'runtime.tool_model_blocked'],
-            true,
-        ))) {
-            return 'blocked';
-        }
-        $assistant = $result['assistant_message'] ?? null;
-        if ($assistant instanceof ConversationMessage
-            && (filled(data_get($assistant->metadata, 'failure_reason')) || is_array(data_get($assistant->metadata, 'failure')))) {
-            return 'failed';
-        }
-
-        return $status;
-    }
-
-    private function browserVoiceRuntimeFailureText(string $candidate): string
-    {
-        $candidate = trim($candidate);
-        if ($candidate !== '' && preg_match('/\b(?:usage limit|current plan|upgrade|available on (?:premium|pro))\b/iu', $candidate) === 1) {
-            return $candidate;
-        }
-        if ($candidate !== '' && preg_match('/would you like me to try again\??$/iu', $candidate) === 1) {
-            return $candidate;
-        }
-        if ($candidate !== '' && preg_match('/\b(?:couldn\'t|cannot|can\'t|unavailable|timed out|didn\'t answer)\b/iu', $candidate) === 1) {
-            return rtrim($candidate, " \t\n\r\0\x0B.?!").'. Would you like me to try again?';
-        }
-
-        return 'I couldn’t finish that request because the service didn’t respond as expected. Would you like me to try again?';
-    }
-
-    private function isReceiptBackedWriteRun(AssistantRun $run, VoiceTurn $turn): bool
-    {
-        return $this->browserVoiceRunLane($run, $turn) === VoiceTurnLane::AppWrite
-            || ($run->handler ?: $turn->handler) === 'agent.generate_note';
-    }
-
-    private function reconcileBrowserVoiceV2RunTerminal(AssistantRun $run, VoiceTurn $turn): void
-    {
-        DB::transaction(function () use ($run, $turn): void {
-            $locked = AssistantRun::query()->whereKey($run->id)->lockForUpdate()->first();
-            if (! $locked instanceof AssistantRun || $locked->status === 'cancelled') {
-                return;
-            }
-
-            $status = match ($turn->state) {
-                VoiceTurnState::Completed => 'completed',
-                VoiceTurnState::Canceled => 'cancelled',
-                VoiceTurnState::Failed => 'failed',
-                default => $locked->status,
-            };
-            $locked->update([
-                'status' => $status,
-                'assistant_message_id' => $turn->final_assistant_message_id,
-                'error' => $status === 'failed' ? $turn->internal_failure_detail : $locked->error,
-                'result' => [
-                    'status' => $status,
-                    'voice_turn_id' => $turn->id,
-                    'assistant_message_id' => $turn->final_assistant_message_id,
-                    'reconciled_from_terminal_turn' => true,
-                ],
-                'cancelled_at' => $status === 'cancelled' ? ($locked->cancelled_at ?? now()) : $locked->cancelled_at,
-                'completed_at' => $locked->completed_at ?? now(),
-                'last_progress_at' => now(),
-            ]);
-        }, 3);
-    }
-
-    private function markCancelled(AssistantRun $run): void
-    {
-        DB::transaction(function () use ($run): void {
-            $session = ConversationSession::query()->lockForUpdate()->find($run->conversation_session_id);
-            $lockedRun = AssistantRun::query()->lockForUpdate()->find($run->id);
-            if (! $lockedRun instanceof AssistantRun || in_array($lockedRun->status, ['completed', 'failed'], true)) {
-                return;
-            }
-
-            $transitioned = $lockedRun->status !== 'cancelled';
-            $lockedRun->update([
-                'status' => 'cancelled',
-                'cancelled_at' => $lockedRun->cancelled_at ?? now(),
-                'completed_at' => $lockedRun->completed_at ?? now(),
-            ]);
-            $this->updateVoiceTurnState($lockedRun, 'cancelled', terminal: true);
-            $this->deleteOrphanAssistants($lockedRun);
-            if ($session instanceof ConversationSession) {
-                $session->update([
-                    'status' => $this->sessionStatusForActiveRuns($session->id, $lockedRun->id),
-                    'last_activity_at' => now(),
-                ]);
-            }
-            if ($transitioned) {
-                $this->recordEvent($lockedRun, 'runtime.run_cancelled', ['run_id' => $lockedRun->id], 'hermes.runs', 'cancelled');
-            }
-        }, 3);
-    }
-
-    private function markSupersessionConflict(AssistantRun $run, AssistantRun $predecessor): void
-    {
-        DB::transaction(function () use ($run, $predecessor): void {
-            $session = ConversationSession::query()->lockForUpdate()->find($run->conversation_session_id);
-            $lockedRun = AssistantRun::query()->lockForUpdate()->find($run->id);
-            if (! $session instanceof ConversationSession || ! $lockedRun instanceof AssistantRun || ! in_array($lockedRun->status, ['queued', 'running'], true)) {
-                return;
-            }
-
-            $assistantMessage = ConversationMessage::create([
-                'user_id' => $lockedRun->user_id,
-                'conversation_session_id' => $lockedRun->conversation_session_id,
-                'role' => 'assistant',
-                'content' => 'That first change completed before I could safely replace it, so I did not make a second change. Tell me whether you want me to update or undo the first one.',
-                'metadata' => [
-                    'runtime' => 'supersession_conflict',
-                    'supersedes_run_id' => $predecessor->id,
-                ],
-            ]);
-            $metadata = is_array($lockedRun->metadata) ? $lockedRun->metadata : [];
-            $lockedRun->update([
-                'status' => 'failed',
-                'assistant_message_id' => $assistantMessage->id,
-                'error' => 'The superseded run committed mutating work before cancellation.',
-                'result' => [
-                    'status' => 'supersession_conflict',
-                    'assistant_message_id' => $assistantMessage->id,
-                    'supersedes_run_id' => $predecessor->id,
-                ],
-                'metadata' => array_merge($metadata, [
-                    'supersession_conflict' => true,
-                    'supersession_conflict_detected_at' => now()->toIso8601String(),
-                ]),
-                'completed_at' => now(),
-            ]);
-            $this->updateVoiceTurnState($lockedRun, 'failed', terminal: true, reason: 'supersession_conflict');
-            $session->update([
-                'status' => $this->sessionStatusForActiveRuns($session->id, $lockedRun->id),
-                'last_activity_at' => now(),
-            ]);
-            $this->recordEvent($lockedRun, 'runtime.run_supersession_conflict', [
-                'run_id' => $lockedRun->id,
-                'supersedes_run_id' => $predecessor->id,
-                'assistant_message_id' => $assistantMessage->id,
-            ], 'hermes.runs', 'failed');
-        }, 3);
-    }
-
-    private function markFailed(AssistantRun $run, string $reason): void
-    {
-        $failed = DB::transaction(function () use ($run, $reason): bool {
-            $session = ConversationSession::query()->lockForUpdate()->find($run->conversation_session_id);
-            $lockedRun = AssistantRun::query()->lockForUpdate()->find($run->id);
-            if (! $session instanceof ConversationSession || ! $lockedRun instanceof AssistantRun) {
-                return false;
-            }
-
-            if (! in_array($lockedRun->status, ['queued', 'running'], true)) {
-                // A cancel/reconcile CAS may have won after the runtime committed its
-                // assistant but before the exception reached this worker. Under the same
-                // session/run locks, remove only output that no terminal run owns.
-                // Failed + unlinked remains an intentionally recoverable ambiguity until
-                // polling reconciles it or Stop transitions it to cancelled.
-                if ($lockedRun->status !== 'failed' || $lockedRun->assistant_message_id !== null) {
-                    $this->deleteOrphanAssistants($lockedRun, preserveLinkedTerminalAssistant: true);
-                }
-
-                return false;
-            }
-
-            $lockedRun->update([
-                'status' => 'failed',
-                'error' => $reason,
-                'completed_at' => now(),
-            ]);
-            $this->updateVoiceTurnState($lockedRun, 'failed', terminal: true, reason: $reason);
-            $session->update([
-                'status' => $this->sessionStatusForActiveRuns($session->id, $lockedRun->id),
-                'last_activity_at' => now(),
-            ]);
-            $this->recordEvent($lockedRun, 'runtime.run_failed', [
-                'run_id' => $lockedRun->id,
-                'reason' => $reason,
-            ], 'hermes.runs', 'failed');
-
-            return true;
-        }, 3);
-
-        if ($failed) {
-            Log::error('Assistant run failed.', [
-                'run_id' => $run->id,
-                'session_id' => $run->conversation_session_id,
-                'exception' => $reason,
-            ]);
-        }
-    }
-
-    private function sessionStatusForActiveRuns(int $sessionId, int $excludingRunId): string
-    {
-        $statuses = AssistantRun::query()
-            ->where('conversation_session_id', $sessionId)
-            ->where('id', '!=', $excludingRunId)
-            ->whereIn('status', ['queued', 'running'])
-            ->pluck('status');
-
-        if ($statuses->contains('running')) {
-            return 'running';
-        }
-
-        return $statuses->contains('queued') ? 'queued' : 'active';
-    }
-
-    private function updateVoiceTurnState(
+    private function claimBrowserVoiceRun(
         AssistantRun $run,
-        string $state,
-        bool $terminal = false,
-        ?string $reason = null,
-    ): void {
-        $message = ConversationMessage::query()->lockForUpdate()->find($run->user_message_id);
-        if (! $message instanceof ConversationMessage || ! (bool) data_get($message->metadata, 'voice_request', false)) {
+        VoiceTurn $turn,
+        VoiceTurnLifecycleService $lifecycle,
+    ): bool {
+        // Deadline enforcement is external and scheduled, but every worker
+        // also closes the race locally before executing a provider call or
+        // typed side effect.
+        $lifecycle->enforceDeadlines($turn->id);
+        $run = $run->fresh() ?? $run;
+        $turn = $turn->fresh() ?? $turn;
+        if ($turn->state->isTerminal()
+            || in_array($run->status, ['completed', 'failed', 'cancelled'], true)) {
+            return false;
+        }
+
+        $started = $lifecycle->claimJobExecution($run);
+        if (! $started) {
+            $currentRun = $run->fresh();
+            $currentTurn = $turn->fresh();
+            if ($currentRun instanceof AssistantRun
+                && $currentTurn instanceof VoiceTurn
+                && $currentRun->status === 'queued'
+                && ! $currentTurn->state->isTerminal()) {
+                $this->job?->release(1);
+            }
+        }
+
+        return $started;
+    }
+
+    private function dispatchBrowserVoiceRun(AssistantRun $run, VoiceTurnLifecycleService $lifecycle): void
+    {
+        if (! $lifecycle->jobRequiresDispatch($run)) {
             return;
         }
 
-        $metadata = is_array($message->metadata) ? $message->metadata : [];
-        $lifecycle = is_array(data_get($metadata, 'voice_turn_outcome')) ? data_get($metadata, 'voice_turn_outcome') : [];
-        $now = now()->toIso8601String();
-        $metadata['voice_turn_state'] = $state;
-        $metadata['voice_turn_outcome'] = array_merge($lifecycle, [
-            'status' => $state,
-            'updated_at' => $now,
-            ...($terminal ? ['terminal_at' => $lifecycle['terminal_at'] ?? $now] : []),
-            ...($reason ? ['reason' => $reason] : []),
-        ]);
-        $message->update(['metadata' => $metadata]);
+        self::dispatch($run->id);
+        $lifecycle->markJobDispatched($run);
     }
 
-    private function deleteOrphanAssistants(AssistantRun $run, bool $preserveLinkedTerminalAssistant = false): void
+    private function semanticInterpretationFromRun(AssistantRun $run): HermesSemanticInterpretation
     {
-        $assistants = ConversationMessage::query()
-            ->where('conversation_session_id', $run->conversation_session_id)
-            ->where('role', 'assistant')
-            ->where('metadata->assistant_run_id', $run->id);
-        if ($preserveLinkedTerminalAssistant
-            && in_array($run->status, ['completed', 'failed'], true)
-            && $run->assistant_message_id !== null) {
-            $assistants->where('id', '!=', $run->assistant_message_id);
+        $payload = json_decode((string) $run->input, true);
+        if (! is_array($payload) || ! is_array($payload['operations'] ?? null)) {
+            throw new VoiceTurnConflictException('The semantic composition run has no sealed interpretation.');
         }
-        $assistantIds = $assistants->pluck('id');
-        if ($assistantIds->isEmpty()) {
-            return;
-        }
+        $typedOperations = array_map(function (mixed $operation): HermesSemanticOperation {
+            if (! is_array($operation)) {
+                throw new VoiceTurnConflictException('The sealed semantic plan contains an invalid operation.');
+            }
 
-        MemoryEvent::query()->whereIn('assistant_message_id', $assistantIds)->delete();
-        ConversationMessage::query()->whereIn('id', $assistantIds)->delete();
+            return new HermesSemanticOperation(
+                id: (string) ($operation['id'] ?? ''),
+                tool: (string) ($operation['tool'] ?? ''),
+                arguments: is_array($operation['arguments'] ?? null) ? $operation['arguments'] : [],
+                dependencies: is_array($operation['dependencies'] ?? null) ? $operation['dependencies'] : [],
+            );
+        }, $payload['operations']);
+
+        return new HermesSemanticInterpretation(
+            outcome: (string) ($payload['outcome'] ?? ''),
+            responseText: is_string($payload['response_text'] ?? null) ? $payload['response_text'] : null,
+            clarificationQuestion: is_string($payload['clarification_question'] ?? null) ? $payload['clarification_question'] : null,
+            acknowledgementText: is_string($payload['acknowledgement_text'] ?? null) ? $payload['acknowledgement_text'] : null,
+            closeAfterResponse: (bool) ($payload['close_after_response'] ?? false),
+            responseExpected: (bool) ($payload['response_expected'] ?? false),
+            operations: $typedOperations,
+        );
     }
 
-    private function recordEvent(AssistantRun $run, string $eventType, array $payload = [], ?string $toolName = null, string $status = 'recorded'): ActivityEvent
-    {
-        return ActivityEvent::create([
-            'user_id' => $run->user_id,
-            'workspace_id' => $run->workspace_id,
-            'conversation_session_id' => $run->conversation_session_id,
-            'event_type' => $eventType,
-            'tool_name' => $toolName,
-            'status' => $status,
-            'payload' => $payload ?: null,
-        ]);
+    /** @return list<HermesSemanticOperationResult> */
+    private function semanticCompositionReceipts(
+        AssistantRun $run,
+        HermesSemanticInterpretation $interpretation,
+        HermesSemanticOperationExecutor $operations,
+    ): array {
+        $runMap = data_get($run->metadata, 'operation_run_map');
+        $runMap = is_array($runMap) ? $runMap : [];
+
+        return array_map(function (HermesSemanticOperation $operation) use ($run, $runMap, $operations): HermesSemanticOperationResult {
+            $operationRunId = (int) ($runMap[$operation->id] ?? 0);
+            $operationRun = $operationRunId > 0
+                ? AssistantRun::query()
+                    ->whereKey($operationRunId)
+                    ->where('voice_turn_id', $run->voice_turn_id)
+                    ->first()
+                : null;
+            $receipt = $operationRun instanceof AssistantRun
+                ? $operations->receiptForRun($operationRun)
+                : null;
+            if (! $operationRun instanceof AssistantRun
+                || ! in_array($operationRun->status, ['completed', 'failed', 'cancelled'], true)
+                || ! is_array($receipt)
+                || ($receipt['operation_id'] ?? null) !== $operation->id
+                || ($receipt['tool'] ?? null) !== $operation->tool) {
+                throw new VoiceTurnConflictException("Semantic operation {$operation->id} has no matching terminal receipt.");
+            }
+            $data = is_array($receipt['data'] ?? null) ? $receipt['data'] : [];
+            $data['side_effect_committed'] = ($receipt['side_effect_committed'] ?? false) === true;
+
+            return new HermesSemanticOperationResult(
+                operationId: $operation->id,
+                tool: $operation->tool,
+                status: (string) ($receipt['status'] ?? 'failed'),
+                data: $data,
+            );
+        }, $interpretation->operations);
     }
 
-    private function elapsedMilliseconds(mixed $startedAt): ?int
-    {
-        if (! $startedAt) {
-            return null;
+    private function compositionHasCommittedReceipt(
+        AssistantRun $compositionRun,
+        HermesSemanticOperationExecutor $operations,
+    ): bool {
+        $runIds = data_get($compositionRun->metadata, 'operation_run_ids');
+        if (! is_array($runIds)) {
+            return false;
         }
 
-        return max(0, (int) $startedAt->diffInMilliseconds(now(), true));
+        return AssistantRun::query()
+            ->where('voice_turn_id', $compositionRun->voice_turn_id)
+            ->whereIn('id', array_map('intval', $runIds))
+            ->get()
+            ->contains(function (AssistantRun $operationRun) use ($operations): bool {
+                $receipt = $operations->receiptForRun($operationRun);
+
+                return is_array($receipt) && ($receipt['side_effect_committed'] ?? false) === true;
+            });
+    }
+
+    /** @param array<string,mixed> $receipt */
+    private function semanticOperationReceiptText(AssistantRun $run, array $receipt): string
+    {
+        $label = trim((string) $run->label) ?: 'Operation';
+
+        return match ((string) ($receipt['status'] ?? 'failed')) {
+            'completed' => "{$label} completed.",
+            'skipped' => "{$label} was skipped because a dependency did not complete.",
+            'canceled' => "{$label} was canceled.",
+            default => "{$label} failed.",
+        };
+    }
+
+    private function recordCompletedTurnActivity(AssistantRun $run, VoiceTurn $turn): void
+    {
+        if ($turn->state === VoiceTurnState::Completed
+            && $turn->finalAssistantMessage instanceof ConversationMessage
+            && $turn->userMessage instanceof ConversationMessage) {
+            app(BeanMemoryService::class)->recordTurnActivity(
+                $run->session->refresh(),
+                $turn->userMessage,
+                $turn->finalAssistantMessage,
+            );
+        }
     }
 }

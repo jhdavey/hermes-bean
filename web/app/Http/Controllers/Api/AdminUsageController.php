@@ -743,7 +743,7 @@ class AdminUsageController extends Controller
         $payload['request_preview'] = $request !== '' ? str($request)->limit(140)->toString() : null;
         $payload['request_full'] = $request !== '' ? $request : null;
         $payload['input_prompt_full'] = data_get($log->metadata, 'input_prompt') ?: $payload['request_full'];
-        $payload['use_case'] = $this->useCaseForLog($log, $request, $actionTypes->all());
+        $payload['use_case'] = $this->useCaseForLog($log, $actionTypes->all());
         $payload['action_summary'] = $actionTypes->isNotEmpty()
             ? $actionTypes->map(fn (string $action): string => $this->humanActionName($action))->unique()->take(4)->implode(', ')
             : null;
@@ -751,7 +751,7 @@ class AdminUsageController extends Controller
         return $payload;
     }
 
-    private function useCaseForLog(AiUsageLog $log, string $request, array $actionTypes): string
+    private function useCaseForLog(AiUsageLog $log, array $actionTypes): string
     {
         $actions = implode(' ', $actionTypes);
         if (preg_match('/\b(external_lookup|weather|flight|store|stock|sports|traffic|news|price)\b/i', $actions) === 1) {
@@ -773,15 +773,10 @@ class AdminUsageController extends Controller
             return 'Workflow management';
         }
 
-        $text = mb_strtolower($request);
-
-        return match (true) {
-            preg_match('/\b(weather|forecast|temperature|flight|store|hours|stock|price|sports|traffic|news)\b/', $text) === 1 => 'Live external lookup',
-            preg_match('/\b(calendar|schedule|event|meeting|appointment|today|tomorrow|this week)\b/', $text) === 1 => 'Calendar planning',
-            preg_match('/\b(task|todo|to do|trash|chore|complete|done)\b/', $text) === 1 => 'Task management',
-            preg_match('/\b(remind|reminder|alert|notify)\b/', $text) === 1 => 'Reminder management',
-            preg_match('/\b(dinner|recipe|workout|plan|idea|suggest|recommend)\b/', $text) === 1 => 'Advice and planning',
-            (string) $log->route_tier === 'simple' => 'Quick chat',
+        return match ((string) $log->request_type) {
+            'external_lookup', 'web_search' => 'Live external lookup',
+            'semantic_interpretation', 'semantic_response_composition' => 'Bean conversation',
+            'realtime_transcription', 'voice_speech' => 'Bean voice',
             default => 'General Bean request',
         };
     }

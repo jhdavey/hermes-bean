@@ -8,14 +8,12 @@ class _ApprovalRequestSheet extends StatefulWidget {
   const _ApprovalRequestSheet({
     required this.approval,
     required this.onApprove,
-    required this.onAlwaysApprove,
     required this.onDeny,
     required this.onChange,
   });
 
   final HermesApproval approval;
   final _ApprovalAction onApprove;
-  final _ApprovalAction onAlwaysApprove;
   final _ApprovalAction onDeny;
   final _ApprovalChangeAction onChange;
 
@@ -183,13 +181,6 @@ class _ApprovalRequestSheetState extends State<_ApprovalRequestSheet> {
                             _run(() => widget.onChange(approval, revised));
                           },
                     child: Text(_changing ? 'Send change' : 'Change'),
-                  ),
-                  OutlinedButton(
-                    key: const Key('approval-always-approve-action'),
-                    onPressed: _busy
-                        ? null
-                        : () => _run(() => widget.onAlwaysApprove(approval)),
-                    child: Text('Always approve'),
                   ),
                   FilledButton(
                     key: const Key('approval-approve-action'),

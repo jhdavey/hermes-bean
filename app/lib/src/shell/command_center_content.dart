@@ -1,17 +1,5 @@
 part of '../../main.dart';
 
-String? _settingsErrorForDisplay(String? error) {
-  if (error == null) return null;
-  final normalized = error.trim().toLowerCase();
-  if (normalized.startsWith('bean is paused') ||
-      normalized.startsWith('bean hit a snag') ||
-      normalized.startsWith('bean could not') ||
-      normalized.startsWith('bean lost')) {
-    return null;
-  }
-  return error;
-}
-
 class _CommandCenterContent extends StatelessWidget {
   const _CommandCenterContent({
     required this.apiClient,
@@ -177,6 +165,7 @@ class _CommandCenterContent extends StatelessWidget {
   final Future<void> Function({
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -199,6 +188,7 @@ class _CommandCenterContent extends StatelessWidget {
     HermesCalendarEvent event, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -443,7 +433,7 @@ class _CommandCenterContent extends StatelessWidget {
             onVoiceChanged: onVoiceChanged,
             onEditAgentOnboarding: onEditAgentOnboarding,
             onWorkspacesChanged: onWorkspacesChanged,
-            error: _settingsErrorForDisplay(error),
+            error: error,
             onErrorDismissed: onErrorDismissed,
           ),
         };

@@ -43,7 +43,9 @@ class AppleCalendarImportTest extends TestCase
         $this->assertSame('Imported from Apple', $event->description);
         $this->assertSame('Studio', $event->location);
         $this->assertSame('Apple Calendar', $event->category);
+        $this->assertSame('scheduled', $event->status);
         $this->assertSame('apple_calendar', $event->metadata['source']);
+        $this->assertSame('confirmed', $event->metadata['external_calendar_status']);
         $this->assertSame('event-1@example.com', $event->metadata['apple_calendar_uid']);
         $this->assertFalse((bool) $event->metadata['all_day']);
         $this->assertSame('2026-07-08T13:30:00.000000Z', $event->starts_at->toJSON());

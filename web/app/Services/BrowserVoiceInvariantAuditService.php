@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\VoiceTurnLane;
 use App\Enums\VoiceTurnState;
 use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
@@ -130,7 +131,7 @@ class BrowserVoiceInvariantAuditService
         AssistantRun::query()
             ->where('source', 'browser_voice_v2')
             ->select([
-                'id', 'voice_turn_id', 'status', 'metadata', 'result', 'completed_at', 'cancelled_at',
+                'id', 'voice_turn_id', 'lane', 'handler', 'status', 'metadata', 'result', 'completed_at', 'cancelled_at',
             ])
             ->orderBy('id')
             ->chunkById($chunkSize, function (Collection $runs) use (&$report, $violation): void {
@@ -252,6 +253,13 @@ class BrowserVoiceInvariantAuditService
     /** @param callable(string, string, ?VoiceTurn, ?AssistantRun, ?VoiceTurnEvent): void $violation */
     private function auditRunLifecycle(AssistantRun $run, callable $violation): void
     {
+        $lane = trim((string) $run->lane);
+        if ($lane === '' || VoiceTurnLane::tryFrom($lane) === null) {
+            $violation('voice_run_lane_missing_or_invalid', 'Browser Voice v2 run has no explicit valid lane.', null, $run);
+        }
+        if (trim((string) $run->handler) === '') {
+            $violation('voice_run_handler_missing', 'Browser Voice v2 run has no explicit handler.', null, $run);
+        }
         if (! in_array($run->status, [...self::ACTIVE_RUN_STATUSES, ...self::TERMINAL_RUN_STATUSES], true)) {
             $violation('unknown_voice_run_status', "Browser Voice v2 run has unsupported status {$run->status}.", null, $run);
 

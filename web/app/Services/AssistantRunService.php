@@ -2,17 +2,27 @@
 
 namespace App\Services;
 
+use App\Data\AssistantRunExecutionClaim;
+use App\Exceptions\AssistantRunClaimLostException;
+use App\Exceptions\AssistantRunConflictException;
+use App\Exceptions\VoiceTurnConflictException;
 use App\Jobs\ProcessAssistantRun;
 use App\Models\ActivityEvent;
 use App\Models\AssistantRun;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
-use App\Models\MemoryEvent;
+use App\Models\VoiceTurn;
+use Closure;
+use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class AssistantRunService
 {
+    public const SYSTEM_FAILURE_FINAL = 'I couldn’t complete that request because Bean is temporarily unavailable. Please try again.';
+
     /**
      * Metadata that describes server-observed run state or server-created relationships.
      * None of these values may be supplied by an API client: several are consumed by the
@@ -22,13 +32,9 @@ class AssistantRunService
      */
     private const SERVER_OWNED_METADATA_KEYS = [
         'assistant_run_id',
-        'defer_memory_candidate',
         'status',
         'run_status',
         'response_status',
-        'voice_turn_outcome',
-        'voice_turn_state',
-        'voice_turn_sequence',
         'started_at',
         'completed_at',
         'failed_at',
@@ -36,25 +42,17 @@ class AssistantRunService
         'cancelled_before_queue',
         'cancellation_requested_at',
         'cancellation_source',
-        'supersession_predecessor_missing',
-        'missing_predecessor_client_request_id',
-        'superseded_client_request_ids',
-        'supersedes_run_id',
-        'superseded_by_client_request_id',
-        'superseded_at',
-        'late_superseded_request_coalesced',
-        'coalesced_into_run_id',
-        'supersession_conflict',
-        'supersession_conflict_detected_at',
         'background_stale_retry_attempts',
         'background_stale_retried_at',
-        'background_response_retry_attempts',
-        'background_response_retried_at',
-        'background_response_original_error',
-        'failed_response_resolved_at',
-        'failed_response_original_error',
-        'failed_response_had_completed_work',
+        'execution_generation',
+        'queued_at',
+        'edited_from_message_id',
+        'edited_message_id',
+        'request_fingerprint',
+        'source',
     ];
+
+    public function __construct(private readonly Dispatcher $dispatcher) {}
 
     /**
      * Keep caller context while removing state that only the run processor may assert.
@@ -69,47 +67,107 @@ class AssistantRunService
     }
 
     /**
-     * @return array{run:AssistantRun,user_message:ConversationMessage,event:ActivityEvent,events:array<int, ActivityEvent>}
+     * @return array{run:AssistantRun,user_message:ConversationMessage,event:ActivityEvent,events:array<int, ActivityEvent>,existing:bool}
      */
     public function queueRun(ConversationSession $session, string $content, array $metadata = [], string $source = 'http'): array
     {
-        $metadata = $this->sanitizeClientMetadata($metadata);
-        $metadata = $this->voiceTurnMetadataForState($metadata, 'queued');
+        return $this->queueRunRequest($session, $content, $metadata, $source);
+    }
 
-        $queued = DB::transaction(function () use ($session, $content, $metadata, $source): array {
+    /**
+     * Admit an immutable branch from one durable user message. The branch
+     * relationship and the new run are sealed by the same lifecycle owner;
+     * prior messages and their run/turn pointers are never rewritten.
+     *
+     * @return array{run:AssistantRun,user_message:ConversationMessage,event:ActivityEvent,events:array<int, ActivityEvent>,existing:bool}
+     */
+    public function queueBranchRun(
+        ConversationSession $session,
+        int $editedFromMessageId,
+        string $content,
+        array $metadata = [],
+        string $source = 'conversation_branch',
+    ): array {
+        $metadata = $this->sanitizeClientMetadata($metadata);
+        $metadata['edited_from_message_id'] = $editedFromMessageId;
+
+        return $this->queueRunRequest(
+            $session,
+            $content,
+            $metadata,
+            $source,
+            $editedFromMessageId,
+        );
+    }
+
+    /**
+     * @return array{run:AssistantRun,user_message:ConversationMessage,event:ActivityEvent,events:array<int, ActivityEvent>,existing:bool}
+     */
+    private function queueRunRequest(
+        ConversationSession $session,
+        string $content,
+        array $metadata,
+        string $source,
+        ?int $editedFromMessageId = null,
+    ): array {
+        $metadata = $this->sanitizeClientMetadata($metadata);
+        if ($editedFromMessageId !== null) {
+            $metadata['edited_from_message_id'] = $editedFromMessageId;
+        }
+        $source = trim($source) ?: 'http';
+        if ($source === 'browser_voice_v2') {
+            throw new \InvalidArgumentException('The Browser Voice source is reserved for lifecycle-owned voice runs.');
+        }
+        $clientRequestId = trim((string) data_get($metadata, 'client_request_id'));
+        if ($clientRequestId === '') {
+            throw new \InvalidArgumentException('A stable client_request_id is required for every assistant run.');
+        }
+        $metadata['client_request_id'] = $clientRequestId;
+        $requestFingerprint = $this->requestFingerprint($content, $metadata);
+
+        $queued = DB::transaction(function () use ($session, $content, $metadata, $source, $clientRequestId, $requestFingerprint, $editedFromMessageId): array {
             $lockedSession = ConversationSession::query()
                 ->whereKey($session->id)
                 ->where('user_id', $session->user_id)
                 ->lockForUpdate()
                 ->firstOrFail();
-            $existing = $this->existingRunForClientRequest($lockedSession, $metadata);
-            if ($existing instanceof AssistantRun) {
-                return $this->replayedQueueResult($existing);
-            }
-            $cancelledBeforeQueue = $this->clientRequestWasCancelled($lockedSession, $metadata);
-            $missingPredecessorSuccessor = $cancelledBeforeQueue
-                ? $this->missingPredecessorSuccessorForClientRequest($lockedSession, $metadata)
-                : null;
-            if ($missingPredecessorSuccessor instanceof AssistantRun
-                && $missingPredecessorSuccessor->userMessage instanceof ConversationMessage) {
-                return $this->coalescedLateOriginalResult(
-                    $lockedSession,
-                    $missingPredecessorSuccessor,
-                    $content,
-                    $metadata,
-                    $source,
+            if (VoiceTurn::query()
+                ->where('conversation_session_id', $lockedSession->id)
+                ->where('turn_id', $metadata['client_request_id'])
+                ->exists()) {
+                throw new AssistantRunConflictException(
+                    'That client_request_id is already owned by a voice turn.',
                 );
             }
+            $existing = $this->existingRunForClientRequest($lockedSession, $metadata);
+            if ($existing instanceof AssistantRun) {
+                $this->assertMatchingRequestFingerprint($existing, $requestFingerprint);
+
+                return $this->replayedQueueResult($existing);
+            }
+            if ($editedFromMessageId !== null) {
+                ConversationMessage::query()
+                    ->whereKey($editedFromMessageId)
+                    ->where('user_id', $lockedSession->user_id)
+                    ->where('conversation_session_id', $lockedSession->id)
+                    ->where('role', 'user')
+                    ->lockForUpdate()
+                    ->firstOrFail();
+            }
+            $cancelledBeforeQueue = $this->clientRequestWasCancelled($lockedSession, $metadata);
             $runMetadata = $cancelledBeforeQueue
-                ? $this->voiceTurnMetadataForState(array_merge($metadata, [
+                ? array_merge($metadata, [
                     'cancelled_before_queue' => true,
                     'cancelled_at' => now()->toIso8601String(),
-                ]), 'cancelled')
+                ])
                 : $metadata;
             $userMessage = ConversationMessage::create([
                 'user_id' => $lockedSession->user_id,
                 'conversation_session_id' => $lockedSession->id,
-                'client_turn_id' => trim((string) data_get($runMetadata, 'client_turn_id', '')) ?: null,
+                'client_turn_id' => trim((string) (
+                    data_get($runMetadata, 'client_turn_id')
+                    ?: data_get($runMetadata, 'client_request_id')
+                )) ?: null,
                 'role' => 'user',
                 'content' => $content,
                 'metadata' => $runMetadata ?: null,
@@ -120,10 +178,13 @@ class AssistantRunService
                 'workspace_id' => $lockedSession->workspace_id,
                 'conversation_session_id' => $lockedSession->id,
                 'user_message_id' => $userMessage->id,
+                'client_request_id' => $clientRequestId,
+                'request_fingerprint' => $requestFingerprint,
                 'source' => $source,
                 'status' => $cancelledBeforeQueue ? 'cancelled' : 'queued',
                 'input' => $content,
                 'metadata' => $runMetadata ?: null,
+                'queued_at' => $cancelledBeforeQueue ? null : now(),
                 'cancelled_at' => $cancelledBeforeQueue ? now() : null,
                 'completed_at' => $cancelledBeforeQueue ? now() : null,
             ]);
@@ -140,520 +201,130 @@ class AssistantRunService
                     'source' => $source,
                     'client_request_id' => data_get($metadata, 'client_request_id'),
                 ], 'hermes.runs', 'cancelled');
-
-                return ['run' => $run, 'user_message' => $userMessage, 'event' => $event, 'events' => [$event]];
-            }
-
-            $events = [];
-            $intent = is_array($metadata['bean_intent'] ?? null) ? $metadata['bean_intent'] : null;
-            if ($intent !== null) {
-                $events[] = $this->recordEvent($run, 'runtime.intent_routed', [
-                    'run_id' => $run->id,
-                    'message_id' => $userMessage->id,
-                    ...$intent,
-                ], 'hermes.router', 'completed');
-
-                foreach ((array) ($intent['work_plan'] ?? []) as $index => $item) {
-                    if (! is_array($item) || trim((string) ($item['label'] ?? '')) === '') {
-                        continue;
-                    }
-                    $events[] = $this->recordEvent($run, 'assistant.work_item.planned', [
-                        'run_id' => $run->id,
-                        'message_id' => $userMessage->id,
-                        'work_item_id' => (string) ($item['id'] ?? 'route-plan-'.$index),
-                        'work_label' => (string) $item['label'],
-                        'label' => (string) $item['label'],
-                        'work_order' => $index,
-                    ], 'hermes.router', 'started');
-                }
-            }
-
-            $event = $this->recordEvent($run, 'runtime.run_queued', [
-                'run_id' => $run->id,
-                'message_id' => $userMessage->id,
-                'source' => $source,
-            ], 'hermes.runs', 'queued');
-            $events[] = $event;
-
-            return ['run' => $run, 'user_message' => $userMessage, 'event' => $event, 'events' => $events];
-        }, 3);
-
-        if ($queued['run']->status === 'queued' && ! ($queued['existing'] ?? false)) {
-            $this->dispatchRunAfterResponse($queued['run']->id);
-        }
-
-        return $queued;
-    }
-
-    /**
-     * @return array{run:AssistantRun,user_message:ConversationMessage,event:ActivityEvent,events:array<int, ActivityEvent>}
-     */
-    public function queueExistingMessage(ConversationSession $session, ConversationMessage $userMessage, array $metadata = [], string $source = 'http'): array
-    {
-        $existingMessageMetadata = is_array($userMessage->metadata) ? $userMessage->metadata : [];
-        $trustedDurableVoiceTurn = filled($userMessage->client_turn_id)
-            && (bool) data_get($existingMessageMetadata, 'voice_request', false)
-            && (string) data_get($existingMessageMetadata, 'source', '') === 'openai_realtime_voice';
-        $trustedLifecycle = $trustedDurableVoiceTurn ? array_intersect_key($existingMessageMetadata, array_flip([
-            'voice_turn_state',
-            'voice_turn_sequence',
-            'voice_turn_outcome',
-        ])) : [];
-        $metadata = $this->voiceTurnMetadataForState(array_merge(
-            $this->sanitizeClientMetadata($existingMessageMetadata),
-            $trustedLifecycle,
-            $this->sanitizeClientMetadata($metadata),
-        ), 'queued');
-
-        $queued = DB::transaction(function () use ($session, $userMessage, $metadata, $source): array {
-            $lockedSession = ConversationSession::query()
-                ->whereKey($session->id)
-                ->where('user_id', $session->user_id)
-                ->lockForUpdate()
-                ->firstOrFail();
-            $existing = $this->existingRunForClientRequest($lockedSession, $metadata);
-            if ($existing instanceof AssistantRun) {
-                return $this->replayedQueueResult($existing);
-            }
-            $cancelledBeforeQueue = $this->clientRequestWasCancelled($lockedSession, $metadata);
-            $runMetadata = $cancelledBeforeQueue
-                ? $this->voiceTurnMetadataForState(array_merge($metadata, [
-                    'cancelled_before_queue' => true,
-                    'cancelled_at' => now()->toIso8601String(),
-                ]), 'cancelled')
-                : $metadata;
-            if (($userMessage->metadata ?: []) !== $runMetadata) {
-                $userMessage->update(['metadata' => $runMetadata ?: null]);
-            }
-            $run = AssistantRun::create([
-                'user_id' => $lockedSession->user_id,
-                'workspace_id' => $lockedSession->workspace_id,
-                'conversation_session_id' => $lockedSession->id,
-                'user_message_id' => $userMessage->id,
-                'source' => $source,
-                'status' => $cancelledBeforeQueue ? 'cancelled' : 'queued',
-                'input' => $userMessage->content,
-                'metadata' => $runMetadata ?: null,
-                'cancelled_at' => $cancelledBeforeQueue ? now() : null,
-                'completed_at' => $cancelledBeforeQueue ? now() : null,
-            ]);
-
-            $lockedSession->update([
-                'status' => $cancelledBeforeQueue ? 'active' : 'queued',
-                'last_activity_at' => now(),
-            ]);
-
-            if ($cancelledBeforeQueue) {
-                $event = $this->recordEvent($run, 'runtime.run_cancelled_before_queue', [
-                    'run_id' => $run->id,
-                    'message_id' => $userMessage->id,
-                    'source' => $source,
-                    'client_request_id' => data_get($metadata, 'client_request_id'),
-                    'reused_user_message' => true,
-                ], 'hermes.runs', 'cancelled');
-
-                return ['run' => $run, 'user_message' => $userMessage->refresh(), 'event' => $event, 'events' => [$event]];
-            }
-
-            $events = [];
-            $intent = is_array($metadata['bean_intent'] ?? null) ? $metadata['bean_intent'] : null;
-            if ($intent !== null) {
-                $events[] = $this->recordEvent($run, 'runtime.intent_routed', [
-                    'run_id' => $run->id,
-                    'message_id' => $userMessage->id,
-                    ...$intent,
-                ], 'hermes.router', 'completed');
-
-                foreach ((array) ($intent['work_plan'] ?? []) as $index => $item) {
-                    if (! is_array($item) || trim((string) ($item['label'] ?? '')) === '') {
-                        continue;
-                    }
-                    $events[] = $this->recordEvent($run, 'assistant.work_item.planned', [
-                        'run_id' => $run->id,
-                        'message_id' => $userMessage->id,
-                        'work_item_id' => (string) ($item['id'] ?? 'route-plan-'.$index),
-                        'work_label' => (string) $item['label'],
-                        'label' => (string) $item['label'],
-                        'work_order' => $index,
-                    ], 'hermes.router', 'started');
-                }
-            }
-
-            $event = $this->recordEvent($run, 'runtime.run_queued', [
-                'run_id' => $run->id,
-                'message_id' => $userMessage->id,
-                'source' => $source,
-                'reused_user_message' => true,
-            ], 'hermes.runs', 'queued');
-            $events[] = $event;
-
-            return ['run' => $run, 'user_message' => $userMessage, 'event' => $event, 'events' => $events];
-        }, 3);
-
-        if ($queued['run']->status === 'queued' && ! ($queued['existing'] ?? false)) {
-            $this->dispatchRunAfterResponse($queued['run']->id);
-        }
-
-        return $queued;
-    }
-
-    /**
-     * Complete a bounded deterministic read without waiting for the agent queue.
-     * The completed run keeps the same idempotency, audit, and reload contract as
-     * queued voice work.
-     *
-     * @return array{run:AssistantRun,user_message:ConversationMessage,assistant_message:ConversationMessage,event:ActivityEvent,events:array<int, ActivityEvent>}
-     */
-    public function completeExistingMessageImmediately(
-        ConversationSession $session,
-        ConversationMessage $userMessage,
-        string $assistantContent,
-        array $metadata = [],
-        string $source = 'http',
-    ): array {
-        $existingMetadata = is_array($userMessage->metadata) ? $userMessage->metadata : [];
-        $trustedLifecycle = filled($userMessage->client_turn_id)
-            && (bool) data_get($existingMetadata, 'voice_request', false)
-            && (string) data_get($existingMetadata, 'source', '') === 'openai_realtime_voice'
-            ? array_intersect_key($existingMetadata, array_flip(['voice_turn_sequence', 'voice_turn_outcome']))
-            : [];
-        $metadata = $this->voiceTurnMetadataForState(array_merge(
-            $this->sanitizeClientMetadata($existingMetadata),
-            $trustedLifecycle,
-            $this->sanitizeClientMetadata($metadata),
-        ), 'completed');
-
-        return DB::transaction(function () use ($session, $userMessage, $assistantContent, $metadata, $source): array {
-            $lockedSession = ConversationSession::query()
-                ->whereKey($session->id)
-                ->where('user_id', $session->user_id)
-                ->lockForUpdate()
-                ->firstOrFail();
-            $existing = $this->existingRunForClientRequest($lockedSession, $metadata);
-            if ($existing instanceof AssistantRun) {
-                $existing = AssistantRun::query()->lockForUpdate()->findOrFail($existing->id);
-                if (! in_array($existing->status, ['queued', 'running', 'failed'], true)
-                    || $existing->assistant_message_id !== null
-                    || $this->runHasCompletedMutatingWork($existing)) {
-                    $replayed = $this->replayedQueueResult($existing->load('assistantMessage'));
-
-                    return [
-                        ...$replayed,
-                        'assistant_message' => $existing->assistantMessage,
-                    ];
-                }
-            }
-
-            $userMessage->update(['metadata' => $metadata]);
-            $run = $existing ?? AssistantRun::create([
-                'user_id' => $lockedSession->user_id,
-                'workspace_id' => $lockedSession->workspace_id,
-                'conversation_session_id' => $lockedSession->id,
-                'user_message_id' => $userMessage->id,
-                'source' => $source,
-                'status' => 'completed',
-                'input' => $userMessage->content,
-                'metadata' => $metadata,
-                'started_at' => now(),
-                'completed_at' => now(),
-            ]);
-            $assistantMessage = ConversationMessage::create([
-                'user_id' => $lockedSession->user_id,
-                'conversation_session_id' => $lockedSession->id,
-                'client_turn_id' => $userMessage->client_turn_id,
-                'role' => 'assistant',
-                'content' => $assistantContent,
-                'metadata' => [
-                    'assistant_run_id' => $run->id,
-                    'runtime' => 'deterministic_app_read',
-                    'client_request_id' => data_get($metadata, 'client_request_id'),
-                    'voice_request' => (bool) data_get($metadata, 'voice_request', false),
-                ],
-            ]);
-            $run->update([
-                'status' => 'completed',
-                'assistant_message_id' => $assistantMessage->id,
-                'metadata' => $metadata,
-                'error' => null,
-                'result' => [
-                    'status' => 'completed',
-                    'assistant_message_id' => $assistantMessage->id,
-                    'deterministic_app_read' => true,
-                ],
-                'started_at' => $run->started_at ?? now(),
-                'completed_at' => now(),
-            ]);
-            $lockedSession->update([
-                'status' => $this->activeRunSessionStatus($lockedSession->id, $run->id),
-                'last_activity_at' => now(),
-            ]);
-            $event = $this->recordEvent($run, 'runtime.run_completed', [
-                'run_id' => $run->id,
-                'message_id' => $userMessage->id,
-                'assistant_message_id' => $assistantMessage->id,
-                'deterministic_app_read' => true,
-                'run_duration_ms' => 0,
-            ], 'hermes.fast_app_read', 'succeeded');
-
-            return [
-                'run' => $run->refresh(),
-                'user_message' => $userMessage->refresh(),
-                'assistant_message' => $assistantMessage,
-                'event' => $event,
-                'events' => [$event],
-            ];
-        }, 3);
-    }
-
-    /**
-     * Replace an uncommitted request with a corrected request while retaining one durable
-     * user message. The predecessor input remains on its cancelled run for auditability.
-     *
-     * @return array{run:AssistantRun,user_message:ConversationMessage,event:ActivityEvent,events:array<int, ActivityEvent>,existing?:bool}
-     */
-    public function queueSupersedingRun(
-        ConversationSession $session,
-        string $supersededClientRequestId,
-        string $content,
-        array $metadata,
-        string $source = 'http'
-    ): array {
-        $metadata = $this->sanitizeClientMetadata($metadata);
-        $metadata['supersedes_client_request_id'] = trim($supersededClientRequestId);
-
-        $dispatchRunId = null;
-        $queued = DB::transaction(function () use ($session, $supersededClientRequestId, $content, $metadata, $source, &$dispatchRunId): array {
-            $lockedSession = ConversationSession::query()
-                ->whereKey($session->id)
-                ->where('user_id', $session->user_id)
-                ->lockForUpdate()
-                ->firstOrFail();
-            $clientRequestId = trim((string) data_get($metadata, 'client_request_id', ''));
-            if ($clientRequestId === '' || $clientRequestId === $supersededClientRequestId) {
-                throw new \DomainException('A correction needs a new client request id.');
-            }
-            $cancelledBeforeQueue = $this->clientRequestWasCancelled($lockedSession, $metadata);
-
-            $existing = AssistantRun::query()
-                ->where('user_id', $lockedSession->user_id)
-                ->where('conversation_session_id', $lockedSession->id)
-                ->where('metadata->client_request_id', $clientRequestId)
-                ->with('userMessage')
-                ->latest('id')
-                ->first();
-            if ($existing instanceof AssistantRun) {
-                $event = $this->recordEvent($existing, 'runtime.run_supersession_replayed', [
-                    'run_id' => $existing->id,
-                    'client_request_id' => $clientRequestId,
-                ], 'hermes.runs', 'recorded');
-
-                return [
-                    'run' => $existing,
-                    'user_message' => $existing->userMessage,
-                    'event' => $event,
-                    'events' => [$event],
-                    'existing' => true,
-                ];
-            }
-
-            $predecessor = AssistantRun::query()
-                ->where('user_id', $lockedSession->user_id)
-                ->where('conversation_session_id', $lockedSession->id)
-                ->where('metadata->client_request_id', $supersededClientRequestId)
-                ->with('userMessage')
-                ->lockForUpdate()
-                ->latest('id')
-                ->first();
-            if (! $predecessor instanceof AssistantRun || ! $predecessor->userMessage instanceof ConversationMessage) {
-                $currentMissingPredecessorSuccessor = $this->missingPredecessorSuccessorForId(
-                    $lockedSession,
-                    $supersededClientRequestId,
-                    lockForUpdate: true,
-                );
-                if ($currentMissingPredecessorSuccessor instanceof AssistantRun) {
-                    $replacement = $this->replaceMissingPredecessorSuccessor(
-                        $lockedSession,
-                        $currentMissingPredecessorSuccessor,
-                        $supersededClientRequestId,
-                        $content,
-                        $metadata,
-                        $source,
-                        $cancelledBeforeQueue,
-                    );
-                    $dispatchRunId = $replacement['run']->status === 'queued'
-                        ? $replacement['run']->id
-                        : null;
-
-                    return $replacement;
-                }
-
-                $orphanedMessage = ConversationMessage::query()
-                    ->where('user_id', $lockedSession->user_id)
-                    ->where('conversation_session_id', $lockedSession->id)
-                    ->where('role', 'user')
-                    ->where('metadata->client_request_id', $supersededClientRequestId)
-                    ->exists();
-                if ($orphanedMessage) {
-                    throw new \DomainException('The request being corrected has no cancellable run.');
-                }
-
-                $this->addCancellationTombstone($lockedSession, $supersededClientRequestId);
-
-                $successorMetadata = array_merge($metadata, [
-                    'supersession_predecessor_missing' => true,
-                    'missing_predecessor_client_request_id' => $supersededClientRequestId,
-                    'superseded_client_request_ids' => [$supersededClientRequestId],
-                ]);
-                if ($cancelledBeforeQueue) {
-                    $successorMetadata = array_merge($successorMetadata, [
-                        'cancelled_before_queue' => true,
-                        'cancelled_at' => now()->toIso8601String(),
-                    ]);
-                }
-                $userMessage = ConversationMessage::create([
-                    'user_id' => $lockedSession->user_id,
-                    'conversation_session_id' => $lockedSession->id,
-                    'role' => 'user',
-                    'content' => $content,
-                    'metadata' => $successorMetadata,
-                ]);
-                $run = AssistantRun::create([
-                    'user_id' => $lockedSession->user_id,
-                    'workspace_id' => $lockedSession->workspace_id,
-                    'conversation_session_id' => $lockedSession->id,
-                    'user_message_id' => $userMessage->id,
-                    'source' => $source,
-                    'status' => $cancelledBeforeQueue ? 'cancelled' : 'queued',
-                    'input' => $content,
-                    'metadata' => $successorMetadata,
-                    'cancelled_at' => $cancelledBeforeQueue ? now() : null,
-                    'completed_at' => $cancelledBeforeQueue ? now() : null,
-                ]);
-                $lockedSession->update([
-                    'status' => $cancelledBeforeQueue ? 'active' : 'queued',
-                    'last_activity_at' => now(),
-                ]);
-                $events = $cancelledBeforeQueue ? [] : $this->recordIntentEvents($run, $userMessage, $successorMetadata);
-                $event = $this->recordEvent($run, $cancelledBeforeQueue ? 'runtime.run_cancelled_before_queue' : 'runtime.run_queued', [
-                    'run_id' => $run->id,
-                    'message_id' => $userMessage->id,
-                    'source' => $source,
-                    'supersession_predecessor_missing' => true,
-                    'client_request_id' => $clientRequestId,
-                ], 'hermes.runs', $cancelledBeforeQueue ? 'cancelled' : 'queued');
-                $dispatchRunId = $cancelledBeforeQueue ? null : $run->id;
-                $events[] = $event;
 
                 return [
                     'run' => $run,
                     'user_message' => $userMessage,
                     'event' => $event,
-                    'events' => $events,
+                    'events' => [$event],
+                    'existing' => false,
                 ];
             }
-            if (filled(data_get($predecessor->metadata, 'superseded_by_client_request_id'))) {
-                throw new \DomainException('The first request has already been superseded.');
-            }
-            if ($predecessor->assistant_message_id !== null || $this->runHasCompletedMutatingWork($predecessor)) {
-                throw new \DomainException('The first request already committed work and cannot be safely replaced.');
-            }
-            if (! in_array($predecessor->status, ['queued', 'running', 'cancelled', 'failed'], true)) {
-                throw new \DomainException('The first request has already finished and cannot be safely replaced.');
-            }
 
-            $predecessorMetadata = is_array($predecessor->metadata) ? $predecessor->metadata : [];
-            $predecessor->update([
-                'status' => 'cancelled',
-                'cancelled_at' => $predecessor->cancelled_at ?? now(),
-                'completed_at' => $predecessor->completed_at ?? now(),
-                'metadata' => array_merge($predecessorMetadata, [
-                    'superseded_by_client_request_id' => $clientRequestId,
-                    'superseded_at' => now()->toIso8601String(),
-                ]),
-            ]);
-            $this->deleteOrphanAssistantsForRun($predecessor);
-
-            $supersededIds = collect([
-                ...((array) data_get($predecessor->userMessage->metadata, 'superseded_client_request_ids', [])),
-                $supersededClientRequestId,
-            ])->map(fn (mixed $id): string => trim((string) $id))
-                ->filter()
-                ->unique()
-                ->values()
-                ->all();
-            $successorMetadata = array_merge($metadata, [
-                'supersedes_run_id' => $predecessor->id,
-                'superseded_client_request_ids' => $supersededIds,
-            ]);
-            if ($cancelledBeforeQueue) {
-                $successorMetadata = array_merge($successorMetadata, [
-                    'cancelled_before_queue' => true,
-                    'cancelled_at' => now()->toIso8601String(),
-                ]);
-            }
-            $userMessage = $predecessor->userMessage;
-            $userMessage->update([
-                'content' => $content,
-                'metadata' => $successorMetadata,
-            ]);
-
-            $run = AssistantRun::create([
-                'user_id' => $lockedSession->user_id,
-                'workspace_id' => $lockedSession->workspace_id,
-                'conversation_session_id' => $lockedSession->id,
-                'user_message_id' => $userMessage->id,
-                'source' => $source,
-                'status' => $cancelledBeforeQueue ? 'cancelled' : 'queued',
-                'input' => $content,
-                'metadata' => $successorMetadata,
-                'cancelled_at' => $cancelledBeforeQueue ? now() : null,
-                'completed_at' => $cancelledBeforeQueue ? now() : null,
-            ]);
-            $lockedSession->update([
-                'status' => $cancelledBeforeQueue ? 'active' : 'queued',
-                'last_activity_at' => now(),
-            ]);
-
-            $superseded = $this->recordEvent($predecessor, 'runtime.run_superseded', [
-                'run_id' => $predecessor->id,
-                'successor_run_id' => $run->id,
-                'client_request_id' => $supersededClientRequestId,
-                'superseded_by_client_request_id' => $clientRequestId,
-            ], 'hermes.runs', 'cancelled');
-            $events = [$superseded, ...($cancelledBeforeQueue ? [] : $this->recordIntentEvents($run, $userMessage, $successorMetadata))];
-            $event = $this->recordEvent($run, $cancelledBeforeQueue ? 'runtime.run_cancelled_before_queue' : 'runtime.run_queued', [
+            $event = $this->recordEvent($run, 'runtime.run_queued', [
                 'run_id' => $run->id,
                 'message_id' => $userMessage->id,
                 'source' => $source,
-                'reused_user_message' => true,
-                'supersedes_run_id' => $predecessor->id,
-                'client_request_id' => $clientRequestId,
-            ], 'hermes.runs', $cancelledBeforeQueue ? 'cancelled' : 'queued');
-            $dispatchRunId = $cancelledBeforeQueue ? null : $run->id;
-            $events[] = $event;
+                'next_execution_generation' => 1,
+            ], 'hermes.runs', 'queued');
 
             return [
                 'run' => $run,
-                'user_message' => $userMessage->refresh(),
+                'user_message' => $userMessage,
                 'event' => $event,
-                'events' => $events,
+                'events' => [$event],
+                'existing' => false,
             ];
         }, 3);
 
-        if ($dispatchRunId !== null) {
-            $this->dispatchRunAfterResponse($dispatchRunId);
+        if ($queued['run']->status === 'queued'
+            && ! ($queued['existing'] ?? false)
+            && ! $this->dispatchRunAfterResponse($queued['run']->id)) {
+            $queued['run'] = $this->prepareRunForBackgroundResponse($queued['run']->refresh());
         }
 
         return $queued;
     }
 
+    /**
+     * Atomically claims a queued generic run. AssistantRunService is the only
+     * owner of generic run/session lifecycle state and lifecycle events. The
+     * queued job carries the exact next generation, so a prior delivery cannot
+     * reclaim a run after recovery has invalidated its attempt.
+     */
+    public function claimRunExecution(AssistantRun $run, int $expectedGeneration): ?AssistantRunExecutionClaim
+    {
+        $this->assertGenericRun($run);
+
+        return DB::transaction(function () use ($run, $expectedGeneration): ?AssistantRunExecutionClaim {
+            $session = ConversationSession::query()->lockForUpdate()->find($run->conversation_session_id);
+            $lockedRun = AssistantRun::query()->lockForUpdate()->find($run->id);
+            if (! $session instanceof ConversationSession
+                || ! $lockedRun instanceof AssistantRun
+                || $lockedRun->status !== 'queued'
+                || $expectedGeneration <= 0
+                || (int) $lockedRun->execution_generation + 1 !== $expectedGeneration) {
+                return null;
+            }
+
+            $lockedRun->update([
+                'status' => 'running',
+                'execution_generation' => $expectedGeneration,
+                'started_at' => now(),
+            ]);
+            $session->update([
+                'status' => 'running',
+                'last_activity_at' => now(),
+            ]);
+            $this->recordEvent($lockedRun, 'runtime.run_started', [
+                'run_id' => $lockedRun->id,
+                'source' => $lockedRun->source,
+                'message_id' => $lockedRun->user_message_id,
+                'execution_generation' => $expectedGeneration,
+                'queue_wait_ms' => $this->elapsedMilliseconds($lockedRun->created_at),
+            ], 'hermes.runs', 'started');
+
+            return new AssistantRunExecutionClaim(
+                runId: $lockedRun->id,
+                sessionId: $lockedRun->conversation_session_id,
+                userMessageId: (int) $lockedRun->user_message_id,
+                generation: $expectedGeneration,
+            );
+        }, 3);
+    }
+
+    public function executionClaimIsCurrent(AssistantRunExecutionClaim $claim): bool
+    {
+        return AssistantRun::query()
+            ->whereKey($claim->runId)
+            ->whereNull('voice_turn_id')
+            ->where('conversation_session_id', $claim->sessionId)
+            ->where('user_message_id', $claim->userMessageId)
+            ->where('status', 'running')
+            ->where('execution_generation', $claim->generation)
+            ->exists();
+    }
+
+    public function withExecutionClaim(AssistantRunExecutionClaim $claim, Closure $callback): mixed
+    {
+        // Every generic execution write crosses this lock-protected lease
+        // boundary. The callback and its writes commit in the same transaction.
+        return DB::transaction(function () use ($claim, $callback): mixed {
+            $session = ConversationSession::query()->lockForUpdate()->find($claim->sessionId);
+            $run = AssistantRun::query()->lockForUpdate()->find($claim->runId);
+            if (! $session instanceof ConversationSession
+                || ! $run instanceof AssistantRun
+                || $run->voice_turn_id !== null
+                || $run->conversation_session_id !== $claim->sessionId
+                || (int) $run->user_message_id !== $claim->userMessageId
+                || $run->status !== 'running'
+                || (int) $run->execution_generation !== $claim->generation) {
+                throw new AssistantRunClaimLostException;
+            }
+
+            return $callback($session, $run);
+        }, 3);
+    }
+
     public function cancelRun(AssistantRun $run): AssistantRun
     {
+        $this->assertGenericRun($run);
+
         DB::transaction(function () use ($run): void {
             $session = ConversationSession::query()->lockForUpdate()->find($run->conversation_session_id);
             $lockedRun = AssistantRun::query()->lockForUpdate()->find($run->id);
             if (! $lockedRun instanceof AssistantRun
-                || in_array($lockedRun->status, ['completed', 'cancelled'], true)
+                || in_array($lockedRun->status, ['completed', 'blocked', 'cancelled'], true)
                 || ($lockedRun->status === 'failed' && $lockedRun->assistant_message_id !== null)) {
                 return;
             }
@@ -663,8 +334,6 @@ class AssistantRunService
                 'cancelled_at' => now(),
                 'completed_at' => now(),
             ]);
-            $this->updateVoiceTurnMessageState($lockedRun, 'cancelled', terminal: true);
-            $this->deleteOrphanAssistantsForRun($lockedRun);
             if ($session instanceof ConversationSession) {
                 $session->update([
                     'status' => $this->activeRunSessionStatus($session->id, $lockedRun->id),
@@ -673,56 +342,99 @@ class AssistantRunService
             }
             $this->recordEvent($lockedRun, 'runtime.run_cancel_requested', [
                 'run_id' => $lockedRun->id,
-            ], 'hermes.runs', 'cancelling');
+            ], 'hermes.runs', 'cancelled');
         }, 3);
 
         return $run->refresh();
     }
 
-    public function reconcileStaleRun(AssistantRun $run): AssistantRun
+    public function cancelSession(ConversationSession $session, ?string $clientRequestId = null): ConversationSession
     {
-        $run->refresh();
-        if (! in_array($run->status, ['queued', 'running'], true)) {
-            return $run;
-        }
+        $clientRequestId = trim((string) $clientRequestId);
 
-        $startedAt = $run->started_at ?: $run->created_at;
-        $staleAfterSeconds = (int) config('services.hermes_runtime.assistant_run_stale_seconds', 210);
-        if ($startedAt === null || $startedAt->gt(now()->subSeconds($staleAfterSeconds))) {
-            return $run;
-        }
+        return DB::transaction(function () use ($session, $clientRequestId): ConversationSession {
+            $lockedSession = ConversationSession::query()
+                ->whereKey($session->id)
+                ->where('user_id', $session->user_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+            $query = AssistantRun::query()
+                ->where('conversation_session_id', $lockedSession->id)
+                ->whereNull('voice_turn_id')
+                ->whereIn('status', ['queued', 'running', 'failed']);
+            if ($clientRequestId !== '') {
+                $query->where('client_request_id', $clientRequestId);
+            }
 
-        $this->markStaleFailed($run, $staleAfterSeconds);
+            /** @var EloquentCollection<int, AssistantRun> $candidates */
+            $candidates = $query->orderBy('id')->lockForUpdate()->get();
+            $runs = $candidates->filter(
+                fn (AssistantRun $run): bool => in_array($run->status, ['queued', 'running'], true)
+                    || ($run->status === 'failed' && $run->assistant_message_id === null),
+            );
+            foreach ($runs as $run) {
+                $metadata = is_array($run->metadata) ? $run->metadata : [];
+                $run->update([
+                    'status' => 'cancelled',
+                    'cancelled_at' => $run->cancelled_at ?? now(),
+                    'completed_at' => $run->completed_at ?? now(),
+                    'metadata' => array_merge($metadata, [
+                        'cancellation_requested_at' => now()->toIso8601String(),
+                        'cancellation_source' => 'session',
+                    ]),
+                ]);
+                $this->recordEvent($run, 'runtime.run_cancel_requested', [
+                    'run_id' => $run->id,
+                    'source' => 'session',
+                ], 'hermes.runs', 'cancelled');
+            }
 
-        return $run->refresh();
-    }
+            $sessionMetadata = is_array($lockedSession->metadata) ? $lockedSession->metadata : [];
+            if ($clientRequestId !== '') {
+                $sessionMetadata['cancelled_client_request_ids'] = collect((array) ($sessionMetadata['cancelled_client_request_ids'] ?? []))
+                    ->map(fn (mixed $id): string => trim((string) $id))
+                    ->filter()
+                    ->push($clientRequestId)
+                    ->unique()
+                    ->take(-50)
+                    ->values()
+                    ->all();
+            }
+            $lockedSession->update([
+                'status' => $this->activeRunSessionStatus($lockedSession->id, 0),
+                'metadata' => $sessionMetadata ?: null,
+                'last_activity_at' => now(),
+            ]);
+            ActivityEvent::create([
+                'user_id' => $lockedSession->user_id,
+                'workspace_id' => $lockedSession->workspace_id,
+                'conversation_session_id' => $lockedSession->id,
+                'event_type' => 'runtime.cancel_requested',
+                'tool_name' => 'hermes.runs',
+                'status' => 'cancelled',
+                'payload' => [
+                    'run_ids' => $runs->pluck('id')->all(),
+                    'client_request_id' => $clientRequestId !== '' ? $clientRequestId : null,
+                ],
+            ]);
 
-    public function recoverStaleRun(AssistantRun $run, HermesRuntimeService $runtime): AssistantRun
-    {
-        unset($runtime);
-
-        return $this->prepareRunForBackgroundResponse($run);
-    }
-
-    public function resolveFailedRunForResponse(AssistantRun $run, HermesRuntimeService $runtime): AssistantRun
-    {
-        unset($runtime);
-
-        return $this->prepareRunForBackgroundResponse($run);
+            return $lockedSession->refresh();
+        }, 3);
     }
 
     public function prepareRunForBackgroundResponse(AssistantRun $run): AssistantRun
     {
+        $this->assertGenericRun($run);
+
         $run->refresh();
         if ($this->runRecoveryProhibited($run)) {
             return $run;
         }
-        $reconciled = $this->reconcileCommittedAssistant($run);
-        if ($reconciled instanceof AssistantRun) {
-            return $reconciled;
-        }
         if (in_array($run->status, ['queued', 'running'], true)) {
-            $startedAt = $run->started_at ?: $run->created_at;
+            $startedAt = $run->status === 'running'
+                ? $run->started_at
+                : $run->queued_at;
+            $startedAt ??= $run->created_at;
             $staleAfterSeconds = (int) config('services.hermes_runtime.assistant_run_stale_seconds', 210);
             if ($startedAt !== null && $startedAt->lte(now()->subSeconds($staleAfterSeconds))) {
                 if ($this->runRecoveryWindowExpired($run)) {
@@ -733,7 +445,7 @@ class AssistantRunService
 
                 $metadata = is_array($run->metadata) ? $run->metadata : [];
                 $attempts = (int) ($metadata['background_stale_retry_attempts'] ?? 0);
-                $maxAttempts = (int) config('services.hermes_runtime.assistant_run_background_retry_attempts', 1);
+                $maxAttempts = (int) config('services.hermes_runtime.assistant_run_stale_recovery_attempts', 1);
                 if ($maxAttempts > 0 && $attempts < $maxAttempts && ! $this->runHasCompletedMutatingWork($run)) {
                     $requeued = $this->requeueRunWithLock(
                         $run,
@@ -744,7 +456,9 @@ class AssistantRunService
                         $maxAttempts,
                     );
                     if ($requeued) {
-                        $this->dispatchRunAfterResponse($run->id);
+                        if (! $this->dispatchRunAfterResponse($run->id)) {
+                            return $this->prepareRunForBackgroundResponse($run->refresh());
+                        }
                     }
 
                     return $run->refresh();
@@ -762,48 +476,185 @@ class AssistantRunService
             return $run;
         }
 
-        $metadata = is_array($run->metadata) ? $run->metadata : [];
-        $attempts = (int) ($metadata['background_response_retry_attempts'] ?? 0);
-        $maxAttempts = (int) config('services.hermes_runtime.assistant_run_background_retry_attempts', 1);
-        if ($maxAttempts > 0 && $attempts < $maxAttempts && ! $this->runHasCompletedMutatingWork($run)) {
-            $requeued = $this->requeueRunWithLock(
-                $run,
-                ['failed'],
-                'background_response_retry_attempts',
-                'background_response_retried_at',
-                'runtime.run_retry_queued',
-                $maxAttempts,
-                ['background_response_original_error' => $run->error],
-            );
-            if ($requeued) {
-                $this->dispatchRunAfterResponse($run->id);
+        return $this->finalizeFailedRun($run);
+    }
+
+    /**
+     * Atomically owns generic run terminal state and its single durable final.
+     * Hermes returns meaning and tool outcomes; it never persists chat output.
+     *
+     * @param  array<string, mixed>  $runtimeResult
+     */
+    public function finishRuntimeResult(AssistantRunExecutionClaim $claim, array $runtimeResult): AssistantRun
+    {
+        $run = AssistantRun::query()->findOrFail($claim->runId);
+        $this->assertGenericRun($run);
+
+        $outcome = strtolower(trim((string) ($runtimeResult['status'] ?? 'failed')));
+        if ($outcome === 'cancelled') {
+            return $this->finishCancelledRun($claim);
+        }
+        if ($outcome === 'failed') {
+            $reason = trim((string) (
+                $runtimeResult['error']
+                ?? data_get($runtimeResult, 'failure_context.exception')
+                ?? data_get($runtimeResult, 'failure_context.reason')
+                ?? 'Hermes runtime failed before producing a terminal response.'
+            ));
+            if (! $this->markRuntimeFailed($claim, $reason, $runtimeResult)) {
+                return $run->refresh();
             }
 
+            return $this->prepareRunForBackgroundResponse($run->refresh());
+        }
+        if (! in_array($outcome, ['completed', 'blocked'], true)) {
+            if (! $this->markRuntimeFailed($claim, "Hermes returned unsupported terminal status [{$outcome}].", $runtimeResult)) {
+                return $run->refresh();
+            }
+
+            return $this->prepareRunForBackgroundResponse($run->refresh());
+        }
+
+        $content = (string) ($runtimeResult['assistant_content'] ?? '');
+        if (trim($content) === '') {
+            if (! $this->markRuntimeFailed($claim, 'Hermes returned an empty terminal response.', $runtimeResult)) {
+                return $run->refresh();
+            }
+
+            return $this->prepareRunForBackgroundResponse($run->refresh());
+        }
+
+        $assistantMessage = null;
+        try {
+            $completedRun = $this->withExecutionClaim($claim, function (ConversationSession $session, AssistantRun $lockedRun) use ($claim, $runtimeResult, $outcome, $content, &$assistantMessage): AssistantRun {
+                $assistantMessage = ConversationMessage::create([
+                    'user_id' => $lockedRun->user_id,
+                    'conversation_session_id' => $lockedRun->conversation_session_id,
+                    'role' => 'assistant',
+                    'content' => $content,
+                    'metadata' => [
+                        'assistant_run_id' => $lockedRun->id,
+                        'final_status' => $outcome,
+                    ],
+                ]);
+                $eventIds = collect($runtimeResult['events'] ?? [])
+                    ->pluck('id')
+                    ->filter()
+                    ->values()
+                    ->all();
+                $lockedRun->update([
+                    'status' => $outcome,
+                    'assistant_message_id' => $assistantMessage->id,
+                    'error' => null,
+                    'result' => [
+                        'status' => $outcome,
+                        'assistant_message_id' => $assistantMessage->id,
+                        'event_ids' => $eventIds,
+                    ],
+                    'completed_at' => now(),
+                ]);
+                $session->update([
+                    'status' => $this->activeRunSessionStatus($session->id, $lockedRun->id),
+                    'last_activity_at' => now(),
+                ]);
+                $this->recordEvent($lockedRun, 'runtime.run_completed', [
+                    'run_id' => $lockedRun->id,
+                    'execution_generation' => $claim->generation,
+                    'status' => $outcome,
+                    'assistant_message_id' => $assistantMessage->id,
+                ], 'hermes.runs', $outcome === 'blocked' ? 'blocked' : 'succeeded');
+
+                return $lockedRun->refresh();
+            });
+        } catch (AssistantRunClaimLostException) {
             return $run->refresh();
         }
 
-        return $this->completeFailedRunWithBridgeMessage($run);
+        if ($assistantMessage instanceof ConversationMessage
+            && $completedRun->assistant_message_id === $assistantMessage->id) {
+            $userMessage = ConversationMessage::find($completedRun->user_message_id);
+            $session = ConversationSession::find($completedRun->conversation_session_id);
+            if ($userMessage instanceof ConversationMessage && $session instanceof ConversationSession) {
+                app(BeanMemoryService::class)->recordTurnActivity($session, $userMessage, $assistantMessage);
+            }
+        }
+
+        return $completedRun;
     }
 
-    private function isRecoverableFailedStaleRun(AssistantRun $run): bool
+    /** @param array<string, mixed> $runtimeResult */
+    private function markRuntimeFailed(AssistantRunExecutionClaim $claim, string $reason, array $runtimeResult): bool
     {
-        if ($run->status !== 'failed' || $run->assistant_message_id !== null) {
+        try {
+            $failed = $this->withExecutionClaim($claim, function (ConversationSession $session, AssistantRun $lockedRun) use ($claim, $reason, $runtimeResult): AssistantRun {
+                $eventIds = collect($runtimeResult['events'] ?? [])
+                    ->pluck('id')
+                    ->filter()
+                    ->values()
+                    ->all();
+                $lockedRun->update([
+                    'status' => 'failed',
+                    'error' => mb_substr($reason, 0, 4000),
+                    'result' => [
+                        'status' => 'failed',
+                        'assistant_message_id' => null,
+                        'event_ids' => $eventIds,
+                    ],
+                    'completed_at' => now(),
+                ]);
+                $session->update([
+                    'status' => $this->activeRunSessionStatus($session->id, $lockedRun->id),
+                    'last_activity_at' => now(),
+                ]);
+                $this->recordEvent($lockedRun, 'runtime.run_failed', [
+                    'run_id' => $lockedRun->id,
+                    'execution_generation' => $claim->generation,
+                    'reason' => mb_substr($reason, 0, 1000),
+                ], 'hermes.runs', 'failed');
+
+                return $lockedRun->refresh();
+            });
+        } catch (AssistantRunClaimLostException) {
             return false;
         }
 
-        $error = strtolower((string) $run->error);
-        if (! str_contains($error, 'run expired before it could be safely recovered')
-            && ! str_contains($error, 'assistant run did not complete within')
-            && ! str_contains($error, 'has timed out')
-            && ! str_contains($error, 'timed out')
-            && ! str_contains($error, 'timeout')) {
-            return false;
+        if ($failed instanceof AssistantRun) {
+            Log::error('Assistant run failed.', [
+                'run_id' => $failed->id,
+                'session_id' => $failed->conversation_session_id,
+                'exception' => $reason,
+            ]);
         }
 
-        return ! $this->runHasCompletedMutatingWork($run);
+        return true;
     }
 
-    private function completeFailedRunWithBridgeMessage(AssistantRun $run): AssistantRun
+    private function finishCancelledRun(AssistantRunExecutionClaim $claim): AssistantRun
+    {
+        try {
+            return $this->withExecutionClaim($claim, function (ConversationSession $session, AssistantRun $lockedRun) use ($claim): AssistantRun {
+                $lockedRun->update([
+                    'status' => 'cancelled',
+                    'cancelled_at' => now(),
+                    'completed_at' => now(),
+                ]);
+                $session->update([
+                    'status' => $this->activeRunSessionStatus($session->id, $lockedRun->id),
+                    'last_activity_at' => now(),
+                ]);
+                $this->recordEvent($lockedRun, 'runtime.run_cancelled', [
+                    'run_id' => $lockedRun->id,
+                    'execution_generation' => $claim->generation,
+                ], 'hermes.runs', 'cancelled');
+
+                return $lockedRun->refresh();
+            });
+        } catch (AssistantRunClaimLostException) {
+            return AssistantRun::query()->findOrFail($claim->runId);
+        }
+    }
+
+    private function finalizeFailedRun(AssistantRun $run): AssistantRun
     {
         return DB::transaction(function () use ($run): AssistantRun {
             $session = ConversationSession::query()->lockForUpdate()->find($run->conversation_session_id);
@@ -816,11 +667,8 @@ class AssistantRunService
                 return $lockedRun?->refresh() ?? $run->refresh();
             }
 
-            $metadata = is_array($lockedRun->metadata) ? $lockedRun->metadata : [];
-            $hadCompletedWork = $this->runHasCompletedMutatingWork($lockedRun);
-            $content = $hadCompletedWork
-                ? 'I finished the app updates and refreshed the latest details. Tell me what you want to do next.'
-                : 'I’m on it. I’m syncing against the latest app state now, and I’ll ask for one detail if I need it.';
+            $hadCommittedWrites = $this->runHasCompletedMutatingWork($lockedRun);
+            $content = self::SYSTEM_FAILURE_FINAL;
 
             $assistantMessage = ConversationMessage::create([
                 'user_id' => $lockedRun->user_id,
@@ -828,40 +676,32 @@ class AssistantRunService
                 'role' => 'assistant',
                 'content' => $content,
                 'metadata' => [
-                    'runtime' => 'failed_run_bridge',
-                    'original_error' => str((string) $lockedRun->error)->limit(1000, '')->toString(),
-                    'had_completed_work' => $hadCompletedWork,
+                    'assistant_run_id' => $lockedRun->id,
+                    'final_status' => 'failed',
+                    'had_committed_writes' => $hadCommittedWrites,
                 ],
             ]);
 
             $lockedRun->update([
-                'status' => 'completed',
                 'assistant_message_id' => $assistantMessage->id,
-                'error' => null,
-                'result' => [
-                    'status' => 'completed',
+                'result' => array_merge(is_array($lockedRun->result) ? $lockedRun->result : [], [
+                    'status' => 'failed',
                     'assistant_message_id' => $assistantMessage->id,
-                    'resolved_failed_run' => true,
-                    'had_completed_work' => $hadCompletedWork,
-                ],
-                'metadata' => array_merge($metadata, [
-                    'failed_response_resolved_at' => now()->toIso8601String(),
-                    'failed_response_original_error' => $lockedRun->error,
-                    'failed_response_had_completed_work' => $hadCompletedWork,
+                    'fault_final' => true,
+                    'had_committed_writes' => $hadCommittedWrites,
                 ]),
-                'completed_at' => now(),
+                'completed_at' => $lockedRun->completed_at ?? now(),
             ]);
-            $this->updateVoiceTurnMessageState($lockedRun, 'completed', terminal: true);
             $session->update([
                 'status' => $this->activeRunSessionStatus($session->id, $lockedRun->id),
                 'last_activity_at' => now(),
             ]);
 
-            $this->recordEvent($lockedRun->refresh(), 'runtime.run_failed_response_resolved', [
+            $this->recordEvent($lockedRun->refresh(), 'runtime.run_fault_final_created', [
                 'run_id' => $lockedRun->id,
                 'assistant_message_id' => $assistantMessage->id,
-                'had_completed_work' => $hadCompletedWork,
-            ], 'hermes.runs', 'succeeded');
+                'had_committed_writes' => $hadCommittedWrites,
+            ], 'hermes.runs', 'failed');
 
             return $lockedRun->refresh();
         }, 3);
@@ -874,6 +714,7 @@ class AssistantRunService
         /** @var EloquentCollection<int, AssistantRun> $runs */
         $runs = AssistantRun::query()
             ->where('conversation_session_id', $session->id)
+            ->whereNull('voice_turn_id')
             ->whereIn('status', ['queued', 'running'])
             ->where(function ($query) use ($staleAfterSeconds): void {
                 $threshold = now()->subSeconds($staleAfterSeconds);
@@ -889,6 +730,23 @@ class AssistantRunService
             if ($this->runRecoveryWindowExpired($run)) {
                 $this->markStaleFailed($run, $staleAfterSeconds, 'Run expired before it could be safely recovered.');
             }
+        }
+    }
+
+    public function prepareSessionRunsForResponse(ConversationSession $session): void
+    {
+        $this->closeExpiredStaleRunsForSession($session);
+
+        /** @var EloquentCollection<int, AssistantRun> $runs */
+        $runs = AssistantRun::query()
+            ->where('conversation_session_id', $session->id)
+            ->whereNull('voice_turn_id')
+            ->whereIn('status', ['queued', 'running', 'failed'])
+            ->orderBy('id')
+            ->get();
+
+        foreach ($runs as $run) {
+            $this->prepareRunForBackgroundResponse($run);
         }
     }
 
@@ -925,7 +783,6 @@ class AssistantRunService
                 'error' => $reason,
                 'completed_at' => now(),
             ]);
-            $this->updateVoiceTurnMessageState($lockedRun, 'failed', terminal: true, reason: $reason);
             $session->update([
                 'status' => $this->activeRunSessionStatus($session->id, $lockedRun->id),
                 'last_activity_at' => now(),
@@ -939,92 +796,12 @@ class AssistantRunService
 
     public function runHasCompletedMutatingWork(AssistantRun $run): bool
     {
-        $messageId = (int) $run->user_message_id;
-        if ($messageId <= 0) {
-            return false;
-        }
-
         return ActivityEvent::query()
             ->where('conversation_session_id', $run->conversation_session_id)
-            ->where('status', 'succeeded')
-            ->where(function ($query) use ($messageId): void {
-                $query->where('payload->work_item_id', 'like', 'crud-plan-'.$messageId.'-%')
-                    ->orWhere('payload->source_message_id', $messageId)
-                    ->orWhere('payload->message_id', $messageId)
-                    ->orWhere('payload->user_message_id', $messageId);
-            })
-            ->whereIn('event_type', [
-                'assistant.task.created',
-                'assistant.task.updated',
-                'assistant.task.deleted',
-                'assistant.reminder.created',
-                'assistant.reminder.updated',
-                'assistant.reminder.deleted',
-                'assistant.calendar_event.created',
-                'assistant.calendar_event.updated',
-                'assistant.calendar_event.deleted',
-                'assistant.note.created',
-                'assistant.note.updated',
-                'assistant.note.deleted',
-                'assistant.note',
-                'assistant.note_folder.created',
-                'assistant.note_folder.updated',
-                'assistant.note_folder.deleted',
-                'assistant.event_category.saved',
-                'assistant.event_category.updated',
-                'assistant.event_category.deleted',
-                'assistant.memory.created',
-                'assistant.memory.updated',
-                'assistant.memory.deleted',
-                'assistant.workspace_memory.noted',
-                'assistant.blocker.created',
-                'assistant.blocker.updated',
-                'assistant.blocker.resolved',
-                'assistant.blocker.deleted',
-                'assistant.approval.created',
-                'assistant.approval.created_directly',
-                'assistant.approval.updated',
-                'assistant.approval.approved',
-                'assistant.approval.denied',
-                'assistant.approval.denied_by_action',
-                'assistant.approval.deleted',
-                'assistant.agent_profile.updated',
-                'assistant.conversation_session.updated',
-            ])
+            ->where('event_type', 'assistant.semantic_operation.receipt')
+            ->where('payload->assistant_run_id', $run->id)
+            ->where('payload->receipt->side_effect_committed', true)
             ->exists();
-    }
-
-    /**
-     * @return array<int, ActivityEvent>
-     */
-    private function recordIntentEvents(AssistantRun $run, ConversationMessage $userMessage, array $metadata): array
-    {
-        $intent = is_array($metadata['bean_intent'] ?? null) ? $metadata['bean_intent'] : null;
-        if ($intent === null) {
-            return [];
-        }
-
-        $events = [$this->recordEvent($run, 'runtime.intent_routed', [
-            'run_id' => $run->id,
-            'message_id' => $userMessage->id,
-            ...$intent,
-        ], 'hermes.router', 'completed')];
-
-        foreach ((array) ($intent['work_plan'] ?? []) as $index => $item) {
-            if (! is_array($item) || trim((string) ($item['label'] ?? '')) === '') {
-                continue;
-            }
-            $events[] = $this->recordEvent($run, 'assistant.work_item.planned', [
-                'run_id' => $run->id,
-                'message_id' => $userMessage->id,
-                'work_item_id' => (string) ($item['id'] ?? 'route-plan-'.$index),
-                'work_label' => (string) $item['label'],
-                'label' => (string) $item['label'],
-                'work_order' => $index,
-            ], 'hermes.router', 'started');
-        }
-
-        return $events;
     }
 
     private function clientRequestWasCancelled(ConversationSession $session, array $metadata): bool
@@ -1042,20 +819,6 @@ class AssistantRunService
         return in_array($clientRequestId, $cancelledRequestIds, true);
     }
 
-    private function addCancellationTombstone(ConversationSession $session, string $clientRequestId): void
-    {
-        $sessionMetadata = is_array($session->metadata) ? $session->metadata : [];
-        $sessionMetadata['cancelled_client_request_ids'] = collect((array) ($sessionMetadata['cancelled_client_request_ids'] ?? []))
-            ->map(fn (mixed $id): string => trim((string) $id))
-            ->filter()
-            ->push(trim($clientRequestId))
-            ->unique()
-            ->take(-50)
-            ->values()
-            ->all();
-        $session->update(['metadata' => $sessionMetadata]);
-    }
-
     private function existingRunForClientRequest(ConversationSession $session, array $metadata): ?AssistantRun
     {
         $clientRequestId = trim((string) data_get($metadata, 'client_request_id', ''));
@@ -1063,209 +826,19 @@ class AssistantRunService
             return null;
         }
 
+        return $this->findRunForClientRequest($session, $clientRequestId);
+    }
+
+    public function findRunForClientRequest(ConversationSession $session, string $clientRequestId): ?AssistantRun
+    {
         return AssistantRun::query()
             ->where('user_id', $session->user_id)
             ->where('conversation_session_id', $session->id)
-            ->where('metadata->client_request_id', $clientRequestId)
-            ->with('userMessage')
+            ->whereNull('voice_turn_id')
+            ->where('client_request_id', trim($clientRequestId))
+            ->with(['session', 'userMessage', 'assistantMessage'])
             ->latest('id')
             ->first();
-    }
-
-    private function missingPredecessorSuccessorForClientRequest(ConversationSession $session, array $metadata): ?AssistantRun
-    {
-        $clientRequestId = trim((string) data_get($metadata, 'client_request_id', ''));
-        if ($clientRequestId === '') {
-            return null;
-        }
-
-        return $this->missingPredecessorSuccessorForId($session, $clientRequestId);
-    }
-
-    private function missingPredecessorSuccessorForId(
-        ConversationSession $session,
-        string $clientRequestId,
-        bool $lockForUpdate = false,
-    ): ?AssistantRun {
-        $query = AssistantRun::query()
-            ->where('user_id', $session->user_id)
-            ->where('conversation_session_id', $session->id)
-            ->where('metadata->supersession_predecessor_missing', true)
-            ->whereJsonContains('metadata->superseded_client_request_ids', $clientRequestId)
-            ->with('userMessage')
-            ->latest('id');
-        if ($lockForUpdate) {
-            $query->lockForUpdate();
-        }
-
-        return $query->first();
-    }
-
-    /**
-     * Atomically make the newest correction win when several corrections all name an
-     * original request that never reached the server.
-     *
-     * @return array{run:AssistantRun,user_message:ConversationMessage,event:ActivityEvent,events:array<int, ActivityEvent>}
-     */
-    private function replaceMissingPredecessorSuccessor(
-        ConversationSession $session,
-        AssistantRun $predecessor,
-        string $missingClientRequestId,
-        string $content,
-        array $metadata,
-        string $source,
-        bool $cancelledBeforeQueue,
-    ): array {
-        $userMessage = $predecessor->userMessage;
-        if (! $userMessage instanceof ConversationMessage) {
-            throw new \DomainException('The earlier correction has no durable user message.');
-        }
-        if (filled(data_get($predecessor->metadata, 'superseded_by_client_request_id'))) {
-            throw new \DomainException('The earlier correction has already been superseded.');
-        }
-        if ($predecessor->assistant_message_id !== null || $this->runHasCompletedMutatingWork($predecessor)) {
-            throw new \DomainException('The earlier correction already committed work and cannot be safely replaced.');
-        }
-        if (! in_array($predecessor->status, ['queued', 'running', 'cancelled', 'failed'], true)) {
-            throw new \DomainException('The earlier correction has already finished and cannot be safely replaced.');
-        }
-
-        $clientRequestId = trim((string) data_get($metadata, 'client_request_id', ''));
-        $predecessorClientRequestId = trim((string) data_get($predecessor->metadata, 'client_request_id', ''));
-        $predecessorMetadata = is_array($predecessor->metadata) ? $predecessor->metadata : [];
-        $predecessor->update([
-            'status' => 'cancelled',
-            'cancelled_at' => $predecessor->cancelled_at ?? now(),
-            'completed_at' => $predecessor->completed_at ?? now(),
-            'metadata' => array_merge($predecessorMetadata, [
-                'superseded_by_client_request_id' => $clientRequestId,
-                'superseded_at' => now()->toIso8601String(),
-            ]),
-        ]);
-        $this->deleteOrphanAssistantsForRun($predecessor);
-
-        $supersededIds = collect([
-            ...((array) data_get($userMessage->metadata, 'superseded_client_request_ids', [])),
-            $missingClientRequestId,
-            $predecessorClientRequestId,
-        ])->map(fn (mixed $id): string => trim((string) $id))
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-        $successorMetadata = array_merge($metadata, [
-            'supersession_predecessor_missing' => true,
-            'missing_predecessor_client_request_id' => $missingClientRequestId,
-            'supersedes_run_id' => $predecessor->id,
-            'superseded_client_request_ids' => $supersededIds,
-        ]);
-        if ($cancelledBeforeQueue) {
-            $successorMetadata = array_merge($successorMetadata, [
-                'cancelled_before_queue' => true,
-                'cancelled_at' => now()->toIso8601String(),
-            ]);
-        }
-        $userMessage->update([
-            'content' => $content,
-            'metadata' => $successorMetadata,
-        ]);
-        $run = AssistantRun::create([
-            'user_id' => $session->user_id,
-            'workspace_id' => $session->workspace_id,
-            'conversation_session_id' => $session->id,
-            'user_message_id' => $userMessage->id,
-            'source' => $source,
-            'status' => $cancelledBeforeQueue ? 'cancelled' : 'queued',
-            'input' => $content,
-            'metadata' => $successorMetadata,
-            'cancelled_at' => $cancelledBeforeQueue ? now() : null,
-            'completed_at' => $cancelledBeforeQueue ? now() : null,
-        ]);
-        $session->update([
-            'status' => $cancelledBeforeQueue ? 'active' : 'queued',
-            'last_activity_at' => now(),
-        ]);
-
-        $superseded = $this->recordEvent($predecessor, 'runtime.run_superseded', [
-            'run_id' => $predecessor->id,
-            'successor_run_id' => $run->id,
-            'client_request_id' => $predecessorClientRequestId,
-            'superseded_by_client_request_id' => $clientRequestId,
-            'missing_predecessor_client_request_id' => $missingClientRequestId,
-        ], 'hermes.runs', 'cancelled');
-        $events = [$superseded, ...($cancelledBeforeQueue ? [] : $this->recordIntentEvents($run, $userMessage, $successorMetadata))];
-        $event = $this->recordEvent($run, $cancelledBeforeQueue ? 'runtime.run_cancelled_before_queue' : 'runtime.run_queued', [
-            'run_id' => $run->id,
-            'message_id' => $userMessage->id,
-            'source' => $source,
-            'reused_user_message' => true,
-            'supersedes_run_id' => $predecessor->id,
-            'missing_predecessor_client_request_id' => $missingClientRequestId,
-            'client_request_id' => $clientRequestId,
-        ], 'hermes.runs', $cancelledBeforeQueue ? 'cancelled' : 'queued');
-        $events[] = $event;
-
-        return [
-            'run' => $run,
-            'user_message' => $userMessage->refresh(),
-            'event' => $event,
-            'events' => $events,
-        ];
-    }
-
-    /**
-     * A correction may reach the server before its original request. Keep the original
-     * run as an auditable cancelled attempt, but point it at the correction's durable
-     * user message so stale text never becomes a second conversation turn.
-     *
-     * @return array{run:AssistantRun,user_message:ConversationMessage,event:ActivityEvent,events:array<int, ActivityEvent>}
-     */
-    private function coalescedLateOriginalResult(
-        ConversationSession $session,
-        AssistantRun $successor,
-        string $content,
-        array $metadata,
-        string $source,
-    ): array {
-        $userMessage = $successor->userMessage;
-        if (! $userMessage instanceof ConversationMessage) {
-            throw new \DomainException('The correction has no durable user message.');
-        }
-
-        $runMetadata = array_merge($metadata, [
-            'cancelled_before_queue' => true,
-            'cancelled_at' => now()->toIso8601String(),
-            'late_superseded_request_coalesced' => true,
-            'coalesced_into_run_id' => $successor->id,
-            'superseded_by_client_request_id' => data_get($successor->metadata, 'client_request_id'),
-        ]);
-        $run = AssistantRun::create([
-            'user_id' => $session->user_id,
-            'workspace_id' => $session->workspace_id,
-            'conversation_session_id' => $session->id,
-            'user_message_id' => $userMessage->id,
-            'source' => $source,
-            'status' => 'cancelled',
-            'input' => $content,
-            'metadata' => $runMetadata,
-            'cancelled_at' => now(),
-            'completed_at' => now(),
-        ]);
-        $session->update(['last_activity_at' => now()]);
-        $event = $this->recordEvent($run, 'runtime.run_late_superseded_request_coalesced', [
-            'run_id' => $run->id,
-            'message_id' => $userMessage->id,
-            'source' => $source,
-            'client_request_id' => data_get($metadata, 'client_request_id'),
-            'coalesced_into_run_id' => $successor->id,
-        ], 'hermes.runs', 'cancelled');
-
-        return [
-            'run' => $run,
-            'user_message' => $userMessage,
-            'event' => $event,
-            'events' => [$event],
-        ];
     }
 
     /**
@@ -1275,7 +848,7 @@ class AssistantRunService
     {
         $event = $this->recordEvent($run, 'runtime.run_queue_replayed', [
             'run_id' => $run->id,
-            'client_request_id' => data_get($run->metadata, 'client_request_id'),
+            'client_request_id' => $run->client_request_id,
         ], 'hermes.runs', 'recorded');
 
         return [
@@ -1285,6 +858,45 @@ class AssistantRunService
             'events' => [$event],
             'existing' => true,
         ];
+    }
+
+    private function assertMatchingRequestFingerprint(AssistantRun $run, string $fingerprint): void
+    {
+        $stored = trim((string) $run->request_fingerprint);
+        if ($stored !== '' && hash_equals($stored, $fingerprint)) {
+            return;
+        }
+
+        throw new AssistantRunConflictException(
+            'That client_request_id is already bound to a different assistant request.',
+        );
+    }
+
+    /** @param array<string, mixed> $metadata */
+    private function requestFingerprint(string $content, array $metadata): string
+    {
+        unset($metadata['request_fingerprint']);
+        $payload = [
+            'content' => $content,
+            'metadata' => $this->canonicalizeFingerprintValue($metadata),
+        ];
+
+        return hash('sha256', json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
+    }
+
+    private function canonicalizeFingerprintValue(mixed $value): mixed
+    {
+        if (! is_array($value)) {
+            return $value;
+        }
+
+        if (array_is_list($value)) {
+            return array_map(fn (mixed $item): mixed => $this->canonicalizeFingerprintValue($item), $value);
+        }
+
+        ksort($value);
+
+        return array_map(fn (mixed $item): mixed => $this->canonicalizeFingerprintValue($item), $value);
     }
 
     private function activeRunSessionStatus(int $sessionId, int $excludingRunId): string
@@ -1306,85 +918,18 @@ class AssistantRunService
     {
         $metadata = is_array($run->metadata) ? $run->metadata : [];
 
-        return in_array($run->status, ['completed', 'cancelled'], true)
+        return in_array($run->status, ['completed', 'blocked', 'cancelled'], true)
             || $run->cancelled_at !== null
-            || filled($metadata['superseded_by_client_request_id'] ?? null)
             || ($metadata['cancelled_before_queue'] ?? false) === true;
     }
 
-    private function deleteOrphanAssistantsForRun(AssistantRun $run): void
+    private function assertGenericRun(AssistantRun $run): void
     {
-        $assistantIds = ConversationMessage::query()
-            ->where('conversation_session_id', $run->conversation_session_id)
-            ->where('role', 'assistant')
-            ->where('metadata->assistant_run_id', $run->id)
-            ->pluck('id');
-        if ($assistantIds->isEmpty()) {
-            return;
+        if ($run->voice_turn_id !== null) {
+            throw new VoiceTurnConflictException(
+                'Browser Voice runs are owned by VoiceTurnLifecycleService.',
+            );
         }
-
-        MemoryEvent::query()->whereIn('assistant_message_id', $assistantIds)->delete();
-        ConversationMessage::query()->whereIn('id', $assistantIds)->delete();
-    }
-
-    private function reconcileCommittedAssistant(AssistantRun $run): ?AssistantRun
-    {
-        $assistantMessage = null;
-        $reconciled = DB::transaction(function () use ($run, &$assistantMessage): ?AssistantRun {
-            $session = ConversationSession::query()->lockForUpdate()->find($run->conversation_session_id);
-            $lockedRun = AssistantRun::query()->lockForUpdate()->find($run->id);
-            if (! $session instanceof ConversationSession
-                || ! $lockedRun instanceof AssistantRun
-                || $lockedRun->assistant_message_id !== null
-                || ! in_array($lockedRun->status, ['queued', 'running', 'failed'], true)
-                || $this->runRecoveryProhibited($lockedRun)) {
-                return null;
-            }
-
-            $assistantMessage = ConversationMessage::query()
-                ->where('conversation_session_id', $lockedRun->conversation_session_id)
-                ->where('role', 'assistant')
-                ->where('metadata->assistant_run_id', $lockedRun->id)
-                ->latest('id')
-                ->first();
-            if (! $assistantMessage instanceof ConversationMessage) {
-                return null;
-            }
-
-            $lockedRun->update([
-                'status' => 'completed',
-                'assistant_message_id' => $assistantMessage->id,
-                'error' => null,
-                'result' => [
-                    'status' => 'completed',
-                    'assistant_message_id' => $assistantMessage->id,
-                    'reconciled_committed_assistant' => true,
-                ],
-                'completed_at' => now(),
-            ]);
-            $this->updateVoiceTurnMessageState($lockedRun, 'completed', terminal: true);
-            $session->update([
-                'status' => $this->activeRunSessionStatus($session->id, $lockedRun->id),
-                'last_activity_at' => now(),
-            ]);
-            $this->recordEvent($lockedRun, 'runtime.run_orphan_assistant_reconciled', [
-                'run_id' => $lockedRun->id,
-                'assistant_message_id' => $assistantMessage->id,
-            ], 'hermes.runs', 'succeeded');
-
-            return $lockedRun->refresh();
-        }, 3);
-
-        if ($reconciled instanceof AssistantRun
-            && $assistantMessage instanceof ConversationMessage
-            && ! MemoryEvent::query()->where('assistant_message_id', $assistantMessage->id)->exists()) {
-            $userMessage = ConversationMessage::find($reconciled->user_message_id);
-            if ($userMessage instanceof ConversationMessage && $reconciled->session instanceof ConversationSession) {
-                app(BeanMemoryService::class)->recordTurnCandidate($reconciled->session, $userMessage, $assistantMessage);
-            }
-        }
-
-        return $reconciled;
     }
 
     private function requeueRunWithLock(
@@ -1415,6 +960,9 @@ class AssistantRunService
 
             $lockedRun->update([
                 'status' => 'queued',
+                'queued_at' => now(),
+                // Retain the last claimed generation. The replacement job is
+                // dispatched with exactly generation + 1.
                 'started_at' => null,
                 'completed_at' => null,
                 'error' => null,
@@ -1424,12 +972,13 @@ class AssistantRunService
                     $retriedAtKey => now()->toIso8601String(),
                 ]),
             ]);
-            $this->updateVoiceTurnMessageState($lockedRun, 'queued');
             $session->update(['status' => 'queued', 'last_activity_at' => now()]);
             $this->recordEvent($lockedRun, $eventType, [
                 'run_id' => $lockedRun->id,
                 'message_id' => $lockedRun->user_message_id,
                 'attempt' => $attempts + 1,
+                'invalidated_execution_generation' => (int) $lockedRun->execution_generation,
+                'next_execution_generation' => (int) $lockedRun->execution_generation + 1,
             ], 'hermes.runs', 'queued');
 
             return true;
@@ -1449,62 +998,80 @@ class AssistantRunService
         ]);
     }
 
-    private function voiceTurnMetadataForState(array $metadata, string $state): array
+    private function elapsedMilliseconds(mixed $startedAt): ?int
     {
-        if (! (bool) data_get($metadata, 'voice_request', false)) {
-            return $metadata;
+        if (! $startedAt) {
+            return null;
         }
 
-        $now = now()->toIso8601String();
-        $lifecycle = is_array(data_get($metadata, 'voice_turn_outcome'))
-            ? data_get($metadata, 'voice_turn_outcome')
-            : [];
-        $metadata['voice_turn_state'] = $state;
-        $metadata['voice_turn_sequence'] = (int) ($metadata['voice_turn_sequence'] ?? 0);
-        $metadata['voice_turn_outcome'] = array_merge($lifecycle, [
-            'status' => $state,
-            'accepted_at' => $lifecycle['accepted_at'] ?? $now,
-            'updated_at' => $now,
-            ...(in_array($state, ['completed', 'cancelled', 'interrupted', 'failed', 'timed_out', 'superseded'], true)
-                ? ['terminal_at' => $lifecycle['terminal_at'] ?? $now]
-                : []),
-        ]);
-
-        return $metadata;
+        return max(0, (int) $startedAt->diffInMilliseconds(now(), true));
     }
 
-    private function updateVoiceTurnMessageState(
-        AssistantRun $run,
-        string $state,
-        bool $terminal = false,
-        ?string $reason = null,
-    ): void {
-        $message = ConversationMessage::query()->lockForUpdate()->find($run->user_message_id);
-        if (! $message instanceof ConversationMessage || ! (bool) data_get($message->metadata, 'voice_request', false)) {
-            return;
-        }
+    private function dispatchRunAfterResponse(int $runId): bool
+    {
+        try {
+            $run = AssistantRun::query()->find($runId);
+            if (! $run instanceof AssistantRun
+                || $run->voice_turn_id !== null
+                || $run->status !== 'queued') {
+                return false;
+            }
+            $job = new ProcessAssistantRun($runId, (int) $run->execution_generation + 1);
+            if (app()->runningInConsole()) {
+                $this->dispatcher->dispatch($job);
+            } else {
+                $this->dispatcher->dispatchAfterResponse($job);
+            }
 
-        $metadata = is_array($message->metadata) ? $message->metadata : [];
-        $lifecycle = is_array(data_get($metadata, 'voice_turn_outcome')) ? data_get($metadata, 'voice_turn_outcome') : [];
-        $now = now()->toIso8601String();
-        $metadata['voice_turn_state'] = $state;
-        $metadata['voice_turn_outcome'] = array_merge($lifecycle, [
-            'status' => $state,
-            'updated_at' => $now,
-            ...($terminal ? ['terminal_at' => $lifecycle['terminal_at'] ?? $now] : []),
-            ...($reason ? ['reason' => $reason] : []),
-        ]);
-        $message->update(['metadata' => $metadata]);
+            return true;
+        } catch (Throwable $exception) {
+            $this->markDispatchFailed($runId, $exception);
+
+            return false;
+        }
     }
 
-    private function dispatchRunAfterResponse(int $runId): void
+    private function markDispatchFailed(int $runId, Throwable $exception): void
     {
-        if (app()->runningInConsole()) {
-            ProcessAssistantRun::dispatch($runId);
+        $failed = DB::transaction(function () use ($runId, $exception): ?AssistantRun {
+            $run = AssistantRun::query()->find($runId);
+            if (! $run instanceof AssistantRun || $run->voice_turn_id !== null) {
+                return null;
+            }
+            $session = ConversationSession::query()->lockForUpdate()->find($run->conversation_session_id);
+            $lockedRun = AssistantRun::query()->lockForUpdate()->find($runId);
+            if (! $lockedRun instanceof AssistantRun
+                || $lockedRun->voice_turn_id !== null
+                || $lockedRun->status !== 'queued') {
+                return null;
+            }
 
-            return;
+            $reason = 'Assistant run dispatch failed: '.str($exception->getMessage())->squish()->limit(1000, '')->toString();
+            $lockedRun->update([
+                'status' => 'failed',
+                'error' => $reason,
+                'completed_at' => now(),
+            ]);
+            if ($session instanceof ConversationSession) {
+                $session->update([
+                    'status' => $this->activeRunSessionStatus($session->id, $lockedRun->id),
+                    'last_activity_at' => now(),
+                ]);
+            }
+            $this->recordEvent($lockedRun, 'runtime.run_dispatch_failed', [
+                'run_id' => $lockedRun->id,
+                'reason' => $reason,
+            ], 'hermes.runs', 'failed');
+
+            return $lockedRun->refresh();
+        }, 3);
+
+        if ($failed instanceof AssistantRun) {
+            Log::error('Assistant run dispatch failed.', [
+                'run_id' => $failed->id,
+                'session_id' => $failed->conversation_session_id,
+                'exception' => $exception->getMessage(),
+            ]);
         }
-
-        ProcessAssistantRun::dispatchAfterResponse($runId);
     }
 }

@@ -6,16 +6,12 @@ function clean(value) {
  * Plays exactly one server-synthesized Browser Voice v2 speech item.
  * The speech scheduler remains the ordering owner; this class owns only the
  * abortable HTTP stream and its corresponding audio nodes. Raw PCM is
- * scheduled as it arrives so the browser does not wait for a complete MP3.
- * Blob playback remains as a compatibility path for deterministic tests and
- * any stale response that predates the streaming endpoint.
+ * scheduled as it arrives so the browser does not wait for the complete
+ * response before playback begins.
  */
 export class BrowserVoiceHttpSpeechTransportV2 {
     constructor({
         requestAudio,
-        createAudio = (url) => new Audio(url),
-        createObjectURL = (blob) => URL.createObjectURL(blob),
-        revokeObjectURL = (url) => URL.revokeObjectURL(url),
         createAbortController = () => new AbortController(),
         createAudioContext = () => {
             const AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext;
@@ -23,8 +19,7 @@ export class BrowserVoiceHttpSpeechTransportV2 {
             return new AudioContextClass({ sampleRate: 24_000, latencyHint: 'interactive' });
         },
         timers = {},
-        startupTimeoutMs = null,
-        timeoutMs = 8_000,
+        startupTimeoutMs = 8_000,
         createId = null,
         onEvent = null,
     } = {}) {
@@ -32,17 +27,11 @@ export class BrowserVoiceHttpSpeechTransportV2 {
             throw new TypeError('HTTP speech transport requires a requestAudio function.');
         }
         this.requestAudio = requestAudio;
-        this.createAudio = createAudio;
-        this.createObjectURL = createObjectURL;
-        this.revokeObjectURL = revokeObjectURL;
         this.createAbortController = createAbortController;
         this.createAudioContext = createAudioContext;
         this.setTimeout = timers.setTimeout || globalThis.setTimeout?.bind(globalThis);
         this.clearTimeout = timers.clearTimeout || globalThis.clearTimeout?.bind(globalThis);
-        // `timeoutMs` remains an alias for callers from the pre-streaming
-        // transport. It is now strictly a start deadline and is cleared when
-        // the first audible PCM buffer begins; it can never cut off playback.
-        this.startupTimeoutMs = Math.max(1, Number(startupTimeoutMs ?? timeoutMs) || 8_000);
+        this.startupTimeoutMs = Math.max(1, Number(startupTimeoutMs) || 8_000);
         this.createId = createId;
         this.onEvent = onEvent;
         this.sequence = 0;
@@ -90,8 +79,6 @@ export class BrowserVoiceHttpSpeechTransportV2 {
             item,
             listeners,
             controller: this.createAbortController(),
-            audio: null,
-            objectUrl: '',
             gainNode: null,
             sources: new Set(),
             reader: null,
@@ -112,28 +99,14 @@ export class BrowserVoiceHttpSpeechTransportV2 {
         }, this.startupTimeoutMs);
 
         Promise.resolve(this.requestAudio(item, { signal: current.controller.signal }))
-            .then((audio) => {
+            .then((response) => {
                 if (this.current !== current || this.generation !== generation || current.controller.signal.aborted) return;
-                if (audio?.body && typeof audio.body.getReader === 'function') {
-                    current.requested = true;
-                    this.#record('transport.requested', current, { mode: 'streaming_pcm' });
-                    return this.#playPcmStream(current, audio);
+                if (!response?.body || typeof response.body.getReader !== 'function') {
+                    throw new Error('Bean voice requires a streaming audio response.');
                 }
-                const blob = audio;
-                if (!blob || Number(blob.size) <= 0) throw new Error('Bean voice playback returned no audio.');
                 current.requested = true;
-                current.objectUrl = this.createObjectURL(blob);
-                current.audio = this.createAudio(current.objectUrl);
-                current.audio.volume = this.volume;
-                current.audio.addEventListener('playing', () => this.#started(current), { once: true });
-                current.audio.addEventListener('ended', () => this.#complete(current), { once: true });
-                current.audio.addEventListener('error', () => {
-                    this.#fail(current, new Error('Bean voice playback failed.'));
-                }, { once: true });
-                this.#record('transport.requested', current, { mode: 'buffered_blob' });
-                return Promise.resolve(current.audio.play()).catch((error) => {
-                    this.#fail(current, error instanceof Error ? error : new Error('Bean voice playback could not start.'));
-                });
+                this.#record('transport.requested', current, { mode: 'streaming_pcm' });
+                return this.#playPcmStream(current, response);
             })
             .catch((error) => {
                 if (current.controller.signal.aborted || this.current !== current) return;
@@ -149,7 +122,6 @@ export class BrowserVoiceHttpSpeechTransportV2 {
             return false;
         }
         this.volume = Math.max(0, Math.min(1, Number(volume) || 0));
-        if (current.audio) current.audio.volume = this.volume;
         if (current.gainNode) current.gainNode.gain.value = this.volume;
         return true;
     }
@@ -284,11 +256,6 @@ export class BrowserVoiceHttpSpeechTransportV2 {
     #release(current) {
         if (current.timer !== null && current.timer !== undefined) this.clearTimeout?.(current.timer);
         current.timer = null;
-        if (current.audio) {
-            try { current.audio.pause(); } catch (_) {}
-            try { current.audio.removeAttribute?.('src'); } catch (_) {}
-            try { current.audio.load?.(); } catch (_) {}
-        }
         if (current.reader) {
             try { void current.reader.cancel().catch?.(() => {}); } catch (_) {}
         }
@@ -301,13 +268,8 @@ export class BrowserVoiceHttpSpeechTransportV2 {
         if (current.gainNode) {
             try { current.gainNode.disconnect(); } catch (_) {}
         }
-        if (current.objectUrl) {
-            try { this.revokeObjectURL(current.objectUrl); } catch (_) {}
-        }
-        current.audio = null;
         current.reader = null;
         current.gainNode = null;
-        current.objectUrl = '';
         if (this.current === current) this.current = null;
     }
 

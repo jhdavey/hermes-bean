@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ConversationSessionKind;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -9,11 +10,12 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ConversationSession extends Model
 {
-    protected $fillable = ['user_id', 'workspace_id', 'created_by_user_id', 'title', 'status', 'runtime_mode', 'metadata', 'last_activity_at'];
+    protected $fillable = ['user_id', 'workspace_id', 'created_by_user_id', 'title', 'status', 'session_kind', 'metadata', 'last_activity_at'];
 
     protected function casts(): array
     {
         return [
+            'session_kind' => ConversationSessionKind::class,
             'metadata' => 'array',
             'last_activity_at' => 'datetime',
         ];

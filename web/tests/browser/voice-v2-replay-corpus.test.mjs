@@ -20,6 +20,9 @@ test('wake replay matrix cross-tests every required family across all six voices
         NEGATIVE_PRIVACY_CASES.map((entry) => entry.family).sort(),
         [
             'been_homophone',
+            'brief_ambient_acknowledgement',
+            'brief_filler_utterance',
+            'brief_nonlexical_hesitation',
             'dog_directed_second_person_conversation',
             'green_bean',
             'hey_beam_near_miss',

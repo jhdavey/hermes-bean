@@ -14,13 +14,7 @@ return new class extends Migration
             $table->string('slug')->unique();
             $table->string('display_name');
             $table->string('status')->default('active')->index();
-            $table->string('provider')->default('openai');
-            $table->string('model')->default('gpt-5.5');
-            $table->string('router_mode')->default('fixed')->index();
-            $table->string('runtime_home')->nullable();
             $table->json('settings')->nullable();
-            $table->json('tool_policy')->nullable();
-            $table->json('approval_policy')->nullable();
             $table->json('metadata')->nullable();
             $table->timestamps();
         });

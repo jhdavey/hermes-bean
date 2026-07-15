@@ -1,8 +1,6 @@
 <?php
 
 use App\Http\Controllers\Api\ActivityEventController;
-use App\Http\Controllers\Api\AdminCommandRunController;
-use App\Http\Controllers\Api\AdminHermesController;
 use App\Http\Controllers\Api\AdminLiveLookupController;
 use App\Http\Controllers\Api\AdminPlanLimitController;
 use App\Http\Controllers\Api\AdminSettingsController;
@@ -75,7 +73,6 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/assistant/sessions', [ConversationSessionController::class, 'store']);
         Route::get('/assistant/sessions/{session}', [ConversationSessionController::class, 'show']);
         Route::post('/assistant/sessions/{session}/cancel', [ConversationSessionController::class, 'cancel']);
-        Route::post('/assistant/sessions/{session}/messages', [ConversationMessageController::class, 'store']);
         Route::post('/assistant/sessions/{session}/messages/{message}/branch', [ConversationMessageController::class, 'branch']);
         Route::post('/assistant/sessions/{session}/runs', [AssistantRunController::class, 'store']);
         Route::get('/assistant/sessions/{session}/runs/lookup', [AssistantRunController::class, 'lookup']);
@@ -170,10 +167,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
             Route::get('/coupon-codes', [CouponCodeController::class, 'index']);
             Route::post('/coupon-codes', [CouponCodeController::class, 'store']);
             Route::delete('/coupon-codes/{couponCode}', [CouponCodeController::class, 'destroy']);
-            Route::get('/hermes/status', [AdminHermesController::class, 'show']);
-            Route::post('/hermes/update', [AdminHermesController::class, 'update']);
             Route::get('/live-lookup/providers', [AdminLiveLookupController::class, 'index']);
-            Route::get('/command-runs/{commandRun}', [AdminCommandRunController::class, 'show']);
             Route::get('/usage/summary', [AdminUsageController::class, 'summary']);
             Route::get('/usage/logs', [AdminUsageController::class, 'logs']);
             Route::get('/usage/alerts', [AdminUsageController::class, 'alerts']);

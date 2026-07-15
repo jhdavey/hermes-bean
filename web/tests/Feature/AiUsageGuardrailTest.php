@@ -2,6 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Data\HermesSemanticComposition;
+use App\Data\HermesSemanticCompositionRequest;
+use App\Data\HermesSemanticInterpretation;
+use App\Data\HermesSemanticInterpretationRequest;
 use App\Models\AdminSetting;
 use App\Models\AiUsageLog;
 use App\Models\ConversationMessage;
@@ -11,6 +15,8 @@ use App\Models\PersonalAccessToken;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\AiUsageService;
+use App\Services\HermesSemanticInterpreter;
+use App\Services\OpenAiHermesSemanticInterpreter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -75,7 +81,7 @@ class AiUsageGuardrailTest extends TestCase
             'conversation_message_id' => $message->id,
             'provider' => 'openai',
             'model' => 'gpt-5.4-mini',
-            'route_tier' => 'simple',
+            'route_tier' => 'semantic_interpretation',
             'status' => 'completed',
             'input_tokens' => 120,
             'output_tokens' => 40,
@@ -139,39 +145,41 @@ class AiUsageGuardrailTest extends TestCase
             ->assertJsonCount(30, 'data.user_growth');
     }
 
-    public function test_daily_cost_limit_blocks_tool_runtime_invocation(): void
+    public function test_daily_cost_limit_blocks_semantic_interpretation_before_provider_invocation(): void
     {
-        config()->set('services.hermes_runtime.default_provider', 'openai');
-        config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
+        config()->set('services.hermes_runtime.semantic_interpretation_model', 'gpt-5.4-mini');
         config()->set('services.hermes_runtime.api_key', 'test-key');
         config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
         config()->set('services.ai_usage.limits.base_cost_limit', 0.000001);
-        Http::fakeSequence()->push([
-            'id' => 'chatcmpl-budget',
-            'model' => 'gpt-test-tools',
-            'choices' => [[
-                'finish_reason' => 'stop',
-                'message' => ['role' => 'assistant', 'content' => 'I can still help with that.'],
-            ]],
-        ], 200);
+        Http::preventStrayRequests();
+
+        $interpreter = new AiUsageGuardrailSemanticInterpreter(
+            app(OpenAiHermesSemanticInterpreter::class),
+        );
+        $this->app->instance(HermesSemanticInterpreter::class, $interpreter);
 
         $token = $this->apiToken('budget-user@example.com');
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
             'title' => 'Budget test',
         ])->assertCreated()->json('data.id');
 
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
             'content' => 'Please plan out my whole week with a deep dive into priorities and tradeoffs.',
+            'metadata' => ['client_request_id' => 'usage-limit-1'],
         ])->assertCreated()
             ->assertJsonPath('data.status', 'blocked')
-            ->assertJsonPath('data.assistant_message.content', 'This account has reached today\'s AI usage limit.')
-            ->assertJsonFragment(['event_type' => 'runtime.usage_blocked']);
+            ->assertJsonPath('data.assistant_message.content', 'This account has reached today\'s AI usage limit.');
 
         $this->assertDatabaseHas('ai_usage_logs', [
             'status' => 'blocked',
-            'route_tier' => 'agent',
+            'route_tier' => 'semantic_interpretation',
         ]);
-        Http::assertSentCount(0);
+        $this->assertDatabaseHas('activity_events', [
+            'event_type' => 'runtime.run_completed',
+            'status' => 'blocked',
+        ]);
+        $this->assertSame(1, $interpreter->interpretCalls);
+        $this->assertSame(0, $interpreter->composeCalls);
     }
 
     public function test_admin_daily_usage_limits_are_enforced_by_tier(): void
@@ -231,5 +239,30 @@ class AiUsageGuardrailTest extends TestCase
         $this->assertTrue($chatPreflight['allowed']);
         $this->assertFalse($externalPreflight['allowed']);
         $this->assertSame('This account has reached today\'s external lookup usage limit.', $externalPreflight['reason']);
+    }
+}
+
+final class AiUsageGuardrailSemanticInterpreter implements HermesSemanticInterpreter
+{
+    public int $interpretCalls = 0;
+
+    public int $composeCalls = 0;
+
+    public function __construct(
+        private readonly OpenAiHermesSemanticInterpreter $interpreter,
+    ) {}
+
+    public function interpret(HermesSemanticInterpretationRequest $request): HermesSemanticInterpretation
+    {
+        $this->interpretCalls++;
+
+        return $this->interpreter->interpret($request);
+    }
+
+    public function compose(HermesSemanticCompositionRequest $request): HermesSemanticComposition
+    {
+        $this->composeCalls++;
+
+        return $this->interpreter->compose($request);
     }
 }

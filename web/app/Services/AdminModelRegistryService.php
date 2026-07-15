@@ -9,21 +9,6 @@ use Illuminate\Support\Facades\Log;
 class AdminModelRegistryService
 {
     private const GROUPS = [
-        'main_model' => [
-            'label' => 'Main Bean reasoning/chat',
-            'description' => 'Used for normal Bean responses and agent reasoning.',
-            'curated' => [
-                'gpt-5-mini',
-                'gpt-5-nano',
-                'gpt-5.5',
-                'gpt-5.4',
-                'gpt-5.2',
-                'gpt-5.1',
-                'gpt-5',
-                'gpt-4.1',
-                'gpt-4o',
-            ],
-        ],
         'external_lookup_model' => [
             'label' => 'External lookup',
             'description' => 'Used when Bean needs live/external information.',
@@ -126,12 +111,10 @@ class AdminModelRegistryService
     private function currentModelIdsFor(string $key): array
     {
         $configValue = match ($key) {
-            'main_model' => config('services.hermes_runtime.default_model'),
             'external_lookup_model' => config('services.hermes_runtime.external_lookup_model'),
             default => null,
         };
         $settingKey = match ($key) {
-            'main_model' => AdminSettingsService::MAIN_MODEL,
             'external_lookup_model' => AdminSettingsService::EXTERNAL_LOOKUP_MODEL,
             default => null,
         };
@@ -203,7 +186,6 @@ class AdminModelRegistryService
 
         return match ($key) {
             'external_lookup_model' => ! str_contains($model, 'realtime') && (str_contains($model, 'search') || preg_match('/^gpt-(5|4\.1|4o)(-|$)/', $model) === 1),
-            'main_model' => ! str_contains($model, 'realtime') && ! str_contains($model, 'search') && ! str_contains($model, 'mini') && ! str_contains($model, 'nano') && preg_match('/^gpt-(5|4\.1|4o)(-|$)/', $model) === 1,
             default => false,
         };
     }

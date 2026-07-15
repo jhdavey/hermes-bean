@@ -38,11 +38,6 @@ class OnboardingTourScreenshotSeeder extends Seeder
 
     public function run(): void
     {
-        config([
-            'services.hermes_runtime.users_home' => storage_path('app/hermes-users'),
-            'services.hermes_runtime.base_home' => null,
-        ]);
-
         DB::transaction(function (): void {
             $user = User::updateOrCreate(
                 ['email' => self::EMAIL],

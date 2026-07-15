@@ -74,22 +74,23 @@ try {
     } catch {
         // The recorded check below owns the failure without leaking a response body.
     }
-    record('wake_manifest_v13', wakeManifestResponse.status === 200
-        && wakeManifest?.version === 13
+    record('wake_manifest_v14', wakeManifestResponse.status === 200
+        && wakeManifest?.version === 14
         && wakeManifest?.detector === 'bean-first-party-classifier-with-local-strict-and-address-timing-candidates'
         && wakeManifest?.wakeModelQaCertified === true
         && wakeManifest?.runtimeDecision?.incidentSpecificNegativeAliases === false
+        && wakeManifest?.runtimeDecision?.strictFallbackRequiresIndependentBeanTimingCandidate === true
         && JSON.stringify(wakeManifest?.runtimeDecision?.timingCandidateAliases) === '["HEY_BEAN","BEAN"]', {
         status: wakeManifestResponse.status,
         version: wakeManifest?.version ?? null,
         detector: wakeManifest?.detector ?? null,
         wake_model_qa_certified: wakeManifest?.wakeModelQaCertified ?? null,
         incident_specific_negative_aliases: wakeManifest?.runtimeDecision?.incidentSpecificNegativeAliases ?? null,
-    }, 'first-party wake-model manifest version 13');
+    }, 'first-party wake-model manifest version 14');
 
     if (typeof wakeManifest?.worker === 'string') {
         const worker = await request(wakeManifest.worker);
-        record('wake_worker_v13', worker.status === 200
+        record('wake_worker_v14', worker.status === 200
             && worker.body.includes('strict_wake')
             && worker.body.includes('classifyFirstPartyAddressPrefix')
             && worker.body.includes('addressTimingCandidate')
@@ -100,7 +101,7 @@ try {
             sha256: sha256(worker.body),
         }, 'current first-party wake worker');
     } else {
-        record('wake_worker_v13', false, null, 'current first-party wake worker');
+        record('wake_worker_v14', false, null, 'current first-party wake worker');
     }
 
     for (const probe of [

@@ -14,11 +14,8 @@ import {
     stageOptimisticUserTurn,
     buildRealtimeConversationItemDeleteEvent,
     buildRealtimeTargetedResponseCancellationEvent,
-    isLikelyNonEnglishRealtimeTranscript,
     isRealtimeWakeAddressOnly,
     isRealtimeDuplicateCallConflict,
-    isStrictRealtimeWakePhrase,
-    isVoiceFillerOnly,
     realtimeMicrophoneConstraints,
     reportRealtimeUsageReliably,
     realtimeUsageReportFromProviderEvent,
@@ -46,10 +43,6 @@ import {
 } from './browserVoiceV2Client.js';
 import { BrowserVoiceHttpSpeechTransportV2 } from './browserVoiceHttpSpeechV2.js';
 import { BrowserVoiceRealtimeInputTransportV2 } from './browserVoiceRealtimeInputV2.js';
-import {
-    BROWSER_VOICE_FOLLOW_UP_RELEVANCE,
-    classifyBrowserVoiceFollowUpRelevance,
-} from './browserVoiceFollowUpRelevanceV2.js';
 import {
     BROWSER_VOICE_REALTIME_INGRESS_RESULTS,
     routeBrowserVoiceRealtimeIngressV2,
@@ -111,6 +104,68 @@ export function browserVoiceV2OwnsStopAction({
     ));
 }
 
+export function reconcileAllDayEndDateInput(startValue, endValue) {
+    const start = String(startValue || '').trim();
+    const end = String(endValue || '').trim();
+    if (end) return end;
+    const parseDateInput = (value) => {
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+        if (!match) return null;
+        const year = Number(match[1]);
+        const month = Number(match[2]);
+        const day = Number(match[3]);
+        const date = new Date(Date.UTC(year, month - 1, day));
+        return date.getUTCFullYear() === year
+            && date.getUTCMonth() === month - 1
+            && date.getUTCDate() === day
+            ? date
+            : null;
+    };
+    const parsedStart = parseDateInput(start);
+    if (!parsedStart) return end;
+
+    const next = new Date(parsedStart);
+    next.setUTCDate(next.getUTCDate() + 1);
+    return next.toISOString().slice(0, 10);
+}
+
+export function isMeaningfulBrowserVoiceV2Interruption(text) {
+    return String(text || '').trim() !== '';
+}
+
+export function browserVoiceV2LocalWakeMatchesCompletedBarge({
+    snapshot = null,
+    completedBarge = null,
+    connectionGeneration = null,
+    gateGeneration = null,
+    sourceSequence = null,
+} = {}) {
+    const identities = {
+        controllerGeneration: Number(snapshot?.generation),
+        snapshotConnectionGeneration: Number(snapshot?.connectionGeneration),
+        completedControllerGeneration: Number(completedBarge?.controllerGeneration),
+        completedConnectionGeneration: Number(completedBarge?.connectionGeneration),
+        connectionGeneration: Number(connectionGeneration),
+        completedGateGeneration: Number(completedBarge?.gateGeneration),
+        gateGeneration: Number(gateGeneration),
+        detectedSequence: Number(sourceSequence),
+        completedSequence: Number(completedBarge?.throughSourceSequence),
+    };
+    if (!completedBarge?.turnId
+        || sourceSequence === null
+        || sourceSequence === ''
+        || completedBarge?.throughSourceSequence === null
+        || completedBarge?.throughSourceSequence === ''
+        || Object.values(identities).some((value) => !Number.isSafeInteger(value) || value < 0)
+        || identities.detectedSequence > identities.completedSequence) return false;
+
+    return snapshot?.activeTurn?.id === completedBarge.turnId
+        && identities.controllerGeneration === identities.completedControllerGeneration
+        && identities.snapshotConnectionGeneration === identities.completedConnectionGeneration
+        && identities.connectionGeneration === identities.completedConnectionGeneration
+        && identities.gateGeneration === identities.completedGateGeneration;
+}
+
 export function mountHeyBeanWebApp(mount) {
     const logoUrl = mount.dataset.logo || '/images/bean-logo.png';
     const browserVoiceV2Configured = mount.dataset.browserVoiceV2 === 'true';
@@ -130,7 +185,6 @@ export function mountHeyBeanWebApp(mount) {
         selectedPlan: initialSelectedPlan,
         selectedBillingInterval: initialBillingInterval,
         guidedSignupStep: 'name',
-        guidedSignupMessages: [],
         guidedSignupName: '',
         guidedSignupEmail: '',
         guidedSignupPassword: '',
@@ -138,9 +192,6 @@ export function mountHeyBeanWebApp(mount) {
         guidedSignupPersonality: '',
         guidedSignupHomeCity: '',
         guidedSignupError: '',
-        guidedSignupThinking: false,
-        guidedSignupResponseVariationIndex: 0,
-        onboardingTourPendingSubscription: false,
         subscriptionSummary: null,
         subscriptionCheckoutStatus: new URLSearchParams(window.location.search).get('checkout') || '',
         billingCheckoutStatus: initialBillingStatus,
@@ -193,8 +244,6 @@ export function mountHeyBeanWebApp(mount) {
         adminCoupons: null,
         adminUsageLoading: false,
         adminModelRegistry: null,
-        adminHermesStatus: null,
-        adminHermesUpdating: false,
         adminUserGrowthRange: 'last_30_days',
         adminArchivedIssuesOpen: false,
         issueReportSubmitting: false,
@@ -212,7 +261,6 @@ export function mountHeyBeanWebApp(mount) {
         voiceWakeListening: false,
         voiceRecording: false,
         voiceProcessing: false,
-        chatQueue: [],
         editingChatMessageId: '',
         activeBeanWorkMessageId: null,
         beanWorkItems: [],
@@ -225,7 +273,7 @@ export function mountHeyBeanWebApp(mount) {
         calendarRefreshing: false,
         dashboardDataLoading: false,
         taskFilter: 'active',
-        reminderFilter: 'pending',
+        reminderFilter: 'scheduled',
         dashboardChangeLastId: 0,
         pendingTaskUpserts: new Map(),
         pendingTaskDeletes: new Set(),
@@ -259,6 +307,8 @@ export function mountHeyBeanWebApp(mount) {
     const browserVoiceV2PotentialBargeInItems = new Set();
     const browserVoiceV2ProviderWakeTurnIds = new Map();
     let browserVoiceV2PendingLocalWakeTurnId = '';
+    let browserVoiceV2CompletedProviderBarge = null;
+    let browserVoiceV2LastProviderInputPcm = null;
     const browserVoiceV2TurnStates = new Map();
     const browserVoiceV2AcknowledgedTurnIds = new Set();
     const browserVoiceV2FinalDeliveredTurnIds = new Set();
@@ -274,6 +324,7 @@ export function mountHeyBeanWebApp(mount) {
     const browserVoiceV2AdmissionFailureTurnIds = new Set();
     const browserVoiceV2ClarificationPromptSequences = new Map();
     const browserVoiceV2RealtimeUsageEventIds = new Set();
+    const browserVoiceV2AppliedStopDirectiveIds = new Set();
     const browserVoiceV2AdmissionRegistry = new BrowserVoiceAdmissionRegistryV2();
     let chatAnnouncementTimer = 0;
     let chatAnnouncementSessionId = null;
@@ -291,6 +342,9 @@ export function mountHeyBeanWebApp(mount) {
     const browserVoiceV2InputTransport = new BrowserVoiceRealtimeInputTransportV2({
         send: realtimeSend,
         bufferedAmount: () => Number(realtimeDataChannel?.bufferedAmount || 0),
+        onAppend: ({ generation, sourceSequence }) => {
+            browserVoiceV2LastProviderInputPcm = { generation, sourceSequence };
+        },
     });
     const browserVoiceV2Playback = new BrowserVoicePlaybackAdapterV2({
         play: (item, listeners) => browserVoiceV2SpeechTransport.play(item, listeners),
@@ -420,7 +474,6 @@ export function mountHeyBeanWebApp(mount) {
     let dashboardChangeAbort = null;
     let dashboardChangeLoopActive = false;
     let dashboardRefreshTimer = 0;
-    let adminCommandRunPollTimer = 0;
     let adminRealtimeRefreshTimer = 0;
     let deferredDashboardRenderPending = false;
     let deferredDashboardRenderTimer = 0;
@@ -429,13 +482,11 @@ export function mountHeyBeanWebApp(mount) {
     const noteAutosaveTimers = new Map();
     const noteAutosaveDelay = 650;
     let chatRequestCounter = 0;
-    let chatQueueCounter = 0;
     let chatContextGeneration = 0;
     let chatSessionLoadGeneration = 0;
     let workspaceSwitchGeneration = 0;
-    let activeChatRequestId = 0;
-    let activeChatClientRequestId = '';
-    let activeChatRequestSettlement = Promise.resolve();
+    let chatSessionAdmissionPromise = null;
+    const activeChatRequests = new Map();
     let beanWorkEventPollTimer = 0;
     let beanWorkEventPollToken = 0;
     let beanWorkStatusClearTimer = 0;
@@ -444,7 +495,6 @@ export function mountHeyBeanWebApp(mount) {
     let beanWorkEventFloorId = 0;
     const beanWorkAppliedEventIds = new Set();
     const beanDashboardRefreshEventIds = new Set();
-    const cancelledChatRequestIds = new Set();
 
     boot();
     bindResponsiveCalendar();
@@ -1197,10 +1247,6 @@ export function mountHeyBeanWebApp(mount) {
         return false;
     }
 
-    function onboardingIntroMessage() {
-        return 'Hey, I’m Bean. This is a quick onboarding interview so I can learn your preferred style, top priorities, and any important schedule or reminder context. Start by telling me who you are and what you want Bean to help with most.';
-    }
-
     function userIsAdmin() {
         return state.user?.is_admin === true || state.user?.isAdmin === true;
     }
@@ -1231,9 +1277,6 @@ export function mountHeyBeanWebApp(mount) {
 
     function resetGuidedSignupState(options = {}) {
         state.guidedSignupStep = options.step || 'name';
-        state.guidedSignupMessages = normalizeList(options.messages).length
-            ? normalizeList(options.messages)
-            : [{ id: `bean-${Date.now()}`, bean: true, text: 'Hello, please enter your name below.' }];
         state.guidedSignupName = options.name || '';
         state.guidedSignupEmail = options.email || '';
         state.guidedSignupPassword = '';
@@ -1241,55 +1284,12 @@ export function mountHeyBeanWebApp(mount) {
         state.guidedSignupPersonality = options.personality || '';
         state.guidedSignupHomeCity = options.homeCity || '';
         state.guidedSignupError = options.error || '';
-        state.guidedSignupThinking = false;
-        state.guidedSignupResponseVariationIndex = 0;
         state.busy = false;
         state.notice = options.notice || '';
     }
 
-    function pushGuidedSignupMessage(bean, text, options = {}) {
-        state.guidedSignupMessages = [
-            ...normalizeList(state.guidedSignupMessages),
-            {
-                id: options.id || `${bean ? 'bean' : 'user'}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-                bean,
-                text,
-                masked: Boolean(options.masked),
-            },
-        ];
-    }
-
-    function guidedSignupBean(text, options = {}) {
-        pushGuidedSignupMessage(true, text, options);
-    }
-
-    function guidedSignupUser(text, options = {}) {
-        pushGuidedSignupMessage(false, text, options);
-    }
-
     function guidedSignupInputLocked() {
-        return state.busy || state.guidedSignupThinking || state.guidedSignupStep === 'plan';
-    }
-
-    function nextGuidedSignupResponseDelay() {
-        return 2000 + ((state.guidedSignupResponseVariationIndex * 431) % 900);
-    }
-
-    async function showGuidedSignupThinking() {
-        if (state.phase !== 'guidedOnboarding') return;
-        state.guidedSignupThinking = true;
-        render();
-        await new Promise((resolve) => window.setTimeout(resolve, nextGuidedSignupResponseDelay()));
-        state.guidedSignupResponseVariationIndex += 1;
-        if (state.phase !== 'guidedOnboarding') return;
-        state.guidedSignupThinking = false;
-        render();
-    }
-
-    async function respondGuidedSignupBean(text, options = {}) {
-        await showGuidedSignupThinking();
-        if (state.phase !== 'guidedOnboarding') return;
-        guidedSignupBean(text, options);
+        return state.busy || state.guidedSignupStep === 'plan';
     }
 
     function startGuidedSignup() {
@@ -1625,14 +1625,14 @@ export function mountHeyBeanWebApp(mount) {
     function announceableChatMessages() {
         return state.messages.filter((message) => {
             if (!message || message.metadata?.realtime_draft || message.progress) return false;
-            return !assistantMessageShouldStayOutOfChat(message);
+            return true;
         });
     }
 
     function chatAnnouncementContent(message) {
         const content = message?.role === 'user'
             ? String(message.content || '').trim()
-            : safeAssistantDisplayContent(conversationalMessageContent(message?.content || '')).trim();
+            : String(message?.content || '').trim();
         if (!content) return '';
         return `${message.role === 'user' ? 'You' : 'Bean'}: ${content}`;
     }
@@ -1765,19 +1765,6 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function modalIdentity(modal = {}) {
-        if (modal.type === 'admin-command-run') {
-            return [
-                modal.type,
-                modal.runId || modal.result?.id || '',
-                modal.status || '',
-                modal.result?.status || '',
-                modal.result?.exit_code ?? modal.result?.exitCode ?? '',
-                modal.result?.updated_at || modal.result?.updatedAt || '',
-                String(modal.result?.output || '').length,
-                String(modal.result?.error || '').length,
-                modal.error || '',
-            ].map((part) => String(part)).join(':');
-        }
         if (modal.type === 'external-calendar-import') {
             return [
                 modal.type,
@@ -1854,71 +1841,22 @@ export function mountHeyBeanWebApp(mount) {
     async function submitGuidedOnboarding(event) {
         event.preventDefault();
         if (guidedSignupInputLocked()) return;
-        const input = event.currentTarget.querySelector('[name="message"]');
-        const value = String(input?.value || '').trim();
-        if (!value) return;
-        if (input) input.value = '';
-        state.guidedSignupError = '';
-        render();
         const step = state.guidedSignupStep;
+        if (!['name', 'email', 'password'].includes(step)) return;
+        const input = event.currentTarget.querySelector('[name="value"]');
+        const rawValue = String(input?.value || '');
+        const value = step === 'password' ? rawValue : rawValue.trim();
+        if (!value) return;
+        state.guidedSignupError = '';
         if (step === 'name') {
             await handleGuidedSignupName(value);
-            return;
-        }
-        if (step === 'themeMode') {
-            const key = guidedThemeModeKeyFromText(value);
-            if (!key) {
-                state.guidedSignupError = 'Choose Light, Dark, or Auto.';
-                render();
-                return;
-            }
-            selectGuidedThemeMode(key);
             return;
         }
         if (step === 'email') {
             await handleGuidedSignupEmail(value);
             return;
         }
-        if (step === 'password') {
-            await handleGuidedSignupPassword(value);
-            return;
-        }
-        if (step === 'personality') {
-            const personality = guidedPersonalityKeyFromText(value);
-            if (!personality) {
-                state.guidedSignupError = 'Pick one of the personality options, or type the one you want.';
-                render();
-                return;
-            }
-            selectGuidedPersonality(personality);
-            return;
-        }
-        if (step === 'location') {
-            if (guidedSignupValueIsSkip(value)) {
-                await skipGuidedLocation();
-                return;
-            }
-            state.guidedSignupError = 'Tap Allow location or Skip so Bean handles this cleanly.';
-            render();
-            return;
-        }
-        if (step === 'tourChoice') {
-            const normalized = value.toLowerCase();
-            if (/\b(yes|yeah|yep|sure|show|tour)\b/.test(normalized)) {
-                guidedSignupUser(value);
-                render();
-                await launchGuidedOnboardingTour();
-                return;
-            }
-            if (/\b(no|skip|straight|dashboard|plan)\b/.test(normalized)) {
-                guidedSignupUser(value);
-                render();
-                await goToGuidedPlan(true);
-                return;
-            }
-            state.guidedSignupError = 'Please answer yes for a quick tour, or no to go straight to plan setup.';
-            render();
-        }
+        await handleGuidedSignupPassword(value);
     }
 
     async function handleGuidedSignupName(value) {
@@ -1929,42 +1867,23 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
         state.guidedSignupName = name;
-        guidedSignupUser(name);
-        await respondGuidedSignupBean(`Nice to meet you, ${name}. Do you prefer light or dark mode? You can also choose Auto, and you can change this anytime in Appearance settings.`);
         state.guidedSignupStep = 'themeMode';
         render();
     }
 
-    function guidedThemeModeKeyFromText(value) {
-        const normalized = String(value || '').trim().toLowerCase();
-        if (!normalized) return '';
-        if (['system', 'device', 'automatic'].includes(normalized)) return 'auto';
-        return ['light', 'dark', 'auto'].find((key) => key === normalized) || '';
-    }
-
-    async function selectGuidedThemeMode(key) {
-        const themeMode = guidedThemeModeKeyFromText(key);
-        if (!themeMode) return;
-        state.guidedSignupThemeMode = themeMode;
+    function selectGuidedThemeMode(key) {
+        if (!['light', 'dark', 'auto'].includes(key)) return;
+        state.guidedSignupThemeMode = key;
         state.guidedSignupError = '';
-        const mode = themeModesByKey.get(themeMode);
-        guidedSignupUser(mode?.label || themeMode);
-        if (themeMode === 'light') {
-            await respondGuidedSignupBean('Ok, I\'ll keep it in Light mode. What email address should I use for your account? Please text it here.');
-        } else if (themeMode === 'dark') {
-            await respondGuidedSignupBean('Dark mode it is. What email address should I use for your account? Please text it here.');
-        } else {
-            await respondGuidedSignupBean('Auto mode it is. What email address should I use for your account? Please text it here.');
-        }
         state.guidedSignupStep = 'email';
         render();
     }
 
     async function handleGuidedSignupEmail(value) {
         const email = value.trim().toLowerCase();
-        guidedSignupUser(email);
+        state.guidedSignupEmail = email;
         if (!looksLikeGuidedSignupEmail(email)) {
-            await respondGuidedSignupBean('That email format does not look right. Please send it like name@example.com, without extra punctuation.');
+            state.guidedSignupError = 'Enter a valid email address, such as name@example.com.';
             render();
             return;
         }
@@ -1974,17 +1893,16 @@ export function mountHeyBeanWebApp(mount) {
             const availability = await api('/auth/email-availability', { method: 'POST', body: { email } });
             state.busy = false;
             if (!availability.available) {
-                await respondGuidedSignupBean('That email is already taken. Please send a different email address for this account.');
+                state.guidedSignupError = 'That email is already in use. Enter a different address.';
                 render();
                 return;
             }
             state.guidedSignupEmail = availability.email;
-            await respondGuidedSignupBean('Thanks. Now text the password you would like for this account. I will mask it here.');
             state.guidedSignupStep = 'password';
             render();
         } catch (_) {
             state.busy = false;
-            await respondGuidedSignupBean('I could not check that email right now. Please try the email again in a moment.');
+            state.guidedSignupError = 'The email could not be checked right now. Try again in a moment.';
             render();
         }
     }
@@ -2001,7 +1919,6 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
         state.guidedSignupPassword = value;
-        guidedSignupUser('Password saved', { masked: true });
         state.busy = true;
         render();
         try {
@@ -2021,7 +1938,6 @@ export function mountHeyBeanWebApp(mount) {
             state.user = result.user || null;
             state.subscriptionSummary = null;
             state.busy = false;
-            await respondGuidedSignupBean('Your account has been created. Check your email to verify. Next, what personality type would you like me to have?');
             state.guidedSignupStep = 'personality';
             render();
         } catch (error) {
@@ -2031,31 +1947,13 @@ export function mountHeyBeanWebApp(mount) {
         }
     }
 
-    function guidedPersonalityKeyFromText(value) {
-        const normalized = String(value || '').toLowerCase();
-        const direct = guidedSignupPersonalities.find((option) => normalized.includes(option.key) || normalized.includes(option.label.toLowerCase().split(' ')[0]));
-        if (direct) return direct.key;
-        if (normalized.includes('balanced')) return 'balanced';
-        if (normalized.includes('coach') || normalized.includes('motivat')) return 'coach';
-        if (normalized.includes('organizer') || normalized.includes('detail')) return 'organizer';
-        if (normalized.includes('creative')) return 'creative';
-        if (normalized.includes('direct') || normalized.includes('operator')) return 'direct';
-        if (normalized.includes('gentle') || normalized.includes('companion')) return 'gentle';
-        return '';
-    }
-
-    async function selectGuidedPersonality(key) {
-        const option = guidedSignupPersonalities.find((item) => item.key === key) || guidedSignupPersonalities[0];
+    function selectGuidedPersonality(key) {
+        const option = guidedSignupPersonalities.find((item) => item.key === key);
+        if (!option) return;
         state.guidedSignupPersonality = option.key;
-        guidedSignupUser(option.label);
-        await respondGuidedSignupBean('Perfect. You can also adjust Bean preferences in the settings menu later. Next, can I access your location so I can see what city we are in? This helps with weather related questions and planning.');
         state.guidedSignupStep = 'location';
         state.guidedSignupError = '';
         render();
-    }
-
-    function guidedSignupValueIsSkip(value) {
-        return /\b(skip|no|not now|later)\b/i.test(String(value || ''));
     }
 
     async function allowGuidedLocation(position) {
@@ -2065,14 +1963,12 @@ export function mountHeyBeanWebApp(mount) {
         try {
             const city = await currentGuidedCityFromPosition(position);
             state.guidedSignupHomeCity = city;
-            guidedSignupUser(`Shared city: ${city}`);
             await saveGuidedSignupPreferences();
             state.busy = false;
-            await respondGuidedSignupBean(`Thanks. I will remember ${city} for weather and local planning. Next, choose your plan so your ${subscriptionTrialDays}-day free trial is ready. After that I will show you the dashboard and help import your calendar.`);
             openGuidedPlanSelection();
         } catch (error) {
             state.busy = false;
-            state.guidedSignupError = error instanceof Error ? error.message : 'I could not read your city. You can skip this and add it later in Settings.';
+            state.guidedSignupError = error instanceof Error ? error.message : 'The app could not read your city. You can skip this and add it later in Settings.';
             render();
         }
     }
@@ -2109,7 +2005,6 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     async function skipGuidedLocation() {
-        guidedSignupUser('Skip location');
         state.guidedSignupHomeCity = '';
         state.busy = true;
         state.guidedSignupError = '';
@@ -2117,7 +2012,6 @@ export function mountHeyBeanWebApp(mount) {
         try {
             await saveGuidedSignupPreferences();
             state.busy = false;
-            await respondGuidedSignupBean(`No worries. We can skip that for now. Next, choose your plan so your ${subscriptionTrialDays}-day free trial is ready. After that I will show you the dashboard and help import your calendar.`);
             openGuidedPlanSelection();
         } catch (error) {
             state.busy = false;
@@ -2164,14 +2058,14 @@ export function mountHeyBeanWebApp(mount) {
         if (error?.code === 3) {
             return 'Location lookup timed out. Please try Allow location again, or skip this and add a city later in Settings.';
         }
-        return 'I could not read your city. Please try Allow location again, or skip this and add it later in Settings.';
+        return 'The app could not read your city. Please try Allow location again, or skip this and add it later in Settings.';
     }
 
     async function currentGuidedCityFromPosition(position) {
         const latitude = position?.coords?.latitude;
         const longitude = position?.coords?.longitude;
         if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-            throw new Error('I could not read your city. You can skip this and add it later in Settings.');
+            throw new Error('The app could not read your city. You can skip this and add it later in Settings.');
         }
         const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}`, {
             headers: { Accept: 'application/json' },
@@ -2185,44 +2079,50 @@ export function mountHeyBeanWebApp(mount) {
             .slice(0, 2)
             .join(', ');
         if (!city) {
-            throw new Error('I could not identify your city from this location. You can skip this and add it later in Settings.');
+            throw new Error('The app could not identify your city from this location. You can skip this and add it later in Settings.');
         }
         return city;
     }
 
-    async function launchGuidedOnboardingTour() {
-        if (!state.user) return;
-        state.guidedSignupStep = 'tour';
-        state.busy = true;
-        state.guidedSignupError = '';
-        state.phase = 'loading';
-        render();
-        const pendingSubscription = userNeedsSignupPaywall(state.user);
-        await loadSignedIn({ deferInitialRender: true });
-        state.busy = false;
-        state.onboardingTourPendingSubscription = pendingSubscription;
-        activateOnboardingTourStep(0);
-        render();
-    }
-
-    async function goToGuidedPlan(skipTour = false) {
-        await respondGuidedSignupBean(
-            skipTour
-                ? 'Sounds good. We will skip the tour and finish setup with your plan. Pick whichever option fits your needs.'
-                : `That is the quick tour. Last step: choose your plan so your ${subscriptionTrialDays}-day free trial is ready.`,
-        );
-        state.phase = 'subscription';
-        state.busy = false;
-        state.guidedSignupStep = 'plan';
-        state.error = '';
-        history.pushState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan || 'premium')}&billing_interval=${encodeURIComponent(normalizedBillingInterval(state.selectedBillingInterval))}`);
-        render();
-    }
-
     function guidedOnboardingMarkup() {
         const step = state.guidedSignupStep;
-        const showComposer = step !== 'tour';
-        const showInstruction = step === 'name' && normalizeList(state.guidedSignupMessages).length === 1;
+        const copy = {
+            name: {
+                eyebrow: 'Account setup',
+                title: 'What should Bean call you?',
+                description: 'Enter the name you want shown in your account.',
+            },
+            themeMode: {
+                eyebrow: 'Appearance',
+                title: 'Choose a theme',
+                description: 'Select one option. You can change it later in Appearance settings.',
+            },
+            email: {
+                eyebrow: 'Account setup',
+                title: 'Add your email address',
+                description: 'This address is used to sign in and verify your account.',
+            },
+            password: {
+                eyebrow: 'Account security',
+                title: 'Create a password',
+                description: 'Use at least 12 characters. Your password is masked and sent only when you submit this form.',
+            },
+            personality: {
+                eyebrow: 'Bean setup',
+                title: 'Choose a response style',
+                description: 'Your account is ready. Select the style you want Bean to use; you can change it later.',
+            },
+            location: {
+                eyebrow: 'Optional location',
+                title: 'Share your city?',
+                description: 'City-level location helps with weather and local planning. You can allow it or skip it.',
+            },
+        }[step] || {
+            eyebrow: 'Setup',
+            title: 'Preparing the next step',
+            description: '',
+        };
+        const progressStep = ['personality', 'location'].includes(step) ? 2 : 1;
         return `
             <div class="hb-app">
                 <main class="hb-guided-onboarding-shell">
@@ -2231,69 +2131,65 @@ export function mountHeyBeanWebApp(mount) {
                     </div>
                     <section class="hb-guided-onboarding-stage">
                         <div class="hb-guided-onboarding-thread" data-guided-thread>
-                            ${normalizeList(state.guidedSignupMessages).map((message) => guidedOnboardingMessageMarkup(message)).join('')}
-                            ${state.guidedSignupThinking ? guidedOnboardingThinkingMarkup() : ''}
-                            ${step === 'themeMode' ? guidedThemeModePanelMarkup() : ''}
-                            ${step === 'personality' ? guidedPersonalityPanelMarkup() : ''}
-                            ${step === 'location' ? guidedLocationPanelMarkup() : ''}
-                            ${step === 'tourChoice' ? guidedTourChoicePanelMarkup() : ''}
-                            ${guidedOnboardingStatusMarkup()}
-                            ${step === 'tour' ? '<div class="hb-guided-onboarding-thinking"><span class="hb-spinner hb-spinner-tiny" aria-hidden="true"></span><span>Preparing your dashboard tour...</span></div>' : ''}
+                            <section class="hb-card hb-guided-setup-card">
+                                ${subscriptionProgressMarkup(progressStep)}
+                                <span class="hb-item-meta">${escapeHtml(copy.eyebrow)}</span>
+                                <h1>${escapeHtml(copy.title)}</h1>
+                                ${copy.description ? `<p class="hb-item-meta">${escapeHtml(copy.description)}</p>` : ''}
+                                ${guidedOnboardingFieldMarkup(step)}
+                                ${step === 'themeMode' ? guidedThemeModePanelMarkup() : ''}
+                                ${step === 'personality' ? guidedPersonalityPanelMarkup() : ''}
+                                ${step === 'location' ? guidedLocationPanelMarkup() : ''}
+                                ${guidedOnboardingStatusMarkup()}
+                            </section>
                         </div>
                     </section>
                 </main>
-                ${showInstruction ? '<div class="hb-guided-onboarding-instruction">Tap to text Bean</div>' : ''}
-                ${showComposer ? guidedOnboardingComposerMarkup() : ''}
                 <div class="hb-guided-onboarding-bean-dock" aria-hidden="true"><img src="${escapeAttr(logoUrl)}" alt=""></div>
             </div>`;
     }
 
-    function guidedOnboardingMessageMarkup(message) {
-        return `
-            <article class="hb-guided-message ${message.bean ? 'hb-guided-message-bean' : 'hb-guided-message-user'}">
-                <strong>${message.bean ? 'Bean' : 'You'}</strong>
-                <p>${escapeHtml(message.masked ? '************' : message.text)}</p>
-            </article>`;
-    }
-
-    function guidedOnboardingThinkingMarkup() {
-        return `
-            <article class="hb-guided-message hb-guided-message-bean hb-guided-message-thinking" aria-live="polite">
-                <strong>Bean</strong>
-                <div class="hb-guided-thinking-row">
-                    <span>Bean is thinking</span>
-                    <span class="hb-guided-thinking-dots" aria-hidden="true">
-                        <span></span><span></span><span></span>
-                    </span>
-                </div>
-            </article>`;
-    }
-
-    function guidedOnboardingComposerMarkup() {
-        const step = state.guidedSignupStep;
+    function guidedOnboardingFieldMarkup(step) {
+        if (!['name', 'email', 'password'].includes(step)) return '';
         const disabled = guidedSignupInputLocked();
-        const hintMap = {
-            name: 'Name',
-            themeMode: 'Choose Light, Dark, or Auto...',
-            email: 'Text your email address...',
-            password: 'Text your password...',
-            personality: 'Type a personality choice...',
-            location: 'Type skip, or tap Allow location...',
-            tourChoice: 'Yes for tour, no for plan setup...',
-        };
+        const field = {
+            name: {
+                label: 'Name',
+                type: 'text',
+                value: state.guidedSignupName,
+                autocomplete: 'name',
+                attrs: 'minlength="2" maxlength="255"',
+            },
+            email: {
+                label: 'Email address',
+                type: 'email',
+                value: state.guidedSignupEmail,
+                autocomplete: 'email',
+                attrs: 'maxlength="254"',
+            },
+            password: {
+                label: 'Password',
+                type: 'password',
+                value: '',
+                autocomplete: 'new-password',
+                attrs: 'minlength="12"',
+            },
+        }[step];
         return `
-            <form class="hb-guided-onboarding-composer" data-action="guided-onboarding">
-                <div class="hb-guided-onboarding-input-row">
+            <form class="hb-form hb-guided-onboarding-form" data-action="guided-onboarding">
+                <label class="hb-label">${escapeHtml(field.label)}
                     <input
-                        class="hb-input hb-guided-onboarding-input"
-                        name="message"
-                        type="${step === 'password' ? 'password' : 'text'}"
-                        placeholder="${escapeAttr(hintMap[step] || 'Message Bean...')}"
+                        class="hb-input"
+                        name="value"
+                        type="${field.type}"
+                        value="${escapeAttr(field.value)}"
+                        autocomplete="${field.autocomplete}"
+                        ${field.attrs}
+                        required
                         ${disabled ? 'disabled' : ''}
-                        autocomplete="off"
                     >
-                    <button class="hb-button hb-guided-onboarding-send" type="submit" ${disabled ? 'disabled' : ''} aria-label="Send">↑</button>
-                </div>
+                </label>
+                <button class="hb-button" type="submit" ${disabled ? 'disabled' : ''}>${state.busy ? 'Saving…' : 'Continue'}</button>
             </form>`;
     }
 
@@ -2342,14 +2238,6 @@ export function mountHeyBeanWebApp(mount) {
             </section>`;
     }
 
-    function guidedTourChoicePanelMarkup() {
-        return `
-            <section class="hb-guided-choice-panel hb-guided-choice-panel-row">
-                <button class="hb-button" type="button" data-guided-tour-choice="tour" ${guidedSignupInputLocked() ? 'disabled' : ''}>Show me</button>
-                <button class="hb-button-secondary" type="button" data-guided-tour-choice="skip" ${guidedSignupInputLocked() ? 'disabled' : ''}>Skip tour</button>
-            </section>`;
-    }
-
     function subscriptionSignupMarkup() {
         if (state.phase === 'loading') {
             return `<div class="hb-loading-screen"><div class="hb-spinner"></div><p>Loading subscription setup…</p></div>`;
@@ -2372,15 +2260,16 @@ export function mountHeyBeanWebApp(mount) {
                     </div>
                     <section class="hb-guided-onboarding-stage">
                         <div class="hb-guided-onboarding-thread">
-                            <article class="hb-guided-message hb-guided-message-bean">
-                                <strong>Bean</strong>
+                            <section class="hb-card hb-guided-setup-card">
+                                ${subscriptionProgressMarkup(3)}
+                                <h1>Choose a plan</h1>
                                 <p>${escapeHtml(introMessage)}</p>
-                            </article>
-                            ${state.notice ? `<div class="hb-success">${escapeHtml(state.notice)}</div>` : ''}
-                            ${canceled ? '<div class="hb-error"><strong>Checkout was canceled</strong><span>No charge was made. Choose a plan when you are ready to continue.</span></div>' : ''}
-                            ${errorMarkup(state.error)}
-                            <section class="hb-guided-choice-panel hb-guided-plan-panel">
-                                ${confirmed ? subscriptionConfirmationMarkup(selectedPlan, subscription, liveConfirmed) : subscriptionPlanSelectionMarkup(selectedPlan)}
+                                ${state.notice ? `<div class="hb-success">${escapeHtml(state.notice)}</div>` : ''}
+                                ${canceled ? '<div class="hb-error"><strong>Checkout was canceled</strong><span>No charge was made. Choose a plan when you are ready to continue.</span></div>' : ''}
+                                ${errorMarkup(state.error)}
+                                <section class="hb-guided-choice-panel hb-guided-plan-panel">
+                                    ${confirmed ? subscriptionConfirmationMarkup(selectedPlan, subscription, liveConfirmed) : subscriptionPlanSelectionMarkup(selectedPlan)}
+                                </section>
                             </section>
                         </div>
                     </section>
@@ -2638,15 +2527,16 @@ export function mountHeyBeanWebApp(mount) {
 
     function remindersMarkup() {
         const completed = state.reminderFilter === 'completed';
-        const items = state.reminders.filter((reminder) => reminderCompleted(reminder) === completed);
+        const status = completed ? 'completed' : 'scheduled';
+        const items = state.reminders.filter((reminder) => reminder?.status === status);
         return `
             <section class="hb-card hb-card-pad hb-board-card" data-tour-target="reminders-view">
-                ${sectionTitle(icons.reminders, 'Reminders', completed ? 'Completed reminders' : 'Pending reminders')}
+                ${sectionTitle(icons.reminders, 'Reminders', completed ? 'Completed reminders' : 'Scheduled reminders')}
                 <div class="hb-tabs">
-                    <button class="hb-chip" type="button" data-reminder-filter="pending" aria-pressed="${!completed}">Pending</button>
+                    <button class="hb-chip" type="button" data-reminder-filter="scheduled" aria-pressed="${!completed}">Scheduled</button>
                     <button class="hb-chip" type="button" data-reminder-filter="completed" aria-pressed="${completed}">Completed</button>
                 </div>
-                ${state.dashboardDataLoading && !items.length ? dashboardLoadingMarkup('Loading reminders...') : dayBoardMarkup(items, 'reminder', completed ? 'No completed reminders' : 'No pending reminders')}
+                ${state.dashboardDataLoading && !items.length ? dashboardLoadingMarkup('Loading reminders...') : dayBoardMarkup(items, 'reminder', completed ? 'No completed reminders' : 'No scheduled reminders')}
             </section>`;
     }
 
@@ -2990,7 +2880,6 @@ export function mountHeyBeanWebApp(mount) {
                     ${adminMetricMarkup('Open alerts', totals.open_alerts, 'Warnings and hard caps')}
                     ${adminMetricMarkup('Issue reports', totals.open_issue_reports, 'Open beta feedback')}
                 </div>
-                ${adminHermesMaintenanceMarkup()}
                 ${adminSettingsMarkup(settings)}
                 ${adminLiveLookupProvidersMarkup(state.adminLiveLookup)}
                 ${adminPlanLimitsMarkup(state.adminPlanLimits)}
@@ -3309,22 +3198,17 @@ export function mountHeyBeanWebApp(mount) {
                 <div class="hb-section-action-row">
                     <div>
                         <strong>Runtime settings</strong>
-                        <small>Model routing and daily usage cost limits</small>
+                        <small>External lookup model and Bean availability</small>
                     </div>
                     <button class="hb-button-secondary" type="submit" ${state.adminUsageLoading ? 'disabled' : ''}>Save settings</button>
                 </div>
                 ${registry.openai_available === false || registry.openaiAvailable === false ? `<div class="hb-admin-model-note">Using curated model options. ${escapeHtml(registry.error || '')}</div>` : ''}
                 <div class="hb-admin-settings-grid">
-                    ${adminModelSelectMarkup('main_model', models.main_model || models.mainModel)}
                     ${adminModelSelectMarkup('external_lookup_model', models.external_lookup_model || models.externalLookupModel)}
                 </div>
                 <div class="hb-admin-settings-grid hb-admin-kill-grid">
                     ${adminSwitchMarkup('bean_chat_enabled', 'Bean chat enabled', 'Pause all Bean text/background requests immediately.', settingValue(killSwitches.bean_chat_enabled || killSwitches.beanChatEnabled) !== false)}
                 </div>
-                <label class="hb-admin-apply-row">
-                    <input type="checkbox" name="apply_main_model_to_profiles">
-                    <span>Apply main model to existing workspace Bean profiles</span>
-                </label>
             </form>`;
     }
 
@@ -3521,36 +3405,6 @@ export function mountHeyBeanWebApp(mount) {
             </label>`;
     }
 
-    function adminHermesMaintenanceMarkup() {
-        const status = state.adminHermesStatus || {};
-        const version = status.version || 'Unknown version';
-        const updateAvailable = status.update_available === true || status.updateAvailable === true;
-        const configured = status.configured !== false;
-        const checkedAt = status.checked_at || status.checkedAt;
-        const error = status.error || '';
-
-        return `
-            <div class="hb-admin-settings hb-admin-hermes-card">
-                <div class="hb-section-action-row">
-                    <div>
-                        <strong>Hermes agent runtime</strong>
-                        <small>${escapeHtml(configured ? 'Server-hosted runtime harness for all Bean agents' : 'Hermes CLI could not be reached')}</small>
-                    </div>
-                    <button class="hb-button-secondary" type="button" data-update-hermes ${state.adminHermesUpdating ? 'disabled' : ''}>${state.adminHermesUpdating ? 'Updating...' : 'Update Hermes'}</button>
-                </div>
-                <div class="hb-admin-hermes-status">
-                    <div>
-                        <span>Current version</span>
-                        <strong>${escapeHtml(version)}</strong>
-                        <small>${checkedAt ? `Checked ${escapeHtml(formatDateTime(checkedAt))}` : 'Not checked yet'}</small>
-                    </div>
-                    <mark class="hb-admin-status ${updateAvailable ? 'hb-admin-status-warning' : ''}">${escapeHtml(updateAvailable ? 'Update available' : configured ? 'Current' : 'Unavailable')}</mark>
-                </div>
-                ${error ? `<div class="hb-admin-model-note">${escapeHtml(error)}</div>` : ''}
-                <small class="hb-admin-hermes-path">${escapeHtml(status.cli_path || status.cliPath || 'hermes')} · ${escapeHtml(status.users_home || status.usersHome || '')}</small>
-            </div>`;
-    }
-
     function adminModelSelectMarkup(name, setting) {
         const registry = state.adminModelRegistry || {};
         const group = registry.groups?.[name] || {};
@@ -3577,7 +3431,6 @@ export function mountHeyBeanWebApp(mount) {
 
     function modelSettingLabel(name) {
         return {
-            main_model: 'Main Bean reasoning/chat',
             external_lookup_model: 'External lookup',
         }[name] || name;
     }
@@ -3753,13 +3606,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function beanWorkDisplayItems() {
-        let items = state.beanWorkItems.filter((item) => item?.label);
-        if (items.some((item) => String(item?.source || '') === 'event' || item?.resolvedByEvent)) {
-            items = items.filter((item) => {
-                const id = String(item?.id || '');
-                return !id.startsWith('request-');
-            });
-        }
+        const items = state.beanWorkItems.filter((item) => item?.label);
         if (items.length) return items.slice(-6);
         return [];
     }
@@ -3784,7 +3631,7 @@ export function mountHeyBeanWebApp(mount) {
         beanDashboardRefreshEventIds.clear();
         const normalizedLabels = normalizeList(Array.isArray(labels) ? labels : (labels ? [labels] : []))
             .map((label) => String(label || '').trim())
-            .filter((label) => label && !isGenericBeanWorkLabel(label))
+            .filter(Boolean)
             .slice(0, 6);
         if (!normalizedLabels.length) {
             state.beanWorkItems = [];
@@ -3803,7 +3650,7 @@ export function mountHeyBeanWebApp(mount) {
             beanWorkStatusMinUntil = Math.max(beanWorkStatusMinUntil, Date.now() + 700);
         }
         if (options.source === 'event') {
-            removeLocalBeanWorkPlaceholders();
+            removeLocalBeanWorkPlaceholders(options.clientRequestId || '');
         }
         const existingIndex = state.beanWorkItems.findIndex((item) => item.id === id);
         const next = {
@@ -3827,19 +3674,6 @@ export function mountHeyBeanWebApp(mount) {
             refreshBeanStatusTag();
             return;
         }
-        const placeholderIndex = beanWorkPlaceholderIndex(label);
-        if (placeholderIndex >= 0 && options.source === 'event') {
-            state.beanWorkItems = state.beanWorkItems.map((item, index) => index === placeholderIndex
-                ? { ...item, label, status: normalizedStatus, resolvedByEvent: true, source: 'event' }
-                : item);
-            if (state.beanWorkItems.every((item) => beanWorkItemDone(item))) scheduleBeanWorkStatusClear();
-            refreshBeanStatusTag();
-            return;
-        }
-        if (isGenericBeanWorkLabel(label)) {
-            refreshBeanStatusTag();
-            return;
-        }
         state.beanWorkItems = [...state.beanWorkItems, next]
             .sort((left, right) => Number(left.order ?? 999) - Number(right.order ?? 999))
             .slice(-8);
@@ -3847,30 +3681,17 @@ export function mountHeyBeanWebApp(mount) {
         refreshBeanStatusTag();
     }
 
-    function removeLocalBeanWorkPlaceholders() {
+    function removeLocalBeanWorkPlaceholders(clientRequestId = '') {
+        const requestId = String(clientRequestId || '').trim();
+        if (!requestId && currentActiveChatRequests().length) return;
         const next = state.beanWorkItems.filter((item) => {
             const id = String(item?.id || '');
-            return !id.startsWith('request-');
+            if (!id.startsWith('request-')) return true;
+            return requestId ? item.clientRequestId !== requestId : Boolean(item.clientRequestId);
         });
         if (next.length !== state.beanWorkItems.length) {
             state.beanWorkItems = next;
         }
-    }
-
-    function completeBeanWorkItem(id, label = '') {
-        if (!id) return;
-        const existingIndex = state.beanWorkItems.findIndex((item) => item.id === id);
-        if (existingIndex >= 0) {
-            state.beanWorkItems = state.beanWorkItems.map((item, index) => index === existingIndex ? { ...item, status: 'completed' } : item);
-            if (state.beanWorkItems.every((item) => beanWorkItemDone(item))) scheduleBeanWorkStatusClear();
-            refreshBeanStatusTag();
-            return;
-        }
-        if (isGenericBeanWorkLabel(label)) {
-            completeActiveBeanWorkItems();
-            return;
-        }
-        if (label) upsertBeanWorkItem(id, label, 'completed');
     }
 
     function completeActiveBeanWorkItems(clientRequestId = '') {
@@ -3878,7 +3699,7 @@ export function mountHeyBeanWebApp(mount) {
         const requestId = String(clientRequestId || '').trim();
         state.beanWorkItems = state.beanWorkItems.map((item) => {
             if (beanWorkItemDone(item)) return item;
-            if (requestId && item.clientRequestId && item.clientRequestId !== requestId) return item;
+            if (requestId && item.clientRequestId !== requestId) return item;
             return { ...item, status: 'completed' };
         });
         if (state.beanWorkItems.every((item) => beanWorkItemDone(item))) scheduleBeanWorkStatusClear();
@@ -3951,76 +3772,18 @@ export function mountHeyBeanWebApp(mount) {
         refreshChatWorkStripInPlace();
     }
 
-    function beanWorkPlaceholderIndex(label) {
-        const target = beanWorkTargetForLabel(label);
-        const subjectKey = beanWorkSubjectKeyForLabel(label);
-        return state.beanWorkItems.findIndex((item) => {
-            if (!String(item.id || '').startsWith('request-') || item.resolvedByEvent || beanWorkItemDone(item)) return false;
-            const placeholderTarget = beanWorkTargetForLabel(item.label);
-            const placeholderSubjectKey = beanWorkSubjectKeyForLabel(item.label);
-            if (target && placeholderTarget && target !== placeholderTarget) return false;
-            if (subjectKey && placeholderSubjectKey) {
-                return subjectKey === placeholderSubjectKey
-                    || subjectKey.includes(placeholderSubjectKey)
-                    || placeholderSubjectKey.includes(subjectKey);
-            }
-            if (!subjectKey && placeholderSubjectKey) return false;
-            return !target || !placeholderTarget || target === placeholderTarget;
-        });
-    }
-
-    function beanWorkCategoryForLabel(label) {
-        const text = String(label || '').toLowerCase();
-        if (!text) return '';
-        const action = /\b(?:delete|deleting|remove|removing|cancel|canceling|cancelled)\b/.test(text) ? 'delete'
-            : /\b(?:create|creating|add|adding|schedule|scheduling)\b/.test(text) ? 'create'
-            : /\b(?:update|updating|change|changing|move|moving|reschedule|rescheduling)\b/.test(text) ? 'update'
-            : /\b(?:save|saving|remember|memory)\b/.test(text) ? 'save'
-            : '';
-        const target = /\b(?:calendar event|event|calendar|appointment|meeting)\b/.test(text) ? 'event'
-            : /\b(?:reminder)\b/.test(text) ? 'reminder'
-            : /\b(?:task|todo)\b/.test(text) ? 'task'
-            : /\b(?:note|notes|folder)\b/.test(text) ? 'note'
-            : /\b(?:memory)\b/.test(text) ? 'memory'
-            : '';
-        return action || target ? `${action}:${target}` : '';
-    }
-
-    function beanWorkTargetForLabel(label) {
-        const category = beanWorkCategoryForLabel(label);
-        const separator = category.indexOf(':');
-        return separator >= 0 ? category.slice(separator + 1) : '';
-    }
-
-    function beanWorkSubjectKeyForLabel(label) {
-        const separator = String(label || '').indexOf(':');
-        if (separator < 0) return '';
-        let subject = String(label || '').slice(separator + 1).toLowerCase();
-        subject = subject
-            .replace(/\([^)]*\)/g, ' ')
-            .replace(/\b(?:calendar|event|events|task|tasks|reminder|reminders|note|notes|create|creating|created|update|updating|updated|delete|deleting|deleted|save|saving|saved)\b/g, ' ')
-            .replace(/[^a-z0-9]+/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-        if (subject === 'groceries' || subject === 'grocery store') subject = 'grocery shopping';
-        if (subject === 'cooking dinner' || subject === 'make dinner') subject = 'cook dinner';
-        return subject;
-    }
-
-    function isGenericBeanWorkLabel(label) {
-        return /^(?:finish|finished|background work|finish background work|bean started working|read request|working on request)$/i.test(String(label || '').trim());
-    }
-
     function applyBeanWorkEvents(events = []) {
         const mutationEvents = [];
         normalizeList(events).sort((left, right) => Number(left?.id || 0) - Number(right?.id || 0)).forEach((event) => {
             const eventId = Number(event?.id || 0);
-            if (Number.isFinite(eventId) && eventId <= beanWorkEventFloorId) return;
+            const linkedRequest = activeChatRequestForBeanWorkEvent(event);
+            if (Number.isFinite(eventId) && eventId <= beanWorkEventFloorId && !linkedRequest) return;
             if (Number.isFinite(eventId) && beanWorkAppliedEventIds.has(eventId)) return;
             const item = beanWorkItemFromEvent(event);
             if (beanActivityEventMutatesDashboard(event)) mutationEvents.push(event);
             if (!item) return;
             if (!beanWorkEventBelongsToActiveRequest(event, item)) return;
+            const request = linkedRequest;
             if (Number.isFinite(eventId)) {
                 beanWorkAppliedEventIds.add(eventId);
                 beanWorkEventFloorId = Math.max(beanWorkEventFloorId, eventId);
@@ -4029,30 +3792,47 @@ export function mountHeyBeanWebApp(mount) {
                 source: 'event',
                 resolvedByEvent: true,
                 order: item.order,
+                clientRequestId: request?.clientRequestId || '',
             });
         });
         refreshDashboardAfterBeanMutationEvents(mutationEvents);
     }
 
     function beanWorkEventBelongsToActiveRequest(event, item = null) {
+        if (currentActiveChatRequests().length) {
+            return Boolean(activeChatRequestForBeanWorkEvent(event));
+        }
         const activeMessageId = Number(state.activeBeanWorkMessageId || 0);
         if (!activeMessageId) return true;
         const payload = event?.payload || {};
-        const eventMessageId = Number(payload.user_message_id || payload.userMessageId || payload.message_id || payload.messageId || payload.request_message_id || payload.requestMessageId || 0);
+        const eventMessageId = Number(payload.user_message_id || payload.message_id || 0);
         if (eventMessageId) return eventMessageId === activeMessageId;
         const type = String(event?.event_type || event?.eventType || '');
         if (['runtime.run_queued', 'runtime.run_started', 'runtime.run_completed', 'runtime.run_stale_failed', 'runtime.run_failed'].includes(type)) return true;
         if (!type.startsWith('assistant.')) return true;
-        if (type === 'assistant.work_item.planned' && state.beanWorkItems.length) return true;
-        if (!item) return false;
-        return state.beanWorkItems.some((existing) => existing.id === item.id)
-            || beanWorkPlaceholderIndex(item.label) >= 0;
+        return false;
+    }
+
+    function activeChatRequestForBeanWorkEvent(event) {
+        const payload = event?.payload || {};
+        const clientRequestId = String(payload.client_request_id || payload.clientRequestId || '').trim();
+        if (clientRequestId) return activeChatRequests.get(clientRequestId) || null;
+        const messageId = Number(payload.user_message_id || payload.userMessageId || payload.message_id || payload.messageId || 0);
+        if (messageId) {
+            return [...activeChatRequests.values()].find((request) => Number(request.userMessageId || 0) === messageId) || null;
+        }
+        const runId = Number(payload.run_id || payload.runId || payload.assistant_run_id || payload.assistantRunId || 0);
+        if (runId) {
+            return [...activeChatRequests.values()].find((request) => Number(request.runId || 0) === runId) || null;
+        }
+        return null;
     }
 
     function beanActivityEventMutatesDashboard(event) {
         const type = String(event?.event_type || event?.eventType || '');
         if (!type.startsWith('assistant.')) return false;
-        if (!beanWorkItemDone({ status: beanWorkEventStatus(String(event?.status || '')) })) return false;
+        const canonicalStatus = beanWorkEventStatus(String(event?.status || ''));
+        if (!canonicalStatus || !beanWorkItemDone({ status: canonicalStatus })) return false;
         return /\.(?:task|reminder|calendar_event|note|note_folder|memory|approval|blocker)\.(?:created|updated|deleted)$/.test(type);
     }
 
@@ -4160,32 +3940,36 @@ export function mountHeyBeanWebApp(mount) {
         if (type === 'runtime.run_failed') return { id: fallbackId, label: 'Finish request', status: 'failed' };
         if (!type.startsWith('assistant.')) return null;
         if (type.includes('.duplicate_skipped')) return null;
-        const plannedId = payload.work_item_id || payload.workItemId || '';
-        const plannedLabel = payload.work_label || payload.workLabel || payload.label || '';
-        if (type === 'assistant.work_item.planned' && plannedId && plannedLabel) {
+        if (type === 'assistant.semantic_operation.receipt') {
+            const receipt = payload.receipt || {};
+            const operationId = String(payload.operation_id || receipt.operation_id || '');
+            const label = String(payload.operation_label || 'Application operation');
+            const canonicalStatus = beanWorkEventStatus(String(receipt.status || status).toLowerCase());
+            if (!operationId || !canonicalStatus) return null;
             return {
-                id: String(plannedId),
-                label: String(plannedLabel),
-                status: 'running',
-                order: Number(payload.work_order ?? payload.workOrder ?? 0),
+                id: `semantic-${payload.assistant_run_id || 'run'}-${operationId}`,
+                label,
+                status: canonicalStatus,
+                order: Number(event?.id || 0),
             };
         }
-        const id = plannedId
-            ? String(plannedId)
-            : fallbackId;
+        const workItemId = payload.work_item_id || '';
+        if (!workItemId) return null;
+        const id = String(workItemId);
         const label = beanWorkEventLabel(type, payload);
-        if (!label) return null;
+        const canonicalStatus = beanWorkEventStatus(status);
+        if (!label || !canonicalStatus) return null;
         return {
             id,
             label,
-            status: beanWorkEventStatus(status),
+            status: canonicalStatus,
             order: Number(payload.work_order ?? payload.workOrder ?? 999),
         };
     }
 
     function beanWorkEventStatus(status) {
         if (['failed', 'skipped', 'cancelled', 'succeeded', 'recorded', 'completed'].includes(status)) return status;
-        return 'completed';
+        return null;
     }
 
     function beanWorkEventLabel(type, payload = {}) {
@@ -4218,11 +4002,9 @@ export function mountHeyBeanWebApp(mount) {
         return null;
     }
 
-    function startBeanWorkEventPolling(sessionId, options = {}) {
+    function startBeanWorkEventPolling(sessionId) {
         stopBeanWorkEventPolling();
         const token = ++beanWorkEventPollToken;
-        const clientRequestId = String(options.clientRequestId || '').trim();
-        const content = String(options.content || '');
         const poll = async (attempt = 0) => {
             if (!sessionId || token !== beanWorkEventPollToken) return;
             try {
@@ -4230,46 +4012,13 @@ export function mountHeyBeanWebApp(mount) {
                 const events = await api(`/assistant/sessions/${sessionId}/events?after=${encodeURIComponent(after)}&wait=1&limit=50`);
                 if (token !== beanWorkEventPollToken) return;
                 applyBeanWorkEvents(events);
-                if (clientRequestId) {
-                    const recovered = await recoverChatFailureFromServer({
-                        sessionId,
-                        clientRequestId,
-                        content,
-                        isCurrent: () => token === beanWorkEventPollToken && String(state.session?.id || '') === String(sessionId),
-                    });
-                    if (token !== beanWorkEventPollToken) return;
-                    if (recovered && (recovered.assistantContent || !['queued', 'running', 'processing'].includes(String(recovered.result?.status || '').toLowerCase()))) {
-                        if (state.beanWorkItems.length && state.beanWorkItems.every((item) => beanWorkItemDone(item))) {
-                            scheduleBeanWorkStatusClear();
-                        }
-                        if (!['queued', 'running', 'processing'].includes(String(recovered.result?.status || '').toLowerCase())) {
-                            refreshOnlyInBackground({ skipCalendarSync: true });
-                        }
-                        state.busy = false;
-                        if (activeChatClientRequestId === clientRequestId) {
-                            activeChatRequestId = 0;
-                            activeChatClientRequestId = '';
-                        }
-                        render();
-                        scrollChatToBottom();
-                        scheduleChatQueueDrain();
-                        return;
-                    }
-                }
                 render();
             } catch (_) {}
             if (token !== beanWorkEventPollToken) return;
-            if ((clientRequestId || beanWorkStatusActive() || attempt < 3) && attempt < beanWorkPollMaxAttempts) {
-                const delay = clientRequestId || beanWorkStatusActive() ? 350 : 900;
+            const hasActiveSessionRequest = activeChatRequestsForSession(sessionId).length > 0;
+            if ((hasActiveSessionRequest || beanWorkStatusActive() || attempt < 3) && attempt < beanWorkPollMaxAttempts) {
+                const delay = hasActiveSessionRequest || beanWorkStatusActive() ? 350 : 900;
                 beanWorkEventPollTimer = window.setTimeout(() => poll(attempt + 1), delay);
-            } else if (clientRequestId && activeChatRequestId && activeChatClientRequestId === clientRequestId) {
-                state.busy = false;
-                activeChatRequestId = 0;
-                activeChatClientRequestId = '';
-                state.error = 'Bean’s request did not reach a final response. Please try again.';
-                state.chatRunState = state.voiceWakeListening ? 'Listening for “Hey Bean”…' : 'Failed';
-                render();
-                scheduleChatQueueDrain();
             }
         };
         beanWorkEventPollTimer = window.setTimeout(() => poll(0), 250);
@@ -4296,9 +4045,7 @@ export function mountHeyBeanWebApp(mount) {
             activeWork: v2ActiveWork,
         });
         const waking = beanChatWaking();
-        const messages = (state.messages.length ? state.messages : [
-            { id: 'intro', role: 'assistant', content: waking ? 'Bean is waking up...' : (needsBeanOnboarding() ? onboardingIntroMessage() : 'Hey! How can I help?') },
-        ]).filter((message) => !assistantMessageShouldStayOutOfChat(message));
+        const messages = state.messages;
         const workStrip = chatDockedWorkStripMarkup();
         const messageListId = options.messageListId || 'hb-chat-messages';
         const inputValue = chatInputValue();
@@ -4322,7 +4069,7 @@ export function mountHeyBeanWebApp(mount) {
                         <textarea name="message" data-chat-focus-control="message" placeholder="${escapeAttr(chatInputPlaceholder())}" rows="1" ${inputDisabled ? 'disabled aria-disabled="true"' : ''}>${escapeHtml(inputValue)}</textarea>
                         <span class="hb-chat-action-cluster">
                             ${(state.busy || v2PlaybackActive) ? `<button class="hb-button-secondary hb-chat-text-send-button hb-chat-text-stop-button" type="button" ${v2OwnsStopAction ? 'data-stop-voice-playback' : 'data-cancel-turn'} data-chat-focus-control="stop" aria-label="Stop Bean speech">${icons.stop}</button>` : ''}
-                            <button class="hb-button-secondary hb-chat-text-send-button" type="submit" data-chat-focus-control="send" aria-label="${escapeAttr(waking ? 'Bean is waking up' : (state.busy ? 'Queue message' : 'Send message'))}" ${sendDisabled}>${icons.send}</button>
+                            <button class="hb-button-secondary hb-chat-text-send-button" type="submit" data-chat-focus-control="send" aria-label="${escapeAttr(waking ? 'Bean is waking up' : 'Send message')}" ${sendDisabled}>${icons.send}</button>
                             <button class="hb-button-secondary hb-chat-text-send-button hb-chat-voice-button ${state.voiceWakeListening ? 'hb-chat-voice-button-listening' : ''} ${voiceHearingClass} ${(state.busy || state.voiceProcessing) ? 'hb-chat-voice-button-thinking' : ''}" style="${voiceActivityStyle}" type="button" data-voice-toggle data-chat-focus-control="voice" aria-pressed="${state.voiceWakeListening ? 'true' : 'false'}" aria-label="${state.voiceRecording ? 'Microphone is hearing you' : (state.voiceWakeListening ? 'Turn off realtime Bean voice' : 'Turn on realtime Bean voice')}" ${sendDisabled}><span class="hb-chat-voice-button-inner"><img src="${escapeAttr(logoUrl)}" alt="" aria-hidden="true"></span></button>
                         </span>
                     </form>
@@ -4410,8 +4157,8 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function onboardingCompletionMarkup() {
-        const sessionMode = state.session?.runtime_mode || state.session?.runtimeMode || '';
-        if (needsBeanOnboarding() || !(state.onboardingJustCompleted || sessionMode === 'onboarding')) return '';
+        const sessionKind = state.session?.session_kind || '';
+        if (needsBeanOnboarding() || !(state.onboardingJustCompleted || sessionKind === 'onboarding')) return '';
         return `
             <article class="hb-chat-onboarding-card hb-chat-onboarding-complete">
                 <div class="hb-chat-onboarding-kicker">${icons.checkCircle}<span>Onboarding saved</span></div>
@@ -4508,16 +4255,11 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function closeOnboardingTour(options = {}) {
-        const openCalendarImport = options.openCalendarImport === true && !state.onboardingTourPendingSubscription;
+        const openCalendarImport = options.openCalendarImport === true;
         markOnboardingTourSeen();
         state.onboardingTourActive = false;
         state.onboardingTourStep = 0;
-        if (state.onboardingTourPendingSubscription) {
-            state.onboardingTourPendingSubscription = false;
-            state.phase = 'subscription';
-            state.selected = 'today';
-            history.pushState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan || 'premium')}&billing_interval=${encodeURIComponent(normalizedBillingInterval(state.selectedBillingInterval))}`);
-        } else if (openCalendarImport) {
+        if (openCalendarImport) {
             state.selected = 'settings';
             state.modal = { type: 'external-calendar-import', providerKey: 'apple' };
         }
@@ -4562,7 +4304,7 @@ export function mountHeyBeanWebApp(mount) {
                     <p>${escapeHtml(step.caption)}</p>
                     <div class="hb-onboarding-tour-actions">
                         <button class="hb-button-ghost" type="button" data-onboarding-tour-skip>Skip</button>
-                        <button class="hb-button" type="button" ${isLast ? 'data-onboarding-tour-finish' : 'data-onboarding-tour-next'}>${isLast ? (state.onboardingTourPendingSubscription ? 'Plan setup' : 'Import calendar') : 'Next'}</button>
+                        <button class="hb-button" type="button" ${isLast ? 'data-onboarding-tour-finish' : 'data-onboarding-tour-next'}>${isLast ? 'Import calendar' : 'Next'}</button>
                     </div>
                 </article>
             </section>`;
@@ -5119,7 +4861,7 @@ export function mountHeyBeanWebApp(mount) {
             });
         });
 
-        pendingReminders().forEach((reminder) => {
+        scheduledReminders().forEach((reminder) => {
             const dueValue = reminderDateValue(reminder);
             if (!dueValue) return;
             const due = parseLocalDate(dueValue);
@@ -5707,10 +5449,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function messageMarkup(message, index = 0, messages = []) {
         const user = message.role === 'user';
-        if (user && ['capturing', 'awaiting_continuation'].includes(String(message?.metadata?.voice_turn_state || '').toLowerCase())) {
-            return '';
-        }
-        const content = user ? (message.content || '') : safeAssistantDisplayContent(conversationalMessageContent(message.content || ''));
+        const content = message.content || '';
         const canEdit = user && !chatHasActiveTurn() && !String(message.id || '').startsWith('local-');
         return `
             <article class="hb-message ${user ? 'hb-message-user' : ''}" ${user ? `data-message-id="${escapeAttr(message.id || '')}"` : ''}>
@@ -5742,68 +5481,9 @@ export function mountHeyBeanWebApp(mount) {
             </article>`;
     }
 
-    function conversationalMessageContent(content) {
-        let current = String(content || '').trim();
-        for (let index = 0; index < 3; index += 1) {
-            const parsed = structuredMessageJson(current);
-            if (!parsed || Array.isArray(parsed)) return current;
-            const next = ['message', 'content', 'assistant_message', 'response']
-                .map((key) => parsed[key])
-                .find((value) => typeof value === 'string' && value.trim() !== '');
-            if (!next) return current;
-            current = next.trim();
-        }
-        return current;
-    }
-
-    function safeAssistantDisplayContent(content) {
-        const current = String(content || '').trim();
-        if (!current) return content || '';
-        const normalized = current.toLowerCase().replace(/\s+/g, ' ');
-        const staleFailurePhrases = [
-            'bean could not finish',
-            'could not finish that request',
-            'bean could not complete',
-            'could not complete the requested change',
-            'i could not complete',
-            'i tried to check that live information',
-            'lookup did not return',
-            'lookup didn’t return',
-            "lookup didn't return",
-            'did not return a usable result',
-            'no usable result',
-            'could not get that live lookup back quickly enough',
-            'couldn’t get that live lookup back quickly enough',
-            "couldn't get that live lookup back quickly enough",
-            'live lookup back quickly enough',
-            'i’m still checking',
-            "i'm still checking",
-            'still checking live sources',
-            'still checking live weather',
-            'response did not come through',
-            'something unexpected happened',
-        ];
-        return staleFailurePhrases.some((phrase) => normalized.includes(phrase))
-            ? 'I’m checking the latest app state now. If I need one more detail, I’ll ask.'
-            : content;
-    }
-
-    function assistantMessageShouldStayOutOfChat(message) {
-        if (!message || message.role !== 'assistant') return false;
-        const runtime = String(message.metadata?.runtime || '').trim();
-        if (['missing_run_bridge', 'direct_queue_bridge', 'async_queue_bridge', 'failed_run_bridge'].includes(runtime)) return true;
-        const normalized = String(message.content || '').toLowerCase().replace(/\s+/g, ' ').trim();
-        return normalized === 'i’m checking the latest app state now. if i need one more detail, i’ll ask.'
-            || normalized === "i'm checking the latest app state now. if i need one more detail, i'll ask."
-            || normalized === 'i didn’t receive that request cleanly. please send it once more and i’ll take it from there.'
-            || normalized === "i didn't receive that request cleanly. please send it once more and i'll take it from there."
-            || normalized === 'i’m on it. i’m syncing against the latest app state now, and i’ll ask for one detail if i need it.'
-            || normalized === "i'm on it. i'm syncing against the latest app state now, and i'll ask for one detail if i need it.";
-    }
-
     function pushVisibleAssistantMessage(message, content = null) {
-        if (!message || assistantMessageShouldStayOutOfChat(message)) return false;
-        const visibleContent = content ?? safeAssistantDisplayContent(conversationalMessageContent(message.content || ''));
+        if (!message) return false;
+        const visibleContent = content ?? String(message.content || '');
         if (!String(visibleContent || '').trim()) return false;
         const assistantId = String(message.id || '');
         if (assistantId && state.messages.some((item) => String(item.id || '') === assistantId)) return false;
@@ -5812,27 +5492,6 @@ export function mountHeyBeanWebApp(mount) {
             content: visibleContent,
         });
         return true;
-    }
-
-    function structuredMessageJson(content) {
-        const trimmed = String(content || '').trim();
-        if (!trimmed) return null;
-        const candidates = [trimmed];
-        const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-        if (fenced) candidates.push(fenced[1].trim());
-        const firstBrace = trimmed.indexOf('{');
-        const lastBrace = trimmed.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace > firstBrace) {
-            candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
-        }
-        for (const candidate of candidates) {
-            try {
-                return JSON.parse(candidate);
-            } catch (error) {
-                // Try the next candidate form.
-            }
-        }
-        return null;
     }
 
     function sectionTitle(icon, title, subtitle = '') {
@@ -5951,7 +5610,6 @@ export function mountHeyBeanWebApp(mount) {
         if (modal.type === 'issue-report') return issueReportModalMarkup();
         if (modal.type === 'issue-report-success') return issueReportSuccessModalMarkup();
         if (modal.type === 'admin-usage-log') return adminUsageLogModalMarkup(modal.log);
-        if (modal.type === 'admin-command-run') return adminCommandRunModalMarkup(modal);
         if (modal.type === 'external-calendar-connect') return externalCalendarConnectModalMarkup();
         if (modal.type === 'external-calendar-import') return externalCalendarImportModalMarkup(modal);
         if (modal.type === 'profile') return profileModalMarkup();
@@ -6059,41 +5717,6 @@ export function mountHeyBeanWebApp(mount) {
 
     function adminLogDetailItemMarkup(label, value) {
         return `<span><small>${escapeHtml(label)}</small><strong>${escapeHtml(value || 'None')}</strong></span>`;
-    }
-
-    function adminCommandRunModalMarkup(modal = {}) {
-        const running = adminCommandRunActive(modal.status);
-        const result = modal.result || {};
-        const metadata = result.metadata || {};
-        const output = result.output || (running ? 'Starting command...\nLive output will appear here as the server receives it.' : '');
-        const error = result.error || modal.error || '';
-        const exitCode = result.exit_code ?? result.exitCode;
-        const command = metadata.command_line || metadata.commandLine || normalizeList(result.command).join(' ') || 'admin command';
-
-        return `
-            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-label="Admin command activity">
-                <section class="hb-card hb-modal hb-admin-log-modal">
-                    ${sectionTitle(icons.activity, result.command_label || result.commandLabel || 'Admin command', running ? 'Running on the server' : 'Command activity and result')}
-                    <div class="hb-admin-log-detail-grid">
-                        ${adminLogDetailItemMarkup('Command', command)}
-                        ${adminLogDetailItemMarkup('Status', result.status || modal.status || 'queued')}
-                        ${adminLogDetailItemMarkup('Exit code', running ? 'pending' : exitCode ?? 'unknown')}
-                        ${adminLogDetailItemMarkup('Started', formatDateTime(result.started_at || result.startedAt) || (running ? 'pending' : 'unknown'))}
-                        ${adminLogDetailItemMarkup('Finished', formatDateTime(result.finished_at || result.finishedAt) || (running ? 'running' : 'unknown'))}
-                        ${adminLogDetailItemMarkup('Timeout', metadata.timeout ? `${metadata.timeout}s` : 'default')}
-                        ${adminLogDetailItemMarkup('Workdir', metadata.cwd || 'default')}
-                        ${adminLogDetailItemMarkup('Run id', result.id || modal.runId || 'pending')}
-                    </div>
-                    <div class="hb-admin-log-prompt-block">
-                        <strong>stdout</strong>
-                        <pre>${escapeHtml(output || 'No stdout returned.')}</pre>
-                    </div>
-                    ${error ? `<div class="hb-admin-log-prompt-block"><strong>stderr</strong><pre>${escapeHtml(error)}</pre></div>` : ''}
-                    <div class="hb-modal-actions">
-                        <button class="hb-button-secondary" type="button" data-close-modal ${running ? 'disabled' : ''}>Close</button>
-                    </div>
-                </section>
-            </div>`;
     }
 
     function issueReportModalMarkup() {
@@ -6254,7 +5877,7 @@ export function mountHeyBeanWebApp(mount) {
                     </div>
                 </div>
                 <label class="hb-label hb-event-status-label">Status<select class="hb-select" name="status">
-                    ${['confirmed', 'tentative', 'cancelled'].map((status) => `<option value="${status}" ${String(item?.status || 'confirmed') === status ? 'selected' : ''}>${capitalize(status)}</option>`).join('')}
+                    ${['scheduled', 'cancelled'].map((status) => `<option value="${status}" ${String(item?.status || 'scheduled') === status ? 'selected' : ''}>${capitalize(status)}</option>`).join('')}
                 </select></label>
             </div>
             <label class="hb-label">Notes<textarea class="hb-textarea" name="description" placeholder="Add notes, agenda, links, or anything useful for this event">${escapeHtml(item?.description || '')}</textarea></label>`;
@@ -6289,7 +5912,9 @@ export function mountHeyBeanWebApp(mount) {
     function eventTimeFieldsMarkup(item = null, when = '', end = '') {
         const allDay = eventAllDay(item);
         const startSource = item?.starts_at || item?.startsAt || when || defaultEventStart();
-        const startDate = allDay ? storedDateOnly(startSource) : dateOnly(startSource);
+        const endSource = item?.ends_at || item?.endsAt || end || startSource;
+        const startDate = dateOnly(startSource);
+        const endDate = dateOnly(endSource);
         return `
             <div class="hb-all-day-toggle">
                 <label class="hb-switch-row hb-all-day-checkbox"><input type="checkbox" name="allDay" data-all-day-toggle ${allDay ? 'checked' : ''}> <strong>All day</strong></label>
@@ -6303,7 +5928,8 @@ export function mountHeyBeanWebApp(mount) {
                 ${labelInput('Ends at', 'endsAt', 'datetime-local', end, allDay ? 'disabled' : '')}
             </div>
             <div class="hb-field-row" data-all-day-fields ${allDay ? '' : 'hidden'}>
-                ${labelInput('Date', 'allDayStart', 'date', startDate, allDay ? 'required' : 'disabled')}
+                ${labelInput('Start date', 'allDayStart', 'date', startDate, allDay ? 'required' : 'disabled')}
+                ${labelInput('Ends before', 'allDayEnd', 'date', endDate, allDay ? 'required' : 'disabled')}
             </div>`;
     }
 
@@ -6498,7 +6124,7 @@ export function mountHeyBeanWebApp(mount) {
         const recurrence = itemRecurrenceValue(item);
         const recurrenceMeta = recurrenceMetadata(item?.metadata);
         const days = recurrenceDays(item?.metadata);
-        const unit = recurrenceMeta.unit || recurrenceMeta.interval_unit || recurrenceMeta.intervalUnit || 'days';
+        const unit = ['days', 'weeks', 'months', 'years'].includes(recurrenceMeta.unit) ? recurrenceMeta.unit : 'days';
         return `
             <label class="hb-label">Recurrence
                 <select class="hb-select" name="recurrence" data-recurrence-select>
@@ -6506,11 +6132,11 @@ export function mountHeyBeanWebApp(mount) {
                 </select>
             </label>
             <div class="hb-tabs hb-recurrence-days" data-recurrence-days ${recurrence === 'specific_days' ? '' : 'hidden'}>
-                ${['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => `<label class="hb-chip"><input type="checkbox" name="specificDays" value="${day}" ${days.has(day) ? 'checked' : ''}> ${day.toUpperCase()}</label>`).join('')}
+                ${['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => `<label class="hb-chip"><input type="checkbox" name="days" value="${day}" ${days.has(day) ? 'checked' : ''}> ${day.toUpperCase()}</label>`).join('')}
             </div>
             <div class="hb-field-row" data-recurrence-interval ${recurrence === 'interval' ? '' : 'hidden'}>
                 ${labelInput('Repeat interval', 'interval', 'number', recurrenceMeta.interval || '', 'min="1"')}
-                <label class="hb-label">Interval unit<select class="hb-select" name="intervalUnit"><option value="days">Days</option><option value="weeks" ${unit === 'weeks' ? 'selected' : ''}>Weeks</option><option value="months" ${unit === 'months' ? 'selected' : ''}>Months</option><option value="years" ${unit === 'years' ? 'selected' : ''}>Years</option></select></label>
+                <label class="hb-label">Interval unit<select class="hb-select" name="unit"><option value="days">Days</option><option value="weeks" ${unit === 'weeks' ? 'selected' : ''}>Weeks</option><option value="months" ${unit === 'months' ? 'selected' : ''}>Months</option><option value="years" ${unit === 'years' ? 'selected' : ''}>Years</option></select></label>
             </div>`;
     }
 
@@ -6520,53 +6146,19 @@ export function mountHeyBeanWebApp(mount) {
 
     function itemRecurrenceValue(item = null) {
         if (eventIsGeneratedOccurrence(item)) return 'none';
-        return normalizeRecurrenceValue(item?.recurrence ?? item?.metadata?.recurrence);
-    }
-
-    function normalizeRecurrenceValue(value) {
-        if (value && typeof value === 'object') {
-            if (value.interval && !value.value && !value.type && !value.frequency) return 'interval';
-            if ((value.specific_days || value.specificDays || value.days) && !value.value && !value.type && !value.frequency) return 'specific_days';
-            return normalizeRecurrenceValue(value.value || value.type || value.frequency || value.freq || value.recurrence || value.rule);
-        }
-        const normalized = String(value || 'none').toLowerCase().trim().replace(/[-\s]+/g, '_');
-        const aliases = {
-            '': 'none',
-            no: 'none',
-            never: 'none',
-            once: 'none',
-            one_time: 'none',
-            day: 'daily',
-            days: 'daily',
-            every_day: 'daily',
-            week: 'weekly',
-            weeks: 'weekly',
-            every_week: 'weekly',
-            month: 'monthly',
-            months: 'monthly',
-            every_month: 'monthly',
-            year: 'yearly',
-            years: 'yearly',
-            annual: 'yearly',
-            annually: 'yearly',
-            every_year: 'yearly',
-            specific_day: 'specific_days',
-            selected_days: 'specific_days',
-            days_of_week: 'specific_days',
-            custom: 'interval',
-            custom_interval: 'interval',
-        };
-        return aliases[normalized] || normalized;
+        const value = Object.prototype.hasOwnProperty.call(item || {}, 'recurrence')
+            ? item?.recurrence
+            : item?.metadata?.recurrence;
+        return recurrenceOptions().includes(value) ? value : 'none';
     }
 
     function recurrenceMetadata(metadata = {}) {
-        const recurrence = metadata?.recurrence && typeof metadata.recurrence === 'object' ? metadata.recurrence : {};
-        return { ...metadata, ...recurrence };
+        return metadata && typeof metadata === 'object' ? metadata : {};
     }
 
     function recurrenceDays(metadata = {}) {
-        const recurrence = recurrenceMetadata(metadata);
-        return new Set(normalizeList(metadata?.specific_days || metadata?.specificDays || metadata?.days || recurrence.specific_days || recurrence.specificDays || recurrence.days));
+        const days = Array.isArray(metadata?.days) ? metadata.days : [];
+        return new Set(days.filter((day) => ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].includes(day)));
     }
 
     function categoriesModalMarkup() {
@@ -6625,14 +6217,6 @@ export function mountHeyBeanWebApp(mount) {
                 requestGuidedLocationFromClick();
             } else {
                 skipGuidedLocation();
-            }
-        }));
-        mount.querySelectorAll('[data-guided-tour-choice]').forEach((button) => button.addEventListener('click', () => {
-            if (guidedSignupInputLocked()) return;
-            if (button.dataset.guidedTourChoice === 'tour') {
-                launchGuidedOnboardingTour();
-            } else {
-                void goToGuidedPlan(true);
             }
         }));
         mount.querySelectorAll('[data-dismiss-plan-limit-error]').forEach((button) => button.addEventListener('click', () => {
@@ -6886,7 +6470,6 @@ export function mountHeyBeanWebApp(mount) {
         mount.querySelectorAll('[data-admin-coupon-delete]').forEach((button) => button.addEventListener('click', () => deleteAdminCouponCode(button.dataset.adminCouponDelete)));
         mount.querySelectorAll('[data-enterprise-limit-form]').forEach((form) => form.addEventListener('submit', saveEnterpriseLimits));
         mount.querySelectorAll('[data-enterprise-limit-delete]').forEach((button) => button.addEventListener('click', () => deleteEnterpriseLimits(button.dataset.enterpriseLimitDelete)));
-        mount.querySelector('[data-update-hermes]')?.addEventListener('click', updateHermesRuntime);
         mount.querySelectorAll('[data-user-growth-range]').forEach((button) => button.addEventListener('click', () => setAdminUserGrowthRange(button.dataset.userGrowthRange)));
         mount.querySelector('[data-toggle-archived-issues]')?.addEventListener('click', () => { state.adminArchivedIssuesOpen = !state.adminArchivedIssuesOpen; render(); });
         mount.querySelectorAll('[data-issue-status]').forEach((button) => button.addEventListener('click', () => updateIssueReportStatus(button.dataset.issueStatus, button.dataset.status)));
@@ -7018,7 +6601,7 @@ export function mountHeyBeanWebApp(mount) {
         mount.querySelectorAll('[data-external-calendar-action]').forEach((button) => button.addEventListener('click', () => externalCalendarAction(button.dataset.externalCalendarAction)));
         mount.querySelectorAll('[data-google-calendar]').forEach((input) => input.addEventListener('change', updateGoogleCalendarSelection));
         mount.querySelectorAll('[data-outlook-calendar]').forEach((input) => input.addEventListener('change', updateOutlookCalendarSelection));
-        mount.querySelectorAll('[data-approval-approve]').forEach((button) => button.addEventListener('click', () => approveApproval(button.dataset.approvalApprove, false)));
+        mount.querySelectorAll('[data-approval-approve]').forEach((button) => button.addEventListener('click', () => approveApproval(button.dataset.approvalApprove)));
         mount.querySelectorAll('[data-approval-deny]').forEach((button) => button.addEventListener('click', () => denyApproval(button.dataset.approvalDeny)));
         mount.querySelectorAll('[data-calendar-pref]').forEach((input) => input.addEventListener('change', () => localStorage.setItem(`heybean.calendar.${input.dataset.calendarPref}`, input.value)));
         mount.querySelectorAll('[data-category-select]').forEach((select) => select.addEventListener('change', syncSelectedCategoryColor));
@@ -7623,7 +7206,6 @@ export function mountHeyBeanWebApp(mount) {
                     window.location.href = '/';
                     return;
                 }
-                if (state.modal?.type === 'admin-command-run' && adminCommandRunActive(state.modal?.status)) return;
                 state.modal = null;
                 render();
             }
@@ -8080,6 +7662,7 @@ export function mountHeyBeanWebApp(mount) {
         const startInput = form.querySelector('input[name="time"]');
         const endInput = form.querySelector('input[name="endsAt"]');
         const allDayStart = form.querySelector('input[name="allDayStart"]');
+        const allDayEnd = form.querySelector('input[name="allDayEnd"]');
         if (startInput) {
             startInput.dataset.previousValue = startInput.value;
             startInput.addEventListener('change', () => syncEventEndWithStart(form));
@@ -8089,6 +7672,29 @@ export function mountHeyBeanWebApp(mount) {
                 endInput.dataset.userEdited = 'true';
                 if (startInput?.value && endInput.value && new Date(endInput.value) <= new Date(startInput.value)) {
                     endInput.value = toDatetimeLocal(defaultEventEnd(startInput.value));
+                }
+            });
+        }
+        if (allDayStart) {
+            allDayStart.addEventListener('change', () => {
+                if (!allDayEnd) return;
+                const reconciledEnd = reconcileAllDayEndDateInput(
+                    allDayStart.value,
+                    allDayEnd.value,
+                );
+                if (reconciledEnd !== allDayEnd.value) {
+                    setDateTimePickerValue(allDayEnd, reconciledEnd, { dispatch: false });
+                }
+            });
+        }
+        if (allDayEnd) {
+            allDayEnd.addEventListener('change', () => {
+                const reconciledEnd = reconcileAllDayEndDateInput(
+                    allDayStart?.value,
+                    allDayEnd.value,
+                );
+                if (reconciledEnd !== allDayEnd.value) {
+                    setDateTimePickerValue(allDayEnd, reconciledEnd, { dispatch: false });
                 }
             });
         }
@@ -8342,13 +7948,11 @@ export function mountHeyBeanWebApp(mount) {
                     method: 'PATCH',
                     body: {
                         model_settings: {
-                            main_model: value('main_model'),
                             external_lookup_model: value('external_lookup_model'),
                         },
                         kill_switches: {
                             bean_chat_enabled: Boolean(form.querySelector('input[name="bean_chat_enabled"]')?.checked),
                         },
-                        apply_main_model_to_profiles: Boolean(form.querySelector('input[name="apply_main_model_to_profiles"]')?.checked),
                     },
                 }),
             };
@@ -8509,77 +8113,6 @@ export function mountHeyBeanWebApp(mount) {
         return Number.isFinite(parsed) ? parsed : null;
     }
 
-    async function updateHermesRuntime() {
-        if (state.adminHermesUpdating) return;
-        state.adminHermesUpdating = true;
-        state.error = '';
-        state.notice = '';
-        state.modal = {
-            type: 'admin-command-run',
-            status: 'queued',
-        };
-        render();
-        try {
-            const run = await api('/admin/hermes/update', { method: 'POST' });
-            state.modal = {
-                type: 'admin-command-run',
-                status: run.status,
-                runId: run.id,
-                result: run,
-            };
-            pollAdminCommandRun(run.id);
-        } catch (error) {
-            const result = error.payload?.data || null;
-            state.modal = {
-                type: 'admin-command-run',
-                status: 'failed',
-                result,
-                error: friendlyError(error, 'update Hermes'),
-            };
-            state.adminHermesUpdating = false;
-            render();
-        }
-    }
-
-    function pollAdminCommandRun(runId) {
-        if (!runId) {
-            state.adminHermesUpdating = false;
-            render();
-            return;
-        }
-        window.clearTimeout(adminCommandRunPollTimer);
-        api(`/admin/command-runs/${encodeURIComponent(runId)}`)
-            .then((run) => {
-                state.modal = {
-                    type: 'admin-command-run',
-                    status: run.status,
-                    runId: run.id,
-                    result: run,
-                };
-                if (adminCommandRunActive(run.status)) {
-                    adminCommandRunPollTimer = window.setTimeout(() => pollAdminCommandRun(runId), 1000);
-                } else {
-                    state.adminHermesUpdating = false;
-                    state.notice = run.status === 'completed' ? 'Hermes update completed.' : 'Hermes update failed.';
-                    api('/admin/hermes/status').then((status) => {
-                        state.adminHermesStatus = status;
-                        render();
-                    }).catch(() => render());
-                    return;
-                }
-                render();
-            })
-            .catch((error) => {
-                state.adminHermesUpdating = false;
-                state.error = friendlyError(error, 'load command output');
-                render();
-            });
-    }
-
-    function adminCommandRunActive(status) {
-        return ['queued', 'running'].includes(String(status || '').toLowerCase());
-    }
-
     function setAdminUserGrowthRange(range) {
         if (!['today', 'last_7_days', 'last_30_days', 'all_time'].includes(range) || state.adminUserGrowthRange === range) return;
         state.adminUserGrowthRange = range;
@@ -8603,9 +8136,10 @@ export function mountHeyBeanWebApp(mount) {
                 color,
                 is_critical: form.elements.critical?.checked || false,
                 metadata: {
-                    ...existingMetadata,
+                    ...metadataWithoutRecurrence(existingMetadata),
                     ...(parentTaskId ? { parent_task_id: Number(parentTaskId) } : {}),
-                    ...recurrence.metadata,
+                    recurrence: recurrence.value,
+                    ...recurrence.details,
                 },
                 sync_to_workspace_ids: syncTo,
             };
@@ -8625,12 +8159,13 @@ export function mountHeyBeanWebApp(mount) {
             const body = {
                 title: data.title,
                 remind_at: fromDatetimeLocal(data.time),
-                status: item?.status || 'pending',
+                status: item?.status || 'scheduled',
                 category: data.category || null,
                 color,
                 metadata: {
-                    ...existingMetadata,
-                    ...recurrence.metadata,
+                    ...metadataWithoutRecurrence(existingMetadata),
+                    recurrence: recurrence.value,
+                    ...recurrence.details,
                     notification_recipients_by_workspace: recipientsByWorkspace,
                     notification_recipient_user_ids: recipientUserIds,
                 },
@@ -8648,34 +8183,43 @@ export function mountHeyBeanWebApp(mount) {
             const allDay = form.elements.allDay?.checked || false;
             const existingMetadata = typeof item?.metadata === 'object' && item?.metadata ? item.metadata : {};
             const generatedOccurrence = eventIsGeneratedOccurrence(item);
-            const recurrence = generatedOccurrence ? { value: null, metadata: {} } : recurrenceFormData(form, data);
+            const recurrence = generatedOccurrence ? { value: null, details: {} } : recurrenceFormData(form, data);
             const metadata = {
-                ...existingMetadata,
-                ...recurrence.metadata,
+                ...metadataWithoutRecurrence(existingMetadata),
+                ...recurrence.details,
                 ...eventPlaceMetadataFromFormData(data),
-                all_day: allDay,
             };
+            delete metadata.all_day;
             if (generatedOccurrence) {
-                metadata.recurrence = 'none';
-                delete metadata.specific_days;
-                delete metadata.specificDays;
                 delete metadata.days;
                 delete metadata.interval;
-                delete metadata.interval_unit;
-                delete metadata.intervalUnit;
                 delete metadata.unit;
             }
+            const originalStartsAt = item?.starts_at || item?.startsAt || '';
+            const originalEndsAt = item?.ends_at || item?.endsAt || '';
+            const preserveLiteralAllDayBounds = Boolean(item && eventAllDay(item) && allDay);
+            const startsAt = allDay
+                ? (preserveLiteralAllDayBounds && data.allDayStart === dateOnly(originalStartsAt)
+                    ? originalStartsAt
+                    : fromDateInputStart(data.allDayStart))
+                : fromDatetimeLocal(data.time);
+            const endsAt = allDay
+                ? (preserveLiteralAllDayBounds && originalEndsAt && data.allDayEnd === dateOnly(originalEndsAt)
+                    ? originalEndsAt
+                    : fromDateInputEndExclusive(data.allDayEnd))
+                : fromDatetimeLocal(data.endsAt);
             const body = {
                 title: data.title,
                 description: data.description || null,
                 location: data.location || null,
-                starts_at: allDay ? fromDateInputStart(data.allDayStart) : fromDatetimeLocal(data.time),
-                ends_at: allDay ? fromDateInputEndInclusive(data.allDayStart) : fromDatetimeLocal(data.endsAt),
+                starts_at: startsAt,
+                ends_at: endsAt,
                 category: data.category || null,
                 color,
                 is_critical: form.elements.critical?.checked || false,
                 recurrence: recurrence.value,
-                status: data.status || 'confirmed',
+                status: data.status || 'scheduled',
+                all_day: allDay,
                 sync_to_workspace_ids: syncTo,
                 metadata,
             };
@@ -8756,7 +8300,9 @@ export function mountHeyBeanWebApp(mount) {
         if (!start || Number.isNaN(start.getTime())) return null;
         const remindAt = new Date(start);
         remindAt.setMinutes(remindAt.getMinutes() - minutesBefore);
-        const recurrence = body.recurrence || event.recurrence || body.metadata?.recurrence || 'none';
+        const recurrence = recurrenceOptions().includes(body.recurrence)
+            ? body.recurrence
+            : recurrenceOptions().includes(event.recurrence) ? event.recurrence : 'none';
         const metadata = {
             source: 'event_reminder',
             minutes_before: minutesBefore,
@@ -8830,7 +8376,7 @@ export function mountHeyBeanWebApp(mount) {
                 ...base,
                 title: body.title,
                 name: body.title,
-                status: body.status || item?.status || 'pending',
+                status: body.status || item?.status || 'scheduled',
                 remind_at: body.remind_at,
                 remindAt: body.remind_at,
                 due_at: body.remind_at,
@@ -8848,11 +8394,11 @@ export function mountHeyBeanWebApp(mount) {
                 ends_at: body.ends_at,
                 endsAt: body.ends_at,
                 recurrence: body.recurrence,
-                status: body.status || item?.status || 'confirmed',
+                status: body.status || item?.status || 'scheduled',
                 is_critical: body.is_critical === true,
                 isCritical: body.is_critical === true,
-                all_day: body.metadata?.all_day === true,
-                allDay: body.metadata?.all_day === true,
+                all_day: body.all_day === true,
+                allDay: body.all_day === true,
             };
         }
         return base;
@@ -8930,22 +8476,31 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function recurrenceFormData(form, data = {}) {
-        const recurrence = data.recurrence || 'none';
-        const specificDays = recurrence === 'specific_days'
-            ? Array.from(form.querySelectorAll('input[name="specificDays"]:checked')).map((input) => input.value)
-            : [];
-        const intervalUnit = recurrence === 'interval' ? data.intervalUnit || 'days' : null;
+        const recurrence = recurrenceOptions().includes(data.recurrence) ? data.recurrence : 'none';
+        const details = {};
+        if (recurrence === 'specific_days') {
+            details.days = Array.from(form.querySelectorAll('input[name="days"]:checked'))
+                .map((input) => input.value)
+                .filter((day) => ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].includes(day));
+        }
+        if (recurrence === 'interval') {
+            const interval = Number(data.interval);
+            details.interval = Number.isInteger(interval) && interval > 0 ? interval : 1;
+            details.unit = ['days', 'weeks', 'months', 'years'].includes(data.unit) ? data.unit : 'days';
+        }
         return {
             value: recurrence,
-            metadata: {
-                recurrence,
-                specific_days: specificDays,
-                days: specificDays,
-                interval: recurrence === 'interval' && data.interval ? Number(data.interval) : null,
-                interval_unit: intervalUnit,
-                unit: intervalUnit,
-            },
+            details,
         };
+    }
+
+    function metadataWithoutRecurrence(metadata = {}) {
+        const canonical = { ...(metadata && typeof metadata === 'object' ? metadata : {}) };
+        delete canonical.recurrence;
+        delete canonical.days;
+        delete canonical.interval;
+        delete canonical.unit;
+        return canonical;
     }
 
     function selectedWorkspaceAssignmentIds(form) {
@@ -9225,9 +8780,19 @@ export function mountHeyBeanWebApp(mount) {
         const allDay = checkbox.checked;
         if (allDay) {
             const startInput = form.querySelector('input[name="time"]');
+            const endInput = form.querySelector('input[name="endsAt"]');
             const allDayStart = form.querySelector('input[name="allDayStart"]');
+            const allDayEnd = form.querySelector('input[name="allDayEnd"]');
             if (startInput?.value && allDayStart) {
                 setDateTimePickerValue(allDayStart, dateOnly(startInput.value), {
+                    dispatch: false,
+                });
+            }
+            if (allDayEnd) {
+                const startDate = parseLocalDate(startInput?.value || new Date());
+                const endDate = parseLocalDate(endInput?.value || startDate);
+                const boundary = dateOnly(endDate) > dateOnly(startDate) ? endDate : addDays(startDate, 1);
+                setDateTimePickerValue(allDayEnd, dateOnly(boundary), {
                     dispatch: false,
                 });
             }
@@ -9235,13 +8800,16 @@ export function mountHeyBeanWebApp(mount) {
             const startInput = form.querySelector('input[name="time"]');
             const endInput = form.querySelector('input[name="endsAt"]');
             const allDayStart = form.querySelector('input[name="allDayStart"]');
+            const allDayEnd = form.querySelector('input[name="allDayEnd"]');
             if (allDayStart?.value && startInput && endInput && !startInput.value) {
                 const start = parseLocalDate(allDayStart.value);
+                const end = parseLocalDate(allDayEnd?.value || allDayStart.value);
                 start.setHours(9, 0, 0, 0);
+                end.setHours(10, 0, 0, 0);
                 setDateTimePickerValue(startInput, toDatetimeLocal(start), {
                     dispatch: false,
                 });
-                setDateTimePickerValue(endInput, toDatetimeLocal(defaultEventEnd(start)), {
+                setDateTimePickerValue(endInput, toDatetimeLocal(end > start ? end : defaultEventEnd(start)), {
                     dispatch: false,
                 });
             }
@@ -9257,8 +8825,8 @@ export function mountHeyBeanWebApp(mount) {
         group.hidden = !enabled;
         group.querySelectorAll('input, select, textarea').forEach((field) => {
             field.disabled = !enabled;
-            if (field.name === 'time' || field.name === 'allDayStart') {
-                field.required = enabled && field.name !== 'endsAt';
+            if (field.name === 'time' || field.name === 'allDayStart' || field.name === 'allDayEnd') {
+                field.required = enabled;
             }
         });
         group.querySelectorAll('button').forEach((button) => {
@@ -9287,7 +8855,7 @@ export function mountHeyBeanWebApp(mount) {
             }
             : {
                 ...task,
-                status: completed ? 'pending' : 'completed',
+                status: completed ? 'open' : 'completed',
                 completed_at: completed ? null : completedAt,
             };
         state.pendingTaskUpserts.set(String(task.id), optimistic);
@@ -9299,7 +8867,7 @@ export function mountHeyBeanWebApp(mount) {
             const saved = await api(`/tasks/${task.id}`, {
                 method: 'PATCH',
                 body: {
-                    status: completed ? 'pending' : 'completed',
+                    status: completed ? 'open' : 'completed',
                     completed_at: completed ? null : completedAt,
                 },
             });
@@ -9316,7 +8884,7 @@ export function mountHeyBeanWebApp(mount) {
         if (!reminder) return;
         const completed = reminderCompleted(reminder);
         const snapshot = snapshotLists('reminder');
-        const optimistic = { ...reminder, status: completed ? 'pending' : 'completed' };
+        const optimistic = { ...reminder, status: completed ? 'scheduled' : 'completed' };
         state.pendingReminderUpserts.set(String(reminder.id), optimistic);
         state.reminders = upsertById(state.reminders, optimistic);
         state.error = '';
@@ -9325,7 +8893,7 @@ export function mountHeyBeanWebApp(mount) {
         try {
             const saved = await api(`/reminders/${reminder.id}`, {
                 method: 'PATCH',
-                body: { status: completed ? 'pending' : 'completed' },
+                body: { status: completed ? 'scheduled' : 'completed' },
             });
             cacheSavedItem('reminder', saved);
             refreshOnlyInBackground({ skipCalendarSync: true });
@@ -9358,40 +8926,96 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function chatHasActiveTurn() {
-        return state.busy || activeChatRequestId > 0;
+        return currentActiveChatRequests().length > 0;
     }
 
-    function enqueueChatContent(content, options = {}) {
-        const queueId = `queued-${Date.now()}-${++chatQueueCounter}`;
-        const queued = {
-            id: queueId,
-            content,
-            editingMessageId: options.editingMessageId || '',
-        };
-        state.chatQueue.push(queued);
-        state.messages.push({
-            id: queueId,
-            role: 'user',
-            content,
-            metadata: { client_queue_status: 'queued' },
-        });
-        state.chatDraft = '';
-        state.editingChatMessageId = '';
-        render();
-        scrollChatToBottom();
+    function activeChatRequestsForSession(sessionId) {
+        const key = String(sessionId || '');
+        if (!key) return [];
+        return [...activeChatRequests.values()].filter((request) => String(request.sessionId || '') === key);
     }
 
-    function scheduleChatQueueDrain() {
-        window.setTimeout(() => {
-            drainChatQueue().catch(() => {});
-        }, 0);
+    function currentActiveChatRequests() {
+        const workspaceId = String(currentWorkspaceId() || '');
+        return [...activeChatRequests.values()].filter((request) => request.workspaceId === workspaceId);
     }
 
-    async function drainChatQueue() {
-        if (chatHasActiveTurn() || !state.chatQueue.length) return;
-        const queued = state.chatQueue.shift();
-        state.messages = state.messages.filter((message) => String(message.id || '') !== String(queued.id));
-        await sendChatContent(queued.content, queued.editingMessageId ? { editingMessageId: queued.editingMessageId } : {});
+    function chatRequestIsCurrent(request) {
+        return activeChatRequests.get(request.clientRequestId) === request
+            && request.workspaceId === String(currentWorkspaceId() || '')
+            && (!request.sessionId || request.sessionId === String(state.session?.id || ''));
+    }
+
+    function chatRunPending(status) {
+        return ['queued', 'running'].includes(String(status || '').toLowerCase());
+    }
+
+    function syncChatBusyState() {
+        const active = currentActiveChatRequests();
+        state.busy = active.length > 0;
+        if (active.length && ['Ready', 'Failed', 'Blocked'].includes(state.chatRunState)) {
+            state.chatRunState = 'Working…';
+        } else if (!active.length && ['Thinking…', 'Working…', 'Stopping…'].includes(state.chatRunState)) {
+            state.chatRunState = state.voiceWakeListening ? 'Listening for “Hey Bean”…' : 'Ready';
+        }
+    }
+
+    function removeActiveChatRequest(request) {
+        if (activeChatRequests.get(request.clientRequestId) !== request) return;
+        window.clearTimeout(request.pollTimer || 0);
+        activeChatRequests.delete(request.clientRequestId);
+        syncChatBusyState();
+    }
+
+    async function ensureChatSessionForRequest(request) {
+        if (state.session?.id && request.workspaceId === String(currentWorkspaceId() || '')) {
+            return state.session;
+        }
+        if (!chatSessionAdmissionPromise) {
+            const onboarding = needsBeanOnboarding();
+            const pending = api('/assistant/sessions', {
+                method: 'POST',
+                body: chatSessionPayload(onboarding),
+                timeoutMs: 45000,
+            });
+            const shared = pending.finally(() => {
+                if (chatSessionAdmissionPromise === shared) chatSessionAdmissionPromise = null;
+            });
+            chatSessionAdmissionPromise = shared;
+        }
+        const createdSession = await chatSessionAdmissionPromise;
+        if (request.workspaceId === String(currentWorkspaceId() || '')) {
+            state.session = createdSession;
+        }
+        return createdSession;
+    }
+
+    function pollDurableChatRequest(request, attempt = 0) {
+        if (activeChatRequests.get(request.clientRequestId) !== request || request.cancelRequested) return;
+        window.clearTimeout(request.pollTimer || 0);
+        const delay = attempt < beanWorkPollMaxAttempts ? 350 : 1500;
+        request.pollTimer = window.setTimeout(async () => {
+            if (activeChatRequests.get(request.clientRequestId) !== request || request.cancelRequested) return;
+            const recovered = await recoverChatFailureFromServer({
+                sessionId: request.sessionId,
+                clientRequestId: request.clientRequestId,
+                content: request.content,
+                isCurrent: () => chatRequestIsCurrent(request),
+            });
+            if (activeChatRequests.get(request.clientRequestId) !== request || request.cancelRequested) return;
+            const status = String(recovered?.result?.status || '').toLowerCase();
+            if (recovered && !chatRunPending(status)) {
+                removeActiveChatRequest(request);
+                if (state.beanWorkItems.length && state.beanWorkItems.every((item) => beanWorkItemDone(item))) {
+                    scheduleBeanWorkStatusClear();
+                }
+                refreshOnlyInBackground({ skipCalendarSync: true });
+                render();
+                scrollChatToBottom();
+                return;
+            }
+            pollDurableChatRequest(request, attempt + 1);
+        }, delay);
     }
 
     function browserVoiceV2Enabled() {
@@ -9553,9 +9177,12 @@ export function mountHeyBeanWebApp(mount) {
         }
         if (effect.type === BROWSER_VOICE_EFFECTS.CLARIFICATION_EXPIRED) {
             if (effect.durable && effect.turnId && state.session?.id) {
-                void browserVoiceV2Client.cancel({
-                    sessionId: state.session.id,
-                    turnId: effect.turnId,
+                // Capture timeout is a UI signal only. Reading the durable
+                // snapshot lets the server enforce its own deadline instead
+                // of turning a browser timer into a second lifecycle owner.
+                void browserVoiceV2Client.snapshot(state.session.id, {
+                    cursor: 0,
+                    timeoutMs: 2500,
                 }).then((snapshot) => {
                     applyBrowserVoiceV2Snapshot(normalizeVoiceV2Snapshot(snapshot), { initial: false });
                 }).catch(() => {});
@@ -9616,8 +9243,8 @@ export function mountHeyBeanWebApp(mount) {
             text: turn.finalText,
             priority: turn.turnId === controllerTurnId ? 100 : (turn.state === 'failed' ? 15 : 10),
             metadata: {
-                naturalClosing: isBrowserVoiceV2NaturalClosing(turn.transcript),
-                responseExpected: /\?\s*$/.test(String(turn.finalText || '')),
+                naturalClosing: Boolean(turn.close_after_response ?? turn.closeAfterResponse ?? false),
+                responseExpected: Boolean(turn.response_expected ?? turn.responseExpected ?? false),
             },
         });
         if (scheduled) {
@@ -9641,7 +9268,7 @@ export function mountHeyBeanWebApp(mount) {
         state.messages = state.messages.filter((message) => {
             const messageTurnId = String(message?.metadata?.client_turn_id || '');
             const provisional = String(message?.id || '') === optimisticId
-                || message?.metadata?.voice_turn_state === 'admitting';
+                || message?.metadata?.browser_voice_provisional === true;
             return !(messageTurnId === turnId && provisional);
         });
         return state.messages.length !== before;
@@ -9665,14 +9292,7 @@ export function mountHeyBeanWebApp(mount) {
         browserVoiceV2Controller.admissionFailed(turnId, 'admission_recovery_exhausted', {
             source: 'admission_recovery',
         });
-        const failureText = 'I couldn’t confirm that request because the connection did not recover. Would you like to try again?';
-        state.error = failureText;
-        browserVoiceV2Speech.enqueueSpeech({
-            turnId,
-            text: failureText,
-            purpose: BROWSER_VOICE_SPEECH_PURPOSES.FINAL,
-            priority: 30,
-        });
+        state.error = 'Voice request was not admitted. Check the connection and try again.';
         render();
     }
 
@@ -9690,7 +9310,7 @@ export function mountHeyBeanWebApp(mount) {
                 id: `optimistic-${turnId}`,
                 role: 'user',
                 content,
-                metadata: { browser_voice_v2: true, client_turn_id: turnId, voice_turn_state: 'admitting' },
+                metadata: { browser_voice_v2: true, browser_voice_provisional: true, client_turn_id: turnId },
             });
         }
         state.chatRunState = 'Sending…';
@@ -9711,11 +9331,16 @@ export function mountHeyBeanWebApp(mount) {
                 // wider transport envelope prevents a transient network delay
                 // from aborting an otherwise healthy, deadline-owned server turn.
                 timeoutMs: 8500,
-                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+                timezone: resolvedBrowserTimeZone(),
                 controllerGeneration: controllerState.generation,
                 providerConnectionGeneration: controllerState.connectionGeneration,
                 transcriptTiming: { final_at_ms: Date.now() },
                 conversationContext,
+                clientContext: {
+                    voice_mode_active: Boolean(realtimeVoiceActive && state.voiceWakeListening),
+                    wake_detection_enabled: Boolean(state.voiceWakeListening),
+                    playback_state: String(browserVoiceV2Speech.snapshot().state || 'idle'),
+                },
                 locationContext: profileHomeCity() ? {
                     label: profileHomeCity(),
                     is_local: true,
@@ -9799,7 +9424,7 @@ export function mountHeyBeanWebApp(mount) {
                 timeoutMs: 2500,
             }));
             const durableTurn = snapshot.turns.find((turn) => turn.turnId === turnId);
-            if (durableTurn && (durableTurn.transcript.endsWith(content) || durableTurn.state !== 'awaiting_clarification')) {
+            if (durableTurn?.resolvedClarificationIds?.includes(clarificationId)) {
                 updateVoiceWakeDraft('');
                 applyBrowserVoiceV2Snapshot(snapshot, { initial: false });
                 return;
@@ -9846,9 +9471,6 @@ export function mountHeyBeanWebApp(mount) {
                 metadata: {
                     browser_voice_v2: true,
                     client_turn_id: message.turn_id,
-                    voice_turn_outcome: {
-                        status: acceptedTurns.find((turn) => turn.turnId === message.turn_id)?.state || '',
-                    },
                 },
             }));
         state.messages = [...retainedMessages, ...durableMessages];
@@ -9880,6 +9502,28 @@ export function mountHeyBeanWebApp(mount) {
 
         const controllerTurnId = browserVoiceV2Controller.snapshot().activeTurn?.id || '';
         acceptedTurns.forEach((turn) => {
+            const stopDirectiveId = String(turn.stopPlaybackDirectiveId || '').trim();
+            if (turn.stopPlayback && stopDirectiveId
+                && !browserVoiceV2AppliedStopDirectiveIds.has(stopDirectiveId)) {
+                browserVoiceV2AppliedStopDirectiveIds.add(stopDirectiveId);
+                browserVoiceV2Controller.stopPlayback('semantic_spoken_stop');
+                if (state.session?.id) {
+                    const controller = browserVoiceV2Controller.snapshot();
+                    void browserVoiceV2Client.markDelivery({
+                        sessionId: state.session.id,
+                        turnId: turn.turnId,
+                        event: 'playback_stopped',
+                        timing: {
+                            occurred_at_ms: Date.now(),
+                            directive_id: stopDirectiveId,
+                            reason: 'semantic_spoken_stop',
+                            controller_generation: controller.generation,
+                            provider_connection_generation: controller.connectionGeneration,
+                        },
+                    }).catch(() => {});
+                }
+            }
+
             const previousState = browserVoiceV2TurnStates.get(turn.turnId);
             const terminal = ['completed', 'failed', 'canceled'].includes(turn.state);
             const becameTerminal = terminal && previousState && !['completed', 'failed', 'canceled'].includes(previousState);
@@ -9996,11 +9640,6 @@ export function mountHeyBeanWebApp(mount) {
         render();
     }
 
-    function isBrowserVoiceV2NaturalClosing(text) {
-        return /^(?:thanks|thank you|that(?:'s| is) all|goodbye|bye|take care|no thanks)[.!]*$/i
-            .test(String(text || '').trim());
-    }
-
     function handleBrowserVoiceV2StateError(error, context = {}) {
         if (!browserVoiceV2Enabled() || Number(context.failureCount || 0) < 3) return;
         const abortSignature = `${error?.name || ''} ${error?.code || ''} ${error?.message || ''}`;
@@ -10104,7 +9743,7 @@ export function mountHeyBeanWebApp(mount) {
         return api('/assistant/voice/realtime/session', {
             method: 'POST',
             body: {
-                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+                timezone: resolvedBrowserTimeZone(),
                 sdp,
             },
             timeoutMs: 15000,
@@ -10149,7 +9788,7 @@ export function mountHeyBeanWebApp(mount) {
             && realtimeLocalWakeGate === gate;
     }
 
-    function handleLocalWakeDetected(gate, connectionGeneration) {
+    function handleLocalWakeDetected(gate, connectionGeneration, detection = {}) {
         if (!localWakeConnectionIsCurrent(gate, connectionGeneration)) return;
 
         const controller = browserVoiceV2Controller.snapshot();
@@ -10164,6 +9803,22 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
 
+        if (browserVoiceV2LocalWakeMatchesCompletedBarge({
+            snapshot: controller,
+            completedBarge: browserVoiceV2CompletedProviderBarge,
+            connectionGeneration,
+            gateGeneration: gate.currentGeneration(),
+            sourceSequence: detection.sourceSequence,
+        })) {
+            // This exact local PCM was already accepted as one meaningful
+            // interruption while the conversation was active. The controller
+            // owns that turn now; a delayed detector callback cannot replace it.
+            browserVoiceV2CompletedProviderBarge = null;
+            return;
+        }
+
+        browserVoiceV2CompletedProviderBarge = null;
+        browserVoiceV2LastProviderInputPcm = null;
         browserVoiceV2InputTransport.activate({ generation: gate.currentGeneration() });
         const wake = browserVoiceV2Controller.wakeConfirmed({ source: 'local_wake_gate' });
         browserVoiceV2PendingLocalWakeTurnId = wake.state.activeTurn?.id || '';
@@ -10263,7 +9918,7 @@ export function mountHeyBeanWebApp(mount) {
         const localWakeGate = new LocalWakeGate({
             audioContext: preparedAudioContext,
             consumerReady: false,
-            onDetected: () => handleLocalWakeDetected(localWakeGate, connectionGeneration),
+            onDetected: (event) => handleLocalWakeDetected(localWakeGate, connectionGeneration, event),
             onActivatedPcm: (event) => {
                 if (!browserVoiceV2InputTransport.append(event)) {
                     throw new Error('Activated microphone audio was not accepted by transcription.');
@@ -10456,20 +10111,26 @@ export function mountHeyBeanWebApp(mount) {
         return controller.activeTurn.id;
     }
 
-    function activateBrowserVoiceV2ProviderWake(transcriptId) {
-        const boundTurnId = browserVoiceV2ProviderWakeTurnIds.get(transcriptId);
-        if (boundTurnId) return boundTurnId;
+    function rememberBrowserVoiceV2CompletedProviderBarge(turnId) {
+        const controller = browserVoiceV2Controller.snapshot();
+        const gateGeneration = realtimeLocalWakeGate?.currentGeneration();
+        const pcmGeneration = Number(browserVoiceV2LastProviderInputPcm?.generation);
+        const throughSourceSequence = Number(browserVoiceV2LastProviderInputPcm?.sourceSequence);
+        if (!turnId
+            || !Number.isSafeInteger(gateGeneration)
+            || pcmGeneration !== gateGeneration
+            || !Number.isSafeInteger(throughSourceSequence)) {
+            browserVoiceV2CompletedProviderBarge = null;
+            return;
+        }
 
-        browserVoiceV2PotentialBargeInItems.delete(transcriptId);
-        const wake = browserVoiceV2Controller.wakeConfirmed({
-            source: 'provider_strict_wake',
-            providerItemId: transcriptId,
-        });
-        if (wake.state.conversationState !== BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING
-            || !wake.state.activeTurn?.id) return '';
-        browserVoiceV2ProviderWakeTurnIds.set(transcriptId, wake.state.activeTurn.id);
-        browserVoiceV2Controller.activationReady({ source: 'provider_strict_wake' });
-        return wake.state.activeTurn.id;
+        browserVoiceV2CompletedProviderBarge = {
+            turnId,
+            controllerGeneration: controller.generation,
+            connectionGeneration: controller.connectionGeneration,
+            gateGeneration,
+            throughSourceSequence,
+        };
     }
 
     function isBrowserVoiceV2RealtimeOutputEvent(type) {
@@ -10528,21 +10189,25 @@ export function mountHeyBeanWebApp(mount) {
                 delta: payload.delta,
             });
             bindBrowserVoiceV2ProviderItemToLocalWake(transcriptId);
-            const strictWake = isStrictRealtimeWakePhrase(draft);
-            if (strictWake) activateBrowserVoiceV2ProviderWake(transcriptId);
-            if (!strictWake && browserVoiceV2PotentialBargeInItems.has(transcriptId)
-                && isMeaningfulBrowserVoiceV2Interruption(draft)) {
-                browserVoiceV2PotentialBargeInItems.delete(transcriptId);
-                browserVoiceV2Controller.confirmBargeIn({ source: 'provider_transcript' });
-            }
-            const commandDraft = stripRealtimeLocalWakePrefix(draft).trim();
-            if (commandDraft && shouldDisplayRealtimeTranscriptDraft(commandDraft)
-                && !isLikelyNonEnglishRealtimeTranscript(commandDraft)) {
-                routeBrowserVoiceRealtimeIngressV2(browserVoiceV2Controller, {
-                    type: 'transcript_partial',
-                    text: commandDraft,
-                    providerItemId: transcriptId,
-                });
+            // Realtime can transcribe only PCM released by the local gate. Its
+            // words may strip an already-confirmed wake prefix, but they can
+            // never become a second dormant-activation authority.
+            const wakeConfirmed = browserVoiceV2ProviderWakeTurnIds.has(transcriptId);
+            const potentialBargeIn = browserVoiceV2PotentialBargeInItems.has(transcriptId);
+            const commandDraft = stripRealtimeLocalWakePrefix(draft, { wakeConfirmed }).trim();
+            if (commandDraft && shouldDisplayRealtimeTranscriptDraft(commandDraft)) {
+                if (potentialBargeIn && !wakeConfirmed) {
+                    // A delta is provisional. Show it during the already-active
+                    // conversation while playback stays recoverably ducked;
+                    // stable completion alone may confirm the interruption.
+                    updateVoiceWakeDraft(commandDraft);
+                } else {
+                    routeBrowserVoiceRealtimeIngressV2(browserVoiceV2Controller, {
+                        type: 'transcript_partial',
+                        text: commandDraft,
+                        providerItemId: transcriptId,
+                    });
+                }
             }
             return true;
         }
@@ -10555,22 +10220,39 @@ export function mountHeyBeanWebApp(mount) {
                 transcript: payload.transcript,
             });
             bindBrowserVoiceV2ProviderItemToLocalWake(transcriptId);
-            const strictWake = isStrictRealtimeWakePhrase(transcript);
-            if (strictWake) activateBrowserVoiceV2ProviderWake(transcriptId);
+            const wakeConfirmed = browserVoiceV2ProviderWakeTurnIds.has(transcriptId);
             const potentialBargeIn = browserVoiceV2PotentialBargeInItems.delete(transcriptId);
             updateRealtimeVoiceActivity(0, { decay: false });
-            if (!strictWake && potentialBargeIn && !isMeaningfulBrowserVoiceV2Interruption(transcript)) {
-                browserVoiceV2Controller.rejectBargeIn('background_or_noise', { source: 'provider_transcript' });
+            if (potentialBargeIn && !isMeaningfulBrowserVoiceV2Interruption(transcript)) {
+                if (browserVoiceV2Controller.snapshot().speechActive) {
+                    browserVoiceV2Controller.rejectBargeIn('background_or_noise', { source: 'provider_transcript' });
+                }
                 updateVoiceWakeDraft('');
                 if (transcriptId) realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
                 render();
                 return true;
             }
-            if (!strictWake && potentialBargeIn) {
-                browserVoiceV2Controller.confirmBargeIn({ source: 'provider_transcript' });
+            if (potentialBargeIn) {
+                const controller = browserVoiceV2Controller.snapshot();
+                if (controller.speechActive) {
+                    const confirmed = browserVoiceV2Controller.confirmBargeIn({ source: 'provider_transcript' });
+                    if (confirmed.state.conversationState === BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING) {
+                        // The utterance is already complete, so establish the
+                        // controller capture synchronously before routing it.
+                        browserVoiceV2Controller.activationReady({ source: 'provider_transcript' });
+                    }
+                } else if (controller.conversationState === BROWSER_VOICE_CONVERSATION_STATES.ACTIVATING) {
+                    browserVoiceV2Controller.activationReady({ source: 'provider_transcript' });
+                } else if (controller.conversationState === BROWSER_VOICE_CONVERSATION_STATES.FOLLOW_UP
+                    && !controller.followUpCandidate) {
+                    routeBrowserVoiceRealtimeIngressV2(browserVoiceV2Controller, {
+                        type: 'speech_started',
+                        providerItemId: transcriptId || null,
+                    });
+                }
             }
-            const command = stripRealtimeLocalWakePrefix(transcript).trim();
-            if (isRealtimeWakeAddressOnly(transcript)) {
+            const command = stripRealtimeLocalWakePrefix(transcript, { wakeConfirmed }).trim();
+            if (isRealtimeWakeAddressOnly(transcript, { wakeConfirmed })) {
                 updateVoiceWakeDraft('');
                 state.chatRunState = 'Listening…';
                 if (transcriptId) realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
@@ -10591,32 +10273,17 @@ export function mountHeyBeanWebApp(mount) {
                 browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
                 return true;
             }
-            if (isLikelyNonEnglishRealtimeTranscript(command)) {
-                if (browserVoiceV2Controller.snapshot().followUpCandidate) {
-                    browserVoiceV2Controller.rejectFollowUpCandidate('non_english_transcript', {
-                        source: 'provider_transcript',
-                        providerItemId: transcriptId || null,
-                    });
-                }
-                updateVoiceWakeDraft('');
-                state.error = 'Bean heard that as another language. Please repeat in English.';
-                render();
-                browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
-                return true;
-            }
-            if (isBrowserVoiceV2PlaybackStop(command)) {
-                browserVoiceV2Controller.stopPlayback('spoken_stop');
-                updateVoiceWakeDraft('');
-                state.chatRunState = 'Listening for “Hey Bean”…';
-                render();
-                browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
-                return true;
-            }
             routeBrowserVoiceRealtimeIngressV2(browserVoiceV2Controller, {
                 type: 'transcript_final',
                 text: command,
                 providerItemId: transcriptId || null,
             });
+            if (potentialBargeIn && !wakeConfirmed) {
+                const controller = browserVoiceV2Controller.snapshot();
+                rememberBrowserVoiceV2CompletedProviderBarge(
+                    controller.followUpCandidate?.id || controller.activeTurn?.id || '',
+                );
+            }
             browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
             return true;
         }
@@ -10624,16 +10291,24 @@ export function mountHeyBeanWebApp(mount) {
         if (type === 'conversation.item.input_audio_transcription.failed') {
             const transcriptId = payload.item_id || payload.item?.id || '';
             const potentialBargeIn = browserVoiceV2PotentialBargeInItems.delete(transcriptId);
+            const wakeConfirmed = browserVoiceV2ProviderWakeTurnIds.has(transcriptId);
             browserVoiceV2ProviderWakeTurnIds.delete(transcriptId);
             realtimeInputTranscripts.discard({ itemId: transcriptId, contentIndex: payload.content_index });
             updateRealtimeVoiceActivity(0, { decay: false });
-            if (potentialBargeIn) {
+            if (potentialBargeIn && browserVoiceV2Controller.snapshot().speechActive) {
                 // A failed transcript cannot confirm meaningful speech. Restore
                 // the current response instead of leaving it permanently ducked
                 // or manufacturing a new user turn from an unknown utterance.
                 browserVoiceV2Controller.rejectBargeIn('transcription_failed', {
                     source: 'provider_transcript',
                 });
+                updateVoiceWakeDraft('');
+                if (transcriptId) realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
+                state.error = '';
+                render();
+                return true;
+            }
+            if (potentialBargeIn && !wakeConfirmed) {
                 updateVoiceWakeDraft('');
                 if (transcriptId) realtimeSend(buildRealtimeConversationItemDeleteEvent(transcriptId));
                 state.error = '';
@@ -10647,15 +10322,8 @@ export function mountHeyBeanWebApp(mount) {
                 render();
                 return true;
             }
-            const failedTurnId = browserVoiceV2Controller.snapshot().activeTurn?.id || newBrowserVoiceV2TurnId();
-            browserVoiceV2Speech.enqueueSpeech({
-                turnId: failedTurnId,
-                text: 'I couldn’t understand that. Please say it again.',
-                purpose: BROWSER_VOICE_SPEECH_PURPOSES.CLARIFICATION,
-                priority: 100,
-            });
             browserVoiceV2Controller.captureFailed('transcription_failed', { source: 'provider_transcript' });
-            state.error = '';
+            state.error = 'Voice transcription failed. Please try again.';
             render();
             return true;
         }
@@ -10719,46 +10387,6 @@ export function mountHeyBeanWebApp(mount) {
             state.chatRunState = Number(error?.status || 0) === 402 ? 'Upgrade to continue' : 'Voice unavailable';
             render();
         }
-    }
-
-    function normalizeBrowserVoiceV2Speech(text) {
-        return String(text || '').toLowerCase().replace(/[^a-z0-9\s]+/g, ' ').replace(/\s+/g, ' ').trim();
-    }
-
-    function isBrowserVoiceV2PlaybackStop(text) {
-        const normalized = normalizeBrowserVoiceV2Speech(text)
-            .replace(/^hey bean\s+/, '')
-            .replace(/^(?:okay|ok)\s+/, '');
-        return /^(?:please )?(?:stop|stop talking|stop speaking|quiet)(?: please| now)?$/.test(normalized);
-    }
-
-    function isBrowserVoiceV2PlaybackEcho(text) {
-        const candidate = normalizeBrowserVoiceV2Speech(text);
-        const spoken = normalizeBrowserVoiceV2Speech(browserVoiceV2Speech.snapshot().current?.text || '');
-        if (!candidate || !spoken || candidate.split(' ').length < 2) return false;
-        if (spoken.includes(candidate)) return true;
-        const candidateWords = candidate.split(' ').filter((word) => word.length > 2);
-        if (!candidateWords.length) return false;
-        const spokenWords = new Set(spoken.split(' '));
-        const overlap = candidateWords.filter((word) => spokenWords.has(word)).length / candidateWords.length;
-        return overlap >= 0.8;
-    }
-
-    function isMeaningfulBrowserVoiceV2Interruption(text) {
-        const content = String(text || '').trim();
-        if (!content || isVoiceFillerOnly(content) || isBrowserVoiceV2PlaybackEcho(content)) return false;
-        if (isStrictRealtimeWakePhrase(content) || isBrowserVoiceV2PlaybackStop(content)) return true;
-        const normalized = normalizeBrowserVoiceV2Speech(content);
-        if (/^(?:yeah|yep|yes|okay|ok|right|sure|uh huh|mm hmm|mhm|got it)$/.test(normalized)) return false;
-        if (/^(?:no|wait|actually|instead|correction)$/.test(normalized)) return true;
-        if (browserVoiceV2Controller.snapshot().conversationState === BROWSER_VOICE_CONVERSATION_STATES.AWAITING_CLARIFICATION) {
-            return normalized.split(' ').filter(Boolean).length >= 1;
-        }
-        return classifyBrowserVoiceFollowUpRelevance(content, {
-            final: true,
-            responseExpected: Boolean(browserVoiceV2Speech.snapshot().current?.metadata?.responseExpected),
-        })
-            === BROWSER_VOICE_FOLLOW_UP_RELEVANCE.MEANINGFUL;
     }
 
     function handleRealtimeEvent(event) {
@@ -10836,6 +10464,8 @@ export function mountHeyBeanWebApp(mount) {
         browserVoiceV2ProviderWakeTurnIds.clear();
         browserVoiceV2RealtimeUsageEventIds.clear();
         browserVoiceV2PendingLocalWakeTurnId = '';
+        browserVoiceV2CompletedProviderBarge = null;
+        browserVoiceV2LastProviderInputPcm = null;
         realtimeVoiceActive = false;
         state.voiceWakeListening = false;
         state.voiceProcessing = false;
@@ -10951,13 +10581,9 @@ export function mountHeyBeanWebApp(mount) {
         const content = new FormData(form).get('message')?.toString().trim();
         if (!content) return;
         const editingMessageId = state.editingChatMessageId || '';
-        if (chatHasActiveTurn()) {
-            enqueueChatContent(content, editingMessageId ? { editingMessageId } : {});
-            return;
-        }
         state.editingChatMessageId = '';
         state.chatDraft = '';
-        await sendChatContent(content, editingMessageId ? { editingMessageId } : {});
+        void sendChatContent(content, editingMessageId ? { editingMessageId } : {});
     }
 
     async function copyChatMessage(messageId) {
@@ -10992,37 +10618,50 @@ export function mountHeyBeanWebApp(mount) {
     async function cancelBeanTurn(event = null, options = {}) {
         event?.preventDefault?.();
         event?.stopPropagation?.();
-        const cancelledSessionId = String(state.session?.id || '');
-        const cancelledClientRequestId = activeChatClientRequestId;
-        if (activeChatRequestId) {
-            cancelledChatRequestIds.add(activeChatRequestId);
-        }
-        activeChatRequestId = 0;
-        activeChatClientRequestId = '';
-        stopBeanWorkEventPolling();
-        state.busy = false;
-        state.chatRunState = 'Ready';
-        state.beanWorkItems = [];
+        const requests = options.requests || currentActiveChatRequests();
+        requests.forEach((request) => {
+            request.cancelRequested = true;
+            window.clearTimeout(request.pollTimer || 0);
+        });
+        state.chatRunState = requests.length ? 'Stopping…' : state.chatRunState;
         render();
-        scrollChatToBottom();
-
-        if (!cancelledSessionId) {
-            if (options.drainQueue !== false) scheduleChatQueueDrain();
-            return;
-        }
+        await Promise.allSettled(requests.map((request) => request.admissionPromise || Promise.resolve()));
+        const sessionIds = [...new Set(requests
+            .map((request) => String(request.sessionId || ''))
+            .filter(Boolean))];
+        if (!sessionIds.length && state.session?.id) sessionIds.push(String(state.session.id));
         try {
-            const cancelledSession = await api(`/assistant/sessions/${cancelledSessionId}/cancel`, {
-                method: 'POST',
-                body: cancelledClientRequestId ? { client_request_id: cancelledClientRequestId } : {},
-                timeoutMs: 5000,
-            });
-            if (String(state.session?.id || '') === cancelledSessionId) {
-                state.session = cancelledSession;
+            for (const sessionId of sessionIds) {
+                const cancelledSession = await api(`/assistant/sessions/${sessionId}/cancel`, {
+                    method: 'POST',
+                    body: {},
+                    timeoutMs: 5000,
+                });
+                if (String(state.session?.id || '') === sessionId) {
+                    state.session = cancelledSession;
+                }
             }
+            requests.forEach(removeActiveChatRequest);
+            if (!currentActiveChatRequests().length) stopBeanWorkEventPolling();
+            state.chatRunState = state.voiceWakeListening ? 'Listening for “Hey Bean”…' : 'Ready';
+            state.beanWorkItems = [];
+            syncChatBusyState();
+            render();
+            scrollChatToBottom();
+            return true;
         } catch (error) {
-            // A completed turn can race the cancel request; the UI has already been released.
-        } finally {
-            if (options.drainQueue !== false) scheduleChatQueueDrain();
+            requests.forEach((request) => {
+                request.cancelRequested = false;
+                if (activeChatRequests.get(request.clientRequestId) === request && request.sessionId) {
+                    pollDurableChatRequest(request);
+                }
+            });
+            syncChatBusyState();
+            state.chatRunState = requests.length ? 'Working…' : state.chatRunState;
+            state.error = friendlyError(error, 'stop Bean');
+            render();
+            if (options.throwOnFailure) throw error;
+            return false;
         }
     }
 
@@ -11037,23 +10676,33 @@ export function mountHeyBeanWebApp(mount) {
 
     async function sendChatContent(content, options = {}) {
         const requestId = ++chatRequestCounter;
-        activeChatRequestId = requestId;
         const wasOnboarding = needsBeanOnboarding();
         const editingMessageId = options.editingMessageId ? String(options.editingMessageId) : '';
-        const clientRequestId = `web-chat-${Date.now()}-${requestId}`;
+        const clientRequestId = `web-chat-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${requestId}`}`;
         const requestWorkspaceId = String(currentWorkspaceId() || '');
-        activeChatClientRequestId = clientRequestId;
+        let resolveAdmission;
+        const request = {
+            requestId,
+            clientRequestId,
+            content,
+            workspaceId: requestWorkspaceId,
+            sessionId: '',
+            runId: null,
+            userMessageId: null,
+            cancelRequested: false,
+            pollTimer: 0,
+            admissionPromise: new Promise((resolve) => {
+                resolveAdmission = resolve;
+            }),
+        };
+        const hadActiveRequest = chatHasActiveTurn();
+        activeChatRequests.set(clientRequestId, request);
         let result = null;
         let assistantContent = '';
         let assistantMessage = null;
-        let needsAssistantLookup = false;
 
         if (options.autoOpenChat && state.selected !== 'bean') {
             state.selected = 'bean';
-        }
-        if (editingMessageId) {
-            const editIndex = state.messages.findIndex((message) => String(message.id) === editingMessageId && message.role === 'user');
-            if (editIndex >= 0) state.messages.splice(editIndex);
         }
         const optimisticTurn = stageOptimisticUserTurn(state.messages, {
             content,
@@ -11065,51 +10714,27 @@ export function mountHeyBeanWebApp(mount) {
         state.chatDraft = '';
         state.editingChatMessageId = '';
         state.chatRunState = 'Thinking…';
-        resetBeanWorkItems([]);
+        if (!hadActiveRequest) resetBeanWorkItems([]);
+        upsertBeanWorkItem(`request-${clientRequestId}`, 'Working on request', 'running', { clientRequestId });
         state.error = '';
         render();
-        let resolveRequestSettlement;
-        const requestSettlement = new Promise((resolve) => {
-            resolveRequestSettlement = resolve;
-        });
-        activeChatRequestSettlement = requestSettlement;
         try {
-            if (!state.session?.id) {
-                const onboarding = needsBeanOnboarding();
-                const createdSession = await api('/assistant/sessions', {
-                    method: 'POST',
-                    body: chatSessionPayload(onboarding),
-                    timeoutMs: 45000,
-                });
-                if (String(currentWorkspaceId() || '') !== requestWorkspaceId || cancelledChatRequestIds.has(requestId)) {
-                    return { result: null, assistantContent: '', assistantMessage: null, clientRequestId };
-                }
-                state.session = createdSession;
-            }
-            const requestSessionId = String(state.session.id);
-            const requestContextIsCurrent = () => String(currentWorkspaceId() || '') === requestWorkspaceId
-                && String(state.session?.id || '') === requestSessionId;
-            startBeanWorkEventPolling(requestSessionId);
-            const useRunEndpoint = !editingMessageId;
-            const metadata = webChatMetadata({
-                source: useRunEndpoint ? 'web_routed_chat' : 'web_direct_chat',
-                client_request_id: clientRequestId,
-                ...(editingMessageId ? { edited_message_id: editingMessageId } : {}),
-            });
-            const path = useRunEndpoint
-                ? `/assistant/sessions/${state.session.id}/runs`
-                : editingMessageId
-                ? `/assistant/sessions/${state.session.id}/messages/${encodeURIComponent(editingMessageId)}/branch`
-                : `/assistant/sessions/${state.session.id}/messages`;
-            const body = useRunEndpoint
-                ? { content, source: 'web_routed_chat', metadata }
-                : { content, metadata };
+            const requestSession = await ensureChatSessionForRequest(request);
+            request.sessionId = String(requestSession.id);
+            if (chatRequestIsCurrent(request)) startBeanWorkEventPolling(request.sessionId);
+            const metadata = webChatMetadata({ client_request_id: clientRequestId });
+            const path = editingMessageId
+                ? `/assistant/sessions/${request.sessionId}/messages/${encodeURIComponent(editingMessageId)}/branch`
+                : `/assistant/sessions/${request.sessionId}/runs`;
+            const body = { content, metadata };
             result = await api(path, {
                 method: 'POST',
                 body,
                 timeoutMs: 45000,
             });
-            if (cancelledChatRequestIds.has(requestId) || !requestContextIsCurrent()) {
+            request.runId = Number(result?.run?.id || 0) || null;
+            request.userMessageId = Number(result?.user_message?.id || result?.run?.user_message_id || 0) || null;
+            if (!chatRequestIsCurrent(request) || request.cancelRequested) {
                 return { result, assistantContent: '', clientRequestId };
             }
             state.session = result.session || state.session;
@@ -11121,12 +10746,11 @@ export function mountHeyBeanWebApp(mount) {
             applyBeanWorkEvents(result.events);
             if (result.assistant_message) {
                 assistantMessage = result.assistant_message;
-                assistantContent = safeAssistantDisplayContent(conversationalMessageContent(result.assistant_message.content || ''));
+                assistantContent = String(result.assistant_message.content || '');
                 const visibleAssistantAdded = pushVisibleAssistantMessage(result.assistant_message, assistantContent);
                 if (!visibleAssistantAdded) {
                     assistantContent = '';
                     assistantMessage = null;
-                    needsAssistantLookup = true;
                     state.chatRunState = 'Working…';
                     ensurePendingBeanWorkItem();
                 }
@@ -11134,13 +10758,15 @@ export function mountHeyBeanWebApp(mount) {
             if (result.status === 'blocked' && isPlanLimitMessage(assistantContent)) {
                 state.error = assistantContent;
             }
-            const pendingResult = ['queued', 'running', 'processing'].includes(String(result.status || '').toLowerCase());
+            const pendingResult = chatRunPending(result.status);
             if (pendingResult) {
-                needsAssistantLookup = true;
                 state.chatRunState = 'Working…';
                 ensurePendingBeanWorkItem();
-            } else if (state.chatRunState !== 'Working…') {
+                pollDurableChatRequest(request);
+            } else {
                 state.chatRunState = result.status === 'blocked' ? 'Blocked' : 'Ready';
+                completeActiveBeanWorkItems(clientRequestId);
+                removeActiveChatRequest(request);
             }
             if (!pendingResult) {
                 await refreshOnly(false);
@@ -11151,54 +10777,36 @@ export function mountHeyBeanWebApp(mount) {
             }
             loadChatSessions({ resumeToday: false, shouldRender: false }).then(() => render()).catch(() => {});
         } catch (error) {
-            if (!cancelledChatRequestIds.has(requestId)) {
-                const recovered = await recoverChatFailureFromServer({
-                    sessionId: state.session?.id,
-                    clientRequestId,
-                    content,
-                    requestId,
-                    isCurrent: () => activeChatRequestId === requestId
-                        && activeChatClientRequestId === clientRequestId
-                        && String(currentWorkspaceId() || '') === requestWorkspaceId
-                        && !cancelledChatRequestIds.has(requestId),
-                });
-                if (recovered) {
-                    result = recovered.result;
-                    assistantContent = recovered.assistantContent || '';
-                    assistantMessage = recovered.result?.assistant_message || null;
-                    return { ...recovered, assistantMessage, clientRequestId };
+            const recovered = request.sessionId ? await recoverChatFailureFromServer({
+                sessionId: request.sessionId,
+                clientRequestId,
+                content,
+                isCurrent: () => chatRequestIsCurrent(request),
+            }) : null;
+            if (recovered) {
+                result = recovered.result;
+                request.runId = Number(result?.run?.id || 0) || request.runId;
+                assistantContent = recovered.assistantContent || '';
+                assistantMessage = recovered.result?.assistant_message || null;
+                if (chatRunPending(result?.status)) {
+                    if (!request.cancelRequested) pollDurableChatRequest(request);
+                } else {
+                    completeActiveBeanWorkItems(clientRequestId);
+                    removeActiveChatRequest(request);
                 }
-                assistantContent = friendlyError(error, 'send that message');
-                assistantMessage = { id: `error-${Date.now()}`, role: 'assistant', content: assistantContent };
-                state.error = assistantContent;
-                state.messages.push(assistantMessage);
+                return { ...recovered, assistantMessage, clientRequestId };
+            }
+            if (!request.cancelRequested) {
+                state.error = friendlyError(error, 'send that message');
                 state.chatRunState = 'Failed';
+                removeActiveChatRequest(request);
             }
         } finally {
-            cancelledChatRequestIds.delete(requestId);
-            if (activeChatRequestId === requestId) {
-                const shouldKeepPollingWork = result
-                    && (needsAssistantLookup || ['queued', 'running', 'processing'].includes(String(result.status || '').toLowerCase()))
-                    && state.session?.id;
-                activeChatRequestId = shouldKeepPollingWork ? requestId : 0;
-                activeChatClientRequestId = shouldKeepPollingWork ? clientRequestId : '';
-                state.busy = Boolean(shouldKeepPollingWork);
-                if (shouldKeepPollingWork) {
-                    startBeanWorkEventPolling(state.session.id, {
-                        clientRequestId,
-                        content,
-                    });
-                } else {
-                    stopBeanWorkEventPolling();
-                    scheduleChatQueueDrain();
-                }
-            }
+            resolveAdmission?.();
+            syncChatBusyState();
+            if (!currentActiveChatRequests().length) stopBeanWorkEventPolling();
             if (state.beanWorkItems.length && state.beanWorkItems.every((item) => beanWorkItemDone(item))) {
                 scheduleBeanWorkStatusClear();
-            }
-            resolveRequestSettlement?.();
-            if (activeChatRequestSettlement === requestSettlement) {
-                activeChatRequestSettlement = Promise.resolve();
             }
             render();
             scrollChatToBottom();
@@ -11206,51 +10814,9 @@ export function mountHeyBeanWebApp(mount) {
         return { result, assistantContent, assistantMessage, clientRequestId };
     }
 
-    async function recoverChatFailureFromServer({ sessionId, clientRequestId, content, isCurrent = () => true }) {
+    async function recoverChatFailureFromServer({ sessionId, clientRequestId, isCurrent = () => true }) {
         const requestKey = String(clientRequestId || '').trim();
         if (!sessionId || !requestKey) return null;
-
-        const applyCompletedSession = (sessionPayload) => {
-            const messages = normalizeList(sessionPayload.messages);
-            const userIndex = messages.findIndex((message) => {
-                const metadata = message?.metadata || {};
-                return message?.role === 'user' && String(metadata.client_request_id || '') === requestKey;
-            });
-            if (userIndex < 0) return null;
-
-            const assistant = messages.slice(userIndex + 1).find((message) => {
-                if (message?.role !== 'assistant') return false;
-                const assistantContent = safeAssistantDisplayContent(conversationalMessageContent(message.content || ''));
-                return !assistantMessageShouldStayOutOfChat({ ...message, content: assistantContent });
-            }) || null;
-            state.session = sessionPayload.session || sessionPayload;
-            state.messages = messages;
-            state.activity = normalizeList(sessionPayload.activity_events || sessionPayload.events).length
-                ? normalizeList(sessionPayload.activity_events || sessionPayload.events)
-                : state.activity;
-            state.activeBeanWorkMessageId = Number(messages[userIndex]?.id || 0) || state.activeBeanWorkMessageId;
-            if (assistant) {
-                const assistantContent = safeAssistantDisplayContent(conversationalMessageContent(assistant.content || ''));
-                assistant.content = assistantContent;
-                state.chatRunState = 'Ready';
-                completeActiveBeanWorkItems(requestKey);
-                refreshOnly(false).catch(() => {});
-                return { result: { status: 'completed', session: state.session, user_message: messages[userIndex], assistant_message: assistant, events: [] }, assistantContent };
-            }
-
-            state.chatRunState = 'Working…';
-            ensurePendingBeanWorkItem();
-            return { result: { status: 'queued', session: state.session, user_message: messages[userIndex], assistant_message: null, events: [] }, assistantContent: '' };
-        };
-
-        try {
-            const sessionPayload = await api(`/assistant/sessions/${sessionId}`, { timeoutMs: 5000 });
-            if (!isCurrent()) return null;
-            const recovered = applyCompletedSession(sessionPayload);
-            if (recovered) return recovered;
-        } catch (_) {
-            // Fall through to run lookup; the request may have been queued.
-        }
 
         try {
             const lookup = await api(`/assistant/sessions/${sessionId}/runs/lookup?client_request_id=${encodeURIComponent(requestKey)}`, { timeoutMs: 5000 });
@@ -11258,31 +10824,34 @@ export function mountHeyBeanWebApp(mount) {
             state.session = lookup.session || state.session;
             state.activity = normalizeList(lookup.events).length ? lookup.events : state.activity;
             if (lookup.user_message) {
+                const request = activeChatRequests.get(requestKey);
+                if (request) request.userMessageId = Number(lookup.user_message.id || 0) || request.userMessageId;
                 state.activeBeanWorkMessageId = Number(lookup.user_message.id || 0) || state.activeBeanWorkMessageId;
                 replaceLocalUserMessage(lookup.user_message);
             }
             applyBeanWorkEvents(lookup.events);
-            if (lookup.status === 'queued') {
+            const status = String(lookup.status || '').toLowerCase();
+            if (chatRunPending(status)) {
                 state.chatRunState = 'Working…';
                 ensurePendingBeanWorkItem();
                 return { result: lookup, assistantContent: '' };
             }
             if (lookup.assistant_message) {
-                const assistantContent = safeAssistantDisplayContent(conversationalMessageContent(lookup.assistant_message.content || ''));
+                const assistantContent = String(lookup.assistant_message.content || '');
                 const assistant = {
                     ...lookup.assistant_message,
                     content: assistantContent,
                 };
-                if (assistantMessageShouldStayOutOfChat(assistant)) {
-                    state.chatRunState = 'Working…';
-                    ensurePendingBeanWorkItem();
-                    return { result: { ...lookup, status: 'queued', assistant_message: null }, assistantContent: '' };
-                }
                 pushVisibleAssistantMessage(assistant, assistantContent);
-                state.chatRunState = lookup.status === 'blocked' ? 'Blocked' : 'Ready';
-                if (lookup.status === 'completed') completeActiveBeanWorkItems(requestKey);
+                state.chatRunState = status === 'blocked' ? 'Blocked' : (status === 'failed' ? 'Failed' : 'Ready');
+                completeActiveBeanWorkItems(requestKey);
                 refreshOnly(false).catch(() => {});
                 return { result: lookup, assistantContent };
+            }
+            if (['completed', 'blocked', 'failed', 'cancelled'].includes(status)) {
+                state.chatRunState = status === 'blocked' ? 'Blocked' : (status === 'failed' ? 'Failed' : 'Ready');
+                completeActiveBeanWorkItems(requestKey);
+                return { result: lookup, assistantContent: '' };
             }
         } catch (_) {
             return null;
@@ -11315,6 +10884,48 @@ export function mountHeyBeanWebApp(mount) {
         }
         const index = state.messages.length - 1 - reversedIndex;
         state.messages[index] = message;
+    }
+
+    function resumeDurableChatRequests(sessionPayload) {
+        const resumedSession = sessionPayload?.session || sessionPayload;
+        const sessionId = String(resumedSession?.id || '');
+        if (!sessionId) return;
+        const workspaceId = String(resumedSession?.workspace_id ?? resumedSession?.workspaceId ?? currentWorkspaceId() ?? '');
+        const runs = normalizeList(sessionPayload?.assistant_runs || sessionPayload?.assistantRuns);
+        runs.forEach((run) => {
+            if (!chatRunPending(run?.status)) return;
+            const clientRequestId = String(run?.client_request_id || run?.clientRequestId || '').trim();
+            if (!clientRequestId) return;
+            let request = activeChatRequests.get(clientRequestId);
+            if (!request) {
+                request = {
+                    requestId: ++chatRequestCounter,
+                    clientRequestId,
+                    content: String(run?.input || run?.user_message?.content || run?.userMessage?.content || ''),
+                    workspaceId,
+                    sessionId,
+                    runId: Number(run?.id || 0) || null,
+                    userMessageId: Number(run?.user_message_id || run?.userMessageId || run?.user_message?.id || run?.userMessage?.id || 0) || null,
+                    cancelRequested: false,
+                    pollTimer: 0,
+                    admissionPromise: Promise.resolve(),
+                };
+                activeChatRequests.set(clientRequestId, request);
+            } else {
+                request.sessionId = sessionId;
+                request.runId = Number(run?.id || 0) || request.runId;
+                request.userMessageId = Number(run?.user_message_id || run?.userMessageId || run?.user_message?.id || run?.userMessage?.id || 0) || request.userMessageId;
+            }
+            const userMessageId = Number(run?.user_message_id || run?.userMessageId || run?.user_message?.id || run?.userMessage?.id || 0);
+            state.activeBeanWorkMessageId = userMessageId || state.activeBeanWorkMessageId;
+            upsertBeanWorkItem(`request-${clientRequestId}`, 'Working on request', 'running', { clientRequestId });
+            pollDurableChatRequest(request);
+        });
+        syncChatBusyState();
+        if (activeChatRequestsForSession(sessionId).length) {
+            state.chatRunState = 'Working…';
+            startBeanWorkEventPolling(sessionId);
+        }
     }
 
     async function newSession() {
@@ -11350,6 +10961,14 @@ export function mountHeyBeanWebApp(mount) {
         return `${sign}${hours}:${minutes}`;
     }
 
+    function resolvedBrowserTimeZone() {
+        try {
+            return String(Intl.DateTimeFormat().resolvedOptions().timeZone || '').trim() || null;
+        } catch (_) {
+            return null;
+        }
+    }
+
     function clientTemporalContext() {
         const now = new Date();
         const offsetMinutes = -now.getTimezoneOffset();
@@ -11364,7 +10983,7 @@ export function mountHeyBeanWebApp(mount) {
         const timezoneName = parts.find((part) => part.type === 'timeZoneName')?.value || '';
         return {
             current_local_time: `${localDate}T${localTime}${offset}`,
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+            timezone: resolvedBrowserTimeZone(),
             timezone_name: timezoneName,
             timezone_offset: offset,
             timezone_offset_minutes: offsetMinutes,
@@ -11384,9 +11003,8 @@ export function mountHeyBeanWebApp(mount) {
         const today = dateOnly(new Date());
         return {
             title: onboarding ? 'Welcome to Bean' : `${monthDayLabel(today)} with Bean`,
-            runtime_mode: onboarding ? 'onboarding' : 'chat',
             workspace_id: currentWorkspaceId() || null,
-            metadata: webChatMetadata({ daily_date: today, source: 'web_chat' }),
+            metadata: webChatMetadata({ daily_date: today }),
         };
     }
 
@@ -11397,9 +11015,11 @@ export function mountHeyBeanWebApp(mount) {
         if (options.resumeToday) state.chatSessionHydrating = true;
         const params = new URLSearchParams({
             date: dateOnly(new Date()),
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
             limit: '30',
         });
+        const timezone = resolvedBrowserTimeZone()
+            || timezoneOffsetLabel(-new Date().getTimezoneOffset());
+        params.set('timezone', timezone);
         const workspaceId = currentWorkspaceId();
         if (workspaceId) params.set('workspace_id', workspaceId);
 
@@ -11410,7 +11030,7 @@ export function mountHeyBeanWebApp(mount) {
                 || String(currentWorkspaceId() || '') !== String(workspaceId || '')) return;
             state.chatSessions = normalizeList(result.sessions);
 
-            if (options.resumeToday && !state.busy) {
+            if (options.resumeToday && !chatHasActiveTurn()) {
                 const todaySession = result.today_session || result.todaySession || null;
                 if (todaySession?.id) {
                     await resumeSession(todaySession.id, {
@@ -11445,6 +11065,7 @@ export function mountHeyBeanWebApp(mount) {
             state.messages = normalizeList(session.messages);
             state.chatRunState = 'Ready';
             state.activity = normalizeList(session.activity_events || session.events).length ? normalizeList(session.activity_events || session.events) : state.activity;
+            resumeDurableChatRequests(session);
             if (!options.keepHistoryOpen) state.chatHistoryOpen = false;
             if (browserVoiceV2Enabled()) {
                 browserVoiceV2Client.start(state.session.id);
@@ -11623,21 +11244,15 @@ export function mountHeyBeanWebApp(mount) {
         render();
         try {
             const growthRange = encodeURIComponent(state.adminUserGrowthRange || 'last_30_days');
-            const [usage, modelRegistry, hermesStatus, liveLookup, planLimits, coupons] = await Promise.all([
+            const [usage, modelRegistry, liveLookup, planLimits, coupons] = await Promise.all([
                 api(`/admin/usage/summary?user_growth_range=${growthRange}`),
                 api('/admin/settings/models'),
-                api('/admin/hermes/status').catch((error) => ({
-                    configured: false,
-                    version: 'Unavailable',
-                    error: friendlyError(error, 'check Hermes status'),
-                })),
                 api('/admin/live-lookup/providers'),
                 api('/admin/plan-limits'),
                 api('/admin/coupon-codes'),
             ]);
             state.adminUsage = usage;
             state.adminModelRegistry = modelRegistry;
-            state.adminHermesStatus = hermesStatus;
             state.adminLiveLookup = liveLookup;
             state.adminPlanLimits = planLimits;
             state.adminCoupons = coupons;
@@ -12042,19 +11657,16 @@ export function mountHeyBeanWebApp(mount) {
     async function setWorkspace(id) {
         if (!id || String(id) === String(currentWorkspaceId())) return;
         const switchGeneration = ++workspaceSwitchGeneration;
-        const requestSettlement = activeChatRequestSettlement;
-        const cancelledSessionId = String(state.session?.id || '');
-        const cancelledClientRequestId = activeChatClientRequestId;
+        const activeRequests = currentActiveChatRequests();
         stopRealtimeVoiceForContextChange();
-        if (chatHasActiveTurn()) {
-            await cancelBeanTurn(null, { drainQueue: false });
-            await requestSettlement;
-            if (cancelledSessionId) {
-                await api(`/assistant/sessions/${cancelledSessionId}/cancel`, {
-                    method: 'POST',
-                    body: cancelledClientRequestId ? { client_request_id: cancelledClientRequestId } : {},
-                    timeoutMs: 5000,
-                }).catch(() => null);
+        if (activeRequests.length) {
+            try {
+                await cancelBeanTurn(null, { requests: activeRequests, throwOnFailure: true });
+            } catch (error) {
+                if (switchGeneration !== workspaceSwitchGeneration) return;
+                state.error = friendlyError(error, 'cancel current Bean work before switching workspaces');
+                render();
+                return;
             }
         }
         if (switchGeneration !== workspaceSwitchGeneration) return;
@@ -12064,7 +11676,6 @@ export function mountHeyBeanWebApp(mount) {
             session: state.session,
             messages: state.messages,
             chatSessions: state.chatSessions,
-            chatQueue: state.chatQueue,
             chatRunState: state.chatRunState,
         };
         chatContextGeneration += 1;
@@ -12072,10 +11683,8 @@ export function mountHeyBeanWebApp(mount) {
         state.session = null;
         state.messages = [];
         state.chatSessions = [];
-        state.chatQueue = [];
         state.chatRunState = 'Ready';
-        activeChatRequestId = 0;
-        activeChatClientRequestId = '';
+        chatSessionAdmissionPromise = null;
         stopBeanWorkEventPolling();
         dashboardRefreshGeneration++;
         setActiveWorkspaceLocally(id);
@@ -12108,11 +11717,9 @@ export function mountHeyBeanWebApp(mount) {
             state.session = previousChat.session;
             state.messages = previousChat.messages;
             state.chatSessions = previousChat.chatSessions;
-            state.chatQueue = previousChat.chatQueue;
             state.chatRunState = previousChat.chatRunState;
             state.error = friendlyError(error, 'switch workspaces');
             render();
-            scheduleChatQueueDrain();
         }
     }
 
@@ -12224,8 +11831,8 @@ export function mountHeyBeanWebApp(mount) {
         await loadSignedIn();
     }
 
-    async function approveApproval(id, alwaysApprove) {
-        await api(`/approvals/${id}/approve`, { method: 'POST', body: { always_approve: alwaysApprove } });
+    async function approveApproval(id) {
+        await api(`/approvals/${id}/approve`, { method: 'POST' });
         await refreshOnly();
     }
 
@@ -12444,8 +12051,8 @@ export function mountHeyBeanWebApp(mount) {
         return `${count} ${noun}${count === 1 ? '' : 's'}`;
     }
 
-    function pendingReminders() {
-        return state.reminders.filter((reminder) => !reminderCompleted(reminder));
+    function scheduledReminders() {
+        return state.reminders.filter((reminder) => reminder?.status === 'scheduled');
     }
 
     function criticalItems() {
@@ -12461,7 +12068,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function criticalRemindersForToday() {
         const today = new Date();
-        return pendingReminders()
+        return scheduledReminders()
             .filter((reminder) => reminderCritical(reminder) && (itemOverdue(reminder, 'reminder') || isSameDay(reminderDateValue(reminder), today)))
             .sort(compareReminders);
     }
@@ -12540,12 +12147,13 @@ export function mountHeyBeanWebApp(mount) {
         if (recurrence === 'yearly') return addYearsNoOverflow(date, 1);
         if (recurrence === 'specific_days') return nextSpecificRecurringDay(date, metadata);
         if (recurrence === 'interval') {
-            const interval = Math.max(1, Number.parseInt(metadata.interval || 1, 10));
-            const unit = String(metadata.unit || metadata.interval_unit || metadata.intervalUnit || 'days').toLowerCase();
-            if (unit === 'week' || unit === 'weeks') return addDays(date, interval * 7);
-            if (unit === 'month' || unit === 'months') return addMonthsNoOverflow(date, interval);
-            if (unit === 'year' || unit === 'years') return addYearsNoOverflow(date, interval);
-            return addDays(date, interval);
+            const interval = Number.parseInt(metadata.interval, 10);
+            if (!Number.isInteger(interval) || interval <= 0) return null;
+            if (metadata.unit === 'days') return addDays(date, interval);
+            if (metadata.unit === 'weeks') return addDays(date, interval * 7);
+            if (metadata.unit === 'months') return addMonthsNoOverflow(date, interval);
+            if (metadata.unit === 'years') return addYearsNoOverflow(date, interval);
+            return null;
         }
         return null;
     }
@@ -12572,21 +12180,13 @@ export function mountHeyBeanWebApp(mount) {
         const recurrence = recurrenceMetadata(metadata);
         const interval = Number.parseInt(recurrence?.interval, 10);
         if (!Number.isFinite(interval) || interval <= 0) return 'Custom interval';
-        const unit = String(recurrence?.unit || recurrence?.interval_unit || recurrence?.intervalUnit || 'days').toLowerCase();
+        const unit = recurrence?.unit;
+        if (!['days', 'weeks', 'months', 'years'].includes(unit)) return 'Custom interval';
         return `Every ${interval} ${intervalUnitLabel(unit, interval)}`;
     }
 
     function intervalUnitLabel(unit, interval) {
-        const normalized = {
-            day: 'day',
-            days: 'day',
-            week: 'week',
-            weeks: 'week',
-            month: 'month',
-            months: 'month',
-            year: 'year',
-            years: 'year',
-        }[unit] || unit.replace(/s$/, '') || 'day';
+        const normalized = { days: 'day', weeks: 'week', months: 'month', years: 'year' }[unit] || '';
         return interval === 1 ? normalized : `${normalized}s`;
     }
 
@@ -12661,11 +12261,11 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function taskCompleted(task) {
-        return Boolean(task?.completed_at || task?.completedAt || ['completed', 'complete', 'done'].includes(String(task?.status || '').toLowerCase()));
+        return task?.status === 'completed';
     }
 
     function reminderCompleted(reminder) {
-        return Boolean(reminder?.completed_at || reminder?.completedAt || ['completed', 'complete', 'done'].includes(String(reminder?.status || '').toLowerCase()));
+        return reminder?.status === 'completed';
     }
 
     function taskSubtitle(task) {
@@ -12796,25 +12396,20 @@ export function mountHeyBeanWebApp(mount) {
 
     function eventAllDay(event = null) {
         const metadata = typeof event?.metadata === 'object' && event?.metadata ? event.metadata : {};
-        const value = event?.all_day ?? event?.allDay ?? metadata.all_day ?? metadata.allDay;
-        return value === true || value === 1 || ['true', '1', 'yes'].includes(String(value || '').toLowerCase());
+        return (event?.all_day ?? metadata.all_day) === true;
     }
 
     function eventIntersectsDay(event, day) {
         const startValue = event.starts_at || event.startsAt;
         if (!startValue) return false;
-        if (eventAllDay(event)) {
-            const dayValue = dateOnly(day);
-            const startDate = storedDateOnly(startValue);
-            const endDate = allDayExclusiveEndDate(event, startDate);
-            return startDate <= dayValue && endDate > dayValue;
-        }
         const dayStart = new Date(parseLocalDate(day));
         dayStart.setHours(0, 0, 0, 0);
         const dayEnd = addDays(dayStart, 1);
         const start = new Date(startValue);
         const endValue = event.ends_at || event.endsAt;
-        const end = endValue ? new Date(endValue) : addMinutes(start, 60);
+        const end = endValue
+            ? new Date(endValue)
+            : (eventAllDay(event) ? addDays(start, 1) : addMinutes(start, 60));
         return start < dayEnd && end > dayStart;
     }
 
@@ -13007,42 +12602,6 @@ export function mountHeyBeanWebApp(mount) {
     function dateOnly(date) {
         const d = parseLocalDate(date);
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    }
-
-    function allDayEndDateInputValue(item, fallbackStartDate) {
-        const end = item?.ends_at || item?.endsAt;
-        if (!end || !eventAllDay(item)) return fallbackStartDate;
-        return allDayInclusiveEndDate(item) || fallbackStartDate;
-    }
-
-    function allDayInclusiveEndDate(event) {
-        const startValue = event?.starts_at || event?.startsAt;
-        const endValue = event?.ends_at || event?.endsAt;
-        if (!endValue) return startValue ? storedDateOnly(startValue) : '';
-        const endDate = storedDateOnly(endValue);
-        if (allDayEndIsExclusiveMidnight(startValue, endValue)) {
-            return dateOnly(addDays(endDate, -1));
-        }
-        return endDate;
-    }
-
-    function allDayExclusiveEndDate(event, fallbackStartDate = '') {
-        const startValue = event?.starts_at || event?.startsAt;
-        const endValue = event?.ends_at || event?.endsAt;
-        const startDate = fallbackStartDate || (startValue ? storedDateOnly(startValue) : '');
-        if (!endValue) return dateOnly(addDays(startDate, 1));
-        const endDate = storedDateOnly(endValue);
-        return allDayEndIsExclusiveMidnight(startValue, endValue) ? endDate : dateOnly(addDays(endDate, 1));
-    }
-
-    function allDayEndIsExclusiveMidnight(startValue, endValue) {
-        if (!startValue || !endValue) return false;
-        const startDate = storedDateOnly(startValue);
-        const endDate = storedDateOnly(endValue);
-        if (endDate <= startDate) return false;
-        const endText = String(endValue);
-        return /^\d{4}-\d{2}-\d{2}$/.test(endText)
-            || /T00:00(?::00(?:\.0+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/.test(endText);
     }
 
     function storedDateOnly(value) {
@@ -13280,7 +12839,6 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function recurrenceLabel(value) {
-        const normalized = normalizeRecurrenceValue(value);
         return {
             none: 'None',
             daily: 'Daily',
@@ -13289,7 +12847,7 @@ export function mountHeyBeanWebApp(mount) {
             yearly: 'Yearly',
             specific_days: 'Specific days',
             interval: 'Every interval',
-        }[normalized] || '';
+        }[value] || '';
     }
 
     function toDatetimeLocal(value) {
@@ -13305,12 +12863,16 @@ export function mountHeyBeanWebApp(mount) {
 
     function fromDateInputStart(value) {
         if (!value) return null;
-        return `${value}T00:00:00.000Z`;
+        const date = parseLocalDate(value);
+        date.setHours(0, 0, 0, 0);
+        return date.toISOString();
     }
 
-    function fromDateInputEndInclusive(value) {
+    function fromDateInputEndExclusive(value) {
         if (!value) return null;
-        return `${value}T23:59:00.000Z`;
+        const date = parseLocalDate(value);
+        date.setHours(0, 0, 0, 0);
+        return date.toISOString();
     }
 
     function safeColor(value, fallback = themeAccentColor()) {
@@ -13748,25 +13310,8 @@ export function mountHeyBeanWebApp(mount) {
 
     function friendlyError(error, action) {
         const message = error?.message || 'Something went wrong.';
-        const safeMessage = safeBeanErrorMessage(message);
-        if (safeMessage) return safeMessage;
         if (/failed to fetch/i.test(message)) return `Could not ${action}. Check your connection and try again.`;
         return message;
-    }
-
-    function safeBeanErrorMessage(message) {
-        const text = String(message || '').trim();
-        if (!text) return '';
-        const normalized = text.toLowerCase().replace(/\s+/g, ' ');
-        const staleFailurePhrases = [
-            'bean could not finish',
-            'could not finish that request',
-            'work failed',
-            'start that background work',
-            'bean hit a snag starting',
-        ];
-        if (!staleFailurePhrases.some((phrase) => normalized.includes(phrase))) return '';
-        return 'Bean is checking the latest app state now. If I need one more detail, I will ask.';
     }
 
     function errorMarkup(message) {

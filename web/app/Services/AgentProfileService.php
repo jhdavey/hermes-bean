@@ -3,11 +3,8 @@
 namespace App\Services;
 
 use App\Models\AgentProfile;
-use App\Models\MemoryItem;
 use App\Models\User;
 use App\Models\Workspace;
-use App\Services\OpenAiVoiceService;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 
 class AgentProfileService
@@ -51,8 +48,6 @@ class AgentProfileService
             $profile->forceFill(['user_id' => $user->id])->save();
         }
 
-        $this->bootstrapRuntimeHome($profile);
-
         return $profile;
     }
 
@@ -68,8 +63,6 @@ class AgentProfileService
             $this->defaultsForWorkspace($workspace, $owner)
         );
 
-        $this->bootstrapRuntimeHome($profile);
-
         return $profile;
     }
 
@@ -80,7 +73,6 @@ class AgentProfileService
         $defaults['user_id'] = $actor->id;
         $defaults['slug'] = $slug;
         $defaults['display_name'] = $workspace->name.' Hermes';
-        $defaults['runtime_home'] = rtrim((string) config('services.hermes_runtime.users_home', ''), '/').'/workspaces/'.$workspace->id.'/'.$slug;
         $defaults['metadata'] = [...($defaults['metadata'] ?? []), 'workspace_id' => $workspace->id, 'workspace_type' => $workspace->type];
 
         return $defaults;
@@ -94,14 +86,10 @@ class AgentProfileService
             'slug' => $slug,
             'display_name' => $user->name."'s Hermes",
             'status' => 'active',
-            'provider' => (string) config('services.hermes_runtime.default_provider', 'openai'),
-            'model' => app(AdminSettingsService::class)->mainModel(),
-            'router_mode' => 'agent',
-            'runtime_home' => rtrim((string) config('services.hermes_runtime.users_home', ''), '/').'/'.$slug,
             'settings' => [
                 'memory_enabled' => true,
                 'skills_enabled' => true,
-                'timezone' => 'UTC',
+                'timezone' => null,
                 'personality_type' => 'balanced',
                 'personality_label' => self::PERSONALITIES['balanced']['label'],
                 'personality_prompt' => self::PERSONALITIES['balanced']['prompt'],
@@ -112,30 +100,6 @@ class AgentProfileService
                     'completed_at' => null,
                 ],
                 'voice' => app(OpenAiVoiceService::class)->defaultVoiceSettings(),
-            ],
-            'tool_policy' => [
-                'allow_internal_calendar' => true,
-                'allow_tasks' => true,
-                'allow_reminders' => true,
-                'allow_activity_records' => true,
-                'external_calendar_sync' => false,
-            ],
-            'approval_policy' => [
-                'auto_approve_low_risk' => true,
-                'require_approval_for' => [
-                    'destructive_actions',
-                    'outgoing_mail',
-                    'outgoing_messages',
-                    'payments',
-                    'purchases',
-                    'deployments',
-                    'external_api_side_effects',
-                ],
-                'approval_surface' => 'app_home_top_banner',
-            ],
-            'metadata' => [
-                'seeded_from' => 'hermes_bean_default_v1',
-                'runtime_strategy' => 'server_hosted_unique_agent',
             ],
         ];
     }
@@ -169,7 +133,6 @@ class AgentProfileService
         $settings['memory'] = $this->memorySettingsFor($settings, $source);
 
         $profile->forceFill(['settings' => $settings])->save();
-        $this->writeRuntimeMemory($profile, $settings['memory']);
 
         return $profile->refresh();
     }
@@ -190,7 +153,6 @@ class AgentProfileService
             $merged['onboarding']['updated_at'] = now()->toISOString();
             $merged['onboarding']['source'] = $source;
             $merged['memory'] = $this->memorySettingsFor($merged, $source);
-            $this->writeRuntimeMemory($profile, $merged['memory']);
         }
 
         $profile->forceFill(['settings' => $merged])->save();
@@ -305,37 +267,6 @@ class AgentProfileService
         ];
     }
 
-    public function appendWorkspaceMemoryNote(Workspace $workspace, User $actor, string $note): AgentProfile
-    {
-        $note = trim($note);
-        if ($note === '') {
-            throw new \InvalidArgumentException('Workspace memory note cannot be empty.');
-        }
-
-        $profile = $this->ensureForWorkspace($workspace, $actor);
-        $path = $this->memoryPath($profile, 'MEMORY.md');
-        File::ensureDirectoryExists(dirname($path));
-        if (! File::exists($path)) {
-            $this->writeRuntimeMarkdownMemory($profile->refresh());
-        }
-
-        $existing = File::exists($path) ? File::get($path) : '';
-        $line = '- '.$note;
-        if (! str_contains($existing, $line)) {
-            File::append($path, PHP_EOL.$line.PHP_EOL);
-        }
-
-        return $profile->refresh();
-    }
-
-    public function refreshRuntimeMemoryForWorkspace(Workspace $workspace, User $actor): AgentProfile
-    {
-        $profile = $this->ensureForWorkspace($workspace, $actor);
-        $this->writeRuntimeMarkdownMemory($profile->refresh());
-
-        return $profile->refresh();
-    }
-
     private function preferenceSummary(string $personality, array $priorities, ?string $context): string
     {
         $parts = ['User prefers Bean personality: '.$personality.'.'];
@@ -347,23 +278,6 @@ class AgentProfileService
         }
 
         return implode(' ', $parts);
-    }
-
-    private function writeRuntimeMemory(AgentProfile $profile, array $memory): void
-    {
-        if (! $profile->runtime_home) {
-            return;
-        }
-
-        File::ensureDirectoryExists($this->memoriesDirectory($profile));
-        $jsonPath = rtrim($profile->runtime_home, '/').'/bean-preferences-memory.json';
-        if (File::exists($jsonPath)) {
-            File::delete($jsonPath);
-        }
-
-        $this->deleteLegacyRootMemoryFiles($profile);
-
-        $this->writeRuntimeMarkdownMemory($profile->refresh(), $memory);
     }
 
     private function recursiveMerge(array $base, array $updates): array
@@ -382,177 +296,5 @@ class AgentProfileService
     public static function personalityKeys(): array
     {
         return array_keys(self::PERSONALITIES);
-    }
-
-    private function writeRuntimeMarkdownMemory(AgentProfile $profile, ?array $memory = null): void
-    {
-        if (! $profile->runtime_home) {
-            return;
-        }
-
-        File::ensureDirectoryExists($this->memoriesDirectory($profile));
-        $this->deleteLegacyRootMemoryFiles($profile);
-
-        $workspace = $profile->workspace ?: ($profile->workspace_id ? Workspace::find($profile->workspace_id) : null);
-        $user = $profile->user ?: ($profile->user_id ? User::find($profile->user_id) : null);
-        $settings = $profile->settings ?? [];
-        $memory ??= (array) data_get($settings, 'memory', []);
-        $workspaceName = $workspace?->name ?? $profile->display_name ?? 'Personal';
-        $workspaceType = $workspace?->type ?? 'personal';
-        $workspaceId = $workspace?->id ?? $profile->workspace_id;
-        $priorities = array_values(array_filter((array) data_get($settings, 'onboarding.priorities', [])));
-        $context = data_get($settings, 'onboarding.context');
-        $summary = data_get($memory, 'user_preferences.summary') ?: data_get($settings, 'memory.user_preferences.summary');
-        $personality = (string) data_get($settings, 'personality_type', 'balanced');
-        $updatedAt = now()->toISOString();
-        $learnedFacts = $this->structuredMemoryFacts($profile);
-
-        $this->putManagedMarkdown(
-            $this->memoryPath($profile, 'USER.md'),
-            '# User Memory'.PHP_EOL.PHP_EOL,
-            implode(PHP_EOL, array_filter([
-                '## Managed identity context',
-                '- signed_in_user_id: '.($user?->id ?? 'unknown'),
-                '- signed_in_user_name: '.($user?->name ?: 'unknown'),
-                '- signed_in_user_email: '.($user?->email ?: 'unknown'),
-                '- workspace_id: '.($workspaceId ?? 'unknown'),
-                '- workspace_name: '.$workspaceName,
-                '- workspace_type: '.$workspaceType,
-                '- agent_profile_id: '.$profile->id,
-                '- agent_slug: '.$profile->slug,
-                '- updated_at: '.$updatedAt,
-            ])).PHP_EOL
-        );
-
-        $this->putManagedMarkdown(
-            $this->memoryPath($profile, 'MEMORY.md'),
-            '# Workspace Memory'.PHP_EOL.PHP_EOL,
-            implode(PHP_EOL, array_filter([
-                '## Managed workspace memory context',
-                '- workspace_id: '.($workspaceId ?? 'unknown'),
-                '- workspace_name: '.$workspaceName,
-                '- workspace_type: '.$workspaceType,
-                '- isolation: This memory belongs only to this '.$workspaceType.' workspace. Do not copy facts into Personal or another household unless a user explicitly asks to sync/share them.',
-                '- personality_type: '.$personality,
-                '- personality_label: '.((string) data_get($settings, 'personality_label', 'Balanced helper')),
-                $priorities !== [] ? '- priorities: '.implode(', ', $priorities) : null,
-                $summary ? '- preference_summary: '.$summary : null,
-                is_string($context) && trim($context) !== '' ? '- context: '.trim($context) : null,
-                '- updated_at: '.$updatedAt,
-            ])).PHP_EOL.PHP_EOL."## Agent-learned durable facts\n"
-            .($learnedFacts !== [] ? implode(PHP_EOL, $learnedFacts).PHP_EOL : 'No structured durable facts yet.'.PHP_EOL)
-            ."\nKeep Personal-only facts out of household files and household facts out of Personal files.\n"
-        );
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function structuredMemoryFacts(AgentProfile $profile): array
-    {
-        if (! $profile->workspace_id || ! $profile->user_id) {
-            return [];
-        }
-
-        return MemoryItem::query()
-            ->where('user_id', $profile->user_id)
-            ->where('workspace_id', $profile->workspace_id)
-            ->where('status', 'active')
-            ->where(function ($query): void {
-                $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
-            })
-            ->orderByDesc('importance')
-            ->orderByDesc('confidence')
-            ->latest('last_seen_at')
-            ->latest('updated_at')
-            ->limit(30)
-            ->get(['type', 'content', 'confidence', 'importance'])
-            ->map(function (MemoryItem $item): string {
-                $type = str_replace('_', ' ', (string) $item->type);
-
-                return '- ['.$type.'] '.str($item->content)->squish()->limit(260, '')->toString()
-                    .' (confidence: '.$item->confidence.', importance: '.$item->importance.')';
-            })
-            ->values()
-            ->all();
-    }
-
-    private function putManagedMarkdown(string $path, string $defaultHeader, string $managedContent): void
-    {
-        File::ensureDirectoryExists(dirname($path));
-
-        $begin = '<!-- BEGIN HERMES-BEAN MANAGED -->';
-        $end = '<!-- END HERMES-BEAN MANAGED -->';
-        $section = $begin.PHP_EOL.rtrim($managedContent).PHP_EOL.$end;
-
-        if (! File::exists($path)) {
-            File::put($path, rtrim($defaultHeader).PHP_EOL.PHP_EOL.$section.PHP_EOL);
-
-            return;
-        }
-
-        $existing = File::get($path);
-        $pattern = '/'.preg_quote($begin, '/').'.*?'.preg_quote($end, '/').'/s';
-        if (preg_match($pattern, $existing)) {
-            File::put($path, preg_replace($pattern, $section, $existing));
-
-            return;
-        }
-
-        File::put($path, rtrim($existing).PHP_EOL.PHP_EOL.$section.PHP_EOL);
-    }
-
-    private function memoriesDirectory(AgentProfile $profile): string
-    {
-        return rtrim((string) $profile->runtime_home, '/').'/memories';
-    }
-
-    private function memoryPath(AgentProfile $profile, string $file): string
-    {
-        return $this->memoriesDirectory($profile).'/'.$file;
-    }
-
-    private function deleteLegacyRootMemoryFiles(AgentProfile $profile): void
-    {
-        foreach (['USER.md', 'MEMORY.md', 'HOUSEHOLD.md', 'PREFERENCES.md'] as $legacyFile) {
-            $legacyPath = rtrim((string) $profile->runtime_home, '/').'/'.$legacyFile;
-            if (File::exists($legacyPath)) {
-                File::delete($legacyPath);
-            }
-        }
-    }
-
-    private function bootstrapRuntimeHome(AgentProfile $profile): void
-    {
-        if (! $profile->runtime_home) {
-            return;
-        }
-
-        File::ensureDirectoryExists($profile->runtime_home);
-        File::ensureDirectoryExists($profile->runtime_home.'/sessions');
-        File::ensureDirectoryExists($profile->runtime_home.'/logs');
-        $this->writeRuntimeMarkdownMemory($profile->refresh());
-
-        $baseHome = (string) config('services.hermes_runtime.base_home', '');
-        if ($baseHome === '') {
-            return;
-        }
-
-        foreach (['.env', 'config.yaml'] as $file) {
-            $source = rtrim($baseHome, '/').'/'.$file;
-            $target = rtrim($profile->runtime_home, '/').'/'.$file;
-
-            if (! File::exists($source) || File::exists($target) || is_link($target)) {
-                continue;
-            }
-
-            if (function_exists('symlink')) {
-                @symlink($source, $target);
-            }
-
-            if (! File::exists($target) && ! is_link($target)) {
-                File::copy($source, $target);
-            }
-        }
     }
 }

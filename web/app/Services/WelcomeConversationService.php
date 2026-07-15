@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\ConversationSessionKind;
 use App\Models\ConversationSession;
 use App\Models\User;
 
@@ -20,7 +21,7 @@ class WelcomeConversationService
                 'workspace_id' => $workspaceId,
                 'created_by_user_id' => $user->id,
                 'status' => 'active',
-                'runtime_mode' => 'onboarding',
+                'session_kind' => ConversationSessionKind::Onboarding,
                 'last_activity_at' => now(),
                 'metadata' => ['created_from' => 'welcome_conversation_v1'],
             ]

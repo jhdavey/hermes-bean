@@ -20,28 +20,26 @@ return new class extends Migration
             $table->string('client_kind', 40)->default('browser_voice');
             $table->text('transcript');
             $table->text('sanitized_transcript');
-            $table->string('lane', 40);
-            $table->string('handler', 120);
             $table->string('state', 40)->default('accepted')->index();
             $table->unsignedInteger('version')->default(1);
             $table->string('idempotency_key', 120);
             $table->boolean('acknowledgement_required')->default(false);
             $table->text('acknowledgement_text')->nullable();
-            $table->timestamp('acknowledged_at')->nullable();
-            $table->timestamp('accepted_at')->nullable();
-            $table->timestamp('started_at')->nullable();
-            $table->timestamp('first_progress_at')->nullable();
-            $table->timestamp('terminal_at')->nullable();
-            $table->timestamp('final_delivered_at')->nullable();
-            $table->timestamp('hard_deadline_at')->nullable();
-            $table->timestamp('no_progress_deadline_at')->nullable();
+            $table->timestamp('acknowledged_at', 6)->nullable();
+            $table->timestamp('accepted_at', 6)->nullable();
+            $table->timestamp('started_at', 6)->nullable();
+            $table->timestamp('first_progress_at', 6)->nullable();
+            $table->timestamp('terminal_at', 6)->nullable();
+            $table->timestamp('final_delivered_at', 6)->nullable();
+            $table->timestamp('hard_deadline_at', 6)->nullable();
+            $table->timestamp('no_progress_deadline_at', 6)->nullable();
             $table->string('failure_category', 80)->nullable();
             $table->text('internal_failure_detail')->nullable();
             $table->text('user_facing_failure_text')->nullable();
             $table->string('side_effect_status', 40)->default('none');
             $table->unsignedTinyInteger('retry_count')->default(0);
             $table->json('metadata')->nullable();
-            $table->timestamps();
+            $table->timestamps(6);
 
             $table->unique(['user_id', 'idempotency_key'], 'voice_turns_user_idempotency_unique');
             $table->index(['conversation_session_id', 'state'], 'voice_turns_session_state_index');
@@ -63,7 +61,7 @@ return new class extends Migration
             $table->unsignedInteger('version');
             $table->string('source', 80)->default('server');
             $table->json('payload')->nullable();
-            $table->timestamps();
+            $table->timestamps(6);
 
             $table->unique(['voice_turn_id', 'sequence'], 'voice_turn_events_turn_sequence_unique');
             $table->index(['conversation_session_id', 'id'], 'voice_turn_events_session_cursor_index');
@@ -78,9 +76,9 @@ return new class extends Migration
             $table->integer('priority')->default(0)->after('label');
             $table->string('resource_lock_key', 180)->nullable()->after('priority');
             $table->string('idempotency_key', 160)->nullable()->after('resource_lock_key');
-            $table->timestamp('hard_deadline_at')->nullable()->after('idempotency_key');
-            $table->timestamp('last_progress_at')->nullable()->after('hard_deadline_at');
-            $table->timestamp('dispatch_requested_at')->nullable()->after('last_progress_at');
+            $table->timestamp('hard_deadline_at', 6)->nullable()->after('idempotency_key');
+            $table->timestamp('last_progress_at', 6)->nullable()->after('hard_deadline_at');
+            $table->timestamp('dispatch_requested_at', 6)->nullable()->after('last_progress_at');
 
             $table->unique(['voice_turn_id', 'idempotency_key'], 'assistant_runs_voice_turn_idempotency_unique');
             $table->index(['conversation_session_id', 'status', 'priority'], 'assistant_runs_voice_capacity_index');

@@ -173,6 +173,7 @@ class _BeanWorkItem {
     this.status = 'running',
     this.resolvedByEvent = false,
     this.order,
+    this.clientRequestId,
   });
 
   final String id;
@@ -180,12 +181,14 @@ class _BeanWorkItem {
   final String status;
   final bool resolvedByEvent;
   final int? order;
+  final String? clientRequestId;
 
   bool get done => const {
     'completed',
     'succeeded',
     'recorded',
     'cancelled',
+    'blocked',
     'failed',
     'skipped',
   }.contains(status.toLowerCase());
@@ -195,12 +198,14 @@ class _BeanWorkItem {
     String? status,
     bool? resolvedByEvent,
     int? order,
+    String? clientRequestId,
   }) => _BeanWorkItem(
     id: id,
     label: label ?? this.label,
     status: status ?? this.status,
     resolvedByEvent: resolvedByEvent ?? this.resolvedByEvent,
     order: order ?? this.order,
+    clientRequestId: clientRequestId ?? this.clientRequestId,
   );
 }
 
@@ -481,11 +486,7 @@ String _themeCategoryColorHex() {
 
 Map<String, Object?> _flutterChatMetadata({
   Map<String, Object?> additional = const {},
-}) => {
-  'source': 'flutter',
-  'client_context': _clientTemporalContext(),
-  ...additional,
-};
+}) => {'client_context': _clientTemporalContext(), ...additional};
 
 String beanFriendlyErrorMessage(Object error, {String? action}) {
   final subscriptionLimitMessage = _subscriptionLimitMessageFromError(error);
@@ -499,15 +500,6 @@ String beanFriendlyErrorMessage(Object error, {String? action}) {
   return '$prefix $guidance';
 }
 
-String beanFriendlyChatFailureMessage(Object error) {
-  final guidance = _beanErrorGuidance(error);
-  if (guidance.toLowerCase().contains('plan limit') ||
-      guidance.toLowerCase().contains('upgrade')) {
-    return guidance;
-  }
-  return 'I’m checking the latest app state now. If I need one more detail, I’ll ask.';
-}
-
 bool beanShouldRecoverQueuedRequest(Object error) {
   if (error is HermesApiException) {
     return error.statusCode == 408 ||
@@ -517,79 +509,6 @@ bool beanShouldRecoverQueuedRequest(Object error) {
         error.statusCode == 504;
   }
   return error is SocketException || error is TimeoutException;
-}
-
-String beanSafeAssistantDisplayContent(String content) {
-  final trimmed = content.trim();
-  if (trimmed.isEmpty) return content;
-  final normalized = trimmed.toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
-  final staleFailurePhrases = [
-    'bean could not finish',
-    'could not finish that request',
-    'bean could not complete',
-    'could not complete the requested change',
-    'i could not complete',
-    'bean hit a snag',
-    'hermesapiexception',
-    'statuscode:',
-    'status code',
-    'bad gateway',
-    'server error',
-    'gateway timeout',
-    'too many attempts',
-    'i tried to check that live information',
-    'lookup did not return',
-    'lookup didn’t return',
-    "lookup didn't return",
-    'did not return a usable result',
-    'no usable result',
-    'could not get that live lookup back quickly enough',
-    'couldn’t get that live lookup back quickly enough',
-    "couldn't get that live lookup back quickly enough",
-    'live lookup back quickly enough',
-    'i’m still checking',
-    "i'm still checking",
-    'still checking live sources',
-    'still checking live weather',
-    'response did not come through',
-    'something unexpected happened',
-  ];
-  if (staleFailurePhrases.any(normalized.contains)) {
-    return 'I’m checking the latest app state now. If I need one more detail, I’ll ask.';
-  }
-
-  return content;
-}
-
-@visibleForTesting
-bool beanAssistantMessageShouldStayOutOfChat(HermesMessage message) {
-  if (message.role != 'assistant') return false;
-
-  final runtime = message.metadata['runtime']?.toString();
-  if (runtime == 'missing_run_bridge' ||
-      runtime == 'direct_queue_bridge' ||
-      runtime == 'async_queue_bridge' ||
-      runtime == 'failed_run_bridge') {
-    return true;
-  }
-
-  final normalized = (message.content ?? '')
-      .toLowerCase()
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-
-  return normalized ==
-          'i’m checking the latest app state now. if i need one more detail, i’ll ask.' ||
-      normalized ==
-          "i'm checking the latest app state now. if i need one more detail, i'll ask." ||
-      normalized ==
-          'i didn’t receive that request cleanly. please send it once more and i’ll take it from there.' ||
-      normalized ==
-          "i didn't receive that request cleanly. please send it once more and i'll take it from there." ||
-      normalized ==
-          'i’m on it. i’m syncing against the latest app state now, and i’ll ask for one detail if i need it.' ||
-      normalized ==
-          "i'm on it. i'm syncing against the latest app state now, and i'll ask for one detail if i need it.";
 }
 
 String _beanErrorGuidance(Object error) {

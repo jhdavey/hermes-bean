@@ -336,6 +336,7 @@ class _CalendarAgenda extends StatelessWidget {
     HermesCalendarEvent event, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -403,6 +404,7 @@ class _CalendarAgenda extends StatelessWidget {
                           savedEvent, {
                           required String title,
                           required String startsAt,
+                          required bool allDay,
                           String? endsAt,
                           String? notes,
                           String? location,
@@ -423,6 +425,7 @@ class _CalendarAgenda extends StatelessWidget {
                           savedEvent,
                           title: title,
                           startsAt: startsAt,
+                          allDay: allDay,
                           endsAt: endsAt,
                           notes: notes,
                           location: location,
@@ -445,6 +448,7 @@ class _CalendarAgenda extends StatelessWidget {
                       startsAt:
                           savedEvent.startsAt ??
                           DateTime.now().toUtc().toIso8601String(),
+                      allDay: _eventIsAllDay(savedEvent),
                       endsAt: savedEvent.endsAt,
                       notes: savedEvent.notes,
                       location: savedEvent.location,

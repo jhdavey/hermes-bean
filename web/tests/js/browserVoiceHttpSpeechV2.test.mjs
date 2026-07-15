@@ -28,6 +28,7 @@ function pcmChunk(samples = [0, 8_192, -8_192, 16_384]) {
 
 function streamingHarness() {
     const reads = [];
+    const requests = [];
     const reader = {
         canceled: false,
         read() {
@@ -80,9 +81,12 @@ function streamingHarness() {
     };
     const timers = new Map();
     let timerSequence = 0;
-    const base = harness({ requestAudio: () => Promise.resolve(response) });
+    const base = harness();
     const transport = new BrowserVoiceHttpSpeechTransportV2({
-        requestAudio: () => Promise.resolve(response),
+        requestAudio: (item, options) => {
+            requests.push({ item, options });
+            return Promise.resolve(response);
+        },
         createAudioContext: () => context,
         timers: {
             setTimeout(callback) { const id = ++timerSequence; timers.set(id, callback); return id; },
@@ -90,30 +94,12 @@ function streamingHarness() {
         },
         startupTimeoutMs: 800,
     });
-    return { ...base, transport, reader, reads, sources, context, timers };
-}
-
-function audioHarness() {
-    const listeners = new Map();
-    const audio = {
-        volume: 1,
-        paused: false,
-        playCalls: 0,
-        addEventListener(type, listener) { listeners.set(type, listener); },
-        play() { this.playCalls += 1; return Promise.resolve(); },
-        pause() { this.paused = true; },
-        removeAttribute() {},
-        load() {},
-        emit(type) { listeners.get(type)?.(); },
-    };
-    return audio;
+    return { ...base, transport, reader, reads, sources, context, timers, requests };
 }
 
 function harness({ requestAudio = null } = {}) {
     const request = deferred();
     const requests = [];
-    const audio = audioHarness();
-    const revoked = [];
     const starts = [];
     const ends = [];
     const errors = [];
@@ -122,9 +108,6 @@ function harness({ requestAudio = null } = {}) {
             requests.push({ item, options });
             return request.promise;
         }),
-        createAudio: () => audio,
-        createObjectURL: () => 'blob:bean-speech',
-        revokeObjectURL: (url) => revoked.push(url),
         timers: { setTimeout: () => 1, clearTimeout: () => {} },
     });
     const item = {
@@ -138,37 +121,47 @@ function harness({ requestAudio = null } = {}) {
         onEnd: (reason) => ends.push(reason),
         onError: (error) => errors.push(error.message),
     };
-    return { transport, request, requests, audio, revoked, starts, ends, errors, item, listeners };
+    return { transport, request, requests, starts, ends, errors, item, listeners };
 }
 
-test('[BV2-SPEECH-TRANSPORT-01] exact durable text is forwarded unchanged and starts only when audio plays', async () => {
-    const run = harness();
+test('[BV2-SPEECH-TRANSPORT-01] exact durable text is forwarded unchanged and starts on the first streamed PCM', async () => {
+    const run = streamingHarness();
     run.transport.play(run.item, run.listeners);
+    await settle();
     assert.equal(run.requests[0].item.text, run.item.text);
     assert.deepEqual(run.starts, []);
 
-    run.request.resolve(new Blob(['audio'], { type: 'audio/mpeg' }));
-    await Promise.resolve();
-    await Promise.resolve();
-    assert.equal(run.audio.playCalls, 1);
-    assert.deepEqual(run.starts, []);
-
-    run.audio.emit('playing');
+    run.reads[0].resolve({ done: false, value: pcmChunk() });
+    await settle();
     assert.deepEqual(run.starts, ['started']);
+
+    run.reads[1].resolve({ done: true });
+    await settle();
+    run.sources[0].end();
 });
 
-test('[BV2-SPEECH-TRANSPORT-02] playback completion is delivered once and releases its object URL', async () => {
+test('[BV2-SPEECH-TRANSPORT-02] streamed playback completion is delivered once and releases ownership', async () => {
+    const run = streamingHarness();
+    run.transport.play(run.item, run.listeners);
+    await settle();
+    run.reads[0].resolve({ done: false, value: pcmChunk() });
+    await settle();
+    run.reads[1].resolve({ done: true });
+    await settle();
+    run.sources[0].end();
+    run.sources[0].end();
+
+    assert.deepEqual(run.ends, ['completed']);
+    assert.equal(run.transport.snapshot().current, null);
+});
+
+test('buffered audio responses are rejected instead of activating a compatibility transport', async () => {
     const run = harness();
     run.transport.play(run.item, run.listeners);
     run.request.resolve(new Blob(['audio'], { type: 'audio/mpeg' }));
-    await Promise.resolve();
-    await Promise.resolve();
-    run.audio.emit('playing');
-    run.audio.emit('ended');
-    run.audio.emit('ended');
+    await settle();
 
-    assert.deepEqual(run.ends, ['completed']);
-    assert.deepEqual(run.revoked, ['blob:bean-speech']);
+    assert.deepEqual(run.errors, ['Bean voice requires a streaming audio response.']);
     assert.equal(run.transport.snapshot().current, null);
 });
 
@@ -177,11 +170,18 @@ test('[BV2-SPEECH-TRANSPORT-03] Stop aborts a pending request and late audio can
     const handle = run.transport.play(run.item, run.listeners);
     assert.equal(run.transport.stop(handle, 'button_stop'), true);
     assert.equal(run.requests[0].options.signal.aborted, true);
-    run.request.resolve(new Blob(['late audio'], { type: 'audio/mpeg' }));
-    await Promise.resolve();
-    await Promise.resolve();
+    let readerCreated = false;
+    run.request.resolve({
+        body: {
+            getReader() {
+                readerCreated = true;
+                return { read: async () => ({ done: true }), cancel: async () => {} };
+            },
+        },
+    });
+    await settle();
 
-    assert.equal(run.audio.playCalls, 0);
+    assert.equal(readerCreated, false);
     assert.deepEqual(run.starts, []);
     assert.deepEqual(run.ends, []);
 });
@@ -197,14 +197,13 @@ test('[BV2-SPEECH-TRANSPORT-04] a synthesis failure reports once and releases ow
     assert.equal(run.transport.snapshot().current, null);
 });
 
-test('[BV2-SPEECH-TRANSPORT-05] volume changes apply to the owned audio element', async () => {
-    const run = harness();
+test('[BV2-SPEECH-TRANSPORT-05] volume changes apply to the owned streaming gain node', async () => {
+    const run = streamingHarness();
     const handle = run.transport.play(run.item, run.listeners);
-    run.request.resolve(new Blob(['audio'], { type: 'audio/mpeg' }));
-    await Promise.resolve();
-    await Promise.resolve();
+    await settle();
     assert.equal(run.transport.setVolume(handle, 0.35), true);
-    assert.equal(run.audio.volume, 0.35);
+    assert.equal(run.transport.current.gainNode.gain.value, 0.35);
+    run.transport.stop(handle, 'test_complete');
 });
 
 test('[BV2-SPEECH-TRANSPORT-06] streamed PCM begins before the complete response arrives and preserves exact text ownership', async () => {

@@ -23,10 +23,10 @@ class RecurringCalendarEventExpansionTest extends TestCase
         $response = $this->withToken($token)->postJson('/api/calendar-events', [
             'workspace_id' => $workspaceId,
             'title' => 'Daily standup',
+            'all_day' => false,
             'starts_at' => '2026-05-26T13:00:00Z',
             'ends_at' => '2026-05-26T13:30:00Z',
             'recurrence' => 'daily',
-            'metadata' => ['recurrence' => 'daily'],
         ])->assertCreated();
 
         $sourceId = $response->json('data.id');
@@ -75,7 +75,6 @@ class RecurringCalendarEventExpansionTest extends TestCase
             'ends_at' => '2026-06-01 15:00:00',
             'recurrence' => 'daily',
             'metadata' => [
-                'recurrence' => 'daily',
                 'recurrence_materialized_until' => '2026-06-02',
             ],
         ]);
@@ -117,10 +116,10 @@ class RecurringCalendarEventExpansionTest extends TestCase
         $sourceId = $this->withToken($token)->postJson('/api/calendar-events', [
             'workspace_id' => $workspaceId,
             'title' => 'Daily workout',
+            'all_day' => false,
             'starts_at' => '2026-06-22T05:00:00Z',
             'ends_at' => '2026-06-22T06:00:00Z',
             'recurrence' => 'daily',
-            'metadata' => ['recurrence' => 'daily'],
         ])->assertCreated()->json('data.id');
 
         $occurrence = CalendarEvent::query()
@@ -128,17 +127,16 @@ class RecurringCalendarEventExpansionTest extends TestCase
             ->where('starts_at', '2026-06-23 05:00:00')
             ->firstOrFail();
 
+        $this->withToken($token)->patchJson('/api/calendar-events/'.$occurrence->id, [
+            'recurrence' => 'daily',
+        ])->assertUnprocessable()->assertJsonValidationErrors('recurrence');
+
         $response = $this->withToken($token)->patchJson('/api/calendar-events/'.$occurrence->id, [
             'title' => 'Daily workout',
+            'all_day' => false,
             'starts_at' => '2026-06-24T05:00:00Z',
             'ends_at' => '2026-06-24T06:00:00Z',
-            'recurrence' => 'daily',
-            'metadata' => [
-                ...$occurrence->metadata,
-                'recurrence' => 'daily',
-                'specific_days' => ['mon', 'tue'],
-                'interval' => 2,
-            ],
+            'metadata' => array_diff_key($occurrence->metadata, ['all_day' => true]),
         ])->assertOk();
 
         $response->assertJsonPath('data.recurrence', null);
@@ -146,7 +144,7 @@ class RecurringCalendarEventExpansionTest extends TestCase
 
         $this->assertNull($occurrence->recurrence);
         $this->assertSame('2026-06-24 05:00:00', $occurrence->starts_at->format('Y-m-d H:i:s'));
-        $this->assertSame('none', $occurrence->metadata['recurrence']);
+        $this->assertArrayNotHasKey('recurrence', $occurrence->metadata);
         $this->assertSame($sourceId, $occurrence->metadata['recurrence_parent_event_id']);
         $this->assertArrayNotHasKey('specific_days', $occurrence->metadata);
         $this->assertArrayNotHasKey('interval', $occurrence->metadata);
@@ -169,10 +167,10 @@ class RecurringCalendarEventExpansionTest extends TestCase
         $sourceId = $this->withToken($token)->postJson('/api/calendar-events', [
             'workspace_id' => $workspaceId,
             'title' => 'Daily workout',
+            'all_day' => false,
             'starts_at' => '2026-06-22T05:00:00Z',
             'ends_at' => '2026-06-22T06:00:00Z',
             'recurrence' => 'daily',
-            'metadata' => ['recurrence' => 'daily'],
         ])->assertCreated()->json('data.id');
 
         CalendarEvent::query()
@@ -208,6 +206,7 @@ class RecurringCalendarEventExpansionTest extends TestCase
         $sourceId = $this->withToken($token)->postJson('/api/calendar-events', [
             'workspace_id' => $workspaceId,
             'title' => 'Weekly lesson',
+            'all_day' => false,
             'starts_at' => '2026-05-26T14:00:00Z',
             'ends_at' => '2026-05-26T15:00:00Z',
             'recurrence' => 'weekly',
@@ -241,6 +240,7 @@ class RecurringCalendarEventExpansionTest extends TestCase
         $sourceId = $this->withToken($token)->postJson('/api/calendar-events', [
             'workspace_id' => $personalWorkspaceId,
             'title' => 'Weekly lesson',
+            'all_day' => false,
             'starts_at' => '2026-05-26T14:00:00Z',
             'ends_at' => '2026-05-26T15:00:00Z',
             'recurrence' => 'weekly',
@@ -293,6 +293,7 @@ class RecurringCalendarEventExpansionTest extends TestCase
         $sourceId = $this->withToken($token)->postJson('/api/calendar-events', [
             'workspace_id' => $workspaceId,
             'title' => 'Weekly club',
+            'all_day' => false,
             'starts_at' => '2026-05-26T14:00:00Z',
             'ends_at' => '2026-05-26T15:00:00Z',
             'recurrence' => 'weekly',
@@ -329,6 +330,7 @@ class RecurringCalendarEventExpansionTest extends TestCase
         $sourceId = $this->withToken($token)->postJson('/api/calendar-events', [
             'workspace_id' => $workspaceId,
             'title' => 'Weekly series',
+            'all_day' => false,
             'starts_at' => '2026-05-26T14:00:00Z',
             'ends_at' => '2026-05-26T15:00:00Z',
             'recurrence' => 'weekly',
@@ -360,6 +362,7 @@ class RecurringCalendarEventExpansionTest extends TestCase
         $sourceId = $this->withToken($token)->postJson('/api/calendar-events', [
             'workspace_id' => $workspaceId,
             'title' => 'Original hidden series',
+            'all_day' => false,
             'starts_at' => '2026-05-26T14:00:00Z',
             'ends_at' => '2026-05-26T15:00:00Z',
             'recurrence' => 'weekly',

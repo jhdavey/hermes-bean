@@ -5,7 +5,8 @@ import 'dart:math';
 import 'package:hermes_bean_app/hermes_api_client.dart';
 
 Future<void> main() async {
-  final suffix = '${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(999999)}';
+  final suffix =
+      '${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(999999)}';
   final email = 'flutter-smoke+$suffix@example.com';
   const password = 'SmokeTestPassword123!';
   final client = HermesApiClient(baseUrl: Uri.parse(hermesApiBaseUrl));
@@ -23,13 +24,36 @@ Future<void> main() async {
     print('me=${me.email == email}');
 
     final today = await client.todaySummary();
-    print('today_tasks=${today.tasks.length} approvals=${today.approvals.length} calendar=${today.calendarEvents.length}');
+    print(
+      'today_tasks=${today.tasks.length} approvals=${today.approvals.length} calendar=${today.calendarEvents.length}',
+    );
 
     final session = await client.startSession(title: 'Flutter live smoke');
-    final result = await client.sendMessage(
+    final clientRequestId = 'flutter-smoke-$suffix';
+    var result = await client.queueMessage(
       sessionId: session.id,
       content: 'Please add workout to my calendar from 6pm-7pm',
+      clientRequestId: clientRequestId,
     );
+    for (
+      var attempt = 0;
+      attempt < 30 && result.assistantMessage == null;
+      attempt++
+    ) {
+      if (const {
+        'blocked',
+        'cancelled',
+        'canceled',
+        'failed',
+      }.contains(result.status)) {
+        break;
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+      result = await client.lookupQueuedMessage(
+        sessionId: session.id,
+        clientRequestId: clientRequestId,
+      );
+    }
     final assistantContent = result.assistantMessage?.content ?? '';
     print('assistant=$assistantContent');
     print('events=${result.events.map((event) => event.eventType).join(',')}');
@@ -44,7 +68,9 @@ Future<void> main() async {
     print('has_workout=$hasWorkout');
 
     if (!hasWorkout || !assistantContent.contains('workout')) {
-      throw StateError('Flutter API smoke did not observe the created workout event.');
+      throw StateError(
+        'Flutter API smoke did not observe the created workout event.',
+      );
     }
   } finally {
     try {

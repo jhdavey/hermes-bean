@@ -292,16 +292,11 @@ bool _reminderIsOverdue(HermesReminder reminder) {
 }
 
 bool _taskIsCompleted(HermesTask task) {
-  final status = (task.status ?? 'open').toLowerCase().replaceAll('_', '-');
-  return status == 'completed' || status == 'complete' || status == 'done';
+  return task.status == 'completed';
 }
 
 bool _reminderIsCompleted(HermesReminder reminder) {
-  final status = (reminder.status ?? 'pending').toLowerCase().replaceAll(
-    '_',
-    '-',
-  );
-  return status == 'completed' || status == 'complete' || status == 'done';
+  return reminder.status == 'completed';
 }
 
 String _taskSubtitle(HermesTask task) {
@@ -327,7 +322,7 @@ String _reminderSubtitle(HermesReminder reminder) {
     showDateForOverdue: overdue,
   );
   final parts = <String>[
-    _reminderIsCompleted(reminder) ? 'Completed' : 'Pending',
+    _reminderIsCompleted(reminder) ? 'Completed' : 'Scheduled',
     if ((reminder.category ?? '').trim().isNotEmpty) reminder.category!.trim(),
     if (overdue) 'overdue',
     if (dueLabel.isNotEmpty) dueLabel else 'No time set',
@@ -346,18 +341,13 @@ DateTime? _parseReminderDueDate(HermesReminder reminder) {
 }
 
 String _recurrenceSummaryFromMetadata(Map<String, Object?>? metadata) {
-  final recurrence = (metadata?['recurrence']?.toString() ?? 'none')
-      .trim()
-      .toLowerCase();
-  if (recurrence.isEmpty || recurrence == 'none') return '';
+  final recurrence = metadata?['recurrence'];
+  if (recurrence == null || recurrence == 'none') return '';
   if (recurrence == 'interval') {
     final interval = _recurrenceIntervalFromMetadata(metadata);
     if (interval == null || interval <= 0) return 'Custom interval';
-    final unit =
-        metadata?['unit']?.toString() ??
-        metadata?['interval_unit']?.toString() ??
-        metadata?['intervalUnit']?.toString() ??
-        'days';
+    final unit = metadata?['unit']?.toString() ?? '';
+    if (!const {'days', 'weeks', 'months', 'years'}.contains(unit)) return '';
     return 'Every $interval ${_intervalUnitLabel(unit, interval)}';
   }
   return switch (recurrence) {
@@ -366,30 +356,22 @@ String _recurrenceSummaryFromMetadata(Map<String, Object?>? metadata) {
     'monthly' => 'Monthly',
     'yearly' => 'Yearly',
     'specific_days' => 'Specific days',
-    _ => recurrence,
+    _ => '',
   };
 }
 
 int? _recurrenceIntervalFromMetadata(Map<String, Object?>? metadata) {
   final value = metadata?['interval'];
-  if (value is int) return value;
-  if (value is num) return value.round();
-  return int.tryParse(value?.toString() ?? '');
+  return value is int ? value : null;
 }
 
 String _intervalUnitLabel(String unit, int interval) {
-  final normalized = switch (unit.trim().toLowerCase()) {
-    'day' || 'days' => 'day',
-    'week' || 'weeks' => 'week',
-    'month' || 'months' => 'month',
-    'year' || 'years' => 'year',
-    final value when value.endsWith('s') && value.length > 1 => value.substring(
-      0,
-      value.length - 1,
-    ),
-    final value when value.isNotEmpty => value,
-    _ => 'day',
-  };
+  final normalized = const {
+    'days': 'day',
+    'weeks': 'week',
+    'months': 'month',
+    'years': 'year',
+  }[unit]!;
   return interval == 1 ? normalized : '${normalized}s';
 }
 
@@ -402,21 +384,7 @@ Color _safeCategoryColor(String? value) {
 }
 
 bool _eventIsAllDay(HermesCalendarEvent event) {
-  final metadata = event.metadata;
-  final marker = metadata?['all_day'] ?? metadata?['allDay'];
-  final markerText = marker?.toString().toLowerCase();
-  if (marker == true || markerText == 'true' || markerText == '1') return true;
-  final source = metadata?['source']?.toString() ?? '';
-  if (source != 'google_calendar') return false;
-  final start = _parseCalendarEventDateTime(event.startsAt);
-  final end = _parseCalendarEventDateTime(event.endsAt, event.startsAt);
-  if (start == null || end == null) return false;
-  final startsAtMidnight =
-      start.hour == 0 && start.minute == 0 && start.second == 0;
-  final endsAtMidnight = end.hour == 0 && end.minute == 0 && end.second == 0;
-  return startsAtMidnight &&
-      endsAtMidnight &&
-      !end.isBefore(start.add(const Duration(days: 1)));
+  return event.metadata?['all_day'] == true;
 }
 
 bool _eventRendersAboveTimeline(HermesCalendarEvent event) =>
@@ -427,7 +395,7 @@ bool _eventIsTimedMultiDay(HermesCalendarEvent event) =>
 
 bool _eventSpansMultipleDays(HermesCalendarEvent event) {
   final start = _parseCalendarEventDateTime(event.startsAt);
-  final end = _parseCalendarEventDateTime(event.endsAt, event.startsAt);
+  final end = _parseCalendarEventDateTime(event.endsAt);
   if (start == null || end == null || !end.isAfter(start)) return false;
   return !_sameCalendarDay(start, end);
 }
@@ -439,14 +407,14 @@ DateTime? _multiDayEventStartDay(HermesCalendarEvent event) {
 
 DateTime? _multiDayEventEndDay(HermesCalendarEvent event) {
   final start = _parseCalendarEventDateTime(event.startsAt);
-  final end = _parseCalendarEventDateTime(event.endsAt, event.startsAt);
+  final end = _parseCalendarEventDateTime(event.endsAt);
   if (start == null || end == null || !end.isAfter(start)) return null;
   return _dateOnly(end);
 }
 
 String _eventTimeRangeShort(HermesCalendarEvent event) {
   final start = _parseCalendarEventDateTime(event.startsAt);
-  final end = _parseCalendarEventDateTime(event.endsAt, event.startsAt);
+  final end = _parseCalendarEventDateTime(event.endsAt);
   if (start != null && end != null && end.isAfter(start)) {
     return _compactTimeRangeLabel(start, end);
   }
@@ -460,7 +428,7 @@ String _compactDueTimeLabel(String? value, {bool showDateForOverdue = false}) {
   if (trimmed.isEmpty) return '';
   final today = _dateOnly(DateTime.now());
   if (_wireValueLooksDateOnly(trimmed)) {
-    final date = _calendarEventStoredDate(trimmed);
+    final date = _parseCalendarDateKey(trimmed);
     if (date == null) return trimmed;
     return _compactDueDateLabel(
       date,
@@ -507,7 +475,7 @@ String _compactTimeRangeLabel(DateTime start, DateTime end) {
 
 String _multiDayEventLabelForDay(HermesCalendarEvent event, DateTime day) {
   final start = _parseCalendarEventDateTime(event.startsAt);
-  final end = _parseCalendarEventDateTime(event.endsAt, event.startsAt);
+  final end = _parseCalendarEventDateTime(event.endsAt);
   if (start != null && _sameCalendarDay(start, day)) {
     return '${_naturalTimeLabel(start)} ${event.title}';
   }
@@ -521,20 +489,20 @@ String? _taskReminderInputToWireValue(String? value) {
   final trimmed = value?.trim() ?? '';
   if (trimmed.isEmpty) return null;
   final parsed = _parseCalendarEventDateTime(trimmed);
-  return parsed == null ? trimmed : _dateTimeToWireIsoString(parsed);
+  return parsed == null ? null : _dateTimeToWireIsoString(parsed);
 }
 
 bool _taskIsRecurring(HermesTask task) {
   final metadata = task.metadata;
   if (metadata == null) return false;
-  final recurrence =
-      metadata['recurrence'] ?? metadata['recurring'] ?? metadata['rrule'];
-  final recurrenceValue = recurrence?.toString().trim().toLowerCase();
-  return recurrence != null &&
-      recurrence != false &&
-      recurrenceValue != null &&
-      recurrenceValue.isNotEmpty &&
-      recurrenceValue != 'none';
+  return const {
+    'daily',
+    'weekly',
+    'monthly',
+    'yearly',
+    'specific_days',
+    'interval',
+  }.contains(metadata['recurrence']);
 }
 
 DateTime? _parseTaskDueDate(HermesTask task) {
@@ -556,8 +524,7 @@ List<_CommandCenterAgendaItem> _commandCenterAgendaItems({
   for (final event in calendar) {
     if (!_eventFallsOnDay(event, today)) continue;
     final start = _parseCalendarEventDateTime(event.startsAt);
-    final end =
-        _parseCalendarEventDateTime(event.endsAt, event.startsAt) ?? start;
+    final end = _parseCalendarEventDateTime(event.endsAt) ?? start;
     if (start == null) continue;
     if (!_eventIsAllDay(event) && end != null && end.isBefore(now)) continue;
     final allDay = _eventIsAllDay(event);

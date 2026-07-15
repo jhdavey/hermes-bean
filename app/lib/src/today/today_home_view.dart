@@ -67,6 +67,7 @@ class _TodayHomeView extends StatelessWidget {
   final Future<void> Function({
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -89,6 +90,7 @@ class _TodayHomeView extends StatelessWidget {
     HermesCalendarEvent event, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -245,7 +247,7 @@ class _TodayHomeView extends StatelessWidget {
       titleLabel: 'Task title',
       timeLabel: 'Due date',
       initialTitle: task?.title ?? '',
-      initialTime: _formatCalendarEventDateTime(task?.dueAt),
+      initialTime: _formatCalendarDateTimeInput(task?.dueAt),
       editorIcon: Icons.task_alt_rounded,
       editorSubtitle: parentTask != null
           ? 'Assigned to ${parentTask.title}'
@@ -521,6 +523,7 @@ class _AppleStyleTodayTimeline extends StatefulWidget {
     HermesCalendarEvent event, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -911,6 +914,7 @@ class _TwoDayTimelinePage extends StatelessWidget {
     HermesCalendarEvent event, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -1248,6 +1252,7 @@ class _PinnedTimelineRows extends StatelessWidget {
     HermesCalendarEvent event, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -1426,6 +1431,7 @@ class _ScrollableAllDayEventRows extends StatelessWidget {
     HermesCalendarEvent event, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -1626,6 +1632,7 @@ class _MultiDayEventSpanRow extends StatelessWidget {
     HermesCalendarEvent event, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -1782,6 +1789,7 @@ class _MultiDayEventSpan extends StatelessWidget {
     HermesCalendarEvent event, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -1838,6 +1846,7 @@ class _MultiDayEventSpan extends StatelessWidget {
               savedEvent, {
               required String title,
               required String startsAt,
+              required bool allDay,
               String? endsAt,
               String? notes,
               String? location,
@@ -1858,6 +1867,7 @@ class _MultiDayEventSpan extends StatelessWidget {
               savedEvent,
               title: title,
               startsAt: startsAt,
+              allDay: allDay,
               endsAt: endsAt,
               notes: notes,
               location: location,
@@ -1879,6 +1889,7 @@ class _MultiDayEventSpan extends StatelessWidget {
           title: savedEvent.title,
           startsAt:
               savedEvent.startsAt ?? DateTime.now().toUtc().toIso8601String(),
+          allDay: _eventIsAllDay(savedEvent),
           endsAt: savedEvent.endsAt,
           notes: savedEvent.notes,
           location: savedEvent.location,
@@ -2007,6 +2018,7 @@ class _AllDayEventRow extends StatelessWidget {
     HermesCalendarEvent event, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -2078,6 +2090,7 @@ class _AllDayEventRow extends StatelessWidget {
                   savedEvent, {
                   required String title,
                   required String startsAt,
+                  required bool allDay,
                   String? endsAt,
                   String? notes,
                   String? location,
@@ -2098,6 +2111,7 @@ class _AllDayEventRow extends StatelessWidget {
                   savedEvent,
                   title: title,
                   startsAt: startsAt,
+                  allDay: allDay,
                   endsAt: endsAt,
                   notes: notes,
                   location: location,
@@ -2120,6 +2134,7 @@ class _AllDayEventRow extends StatelessWidget {
               startsAt:
                   savedEvent.startsAt ??
                   DateTime.now().toUtc().toIso8601String(),
+              allDay: _eventIsAllDay(savedEvent),
               endsAt: savedEvent.endsAt,
               notes: savedEvent.notes,
               location: savedEvent.location,
@@ -2225,6 +2240,7 @@ class _TimelineEventBlock extends StatelessWidget {
     HermesCalendarEvent event, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -2318,6 +2334,7 @@ class _TimelineEventBlock extends StatelessWidget {
                 savedEvent, {
                 required String title,
                 required String startsAt,
+                required bool allDay,
                 String? endsAt,
                 String? notes,
                 String? location,
@@ -2338,6 +2355,7 @@ class _TimelineEventBlock extends StatelessWidget {
                 savedEvent,
                 title: title,
                 startsAt: startsAt,
+                allDay: allDay,
                 endsAt: endsAt,
                 notes: notes,
                 location: location,
@@ -2359,6 +2377,7 @@ class _TimelineEventBlock extends StatelessWidget {
             title: savedEvent.title,
             startsAt:
                 savedEvent.startsAt ?? DateTime.now().toUtc().toIso8601String(),
+            allDay: _eventIsAllDay(savedEvent),
             endsAt: savedEvent.endsAt,
             notes: savedEvent.notes,
             location: savedEvent.location,

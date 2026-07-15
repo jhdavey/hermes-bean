@@ -74,7 +74,7 @@ test('[BV2-BROWSER-01] fresh-load readiness, wake privacy, live transcript, and 
     expect(state.controller.lastRejectedEvent.reason).toBe('stale_sequence');
 });
 
-test('[BV2-BROWSER-07] a released wake fragment stays private until the complete instant command arrives', async ({ page }) => {
+test('[BV2-BROWSER-07] a released wake fragment stays private until the complete semantic request arrives', async ({ page }) => {
     await boot(page);
     await markReady(page);
 
@@ -205,7 +205,7 @@ test('[BV2-BROWSER-02] follow-up, false barge, and meaningful barge preserve exa
     ]);
 });
 
-test('[BV2-BROWSER-08] an instant answer opens a no-wake task follow-up and admits it exactly once', async ({ page }) => {
+test('[BV2-BROWSER-08] a semantic no-tool answer opens a no-wake task follow-up and admits it exactly once', async ({ page }) => {
     await boot(page);
     await markReady(page);
 
@@ -345,6 +345,11 @@ test('[BV2-BROWSER-13] expired follow-up stays private through five minutes of d
         harness.controller.speechEnded({ source: 'provider' });
         await harness.waitForAdmissions();
 
+        harness.controller.speechStarted({ turnId: 'ambient-brief-filler', source: 'provider' });
+        harness.controller.transcriptFinal('Ah.', { source: 'provider' });
+        harness.controller.speechEnded({ source: 'provider' });
+        await harness.waitForAdmissions();
+
         const afterAmbient = harness.snapshot();
         harness.wake('strict-wake-after-dormancy');
         harness.final('Can you hear me?');
@@ -369,6 +374,7 @@ test('[BV2-BROWSER-13] expired follow-up stays private through five minutes of d
     await expect(page.locator('#voice-input')).toHaveText('');
     await expect(page.locator('#chat [data-role="user"]')).toHaveCount(2);
     await expect(page.locator('#chat')).not.toContainText('goof');
+    await expect(page.locator('#chat')).not.toContainText('Ah.');
 });
 
 test('[BV2-BROWSER-12] a generated-note request remains one visible turn and speaks the exact durable final', async ({ page }) => {
@@ -386,7 +392,6 @@ test('[BV2-BROWSER-12] a generated-note request remains one visible turn and spe
         await harness.waitForAdmissions();
         await harness.updateTurn('meal-plan-note-turn', {
             state: 'completed',
-            handler: 'agent.generate_note',
             final_text: finalText,
             jobs: [{ id: 'meal-plan-note-job', label: 'Create Meal Plans note', status: 'completed', version: 2 }],
         });
@@ -545,7 +550,7 @@ test('[BV2-BROWSER-04] stale events and snapshots cannot regress state, and relo
     expect(afterReload.server.messages.filter((message) => message.id === 'final:reload-turn')).toHaveLength(1);
 });
 
-test('[BV2-BROWSER-06] capture owns buffered TTS, strict provider wake preserves queued finals, and reload speaks only unheard finals', async ({ page }) => {
+test('[BV2-BROWSER-06] capture owns buffered TTS, strict local wake preserves queued finals, and reload speaks only unheard finals', async ({ page }) => {
     await boot(page);
     await markReady(page);
 

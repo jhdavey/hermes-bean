@@ -24,16 +24,30 @@ class CommandCenterShell extends StatefulWidget {
   State<CommandCenterShell> createState() => _CommandCenterShellState();
 }
 
-class _QueuedBeanChatRequest {
-  const _QueuedBeanChatRequest({
+class _ActiveBeanChatRequest {
+  _ActiveBeanChatRequest({
+    required this.clientRequestId,
     required this.localMessageId,
+    required this.sessionId,
     required this.content,
-    required this.editingMessageId,
+    required this.metadata,
   });
 
+  final String clientRequestId;
   final int localMessageId;
+  final int sessionId;
   final String content;
-  final int? editingMessageId;
+  final Map<String, Object?> metadata;
+  final Completer<void> admissionCompleter = Completer<void>();
+  int? runId;
+  int? userMessageId;
+  bool cancelRequested = false;
+
+  Future<void> get admissionSettled => admissionCompleter.future;
+
+  void settleAdmission() {
+    if (!admissionCompleter.isCompleted) admissionCompleter.complete();
+  }
 }
 
 class _CommandCenterShellState extends State<CommandCenterShell>
@@ -56,9 +70,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   GoogleCalendarSyncStatus? _outlookCalendarStatus;
   List<HermesApproval> _approvals = const [];
   List<HermesActivityEvent> _events = const [];
-  final List<HermesMessage> _messages = const [
-    HermesMessage(id: 0, role: 'assistant', content: 'Bean is waking up…'),
-  ].toList();
+  final List<HermesMessage> _messages = [];
   String? _error;
   String? _authNotice;
   String? _loadingStatusText;
@@ -68,12 +80,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _dashboardDataLoading = false;
   String _chatRunState = 'Ready';
   int _chatRunToken = 0;
-  int? _activeAssistantRunId;
+  final Set<int> _activeAssistantRunIds = <int>{};
+  final Set<int> _assistantRunPolls = <int>{};
+  final Map<String, _ActiveBeanChatRequest> _activeBeanChatRequests =
+      <String, _ActiveBeanChatRequest>{};
   int? _activeBeanWorkMessageId;
   List<_BeanWorkItem> _beanWorkItems = const [];
   int _beanWorkEventFloorId = 0;
   bool _beanWorkFinalized = false;
-  bool _beanWorkAcceptsOrphanPlanEvents = false;
   final Set<int> _beanWorkAppliedEventIds = <int>{};
   final Set<int> _beanDashboardRefreshEventIds = <int>{};
   final Set<String> _beanWorkStagedCompletionIds = <String>{};
@@ -108,11 +122,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   final FocusNode _chatInputFocusNode = FocusNode();
   bool _voiceRecording = false;
   bool _voiceProcessing = false;
-  final List<_QueuedBeanChatRequest> _beanChatQueue =
-      <_QueuedBeanChatRequest>[];
   bool _beanChatCollapsed = false;
   int? _editingChatMessageId;
-  bool _beanChatQueueDraining = false;
   int _localMessageSequence = -1;
   final Set<int> _dismissedReminderBannerIds = <int>{};
   final Set<int> _notifiedReminderIds = <int>{};
@@ -171,6 +182,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       mounted && generation == _authGeneration;
 
   void _clearSignedInState() {
+    _chatRunToken++;
+    _activeAssistantRunIds.clear();
+    _assistantRunPolls.clear();
+    _activeBeanChatRequests.clear();
+    _cancelBeanClientRetryTimers();
     _user = null;
     _session = null;
     _tasks = const [];
@@ -632,8 +648,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     String? referenceValue,
   ]) {
     if (left == null || right == null) return left == right;
-    final leftDate = _parseCalendarEventDateTime(left, referenceValue);
-    final rightDate = _parseCalendarEventDateTime(right, referenceValue);
+    final leftDate = _parseCalendarEventDateTime(left);
+    final rightDate = _parseCalendarEventDateTime(right);
     if (leftDate == null || rightDate == null) return left == right;
     return leftDate.isAtSameMomentAs(rightDate);
   }
@@ -647,8 +663,21 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     String status = 'running',
     bool resolvedByEvent = false,
     int? order,
+    String? clientRequestId,
   }) {
     if (id.isEmpty || label.trim().isEmpty) return;
+    if (resolvedByEvent) {
+      _beanWorkItems = _beanWorkItems
+          .where(
+            (item) =>
+                !item.id.startsWith('request-') ||
+                (clientRequestId != null
+                    ? item.clientRequestId != clientRequestId
+                    : _activeBeanChatRequests.isNotEmpty ||
+                          item.clientRequestId != null),
+          )
+          .toList(growable: false);
+    }
     final cleanLabel = label.trim();
     final cleanStatus = status.toLowerCase();
     if (!_beanWorkStatusDone(cleanStatus)) {
@@ -666,6 +695,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       status: cleanStatus,
       resolvedByEvent: resolvedByEvent,
       order: order,
+      clientRequestId: clientRequestId,
     );
     if (existingIndex >= 0) {
       _beanWorkItems = [
@@ -680,6 +710,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                     status: next.status,
                     resolvedByEvent: resolvedByEvent,
                     order: next.order,
+                    clientRequestId: next.clientRequestId,
                   )
           else
             _beanWorkItems[i],
@@ -688,26 +719,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _scheduleBeanWorkStatusClearIfDone();
       return;
     }
-    final placeholderIndex = _beanWorkPlaceholderIndex(cleanLabel);
-    if (placeholderIndex >= 0 && resolvedByEvent) {
-      _beanWorkItems = [
-        for (var i = 0; i < _beanWorkItems.length; i++)
-          if (i == placeholderIndex)
-            _BeanWorkItem(
-              id: id,
-              label: cleanLabel,
-              status: cleanStatus,
-              resolvedByEvent: true,
-              order: order,
-            )
-          else
-            _beanWorkItems[i],
-      ];
-      _sortBeanWorkItemsByServerPlan();
-      _scheduleBeanWorkStatusClearIfDone();
-      return;
-    }
-    if (_isGenericBeanWorkLabel(cleanLabel)) return;
     _beanWorkItems = [..._beanWorkItems, next];
     if (_beanWorkItems.length > 8) {
       _beanWorkItems = _beanWorkItems.sublist(_beanWorkItems.length - 8);
@@ -739,21 +750,58 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkItems = [for (final entry in indexed) entry.$2];
   }
 
-  void _completeActiveBeanWorkItems([String status = 'completed']) {
+  void _completeActiveBeanWorkItems([
+    String status = 'completed',
+    String? clientRequestId,
+  ]) {
     if (_beanWorkItems.isEmpty) return;
     _beanWorkItems = [
       for (final item in _beanWorkItems)
-        item.done ? item : item.copyWith(status: status),
+        item.done ||
+                (clientRequestId != null &&
+                    item.clientRequestId != clientRequestId)
+            ? item
+            : item.copyWith(status: status),
     ];
-    _beanWorkFinalized = true;
+    _beanWorkFinalized = _beanWorkItems.every((item) => item.done);
     _scheduleBeanWorkStatusClearIfDone();
+  }
+
+  void _terminalizeBeanWorkItems(String runStatus, String clientRequestId) {
+    final normalizedStatus = runStatus.toLowerCase();
+    final hasStructuredOperation = _beanWorkItems.any(
+      (item) => item.resolvedByEvent && item.clientRequestId == clientRequestId,
+    );
+    if (normalizedStatus == 'completed' && !hasStructuredOperation) {
+      _beanWorkItems = _beanWorkItems
+          .where(
+            (item) =>
+                item.clientRequestId != clientRequestId || item.resolvedByEvent,
+          )
+          .toList(growable: false);
+      if (_beanWorkItems.isEmpty) {
+        _beanWorkStatusClearTimer?.cancel();
+        _beanWorkStatusClearTimer = null;
+        _beanWorkStatusHoldUntil = null;
+        _beanWorkStatusMinUntil = null;
+        _beanWorkFinalized = false;
+      }
+      return;
+    }
+
+    _completeActiveBeanWorkItems(switch (normalizedStatus) {
+      'completed' => 'completed',
+      'blocked' => 'blocked',
+      'cancelled' => 'cancelled',
+      _ => 'failed',
+    }, clientRequestId);
   }
 
   void _scheduleBeanWorkStatusClearIfDone() {
     if (_beanWorkItems.isEmpty || _beanWorkItems.any((item) => !item.done)) {
       return;
     }
-    if (_activeAssistantRunId != null) {
+    if (_activeAssistantRunIds.isNotEmpty) {
       return;
     }
     _scheduleBeanWorkStatusClear(
@@ -777,7 +825,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkStatusHoldUntil = now.add(clearDelay);
     _beanWorkStatusClearTimer = Timer(clearDelay, () {
       if (!mounted) return;
-      if (_busy || _activeAssistantRunId != null) {
+      if (_busy || _activeAssistantRunIds.isNotEmpty) {
         _scheduleBeanWorkStatusClear(delay);
         return;
       }
@@ -786,8 +834,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _beanWorkStatusMinUntil = null;
         _beanWorkItems = const [];
         _beanWorkFinalized = false;
-        _beanWorkAcceptsOrphanPlanEvents = false;
-        _activeAssistantRunId = null;
         _activeBeanWorkMessageId = null;
         _beanWorkStagedCompletionIds.clear();
       });
@@ -814,7 +860,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkAppliedEventIds.clear();
     _beanDashboardRefreshEventIds.clear();
     _beanWorkFinalized = false;
-    _beanWorkAcceptsOrphanPlanEvents = false;
     _activeBeanWorkMessageId = null;
     _beanWorkStagedCompletionIds.clear();
     _cancelBeanWorkStageTimers();
@@ -832,149 +877,29 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     'succeeded',
     'recorded',
     'cancelled',
+    'blocked',
     'failed',
     'skipped',
   }.contains(status.toLowerCase());
-
-  int _beanWorkPlaceholderIndex(String label) {
-    final target = _beanWorkTargetForLabel(label);
-    final subjectKey = _beanWorkSubjectKeyForLabel(label);
-    final preciseIndex = _beanWorkItems.indexWhere((item) {
-      return _beanWorkItemCanResolvePlaceholder(item, target, subjectKey);
-    });
-    if (preciseIndex >= 0) return preciseIndex;
-    if (target.isEmpty) return -1;
-    final targetOnlyMatches = <int>[];
-    for (var index = 0; index < _beanWorkItems.length; index++) {
-      final item = _beanWorkItems[index];
-      if (!item.id.startsWith('request-') ||
-          item.resolvedByEvent ||
-          item.done) {
-        continue;
-      }
-      final placeholderTarget = _beanWorkTargetForLabel(item.label);
-      if (placeholderTarget == target) targetOnlyMatches.add(index);
-    }
-    return targetOnlyMatches.length == 1 ? targetOnlyMatches.first : -1;
-  }
-
-  bool _beanWorkHasPendingPlaceholderForLabel(String label) {
-    final target = _beanWorkTargetForLabel(label);
-    final subjectKey = _beanWorkSubjectKeyForLabel(label);
-    return _beanWorkItems.any(
-      (item) => _beanWorkItemCanResolvePlaceholder(item, target, subjectKey),
-    );
-  }
-
-  bool _beanWorkItemCanResolvePlaceholder(
-    _BeanWorkItem item,
-    String target,
-    String subjectKey,
-  ) {
-    if (!item.id.startsWith('request-') || item.resolvedByEvent || item.done) {
-      return false;
-    }
-    final placeholderTarget = _beanWorkTargetForLabel(item.label);
-    final placeholderSubjectKey = _beanWorkSubjectKeyForLabel(item.label);
-    if (target.isNotEmpty &&
-        placeholderTarget.isNotEmpty &&
-        target != placeholderTarget) {
-      return false;
-    }
-    if (subjectKey.isNotEmpty && placeholderSubjectKey.isNotEmpty) {
-      return subjectKey == placeholderSubjectKey ||
-          subjectKey.contains(placeholderSubjectKey) ||
-          placeholderSubjectKey.contains(subjectKey);
-    }
-    if (subjectKey.isEmpty && placeholderSubjectKey.isNotEmpty) return false;
-    return target.isEmpty ||
-        placeholderTarget.isEmpty ||
-        target == placeholderTarget;
-  }
-
-  String _beanWorkCategoryForLabel(String label) {
-    final text = label.toLowerCase();
-    if (text.trim().isEmpty) return '';
-    final action =
-        RegExp(
-          r'\b(delete|deleting|remove|removing|cancel|canceling|cancelled)\b',
-        ).hasMatch(text)
-        ? 'delete'
-        : RegExp(
-            r'\b(create|creating|add|adding|schedule|scheduling)\b',
-          ).hasMatch(text)
-        ? 'create'
-        : RegExp(
-            r'\b(update|updating|change|changing|move|moving|reschedule|rescheduling)\b',
-          ).hasMatch(text)
-        ? 'update'
-        : RegExp(r'\b(save|saving|remember|memory)\b').hasMatch(text)
-        ? 'save'
-        : '';
-    final target =
-        RegExp(
-          r'\b(calendar event|event|calendar|appointment|meeting)\b',
-        ).hasMatch(text)
-        ? 'event'
-        : RegExp(r'\breminder\b').hasMatch(text)
-        ? 'reminder'
-        : RegExp(r'\b(task|todo)\b').hasMatch(text)
-        ? 'task'
-        : RegExp(r'\b(note|notes|folder|folders)\b').hasMatch(text)
-        ? 'note'
-        : RegExp(r'\bmemory\b').hasMatch(text)
-        ? 'memory'
-        : '';
-    return action.isNotEmpty || target.isNotEmpty ? '$action:$target' : '';
-  }
-
-  String _beanWorkTargetForLabel(String label) {
-    final category = _beanWorkCategoryForLabel(label);
-    final separator = category.indexOf(':');
-    if (separator < 0 || separator == category.length - 1) return '';
-    return category.substring(separator + 1);
-  }
-
-  String _beanWorkSubjectKeyForLabel(String label) {
-    final separator = label.indexOf(':');
-    if (separator < 0 || separator == label.length - 1) return '';
-    var subject = label.substring(separator + 1).toLowerCase();
-    subject = subject
-        .replaceAll(RegExp(r'\([^)]*\)'), ' ')
-        .replaceAll(
-          RegExp(
-            r'\b(calendar|event|events|task|tasks|reminder|reminders|note|notes|create|creating|created|update|updating|updated|delete|deleting|deleted|save|saving|saved)\b',
-          ),
-          ' ',
-        )
-        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    if (subject == 'groceries' || subject == 'grocery store') {
-      subject = 'grocery shopping';
-    }
-    if (subject == 'cooking dinner' || subject == 'make dinner') {
-      subject = 'cook dinner';
-    }
-    return subject;
-  }
-
-  bool _isGenericBeanWorkLabel(String label) => RegExp(
-    r'^(finish|finished|background work|finish background work|bean started working|read request|working on request|work on request)$',
-    caseSensitive: false,
-  ).hasMatch(label.trim());
 
   void _beginBeanWorkEventContext({bool freshRequest = false}) {
     if (freshRequest) {
       _prepareBeanWorkForFreshRequest();
     }
-    _beanWorkAcceptsOrphanPlanEvents = true;
   }
 
-  void _ensurePendingBeanWorkItem() {
-    if (_beanWorkItems.any((item) => !item.done)) return;
-    _beanWorkItems = const [
-      _BeanWorkItem(id: 'request-pending', label: 'Working on request'),
+  void _ensurePendingBeanWorkItem([String? clientRequestId]) {
+    final requestId = clientRequestId?.trim() ?? '';
+    final itemId = requestId.isEmpty ? 'request-pending' : 'request-$requestId';
+    if (_beanWorkItems.any((item) => item.id == itemId && !item.done)) return;
+    _beanWorkFinalized = false;
+    _beanWorkItems = [
+      ..._beanWorkItems,
+      _BeanWorkItem(
+        id: itemId,
+        label: 'Working on request',
+        clientRequestId: requestId.isEmpty ? null : requestId,
+      ),
     ];
   }
 
@@ -985,36 +910,41 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       ..sort((left, right) => left.id.compareTo(right.id));
     final appliedEvents = <HermesActivityEvent>[];
     for (final event in ordered) {
-      if (event.id <= _beanWorkEventFloorId ||
+      final linkedRequest = _activeBeanChatRequestForEvent(event);
+      if ((event.id <= _beanWorkEventFloorId && linkedRequest == null) ||
           _beanWorkAppliedEventIds.contains(event.id)) {
         continue;
       }
       final item = _beanWorkItemFromEvent(event);
       if (item == null) continue;
       if (!_beanWorkEventBelongsToActiveRequest(event, item)) continue;
+      final scopedItem = linkedRequest == null
+          ? item
+          : item.copyWith(clientRequestId: linkedRequest.clientRequestId);
       _beanWorkAppliedEventIds.add(event.id);
       _beanWorkEventFloorId = math.max(_beanWorkEventFloorId, event.id);
       appliedEvents.add(event);
       final shouldStageCompletion =
-          item.done &&
-          !_beanWorkItems.any((existing) => existing.id == item.id) &&
-          !_beanWorkHasPendingPlaceholderForLabel(item.label);
+          scopedItem.done &&
+          !_beanWorkItems.any((existing) => existing.id == scopedItem.id);
       if (shouldStageCompletion) {
         _upsertBeanWorkItem(
-          item.id,
-          item.label,
+          scopedItem.id,
+          scopedItem.label,
           status: 'running',
           resolvedByEvent: true,
+          clientRequestId: scopedItem.clientRequestId,
         );
-        _stageBeanWorkCompletion(item);
+        _stageBeanWorkCompletion(scopedItem);
         continue;
       }
       _upsertBeanWorkItem(
-        item.id,
-        item.label,
-        status: item.status,
+        scopedItem.id,
+        scopedItem.label,
+        status: scopedItem.status,
         resolvedByEvent: true,
-        order: item.order,
+        order: scopedItem.order,
+        clientRequestId: scopedItem.clientRequestId,
       );
     }
     _finalizeBeanWorkFromCompletedMutationEvents(appliedEvents);
@@ -1029,13 +959,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
     if (!events.any(_beanActivityEventMutatesDashboard)) return;
     _beanWorkFinalized = true;
-    _chatRunState = _activeAssistantRunId == null ? 'Updated' : 'Finalizing...';
+    _chatRunState = _activeAssistantRunIds.isEmpty
+        ? 'Updated'
+        : 'Finalizing...';
     _scheduleBeanWorkStatusClearIfDone();
   }
 
   bool get _hasActiveBeanWorkContext =>
       _activeBeanWorkMessageId != null ||
-      _activeAssistantRunId != null ||
+      _activeAssistantRunIds.isNotEmpty ||
       _beanWorkItems.isNotEmpty;
 
   void _stageBeanWorkCompletion(_BeanWorkItem item) {
@@ -1051,6 +983,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           item.label,
           status: item.status,
           resolvedByEvent: true,
+          clientRequestId: item.clientRequestId,
         );
         _beanWorkStagedCompletionIds.remove(item.id);
       });
@@ -1062,6 +995,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     HermesActivityEvent event,
     _BeanWorkItem item,
   ) {
+    if (_activeBeanChatRequests.isNotEmpty) {
+      return _activeBeanChatRequestForEvent(event) != null;
+    }
     final activeMessageId = _activeBeanWorkMessageId;
     if (activeMessageId == null) return true;
 
@@ -1083,24 +1019,45 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
     if (!type.startsWith('assistant.')) return true;
 
-    if (type == 'assistant.work_item.planned' &&
-        _beanWorkAcceptsOrphanPlanEvents) {
-      return true;
-    }
+    return false;
+  }
 
-    if (_beanWorkAcceptsOrphanPlanEvents &&
-        _beanActivityEventMutatesDashboard(event)) {
-      return true;
+  _ActiveBeanChatRequest? _activeBeanChatRequestForEvent(
+    HermesActivityEvent event,
+  ) {
+    final payload = event.payload;
+    final clientRequestId =
+        _stringFromPayload(payload, 'client_request_id') ??
+        _stringFromPayload(payload, 'clientRequestId');
+    if (clientRequestId != null) {
+      return _activeBeanChatRequests[clientRequestId];
     }
-
-    return _beanWorkItems.any((existing) => existing.id == item.id) ||
-        _beanWorkHasPendingPlaceholderForLabel(item.label);
+    final messageId =
+        _intFromPayload(payload, 'user_message_id') ??
+        _intFromPayload(payload, 'userMessageId') ??
+        _intFromPayload(payload, 'message_id') ??
+        _intFromPayload(payload, 'messageId');
+    if (messageId != null) {
+      for (final request in _activeBeanChatRequests.values) {
+        if (request.userMessageId == messageId) return request;
+      }
+    }
+    final runId =
+        _intFromPayload(payload, 'run_id') ??
+        _intFromPayload(payload, 'runId') ??
+        _intFromPayload(payload, 'assistant_run_id') ??
+        _intFromPayload(payload, 'assistantRunId');
+    if (runId != null) {
+      for (final request in _activeBeanChatRequests.values) {
+        if (request.runId == runId) return request;
+      }
+    }
+    return null;
   }
 
   _BeanWorkItem? _beanWorkItemFromEvent(HermesActivityEvent event) {
     final type = event.eventType;
     final payload = event.payload;
-    final status = (event.status ?? '').toLowerCase();
     if (type.isEmpty || type == 'runtime.run_queued') return null;
     if (type == 'runtime.run_started' || type == 'runtime.run_completed') {
       return null;
@@ -1112,35 +1069,46 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         status: 'failed',
       );
     }
-    if (!type.startsWith('assistant.')) return null;
-    final workItemId = _stringFromPayload(payload, 'work_item_id');
-    final workLabel = _stringFromPayload(payload, 'work_label');
-    if (type == 'assistant.work_item.planned') {
-      final label =
-          _stringFromPayload(payload, 'label') ??
-          workLabel ??
-          _stringFromPayload(payload, 'title');
-      if (workItemId == null || label == null || label.trim().isEmpty) {
-        return null;
-      }
+    if (type != 'assistant.semantic_operation.receipt') return null;
 
-      return _BeanWorkItem(
-        id: workItemId,
-        label: label,
-        status: 'running',
-        resolvedByEvent: true,
-        order: _intFromPayload(payload, 'work_order'),
-      );
+    final receipt = _stringObjectMap(payload['receipt']);
+    if (receipt == null) return null;
+    final operationId = _stringFromPayload(payload, 'operation_id');
+    final runId = _intFromPayload(payload, 'assistant_run_id');
+    final tool =
+        _stringFromPayload(payload, 'tool') ??
+        receipt['tool']?.toString().trim() ??
+        event.toolName?.trim();
+    final receiptStatus = receipt['status']?.toString().toLowerCase().trim();
+    final canonicalStatus = switch (receiptStatus) {
+      'completed' => 'completed',
+      'failed' => 'failed',
+      'skipped' => 'skipped',
+      'canceled' || 'cancelled' => 'cancelled',
+      _ => null,
+    };
+    final label = tool == null
+        ? null
+        : _semanticOperationWorkLabel(tool, receipt);
+    if (operationId == null ||
+        runId == null ||
+        canonicalStatus == null ||
+        label == null) {
+      return null;
     }
-    if (type.contains('.duplicate_skipped') && workItemId == null) return null;
-    final label = _beanWorkEventLabel(type, payload);
-    if (label == null) return null;
+
     return _BeanWorkItem(
-      id: workItemId ?? 'event-${event.id}',
-      label: workLabel ?? label,
-      status: _beanWorkEventStatus(status),
-      resolvedByEvent: workItemId != null,
-      order: _intFromPayload(payload, 'work_order'),
+      id: 'semantic-$runId-$operationId',
+      label: label,
+      status: canonicalStatus,
+      resolvedByEvent: true,
+    );
+  }
+
+  Map<String, Object?>? _stringObjectMap(Object? value) {
+    if (value is! Map) return null;
+    return value.map(
+      (key, nestedValue) => MapEntry(key.toString(), nestedValue),
     );
   }
 
@@ -1151,7 +1119,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     return string.isEmpty ? null : string;
   }
 
-  String _beanWorkEventStatus(String status) {
+  String? _beanWorkEventStatus(String status) {
     if (const {
       'failed',
       'skipped',
@@ -1162,50 +1130,74 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }.contains(status)) {
       return status;
     }
-    return 'completed';
+    return null;
   }
 
-  String? _beanWorkEventLabel(String type, Map<String, Object?> payload) {
+  String? _semanticOperationWorkLabel(
+    String tool,
+    Map<String, Object?> receipt,
+  ) {
+    final normalizedTool = tool.trim().toLowerCase();
+    final data = _stringObjectMap(receipt['data']);
+    final events = data?['events'];
+    Map<String, Object?>? eventData;
+    if (events is List && events.isNotEmpty) {
+      final firstEvent = _stringObjectMap(events.first);
+      eventData = _stringObjectMap(firstEvent?['data']);
+    }
+    final resource = _stringObjectMap(
+      data?['task'] ??
+          data?['reminder'] ??
+          data?['calendar_event'] ??
+          data?['note'] ??
+          data?['memory_item'],
+    );
     final title =
-        payload['title'] ??
-        payload['summary'] ??
-        payload['name'] ??
-        payload['reason'] ??
-        payload['display_name'] ??
-        payload['displayName'];
+        eventData?['title'] ??
+        eventData?['name'] ??
+        eventData?['display_name'] ??
+        resource?['title'] ??
+        resource?['name'];
     final cleanTitle = title?.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
     final readable = cleanTitle == null || cleanTitle.isEmpty
         ? ''
         : ': ${cleanTitle.length > 72 ? '${cleanTitle.substring(0, 72)}...' : cleanTitle}';
-    if (type.contains('.task.created')) return 'Create task$readable';
-    if (type.contains('.task.updated')) return 'Update task$readable';
-    if (type.contains('.task.deleted')) return 'Delete task$readable';
-    if (type.contains('.reminder.created')) return 'Create reminder$readable';
-    if (type.contains('.reminder.updated')) return 'Update reminder$readable';
-    if (type.contains('.reminder.deleted')) return 'Delete reminder$readable';
-    if (type.contains('.calendar_event.created')) {
-      return 'Create calendar event$readable';
+
+    if (normalizedTool == 'external.lookup') return 'Checking live information';
+    if (normalizedTool == 'app.day.read') return 'Checking today';
+    if (normalizedTool == 'app.history.search') {
+      return 'Checking request history';
     }
-    if (type.contains('.calendar_event.updated')) {
-      return 'Update calendar event$readable';
-    }
-    if (type.contains('.calendar_event.deleted')) {
-      return 'Delete calendar event$readable';
-    }
-    if (type.contains('.note.created')) return 'Create note$readable';
-    if (type.contains('.note.updated')) return 'Update note$readable';
-    if (type.contains('.note.deleted')) return 'Delete note$readable';
-    if (type.contains('.note_folder.created')) return 'Create folder$readable';
-    if (type.contains('.note_folder.updated')) return 'Update folder$readable';
-    if (type.contains('.note_folder.deleted')) return 'Delete folder$readable';
-    if (type.contains('.memory.created')) return 'Save knowledge$readable';
-    if (type.contains('.memory.updated')) return 'Update knowledge$readable';
-    if (type.contains('.memory.deleted')) return 'Forget knowledge$readable';
-    if (type.contains('.approval.created')) return 'Prepare approval$readable';
-    if (type.contains('.blocker.created')) return 'Flag blocker$readable';
-    if (type.contains('.workspace_memory.noted')) return 'Save knowledge';
-    if (type.contains('.google_calendar.')) return 'Sync Google Calendar';
-    return null;
+    if (normalizedTool == 'app.activity.search') return 'Checking activity';
+    if (normalizedTool == 'voice.playback.stop') return 'Stop playback';
+    if (normalizedTool == 'voice.work.status') return 'Checking work status';
+    if (normalizedTool == 'voice.work.cancel') return 'Cancel work';
+
+    final parts = normalizedTool.split('.');
+    if (parts.length != 3 || parts.first != 'app') return null;
+    final noun = switch (parts[1]) {
+      'task' => 'task',
+      'reminder' => 'reminder',
+      'calendar' => 'calendar event',
+      'note' => 'note',
+      'note_folder' => 'folder',
+      'event_category' => 'category',
+      'memory' => 'knowledge',
+      'blocker' => 'blocker',
+      'agent_profile' => 'profile',
+      'conversation' => 'conversation',
+      _ => null,
+    };
+    if (noun == null) return null;
+    return switch (parts[2]) {
+      'create' => 'Create $noun$readable',
+      'update' => 'Update $noun$readable',
+      'delete' => 'Delete $noun$readable',
+      'resolve' => 'Resolve $noun$readable',
+      'search' =>
+        'Checking ${noun == 'knowledge' ? 'saved knowledge' : '${noun}s'}',
+      _ => null,
+    };
   }
 
   @override
@@ -1264,13 +1256,13 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   bool get _beanStatusTagVisible =>
       _busy ||
-      _activeAssistantRunId != null ||
+      _activeAssistantRunIds.isNotEmpty ||
       _beanWorkItems.isNotEmpty ||
       _beanWorkStatusHolding;
 
   bool get _beanStopAvailable =>
       _busy ||
-      _activeAssistantRunId != null ||
+      _activeAssistantRunIds.isNotEmpty ||
       _beanVisibleWorkItems.any((item) => !item.done) ||
       RegExp(
         r'\b(working|thinking|responding|queued|running|finalizing)\b',
@@ -1469,8 +1461,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   bool _isReminderCompleted(HermesReminder reminder) {
-    final status = reminder.status?.toLowerCase();
-    return status == 'completed' || status == 'complete' || status == 'done';
+    return reminder.status == 'completed';
   }
 
   Future<void> _bootstrap() async {
@@ -1704,6 +1695,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _user = user;
         _session = session;
         _replaceMessagesFromSession(sessionDetails, user: user);
+        _resumeActiveBeanRuns(sessionDetails);
         _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
         _eventCategories = primaryResults[4] as List<HermesEventCategory>;
         _reminders = listedReminders.isEmpty
@@ -2050,7 +2042,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     String? name,
     String? homeCity,
   }) async {
-    final wasEditingAgentPreferences = _editingAgentPreferences;
     setState(() {
       _busy = true;
       _error = null;
@@ -2104,18 +2095,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _forceAgentOnboarding = false;
         _editingAgentPreferences = false;
       });
-      if (wasEditingAgentPreferences) {
-        try {
-          await _notifyAgentPreferencesUpdated(
-            agentPersonality: agentPersonality,
-            onboardingPriorities: savedPriorities,
-            onboardingContext: onboardingContext,
-          );
-        } catch (_) {
-          // Preferences are already persisted in settings; a runtime-memory sync
-          // failure should not reopen the editor or make the save look lost.
-        }
-      }
     } catch (error) {
       if (!mounted) return;
       setState(
@@ -2281,9 +2260,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     HermesUser user, {
     String source = 'flutter',
   }) async {
-    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final now = DateTime.now();
+    final today = now.toIso8601String().substring(0, 10);
+    final timezone = _clientTemporalContext()['timezone_offset'] as String;
     final sessions = await widget.apiClient.listConversationSessions(
       date: today,
+      timezone: timezone,
       workspaceId: user.activeWorkspace?.numericId,
       limit: 30,
     );
@@ -2294,7 +2276,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
     final session = await widget.apiClient.startSession(
       title: 'Today with Bean',
-      runtimeMode: 'chat',
       workspaceId: user.activeWorkspace?.numericId,
       metadata: _flutterChatMetadata(additional: {'reason': source}),
     );
@@ -2308,33 +2289,23 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }) {
     final replacementMessages = <HermesMessage>[];
     if (details != null && details.messages.isNotEmpty) {
-      replacementMessages.addAll(
-        details.messages
-            .map(_displayableChatMessage)
-            .whereType<HermesMessage>(),
-      );
-    }
-    if (replacementMessages.isEmpty) {
-      replacementMessages.add(
-        HermesMessage(
-          id: 0,
-          role: 'assistant',
-          content: _personalizedBeanIntroMessage(user ?? _user),
-        ),
-      );
+      replacementMessages.addAll(details.messages);
     }
     final shouldPreserveLocalMessages =
-        preserveVisibleMessages ||
-        _beanChatQueue.isNotEmpty ||
-        _beanChatQueueDraining;
+        preserveVisibleMessages || _activeBeanChatRequests.isNotEmpty;
+    final activeLocalMessageIds = _activeBeanChatRequests.values
+        .map((request) => request.localMessageId)
+        .toSet();
+    final activeDurableMessageIds = _activeBeanChatRequests.values
+        .map((request) => request.userMessageId)
+        .whereType<int>()
+        .toSet();
     final localPendingMessages = shouldPreserveLocalMessages
         ? _messages
               .where(
                 (message) =>
-                    message.id < 0 ||
-                    message.metadata['local_ack'] == true ||
-                    (_beanChatHasActiveTurn &&
-                        message.id == _activeBeanWorkMessageId),
+                    activeLocalMessageIds.contains(message.id) ||
+                    activeDurableMessageIds.contains(message.id),
               )
               .toList()
         : const <HermesMessage>[];
@@ -2353,22 +2324,42 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
-  String _personalizedBeanIntroMessage(HermesUser? user) {
-    final profile = user?.currentAgentProfile;
-    switch (profile?.personalityType) {
-      case 'coach':
-        return 'Hey! What are we tackling?';
-      case 'organizer':
-        return 'What should Bean organize first?';
-      case 'creative':
-        return "What's on your mind?";
-      case 'direct':
-        return 'What should Bean handle?';
-      case 'gentle':
-        return "Hey, how's your day going?";
-      case 'balanced':
-      default:
-        return 'Hey! How can I help?';
+  void _resumeActiveBeanRuns(HermesSessionDetails? details) {
+    if (details == null) return;
+    for (final run in details.activeRuns) {
+      if (!_beanRunPending(run.status)) continue;
+      final clientRequestId = (run.clientRequestId ?? '').trim();
+      if (clientRequestId.isEmpty) continue;
+      final userMessage = run.userMessage;
+      final userMessageId = run.userMessageId ?? userMessage?.id;
+      final request = _activeBeanChatRequests.putIfAbsent(
+        clientRequestId,
+        () => _ActiveBeanChatRequest(
+          clientRequestId: clientRequestId,
+          localMessageId: userMessageId ?? _nextLocalMessageId(),
+          sessionId: details.session.id,
+          content: run.input ?? userMessage?.content ?? '',
+          metadata: {'client_request_id': clientRequestId},
+        ),
+      );
+      request.runId = run.id;
+      request.userMessageId = userMessageId;
+      request.settleAdmission();
+      _activeAssistantRunIds.add(run.id);
+      _activeBeanWorkMessageId = userMessageId ?? _activeBeanWorkMessageId;
+      _ensurePendingBeanWorkItem(clientRequestId);
+      unawaited(
+        _pollQueuedRun(
+          run.id,
+          _chatRunToken,
+          clientRequestId: clientRequestId,
+          userMessageId: userMessageId,
+        ),
+      );
+    }
+    _syncBeanChatBusyState();
+    if (_activeAssistantRunIds.isNotEmpty) {
+      _chatRunState = 'Working...';
     }
   }
 
@@ -2380,9 +2371,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _selectedCalendarDay = _dateOnly(DateTime.now());
         _showCalendarMonth = false;
       }
-      if (destination == _HomeDestination.bean && _needsBeanIntroduction) {
-        _ensureBeanIntroductionPrompt();
-      }
     });
     if (destination != _HomeDestination.bean &&
         _beanWorkItems.isNotEmpty &&
@@ -2391,57 +2379,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
-  void _ensureBeanIntroductionPrompt() {
-    const prompt = "Hi, I'm Bean. What is your name?";
-    final alreadyPrompted = _messages.any(
-      (message) => message.role == 'assistant' && message.content == prompt,
-    );
-    if (!alreadyPrompted) {
-      _messages.add(
-        HermesMessage(
-          id: _nextLocalMessageId(),
-          role: 'assistant',
-          content: prompt,
-        ),
-      );
-    }
-  }
-
-  Future<void> _notifyAgentPreferencesUpdated({
-    required String agentPersonality,
-    required List<String> onboardingPriorities,
-    String? onboardingContext,
-  }) async {
-    final session = _session;
-    if (session == null) return;
-
-    await widget.apiClient.sendMessage(
-      sessionId: session.id,
-      content:
-          'Bean preferences were updated in Settings. Save these as your current memory: personality=$agentPersonality; priorities=${onboardingPriorities.join(', ')}; context=${onboardingContext ?? ''}',
-      metadata: _flutterChatMetadata(
-        additional: {
-          'source': 'settings',
-          'settings_update': true,
-          'agent_personality': agentPersonality,
-          'onboarding_priorities': onboardingPriorities,
-          'onboarding_context': onboardingContext,
-        },
-      ),
-    );
-  }
-
   void _replaceChatMessage(int localMessageId, HermesMessage message) {
     final index = _messages.indexWhere(
       (candidate) => candidate.id == localMessageId,
     );
     if (index == -1) return;
-    final displayMessage = _displayableChatMessage(message);
-    if (displayMessage == null) {
-      _messages.removeAt(index);
-      return;
-    }
-    _messages[index] = displayMessage;
+    _messages[index] = message;
   }
 
   void _beginEditingChatMessage(HermesMessage message) {
@@ -2472,47 +2415,103 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   Future<void> _stopAgent() async {
-    final session = _session;
     if (!_beanStopAvailable) return;
-    final activeRunId = _activeAssistantRunId;
-    _chatRunToken++;
-    if (activeRunId != null) {
-      unawaited(() async {
-        try {
-          await widget.apiClient.cancelAssistantRun(activeRunId);
-        } catch (_) {
-          // The run may have finished before the cancel request arrives.
-        }
-      }());
+    await _cancelActiveBeanChatRequests();
+  }
+
+  Future<bool> _cancelActiveBeanChatRequests() async {
+    final session = _session;
+    final requests = _activeBeanChatRequests.values.toList(growable: false);
+    for (final request in requests) {
+      request.cancelRequested = true;
     }
+    final durableCancellationRequests = session == null
+        ? const <Future<HermesSession>>[]
+        : [
+            for (final request in requests)
+              widget.apiClient.cancelSession(
+                session.id,
+                clientRequestId: request.clientRequestId,
+              ),
+          ];
     if (mounted) {
       setState(() {
-        _busy = false;
-        _activeAssistantRunId = null;
+        _busy = true;
         _editingChatMessageId = null;
-        _chatRunState = 'Stopped';
-        _beanWorkItems = const [];
-        _beanWorkAcceptsOrphanPlanEvents = false;
-        _messages.add(
-          HermesMessage(
-            id: _messages.length + 1,
-            role: 'assistant',
-            content: 'Stopped. That request will not update your day.',
-          ),
-        );
+        _chatRunState = 'Stopping...';
       });
     }
-
-    if (session == null) return;
-    unawaited(
-      widget.apiClient
-          .cancelSession(session.id)
-          .then((cancelledSession) {
-            if (!mounted) return;
-            setState(() => _session = cancelledSession);
-          })
-          .catchError((_) {}),
-    );
+    await Future.wait<void>([
+      for (final request in requests) request.admissionSettled,
+    ]);
+    if (session == null) {
+      _chatRunToken++;
+      _activeBeanChatRequests.clear();
+      _activeAssistantRunIds.clear();
+      _assistantRunPolls.clear();
+      _cancelBeanClientRetryTimers();
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _chatRunState = 'Stopped';
+          _beanWorkItems = const [];
+        });
+      }
+      return true;
+    }
+    try {
+      await Future.wait(
+        durableCancellationRequests,
+      ).catchError((_) => const <HermesSession>[]);
+      final cancelledSession = await widget.apiClient.cancelSession(session.id);
+      if (!mounted) return true;
+      _chatRunToken++;
+      _activeBeanChatRequests.clear();
+      _activeAssistantRunIds.clear();
+      _assistantRunPolls.clear();
+      _cancelBeanClientRetryTimers();
+      setState(() {
+        _session = cancelledSession;
+        _busy = false;
+        _chatRunState = 'Stopped';
+        _beanWorkItems = const [];
+        _error = null;
+      });
+      return true;
+    } catch (error) {
+      for (final request in requests) {
+        request.cancelRequested = false;
+        final runId = request.runId;
+        if (runId != null) {
+          unawaited(
+            _pollQueuedRun(
+              runId,
+              _chatRunToken,
+              clientRequestId: request.clientRequestId,
+              userMessageId: request.userMessageId,
+            ),
+          );
+        } else {
+          unawaited(
+            _retryQueuedBeanRequestUntilAccepted(
+              runToken: _chatRunToken,
+              sessionId: request.sessionId,
+              content: request.content,
+              metadata: request.metadata,
+              localUserMessageId: request.localMessageId,
+            ),
+          );
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _syncBeanChatBusyState();
+          _chatRunState = 'Working...';
+          _error = beanFriendlyErrorMessage(error, action: 'stop Bean');
+        });
+      }
+      return false;
+    }
   }
 
   Future<void> _startVoiceChatCapture() async {
@@ -2541,118 +2540,73 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (text.isEmpty) return;
     final editingMessageId = _editingChatMessageId;
     _chatInputController.clear();
-    if (_beanChatHasActiveTurn) {
-      _enqueueBeanChatRequest(text, editingMessageId: editingMessageId);
-      return;
-    }
-    await _sendChat(text, editingMessageId: editingMessageId);
+    unawaited(_sendChat(text, editingMessageId: editingMessageId));
   }
 
-  bool get _beanChatHasActiveTurn => _busy || _activeAssistantRunId != null;
+  bool get _beanChatHasActiveTurn =>
+      _activeBeanChatRequests.isNotEmpty || _activeAssistantRunIds.isNotEmpty;
 
-  void _enqueueBeanChatRequest(String content, {int? editingMessageId}) {
-    final localMessageId = _nextLocalMessageId();
-    final request = _QueuedBeanChatRequest(
-      localMessageId: localMessageId,
-      content: content,
-      editingMessageId: editingMessageId,
-    );
-    setState(() {
-      _editingChatMessageId = null;
-      _beanChatQueue.add(request);
-      _messages.add(
-        HermesMessage(
-          id: localMessageId,
-          role: 'user',
-          content: content,
-          metadata: const {'client_queue_status': 'queued'},
-        ),
-      );
-    });
-  }
-
-  void _scheduleBeanChatQueueDrain() {
-    final completedWorkVisible =
-        _beanWorkItems.isNotEmpty && _beanWorkItems.every((item) => item.done);
-    final delay = completedWorkVisible
-        ? const Duration(milliseconds: 650)
-        : Duration.zero;
-    Future<void>.delayed(delay, _drainBeanChatQueue);
-  }
-
-  Future<void> _drainBeanChatQueue() async {
-    if (_beanChatQueueDraining ||
-        _beanChatHasActiveTurn ||
-        _beanChatQueue.isEmpty) {
-      return;
-    }
-    _beanChatQueueDraining = true;
-    final request = _beanChatQueue.removeAt(0);
-    if (mounted) {
-      setState(() {
-        _markLocalQueuedChatMessageSending(request.localMessageId);
-      });
-    }
-    try {
-      await _sendChat(
-        request.content,
-        editingMessageId: request.editingMessageId,
-        localUserMessageId: request.localMessageId,
-      );
-    } finally {
-      _beanChatQueueDraining = false;
-      if (mounted) _scheduleBeanChatQueueDrain();
+  void _syncBeanChatBusyState() {
+    _busy = _beanChatHasActiveTurn;
+    if (_busy && const {'Ready', 'Failed', 'Blocked'}.contains(_chatRunState)) {
+      _chatRunState = 'Working...';
+    } else if (!_busy &&
+        const {
+          'Thinking…',
+          'Working...',
+          'Stopping...',
+        }.contains(_chatRunState)) {
+      _chatRunState = 'Ready';
     }
   }
 
-  void _markLocalQueuedChatMessageSending(int localMessageId) {
-    final index = _messages.indexWhere(
-      (message) => message.id == localMessageId,
-    );
-    if (index == -1) return;
-    final message = _messages[index];
-    _messages[index] = HermesMessage(
-      id: message.id,
-      role: message.role,
-      content: message.content,
-      metadata: {...message.metadata, 'client_queue_status': 'sending'},
-    );
+  bool _beanRunPending(String status) =>
+      const {'queued', 'running'}.contains(status.toLowerCase());
+
+  void _completeActiveBeanChatRequest(
+    _ActiveBeanChatRequest request, {
+    int? runId,
+  }) {
+    if (identical(_activeBeanChatRequests[request.clientRequestId], request)) {
+      _activeBeanChatRequests.remove(request.clientRequestId);
+    }
+    final durableRunId = runId ?? request.runId;
+    if (durableRunId != null) _activeAssistantRunIds.remove(durableRunId);
+    _syncBeanChatBusyState();
   }
 
-  Future<String?> _sendChat(
-    String content, {
-    int? editingMessageId,
-    int? localUserMessageId,
-    bool voiceRequest = false,
-  }) async {
+  Future<String?> _sendChat(String content, {int? editingMessageId}) async {
     final trimmed = content.trim();
     var session = _session;
     if (trimmed.isEmpty || session == null) return null;
-    final runToken = ++_chatRunToken;
-    final visibleLocalUserMessageId =
-        localUserMessageId ?? _nextLocalMessageId();
+    final runToken = _chatRunToken;
+    final visibleLocalUserMessageId = _nextLocalMessageId();
     final editingServerMessageId =
         editingMessageId != null && editingMessageId > 0
         ? editingMessageId
         : null;
     var chatPhase = 'preparing message';
-    String? clientRequestId;
-    Map<String, Object?>? messageMetadataForRecovery;
+    final clientRequestId =
+        'flutter-chat-${DateTime.now().microsecondsSinceEpoch}-$visibleLocalUserMessageId';
+    final messageMetadata = _flutterChatMetadata(
+      additional: {'client_request_id': clientRequestId},
+    );
+    final request = _ActiveBeanChatRequest(
+      clientRequestId: clientRequestId,
+      localMessageId: visibleLocalUserMessageId,
+      sessionId: session.id,
+      content: trimmed,
+      metadata: messageMetadata,
+    );
+    final hadActiveRequest = _beanChatHasActiveTurn;
+    _activeBeanChatRequests[clientRequestId] = request;
     String? surfacedAssistantText;
-    _cancelBeanClientRetryTimers();
     setState(() {
       _busy = true;
       _editingChatMessageId = null;
       _chatRunState = 'Thinking…';
-      _beginBeanWorkEventContext(freshRequest: true);
-      if (editingMessageId != null) {
-        final editIndex = _messages.indexWhere(
-          (message) => message.id == editingMessageId && message.role == 'user',
-        );
-        if (editIndex != -1) {
-          _messages.removeRange(editIndex, _messages.length);
-        }
-      }
+      _beginBeanWorkEventContext(freshRequest: !hadActiveRequest);
+      _ensurePendingBeanWorkItem(clientRequestId);
       final existingLocalIndex = _messages.indexWhere(
         (message) => message.id == visibleLocalUserMessageId,
       );
@@ -2662,14 +2616,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             id: visibleLocalUserMessageId,
             role: 'user',
             content: trimmed,
+            metadata: {'client_request_id': clientRequestId},
           ),
-        );
-      } else {
-        _messages[existingLocalIndex] = HermesMessage(
-          id: visibleLocalUserMessageId,
-          role: 'user',
-          content: trimmed,
-          metadata: const {'client_queue_status': 'sending'},
         );
       }
     });
@@ -2681,40 +2629,20 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           : editingServerMessageId != null
           ? 'branching Bean chat message'
           : 'routing Bean chat message';
-      clientRequestId =
-          'flutter-chat-${DateTime.now().microsecondsSinceEpoch}-$visibleLocalUserMessageId';
-      final messageMetadata = _flutterChatMetadata(
-        additional: {
-          'source': 'flutter_routed_chat',
-          'client_request_id': clientRequestId,
-          if (editingServerMessageId != null)
-            'edited_message_id': editingServerMessageId,
-          if (voiceRequest) 'voice_request': true,
-          if (voiceRequest)
-            'requested_response_voice': _user?.currentAgentProfile?.voiceKey,
-        },
-      );
-      messageMetadataForRecovery = messageMetadata;
       late final HermesMessageResult result;
       if (needsBeanIntroduction) {
-        result = await _sendBeanIntroductionMessage(session.id, trimmed);
+        result = await _queueBeanMessageWithRetry(
+          sessionId: session.id,
+          content: trimmed,
+          metadata: messageMetadata,
+        );
       } else if (editingServerMessageId != null) {
-        try {
-          result = await widget.apiClient.branchMessage(
-            sessionId: session.id,
-            messageId: editingServerMessageId,
-            content: trimmed,
-            metadata: messageMetadata,
-          );
-        } catch (error) {
-          if (!_shouldRetryQueuedBeanRequest(error)) rethrow;
-          chatPhase = 'queueing edited Bean message after transient failure';
-          result = await _queueBeanMessageWithRetry(
-            sessionId: session.id,
-            content: trimmed,
-            metadata: messageMetadata,
-          );
-        }
+        result = await _branchBeanMessageWithRetry(
+          sessionId: session.id,
+          messageId: editingServerMessageId,
+          content: trimmed,
+          metadata: messageMetadata,
+        );
       } else {
         result = await _queueBeanMessageWithRetry(
           sessionId: session.id,
@@ -2722,8 +2650,13 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           metadata: messageMetadata,
         );
       }
-      if (!mounted || runToken != _chatRunToken) return null;
-      if (result.status == 'queued') {
+      request.runId = result.run?.id;
+      request.userMessageId = result.userMessage?.id;
+      request.settleAdmission();
+      if (!mounted || runToken != _chatRunToken || request.cancelRequested) {
+        return null;
+      }
+      if (_beanRunPending(result.status)) {
         setState(() {
           if (result.userMessage != null) {
             _replaceChatMessage(visibleLocalUserMessageId, result.userMessage!);
@@ -2734,15 +2667,23 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _events = _mergeEvents(result.events, _events);
           _applyBeanWorkEvents(result.events);
           _applyBeanDashboardMutationEvents(result.events);
-          _ensurePendingBeanWorkItem();
+          _ensurePendingBeanWorkItem(clientRequestId);
         });
         final run = result.run;
         if (run != null) {
           setState(() {
-            _activeAssistantRunId = run.id;
+            _activeAssistantRunIds.add(run.id);
             _beginBeanWorkEventContext();
+            _syncBeanChatBusyState();
           });
-          unawaited(_pollQueuedRun(run.id, runToken));
+          unawaited(
+            _pollQueuedRun(
+              run.id,
+              runToken,
+              clientRequestId: clientRequestId,
+              userMessageId: result.userMessage?.id,
+            ),
+          );
         } else {
           unawaited(
             _retryQueuedBeanRequestUntilAccepted(
@@ -2758,9 +2699,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       }
 
       if (!needsBeanIntroduction && result.assistantMessage != null) {
-        final suppressedAssistantMessage = _assistantMessageShouldStayOutOfChat(
-          result.assistantMessage!,
-        );
         setState(() {
           if (result.userMessage != null) {
             _replaceChatMessage(visibleLocalUserMessageId, result.userMessage!);
@@ -2772,28 +2710,22 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _applyBeanDashboardMutationEvents(result.events);
           if (result.status == 'cancelled') {
             _chatRunState = 'Stopped';
-          } else if (suppressedAssistantMessage) {
-            _chatRunState = 'Working in background';
-            _beginBeanWorkEventContext();
-            _ensurePendingBeanWorkItem();
           } else {
-            final displayMessage = _displayableChatMessage(
-              result.assistantMessage!,
-            );
-            if (displayMessage != null &&
-                !_messages.any(
-                  (candidate) => candidate.id == displayMessage.id,
-                )) {
+            final displayMessage = result.assistantMessage!;
+            if (!_messages.any(
+              (candidate) => candidate.id == displayMessage.id,
+            )) {
               _messages.add(displayMessage);
               surfacedAssistantText = displayMessage.content;
             }
             _chatRunState = result.status == 'blocked' ? 'Blocked' : 'Updated';
-            _completeActiveBeanWorkItems();
+            _terminalizeBeanWorkItems(result.status, clientRequestId);
           }
           final assistantContent = result.assistantMessage!.content;
           _error = _isPlanLimitMessage(assistantContent)
               ? assistantContent
               : null;
+          _completeActiveBeanChatRequest(request, runId: result.run?.id);
         });
         _refreshDashboardAfterBeanMutationEvents(result.events);
         if (!result.events.any(_beanActivityEventMutatesDashboard)) {
@@ -2828,9 +2760,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (!mounted || runToken != _chatRunToken) return null;
       final completedBeanIntroduction =
           needsBeanIntroduction && !_userNeedsBeanIntroduction(refreshedUser);
-      final suppressedAssistantMessage =
-          result.assistantMessage != null &&
-          _assistantMessageShouldStayOutOfChat(result.assistantMessage!);
       setState(() {
         if (result.userMessage != null) {
           _replaceChatMessage(visibleLocalUserMessageId, result.userMessage!);
@@ -2842,50 +2771,27 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         if (result.status == 'cancelled') {
           _chatRunState = 'Stopped';
         } else if (result.assistantMessage != null) {
-          final displayMessage = _displayableChatMessage(
-            result.assistantMessage!,
-          );
-          if (displayMessage != null) {
+          final displayMessage = result.assistantMessage!;
+          if (!_messages.any(
+            (candidate) => candidate.id == displayMessage.id,
+          )) {
             _messages.add(displayMessage);
             surfacedAssistantText = displayMessage.content;
-          } else {
-            _chatRunState = 'Working in background';
-            _beginBeanWorkEventContext();
           }
           final assistantContent = result.assistantMessage!.content;
           if (_isPlanLimitMessage(assistantContent)) {
             _error = assistantContent;
           }
-        } else if (result.status == 'blocked' && result.blocker != null) {
-          final reason = _readBlockerReason(result.blocker);
-          _messages.add(
-            HermesMessage(
-              id: _messages.length + 1,
-              role: 'assistant',
-              content: reason == null || reason.isEmpty
-                  ? 'Bean is paused because something needs attention before it can continue. Please check Settings or approvals, then try again.'
-                  : 'Bean is paused because $reason Please check Settings or approvals, then try again.',
-            ),
-          );
-        } else if (result.assistantMessage == null) {
-          const fallbackAssistantText =
-              'Done — I’m refreshing the latest app details now.';
-          _messages.add(
-            HermesMessage(
-              id: _messages.length + 1,
-              role: 'assistant',
-              content: fallbackAssistantText,
-            ),
-          );
-          surfacedAssistantText = fallbackAssistantText;
+        } else if (result.status != 'cancelled') {
+          _error =
+              'Bean did not return a durable final response. Please try again.';
         }
-        _chatRunState = suppressedAssistantMessage
-            ? 'Working in background'
-            : switch (result.status) {
-                'blocked' => 'Blocked',
-                'cancelled' => 'Stopped',
-                _ => 'Updated',
-              };
+        _chatRunState = switch (result.status) {
+          'blocked' => 'Blocked',
+          'cancelled' => 'Stopped',
+          'failed' => 'Failed',
+          _ => 'Updated',
+        };
         _tasks = _tasksWithPendingWrites(refreshedTasks);
         _reminders = _remindersWithPendingWrites(refreshedSummary.reminders);
         _calendar = _calendarEventsForDashboardState(
@@ -2896,23 +2802,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _events = _mergeEvents(result.events, refreshedEvents);
         _applyBeanWorkEvents(_events);
         _applyBeanDashboardMutationEvents(result.events);
-        if (suppressedAssistantMessage) {
-          _beginBeanWorkEventContext();
-        } else {
-          _completeActiveBeanWorkItems();
-        }
+        _terminalizeBeanWorkItems(result.status, clientRequestId);
+        _completeActiveBeanChatRequest(request, runId: result.run?.id);
       });
-      if (suppressedAssistantMessage) {
-        unawaited(
-          _retryQueuedBeanRequestUntilAccepted(
-            runToken: runToken,
-            sessionId: session.id,
-            content: trimmed,
-            metadata: messageMetadata,
-            localUserMessageId: visibleLocalUserMessageId,
-          ),
-        );
-      }
       if (completedBeanIntroduction) {
         unawaited(_startOnboardingTourAfterBeanIntroduction());
       }
@@ -2921,16 +2813,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         runToken: runToken,
         session: session,
         clientRequestId: clientRequestId,
-        metadata:
-            messageMetadataForRecovery ??
-            _flutterChatMetadata(
-              additional: {
-                if (clientRequestId != null)
-                  'client_request_id': clientRequestId,
-                if (editingServerMessageId != null)
-                  'edited_message_id': editingServerMessageId,
-              },
-            ),
+        metadata: messageMetadata,
         localUserMessageId: visibleLocalUserMessageId,
         originalContent: trimmed,
       );
@@ -2949,30 +2832,22 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         ),
       );
       if (!mounted || runToken != _chatRunToken) return null;
-      final friendlyFailureMessage = beanFriendlyChatFailureMessage(error);
+      final transportStatus =
+          _subscriptionLimitMessageFromError(error) ??
+          'Bean could not confirm that message. Please try again.';
       setState(() {
-        _chatRunState = 'Checking…';
+        _chatRunState = 'Failed';
         _beanWorkItems = const [];
-        _beanWorkAcceptsOrphanPlanEvents = false;
-        _messages.add(
-          HermesMessage(
-            id: _messages.length + 1,
-            role: 'assistant',
-            content: friendlyFailureMessage,
-          ),
-        );
-        _error = null;
+        _error = transportStatus;
+        _completeActiveBeanChatRequest(request);
       });
-      surfacedAssistantText = friendlyFailureMessage;
     } finally {
+      request.settleAdmission();
       if (mounted && runToken == _chatRunToken) {
-        setState(() => _busy = false);
-        _scheduleBeanChatQueueDrain();
+        setState(_syncBeanChatBusyState);
       }
     }
-    final assistantText = beanSafeAssistantDisplayContent(
-      surfacedAssistantText ?? '',
-    ).trim();
+    final assistantText = (surfacedAssistantText ?? '').trim();
     return assistantText.isEmpty ? null : assistantText;
   }
 
@@ -2997,6 +2872,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       );
       if (!mounted || runToken != _chatRunToken) return true;
       if (_queuedLookupResultShouldKeepRetrying(result)) {
+        if (_activeBeanChatRequests[requestId]?.cancelRequested == true) {
+          return true;
+        }
         setState(() {
           if (result.userMessage != null) {
             _replaceChatMessage(localUserMessageId, result.userMessage!);
@@ -3021,68 +2899,30 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _applyRecoveredChatResult(
         result,
         runToken: runToken,
+        clientRequestId: requestId,
         localUserMessageId: localUserMessageId,
-        originalContent: originalContent,
       );
       return true;
     } catch (_) {
-      // Fall through to session refresh. Some failures happen after the server
-      // saved messages but before the run lookup is available.
-    }
-
-    try {
-      final details = await widget.apiClient.resumeSessionDetails(
-        activeSession.id,
+      return _recoverTerminalChatResultFromSession(
+        sessionId: activeSession.id,
+        clientRequestId: requestId,
+        runToken: runToken,
+        localUserMessageId: localUserMessageId,
       );
-      if (!mounted || runToken != _chatRunToken) return true;
-      final messages = details.messages;
-      final userIndex = messages.indexWhere(
-        (message) =>
-            message.role == 'user' &&
-            message.metadata['client_request_id'] == requestId,
-      );
-      if (userIndex == -1) {
-        return false;
-      }
-      final hasAssistantAfter = _hasDisplayableAssistantAfter(
-        messages,
-        userIndex,
-      );
-      setState(() {
-        _session = details.session;
-        _replaceMessagesFromSession(
-          details,
-          user: _user,
-          preserveVisibleMessages: true,
-        );
-        _activeBeanWorkMessageId = messages[userIndex].id;
-        _chatRunState = hasAssistantAfter ? 'Updated' : 'Working in background';
-        if (hasAssistantAfter) {
-          _activeAssistantRunId = null;
-          _completeActiveBeanWorkItems();
-        } else {
-          _beginBeanWorkEventContext();
-        }
-        _error = null;
-      });
-      if (hasAssistantAfter) {
-        unawaited(_refreshSignedInViews(showLoading: false));
-        _scheduleBeanChatQueueDrain();
-      }
-      return true;
-    } catch (_) {
-      return false;
     }
   }
 
   void _applyRecoveredChatResult(
     HermesMessageResult result, {
     required int runToken,
+    required String clientRequestId,
     required int localUserMessageId,
-    required String originalContent,
   }) {
     if (!mounted || runToken != _chatRunToken) return;
-    if (result.status == 'queued') {
+    final request = _activeBeanChatRequests[clientRequestId];
+    if (request?.cancelRequested == true) return;
+    if (_beanRunPending(result.status)) {
       setState(() {
         if (result.userMessage != null) {
           _replaceChatMessage(localUserMessageId, result.userMessage!);
@@ -3094,23 +2934,30 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _applyBeanWorkEvents(result.events);
         _applyBeanDashboardMutationEvents(result.events);
         _beginBeanWorkEventContext();
-        _ensurePendingBeanWorkItem();
+        _ensurePendingBeanWorkItem(clientRequestId);
         final run = result.run;
         if (run != null) {
-          _activeAssistantRunId = run.id;
+          _activeAssistantRunIds.add(run.id);
+          request?.runId = run.id;
         }
+        request?.userMessageId = result.userMessage?.id;
+        _syncBeanChatBusyState();
         _error = null;
       });
       final run = result.run;
       if (run != null) {
-        unawaited(_pollQueuedRun(run.id, runToken));
+        unawaited(
+          _pollQueuedRun(
+            run.id,
+            runToken,
+            clientRequestId: clientRequestId,
+            userMessageId: result.userMessage?.id,
+          ),
+        );
       }
       return;
     }
 
-    final suppressedAssistantMessage =
-        result.assistantMessage != null &&
-        _assistantMessageShouldStayOutOfChat(result.assistantMessage!);
     setState(() {
       if (result.userMessage != null) {
         _replaceChatMessage(localUserMessageId, result.userMessage!);
@@ -3124,35 +2971,26 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           !_messages.any(
             (candidate) => candidate.id == result.assistantMessage!.id,
           )) {
-        final displayMessage = _displayableChatMessage(
-          result.assistantMessage!,
-        );
-        if (displayMessage != null) {
-          _messages.add(displayMessage);
-        } else {
-          _chatRunState = 'Working in background';
-          _beginBeanWorkEventContext();
-          _ensurePendingBeanWorkItem();
-        }
+        _messages.add(result.assistantMessage!);
       }
-      _chatRunState = suppressedAssistantMessage
-          ? 'Working in background'
-          : switch (result.status) {
-              'blocked' => 'Blocked',
-              'cancelled' => 'Stopped',
-              _ => 'Updated',
-            };
-      if (result.status == 'completed' && !suppressedAssistantMessage) {
-        _completeActiveBeanWorkItems();
-      } else if (suppressedAssistantMessage) {
-        _beginBeanWorkEventContext();
-        _ensurePendingBeanWorkItem();
+      _chatRunState = switch (result.status) {
+        'blocked' => 'Blocked',
+        'cancelled' => 'Stopped',
+        'failed' => 'Failed',
+        _ => 'Updated',
+      };
+      if (['completed', 'blocked', 'failed'].contains(result.status)) {
+        _terminalizeBeanWorkItems(result.status, clientRequestId);
       }
-      _activeAssistantRunId = null;
+      if (request != null) {
+        _completeActiveBeanChatRequest(request, runId: result.run?.id);
+      } else if (result.run != null) {
+        _activeAssistantRunIds.remove(result.run!.id);
+        _syncBeanChatBusyState();
+      }
       _error = null;
     });
     unawaited(_refreshSignedInViews(showLoading: false));
-    if (!suppressedAssistantMessage) _scheduleBeanChatQueueDrain();
   }
 
   Future<HermesMessageResult> _queueBeanMessageWithRetry({
@@ -3169,6 +3007,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         return await widget.apiClient.queueMessage(
           sessionId: sessionId,
           content: content,
+          clientRequestId: clientRequestId,
           metadata: metadata,
         );
       } catch (error) {
@@ -3218,6 +3057,48 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     throw lastError ?? StateError('Bean queue request failed.');
   }
 
+  Future<HermesMessageResult> _branchBeanMessageWithRetry({
+    required int sessionId,
+    required int messageId,
+    required String content,
+    required Map<String, Object?> metadata,
+  }) async {
+    Object? lastError;
+    final clientRequestId = metadata['client_request_id'] is String
+        ? (metadata['client_request_id']! as String).trim()
+        : '';
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await widget.apiClient.branchMessage(
+          sessionId: sessionId,
+          messageId: messageId,
+          content: content,
+          clientRequestId: clientRequestId,
+          metadata: metadata,
+        );
+      } catch (error) {
+        lastError = error;
+        if (!_shouldRetryQueuedBeanRequest(error) || attempt >= 2) break;
+        if (clientRequestId.isNotEmpty) {
+          try {
+            return await widget.apiClient.lookupQueuedMessage(
+              sessionId: sessionId,
+              clientRequestId: clientRequestId,
+            );
+          } catch (_) {
+            // The branch may not have reached the server; retry the same
+            // stable request ID against the same branch operation.
+          }
+        }
+        await Future<void>.delayed(
+          Duration(milliseconds: 300 + (attempt * 450)),
+        );
+      }
+    }
+
+    throw lastError ?? StateError('Bean branch request failed.');
+  }
+
   Future<void> _retryQueuedBeanRequestUntilAccepted({
     required int runToken,
     required int sessionId,
@@ -3231,10 +3112,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (clientRequestId.isEmpty) return;
 
     for (var attempt = 0; attempt < 18; attempt++) {
+      final activeRequest = _activeBeanChatRequests[clientRequestId];
+      if (activeRequest == null || activeRequest.cancelRequested) return;
       await _sleepWithBeanClientRetryTimer(
         Duration(milliseconds: attempt < 4 ? 900 : 1800),
       );
       if (!mounted || runToken != _chatRunToken) return;
+      if (_activeBeanChatRequests[clientRequestId]?.cancelRequested == true) {
+        return;
+      }
 
       try {
         final recovered = await widget.apiClient.lookupQueuedMessage(
@@ -3246,8 +3132,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           _applyRecoveredChatResult(
             recovered,
             runToken: runToken,
+            clientRequestId: clientRequestId,
             localUserMessageId: localUserMessageId,
-            originalContent: content,
           );
           return;
         }
@@ -3260,14 +3146,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         final queued = await widget.apiClient.queueMessage(
           sessionId: sessionId,
           content: content,
+          clientRequestId: clientRequestId,
           metadata: metadata,
         );
         if (!mounted || runToken != _chatRunToken) return;
         _applyRecoveredChatResult(
           queued,
           runToken: runToken,
+          clientRequestId: clientRequestId,
           localUserMessageId: localUserMessageId,
-          originalContent: content,
         );
         return;
       } catch (_) {
@@ -3275,7 +3162,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         setState(() {
           _chatRunState = 'Working in background';
           _beginBeanWorkEventContext();
-          _ensurePendingBeanWorkItem();
+          _ensurePendingBeanWorkItem(clientRequestId);
           _error = null;
         });
       }
@@ -3283,16 +3170,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   }
 
   bool _queuedLookupResultShouldKeepRetrying(HermesMessageResult result) {
-    if (result.run == null &&
-        result.status == 'queued' &&
-        result.assistantMessage == null) {
-      return true;
-    }
-
-    final assistantMessage = result.assistantMessage;
     return result.run == null &&
-        assistantMessage != null &&
-        beanAssistantMessageShouldStayOutOfChat(assistantMessage);
+        result.status == 'queued' &&
+        result.assistantMessage == null;
   }
 
   Future<void> _sleepWithBeanClientRetryTimer(Duration duration) {
@@ -3361,206 +3241,270 @@ ${_truncateDiagnostic(stack, 2200)}
     return '${value.substring(0, maxLength)}…';
   }
 
-  Future<HermesMessageResult> _sendBeanIntroductionMessage(
-    int sessionId,
-    String content,
-  ) async {
-    final metadata = _flutterChatMetadata();
-    try {
-      return await widget.apiClient.sendMessage(
-        sessionId: sessionId,
-        content: content,
-        metadata: metadata,
-      );
-    } catch (firstError) {
-      debugPrint('Bean onboarding direct message failed: $firstError');
-      try {
-        return await widget.apiClient.sendMessage(
-          sessionId: sessionId,
-          content: content,
-          metadata: metadata,
-        );
-      } catch (secondError) {
-        debugPrint('Bean onboarding direct message retry failed: $secondError');
-        return widget.apiClient.queueMessage(
-          sessionId: sessionId,
-          content: content,
-          metadata: metadata,
-        );
-      }
-    }
-  }
-
-  Future<void> _pollQueuedRun(int runId, int runToken) async {
+  Future<void> _pollQueuedRun(
+    int runId,
+    int runToken, {
+    required String clientRequestId,
+    int? userMessageId,
+  }) async {
+    if (!_assistantRunPolls.add(runId)) return;
     var pollErrors = 0;
-    for (var attempt = 0; attempt < 90; attempt++) {
-      await Future<void>.delayed(
-        attempt == 0
-            ? const Duration(milliseconds: 150)
-            : const Duration(milliseconds: 250),
-      );
-      if (!mounted || runToken != _chatRunToken) return;
-      try {
-        final run = await widget.apiClient.getAssistantRun(runId);
-        pollErrors = 0;
+    var attempt = 0;
+    try {
+      while (mounted && runToken == _chatRunToken) {
+        final request = _activeBeanChatRequests[clientRequestId];
+        if (request?.cancelRequested == true) return;
+        await Future<void>.delayed(
+          attempt == 0
+              ? const Duration(milliseconds: 150)
+              : attempt < 90
+              ? const Duration(milliseconds: 250)
+              : const Duration(milliseconds: 1500),
+        );
         if (!mounted || runToken != _chatRunToken) return;
-        final runTerminal =
-            run.status == 'completed' ||
-            run.status == 'failed' ||
-            run.status == 'cancelled';
-        if (run.userMessageId != null) {
-          setState(() {
-            _activeBeanWorkMessageId = run.userMessageId;
-          });
+        if (_activeBeanChatRequests[clientRequestId]?.cancelRequested == true) {
+          return;
         }
-        final sessionId = _session?.id;
-        if (sessionId != null) {
-          final events = await widget.apiClient
-              .pollActivityEvents(
-                sessionId,
-                after: _latestActivityEventId(),
-                waitSeconds: runTerminal ? 0 : 1,
-              )
-              .catchError((_) => const <HermesActivityEvent>[]);
+        try {
+          final run = await widget.apiClient.getAssistantRun(runId);
+          pollErrors = 0;
           if (!mounted || runToken != _chatRunToken) return;
-          if (events.isNotEmpty) {
+          final runTerminal = !_beanRunPending(run.status);
+          final durableUserMessageId = run.userMessageId ?? userMessageId;
+          if (durableUserMessageId != null) {
             setState(() {
-              _events = _mergeEvents(events, _events);
-              _applyBeanWorkEvents(events);
-              _applyBeanDashboardMutationEvents(events);
+              _activeBeanWorkMessageId = durableUserMessageId;
+              request?.userMessageId = durableUserMessageId;
             });
-            _refreshDashboardAfterBeanMutationEvents(events);
           }
-        }
-        if (runTerminal) {
-          if (run.status == 'completed' && run.assistantMessage == null) {
-            if (await _recoverQueuedRunFromSession(
+          final sessionId = request?.sessionId ?? _session?.id;
+          if (sessionId != null) {
+            final events = await widget.apiClient
+                .pollActivityEvents(
+                  sessionId,
+                  after: _latestActivityEventId(),
+                  waitSeconds: runTerminal ? 0 : 1,
+                )
+                .catchError((_) => const <HermesActivityEvent>[]);
+            if (!mounted || runToken != _chatRunToken) return;
+            if (events.isNotEmpty) {
+              setState(() {
+                _events = _mergeEvents(events, _events);
+                _applyBeanWorkEvents(events);
+                _applyBeanDashboardMutationEvents(events);
+              });
+              _refreshDashboardAfterBeanMutationEvents(events);
+            }
+          }
+          if (runTerminal) {
+            if (await _recoverQueuedRunFromServer(
               runId: runId,
               runToken: runToken,
+              clientRequestId: clientRequestId,
+              localUserMessageId:
+                  request?.localMessageId ?? durableUserMessageId ?? -runId,
             )) {
               return;
             }
-            if (attempt < 89) {
-              continue;
-            }
-          }
-          final finalEvents = sessionId == null
-              ? const <HermesActivityEvent>[]
-              : await widget.apiClient
-                    .pollActivityEvents(
-                      sessionId,
-                      after: _latestActivityEventId(),
-                      waitSeconds: 1,
-                    )
-                    .catchError((_) => const <HermesActivityEvent>[]);
-          if (!mounted || runToken != _chatRunToken) return;
-          setState(() {
-            if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
-            if (finalEvents.isNotEmpty) {
-              _events = _mergeEvents(finalEvents, _events);
-              _applyBeanWorkEvents(finalEvents);
-              _applyBeanDashboardMutationEvents(finalEvents);
-            }
-            _chatRunState = switch (run.status) {
-              'completed' => 'Updated',
-              'cancelled' => 'Stopped',
-              _ => 'Checking…',
-            };
-            _completeActiveBeanWorkItems(switch (run.status) {
-              'completed' => 'completed',
-              'cancelled' => 'cancelled',
-              _ => 'failed',
-            });
-            final message = run.assistantMessage;
-            if (message != null &&
-                !_messages.any((candidate) => candidate.id == message.id)) {
-              final displayMessage = _displayableChatMessage(message);
-              if (displayMessage != null) {
-                _messages.add(displayMessage);
+            final finalEvents = sessionId == null
+                ? const <HermesActivityEvent>[]
+                : await widget.apiClient
+                      .pollActivityEvents(
+                        sessionId,
+                        after: _latestActivityEventId(),
+                        waitSeconds: 1,
+                      )
+                      .catchError((_) => const <HermesActivityEvent>[]);
+            if (!mounted || runToken != _chatRunToken) return;
+            setState(() {
+              if (finalEvents.isNotEmpty) {
+                _events = _mergeEvents(finalEvents, _events);
+                _applyBeanWorkEvents(finalEvents);
+                _applyBeanDashboardMutationEvents(finalEvents);
               }
-            } else if (run.status == 'failed') {
-              _chatRunState = 'Ready';
+              _chatRunState = switch (run.status) {
+                'completed' => 'Updated',
+                'blocked' => 'Blocked',
+                'cancelled' => 'Stopped',
+                _ => 'Failed',
+              };
+              _terminalizeBeanWorkItems(run.status, clientRequestId);
+              final message = run.assistantMessage;
+              if (message != null &&
+                  !_messages.any((candidate) => candidate.id == message.id)) {
+                _messages.add(message);
+              } else if (run.status == 'failed') {
+                _chatRunState = 'Ready';
+              }
+              if (request != null) {
+                _completeActiveBeanChatRequest(request, runId: runId);
+              } else {
+                _activeAssistantRunIds.remove(runId);
+                _syncBeanChatBusyState();
+              }
+            });
+            _refreshDashboardAfterBeanMutationEvents(finalEvents);
+            if (!finalEvents.any(_beanActivityEventMutatesDashboard)) {
+              unawaited(_refreshSignedInViews(showLoading: false));
             }
-          });
-          _refreshDashboardAfterBeanMutationEvents(finalEvents);
-          if (!finalEvents.any(_beanActivityEventMutatesDashboard)) {
-            unawaited(_refreshSignedInViews(showLoading: false));
+            return;
           }
-          _scheduleBeanChatQueueDrain();
-          return;
+          if (attempt > 0 &&
+              attempt % 12 == 0 &&
+              await _recoverQueuedRunFromServer(
+                runId: runId,
+                runToken: runToken,
+                clientRequestId: clientRequestId,
+                localUserMessageId:
+                    request?.localMessageId ?? userMessageId ?? -runId,
+              )) {
+            return;
+          }
+        } catch (_) {
+          pollErrors++;
+          if (pollErrors >= 2 &&
+              await _recoverQueuedRunFromServer(
+                runId: runId,
+                runToken: runToken,
+                clientRequestId: clientRequestId,
+                localUserMessageId:
+                    request?.localMessageId ?? userMessageId ?? -runId,
+              )) {
+            return;
+          }
         }
-        if (attempt > 0 &&
-            attempt % 12 == 0 &&
-            await _recoverQueuedRunFromSession(
-              runId: runId,
-              runToken: runToken,
-            )) {
-          return;
-        }
-      } catch (_) {
-        pollErrors++;
-        if (pollErrors >= 2 &&
-            await _recoverQueuedRunFromSession(
-              runId: runId,
-              runToken: runToken,
-            )) {
-          return;
-        }
+        attempt++;
       }
+    } finally {
+      _assistantRunPolls.remove(runId);
     }
-    if (await _recoverQueuedRunFromSession(runId: runId, runToken: runToken)) {
-      return;
-    }
-    if (!mounted || runToken != _chatRunToken) return;
-    setState(() {
-      _busy = false;
-      _chatRunState = 'Working in background';
-    });
-    _scheduleBeanChatQueueDrain();
   }
 
-  Future<bool> _recoverQueuedRunFromSession({
+  Future<bool> _recoverQueuedRunFromServer({
     required int runId,
     required int runToken,
+    required String clientRequestId,
+    required int localUserMessageId,
   }) async {
-    final session = _session;
-    final activeMessageId = _activeBeanWorkMessageId;
-    if (session == null || activeMessageId == null) return false;
+    final request = _activeBeanChatRequests[clientRequestId];
+    final sessionId = request?.sessionId ?? _session?.id;
+    if (sessionId == null) return false;
 
     try {
-      final details = await widget.apiClient.resumeSessionDetails(session.id);
+      final result = await widget.apiClient.lookupQueuedMessage(
+        sessionId: sessionId,
+        clientRequestId: clientRequestId,
+      );
       if (!mounted || runToken != _chatRunToken) return true;
-
-      final messages = details.messages;
-      final userIndex = messages.indexWhere(
-        (message) => message.id == activeMessageId && message.role == 'user',
+      if (result.run != null && result.run!.id != runId) return false;
+      _applyRecoveredChatResult(
+        result,
+        runToken: runToken,
+        clientRequestId: clientRequestId,
+        localUserMessageId: localUserMessageId,
       );
-      if (userIndex == -1) return false;
-
-      final hasAssistantAfter = _hasDisplayableAssistantAfter(
-        messages,
-        userIndex,
+      return !_beanRunPending(result.status);
+    } catch (_) {
+      return _recoverTerminalChatResultFromSession(
+        sessionId: sessionId,
+        clientRequestId: clientRequestId,
+        runToken: runToken,
+        localUserMessageId: localUserMessageId,
+        expectedRunId: runId,
       );
-      if (!hasAssistantAfter) return false;
-      setState(() {
-        if (_activeAssistantRunId == runId) _activeAssistantRunId = null;
-        _session = details.session;
-        _replaceMessagesFromSession(
-          details,
-          user: _user,
-          preserveVisibleMessages: true,
-        );
-        _chatRunState = 'Updated';
-        _busy = false;
-        _error = null;
-        _completeActiveBeanWorkItems();
-      });
-      _scheduleBeanChatQueueDrain();
+    }
+  }
 
+  Future<bool> _recoverTerminalChatResultFromSession({
+    required int sessionId,
+    required String clientRequestId,
+    required int runToken,
+    required int localUserMessageId,
+    int? expectedRunId,
+  }) async {
+    try {
+      final details = await widget.apiClient.resumeSessionDetails(sessionId);
+      if (!mounted || runToken != _chatRunToken) return true;
+      final result = _exactTerminalChatResultFromSession(
+        details,
+        clientRequestId: clientRequestId,
+        expectedRunId: expectedRunId,
+      );
+      if (result == null) return false;
+      _applyRecoveredChatResult(
+        result,
+        runToken: runToken,
+        clientRequestId: clientRequestId,
+        localUserMessageId: localUserMessageId,
+      );
       return true;
     } catch (_) {
       return false;
     }
+  }
+
+  HermesMessageResult? _exactTerminalChatResultFromSession(
+    HermesSessionDetails details, {
+    required String clientRequestId,
+    int? expectedRunId,
+  }) {
+    final matchingUsers = details.messages
+        .where(
+          (message) =>
+              message.role == 'user' &&
+              message.metadata['client_request_id']?.toString() ==
+                  clientRequestId,
+        )
+        .toList(growable: false);
+    if (matchingUsers.length != 1) return null;
+    final userMessage = matchingUsers.single;
+
+    var runId = expectedRunId;
+    if (runId == null) {
+      final eventRunIds = details.activityEvents
+          .where((event) {
+            final payload = event.payload;
+            final eventClientRequestId =
+                _stringFromPayload(payload, 'client_request_id') ??
+                _stringFromPayload(payload, 'clientRequestId');
+            final eventMessageId =
+                _intFromPayload(payload, 'user_message_id') ??
+                _intFromPayload(payload, 'message_id');
+            return eventClientRequestId == clientRequestId ||
+                eventMessageId == userMessage.id;
+          })
+          .map(
+            (event) =>
+                _intFromPayload(event.payload, 'assistant_run_id') ??
+                _intFromPayload(event.payload, 'run_id'),
+          )
+          .whereType<int>()
+          .toSet();
+      if (eventRunIds.length != 1) return null;
+      runId = eventRunIds.single;
+    }
+
+    final matchingAssistants = details.messages
+        .where(
+          (message) =>
+              message.role == 'assistant' &&
+              _intFromPayload(message.metadata, 'assistant_run_id') == runId,
+        )
+        .toList(growable: false);
+    if (matchingAssistants.length != 1) return null;
+    final assistantMessage = matchingAssistants.single;
+    final status =
+        assistantMessage.metadata['final_status']?.toString().toLowerCase() ??
+        'completed';
+    if (_beanRunPending(status)) return null;
+
+    return HermesMessageResult(
+      status: status,
+      session: details.session,
+      userMessage: userMessage,
+      assistantMessage: assistantMessage,
+      events: details.activityEvents,
+    );
   }
 
   void _refreshDashboardAfterBeanMutationEvents(
@@ -3795,125 +3739,13 @@ ${_truncateDiagnostic(stack, 2200)}
   bool _beanActivityEventMutatesDashboard(HermesActivityEvent event) {
     final type = event.eventType;
     if (!type.startsWith('assistant.')) return false;
-    if (!_beanWorkStatusDone(_beanWorkEventStatus(event.status ?? ''))) {
+    final canonicalStatus = _beanWorkEventStatus(event.status ?? '');
+    if (canonicalStatus == null || !_beanWorkStatusDone(canonicalStatus)) {
       return false;
     }
     return RegExp(
       r'\.(?:task|reminder|calendar_event|note|note_folder|memory|approval|blocker)\.(?:created|updated|deleted)$',
     ).hasMatch(type);
-  }
-
-  HermesMessage? _displayableChatMessage(HermesMessage message) {
-    if (_assistantMessageShouldStayOutOfChat(message)) {
-      return null;
-    }
-
-    final content = _naturalLanguageContent(message.content);
-    final safeContent = content == null
-        ? null
-        : beanSafeAssistantDisplayContent(content);
-    return HermesMessage(
-      id: message.id,
-      role: message.role,
-      content:
-          safeContent ??
-          (message.metadata['runtime'] == 'tools' ? 'Done.' : null),
-      metadata: message.metadata,
-    );
-  }
-
-  bool _hasDisplayableAssistantAfter(
-    List<HermesMessage> messages,
-    int userIndex,
-  ) {
-    return messages
-        .skip(userIndex + 1)
-        .where((message) => message.role == 'assistant')
-        .map(_displayableChatMessage)
-        .whereType<HermesMessage>()
-        .any((message) => (message.content ?? '').trim().isNotEmpty);
-  }
-
-  bool _assistantMessageShouldStayOutOfChat(HermesMessage message) {
-    return beanAssistantMessageShouldStayOutOfChat(message);
-  }
-
-  String? _naturalLanguageContent(String? content) {
-    final trimmed = content?.trim();
-    if (trimmed == null || trimmed.isEmpty) return content;
-    try {
-      final decoded = jsonDecode(trimmed);
-      if (decoded is Map<String, Object?>) {
-        for (final key in [
-          'message',
-          'content',
-          'assistant_message',
-          'response',
-        ]) {
-          final value = decoded[key];
-          if (value is String && value.trim().isNotEmpty) {
-            return value.trim();
-          }
-        }
-        if (decoded.containsKey('role') || decoded.containsKey('content')) {
-          return null;
-        }
-      }
-    } catch (_) {
-      // Plain-text assistant messages are already displayable.
-    }
-    final cleaned = _removeLeadingJsonLines(trimmed);
-    if (cleaned != null) return cleaned;
-    return content;
-  }
-
-  String? _removeLeadingJsonLines(String content) {
-    final lines = content.split('\n');
-    var firstNaturalLine = 0;
-    while (firstNaturalLine < lines.length) {
-      final line = lines[firstNaturalLine].trim();
-      if (line.isEmpty) {
-        firstNaturalLine++;
-        continue;
-      }
-      if (!_looksLikeStandaloneJsonObject(line)) break;
-      firstNaturalLine++;
-    }
-    if (firstNaturalLine == 0 || firstNaturalLine >= lines.length) {
-      return null;
-    }
-    final cleaned = lines.skip(firstNaturalLine).join('\n').trim();
-    return cleaned.isEmpty ? null : cleaned;
-  }
-
-  bool _looksLikeStandaloneJsonObject(String value) {
-    if (!value.startsWith('{') || !value.endsWith('}')) return false;
-    try {
-      return jsonDecode(value) is Map<String, Object?>;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  String? _readBlockerReason(Map<String, Object?>? blocker) {
-    if (blocker == null) return null;
-    for (final key in ['reason', 'message', 'title', 'description']) {
-      final value = blocker[key];
-      if (value is String) {
-        final cleaned = _safeValidationSentence(value);
-        if (cleaned != null) return cleaned;
-      }
-    }
-    final context = blocker['context'];
-    if (context is Map<String, Object?>) {
-      final detail =
-          context['message'] ?? context['error'] ?? context['failure_type'];
-      if (detail is String) {
-        final cleaned = _safeValidationSentence(detail);
-        if (cleaned != null) return cleaned;
-      }
-    }
-    return null;
   }
 
   List<HermesActivityEvent> _mergeEvents(
@@ -4231,7 +4063,7 @@ ${_truncateDiagnostic(stack, 2200)}
     try {
       final feed = await widget.apiClient.dashboardChanges(
         after: previousLatestId,
-        waitSeconds: _busy || _activeAssistantRunId != null ? 1 : 0,
+        waitSeconds: _busy || _activeAssistantRunIds.isNotEmpty ? 1 : 0,
       );
       if (!mounted ||
           _phase != _AuthPhase.signedIn ||
@@ -4271,7 +4103,7 @@ ${_truncateDiagnostic(stack, 2200)}
     }
     try {
       final sessionDetailsFuture =
-          session != null && _activeAssistantRunId != null
+          session != null && _activeAssistantRunIds.isNotEmpty
           ? widget.apiClient
                 .resumeSessionDetails(session.id)
                 .then<HermesSessionDetails?>((details) => details)
@@ -4356,6 +4188,7 @@ ${_truncateDiagnostic(stack, 2200)}
             user: user,
             preserveVisibleMessages: true,
           );
+          _resumeActiveBeanRuns(sessionDetails);
         }
         _tasks = _dashboardListForMutationRefresh(
           refreshed: refreshedTasks,
@@ -4390,7 +4223,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _approvals = summary.approvals;
         _events = refreshedActivityEvents;
         if (_busy ||
-            _activeAssistantRunId != null ||
+            _activeAssistantRunIds.isNotEmpty ||
             _beanWorkItems.isNotEmpty) {
           _applyBeanWorkEvents(refreshedActivityEvents);
         }
@@ -4507,6 +4340,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _user = user;
         _session = session;
         _replaceMessagesFromSession(sessionDetails, user: user);
+        _resumeActiveBeanRuns(sessionDetails);
         _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
         _noteFolders = _sortedNoteFolders(results[4] as List<HermesNoteFolder>);
         _notes = _sortedNotes(results[5] as List<HermesNote>);
@@ -4583,8 +4417,6 @@ ${_truncateDiagnostic(stack, 2200)}
         builder: (context) => _ApprovalRequestSheet(
           approval: currentApproval,
           onApprove: (approval) => _approveApproval(approval),
-          onAlwaysApprove: (approval) =>
-              _approveApproval(approval, alwaysApprove: true),
           onDeny: _denyApproval,
           onChange: _changeApproval,
         ),
@@ -4593,14 +4425,8 @@ ${_truncateDiagnostic(stack, 2200)}
     });
   }
 
-  Future<void> _approveApproval(
-    HermesApproval approval, {
-    bool alwaysApprove = false,
-  }) async {
-    await widget.apiClient.approveApproval(
-      approval.id,
-      alwaysApprove: alwaysApprove,
-    );
+  Future<void> _approveApproval(HermesApproval approval) async {
+    await widget.apiClient.approveApproval(approval.id);
     if (!mounted) return;
     await _refreshSignedInViews();
   }
@@ -4759,7 +4585,7 @@ ${_truncateDiagnostic(stack, 2200)}
           )
         : task.copyWith(
             title: title,
-            status: task.status ?? 'open',
+            status: task.status,
             dueAt: normalizedDueAt,
             notes: notes,
             category: category,
@@ -4840,7 +4666,7 @@ ${_truncateDiagnostic(stack, 2200)}
           : await widget.apiClient.updateTask(
               task.id,
               title: title,
-              status: task.status ?? 'open',
+              status: task.status,
               dueAt: normalizedDueAt,
               notes: notes,
               category: category,
@@ -4982,7 +4808,7 @@ ${_truncateDiagnostic(stack, 2200)}
           null,
           title: title,
           remindAt: time,
-          status: 'pending',
+          status: 'scheduled',
           category: result['category'] as String?,
           color: result['color'] as String?,
           workspaceId: result['workspaceId'] as int?,
@@ -5065,7 +4891,7 @@ ${_truncateDiagnostic(stack, 2200)}
     HermesReminder? reminder, {
     required String title,
     required String remindAt,
-    String status = 'pending',
+    String status = 'scheduled',
     String? category,
     String? color,
     int? workspaceId,
@@ -5227,7 +5053,7 @@ ${_truncateDiagnostic(stack, 2200)}
   Future<void> _toggleReminderCompletion(HermesReminder reminder) async {
     final previousReminders = _reminders;
     final completed = _reminderIsCompleted(reminder);
-    final updatedStatus = completed ? 'pending' : 'completed';
+    final updatedStatus = completed ? 'scheduled' : 'completed';
     final optimisticReminder = reminder.copyWith(status: updatedStatus);
     _markDashboardDataMutated();
     final mutationVersion = _dashboardDataVersion;
@@ -5609,6 +5435,7 @@ ${_truncateDiagnostic(stack, 2200)}
   Future<void> _createCalendarEvent({
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -5626,11 +5453,23 @@ ${_truncateDiagnostic(stack, 2200)}
     int? workspaceId,
     List<Object> syncToWorkspaceIds = const [],
   }) {
-    final wireStartsAt = _calendarEventWireValueToUtcIso(startsAt) ?? startsAt;
-    final wireEndsAt = _calendarEventWireValueToUtcIso(endsAt);
+    final wireStartsAt = allDay
+        ? startsAt
+        : _calendarEventWireValueToUtcIso(startsAt) ?? startsAt;
+    final wireEndsAt = allDay
+        ? endsAt
+        : _calendarEventWireValueToUtcIso(endsAt);
     final normalizedColor = _isHexColor(color)
         ? color!.trim().toUpperCase()
         : _themeCategoryColorHex();
+    final requestMetadata = metadata == null
+        ? null
+        : <String, Object?>{...metadata};
+    requestMetadata?.remove('all_day');
+    final optimisticMetadata = <String, Object?>{
+      ...?requestMetadata,
+      'all_day': allDay,
+    };
     final previousCalendar = _calendar;
     final optimisticEvent = HermesCalendarEvent(
       id: _nextLocalResourceId(),
@@ -5639,11 +5478,11 @@ ${_truncateDiagnostic(stack, 2200)}
       endsAt: wireEndsAt,
       notes: notes,
       location: location,
-      status: status,
+      status: status ?? 'scheduled',
       category: category,
       color: normalizedColor,
       recurrence: recurrence,
-      metadata: metadata,
+      metadata: optimisticMetadata,
       isCritical: isCritical ?? false,
       workspaceId: workspaceId ?? _user?.activeWorkspace?.numericId,
     );
@@ -5658,6 +5497,7 @@ ${_truncateDiagnostic(stack, 2200)}
     unawaited(
       _createCalendarEventInBackground(
         title: title,
+        allDay: allDay,
         wireStartsAt: wireStartsAt,
         wireEndsAt: wireEndsAt,
         notes: notes,
@@ -5666,7 +5506,7 @@ ${_truncateDiagnostic(stack, 2200)}
         category: category,
         normalizedColor: normalizedColor,
         recurrence: recurrence,
-        metadata: metadata,
+        metadata: requestMetadata,
         isCritical: isCritical,
         reminderMinutesBefore: reminderMinutesBefore,
         reminderRecurrence: reminderRecurrence,
@@ -5685,6 +5525,7 @@ ${_truncateDiagnostic(stack, 2200)}
 
   Future<void> _createCalendarEventInBackground({
     required String title,
+    required bool allDay,
     required String wireStartsAt,
     required String? wireEndsAt,
     required String? notes,
@@ -5710,6 +5551,7 @@ ${_truncateDiagnostic(stack, 2200)}
       final createdEvent = await widget.apiClient.createCalendarEvent(
         title: title,
         startsAt: wireStartsAt,
+        allDay: allDay,
         endsAt: wireEndsAt,
         notes: notes,
         location: location,
@@ -5798,14 +5640,10 @@ ${_truncateDiagnostic(stack, 2200)}
       final sortedDays = days.whereType<String>().toList()..sort();
       if (sortedDays.isNotEmpty) metadata['days'] = sortedDays;
     }
-    if (normalizedRecurrence == 'specific_days' ||
-        normalizedRecurrence == 'interval') {
+    if (normalizedRecurrence == 'interval') {
       final interval = eventMetadata?['interval'];
       if (interval is int && interval > 0) {
         metadata['interval'] = interval;
-      } else if (interval is String) {
-        final parsed = int.tryParse(interval);
-        if (parsed != null && parsed > 0) metadata['interval'] = parsed;
       }
       final unit = eventMetadata?['unit'];
       if (unit is String && unit.trim().isNotEmpty) {
@@ -5819,6 +5657,7 @@ ${_truncateDiagnostic(stack, 2200)}
     HermesCalendarEvent event, {
     required String title,
     required String startsAt,
+    required bool allDay,
     String? endsAt,
     String? notes,
     String? location,
@@ -5836,11 +5675,23 @@ ${_truncateDiagnostic(stack, 2200)}
     int? workspaceId,
     List<Object> syncToWorkspaceIds = const [],
   }) {
-    final wireStartsAt = _calendarEventWireValueToUtcIso(startsAt) ?? startsAt;
-    final wireEndsAt = _calendarEventWireValueToUtcIso(endsAt);
+    final wireStartsAt = allDay
+        ? startsAt
+        : _calendarEventWireValueToUtcIso(startsAt) ?? startsAt;
+    final wireEndsAt = allDay
+        ? endsAt
+        : _calendarEventWireValueToUtcIso(endsAt);
     final normalizedColor = _isHexColor(color)
         ? color!.trim().toUpperCase()
         : _themeCategoryColorHex();
+    final requestMetadata = metadata == null
+        ? null
+        : <String, Object?>{...metadata};
+    requestMetadata?.remove('all_day');
+    final optimisticMetadata = <String, Object?>{
+      ...?requestMetadata,
+      'all_day': allDay,
+    };
     final previousCalendar = _calendar;
     final optimisticEvent = event.copyWith(
       title: title,
@@ -5852,7 +5703,7 @@ ${_truncateDiagnostic(stack, 2200)}
       category: category,
       color: normalizedColor,
       recurrence: recurrence,
-      metadata: metadata,
+      metadata: optimisticMetadata,
       isCritical: isCritical ?? event.isCritical,
       clearEndsAt: wireEndsAt == null,
       clearNotes: notes == null,
@@ -5878,6 +5729,7 @@ ${_truncateDiagnostic(stack, 2200)}
       _editCalendarEventInBackground(
         event,
         title: title,
+        allDay: allDay,
         wireStartsAt: wireStartsAt,
         wireEndsAt: wireEndsAt,
         notes: notes,
@@ -5886,7 +5738,7 @@ ${_truncateDiagnostic(stack, 2200)}
         category: category,
         normalizedColor: normalizedColor,
         recurrence: recurrence,
-        metadata: metadata,
+        metadata: requestMetadata,
         isCritical: isCritical,
         reminderMinutesBefore: reminderMinutesBefore,
         reminderRecurrence: reminderRecurrence,
@@ -5905,6 +5757,7 @@ ${_truncateDiagnostic(stack, 2200)}
   Future<void> _editCalendarEventInBackground(
     HermesCalendarEvent event, {
     required String title,
+    required bool allDay,
     required String wireStartsAt,
     required String? wireEndsAt,
     required String? notes,
@@ -5930,6 +5783,7 @@ ${_truncateDiagnostic(stack, 2200)}
         event.id,
         title: title,
         startsAt: wireStartsAt,
+        allDay: allDay,
         endsAt: wireEndsAt,
         notes: notes,
         location: location,
@@ -6157,6 +6011,7 @@ ${_truncateDiagnostic(stack, 2200)}
             _, {
             required String title,
             required String startsAt,
+            required bool allDay,
             String? endsAt,
             String? notes,
             String? location,
@@ -6176,6 +6031,7 @@ ${_truncateDiagnostic(stack, 2200)}
           }) => _createCalendarEvent(
             title: title,
             startsAt: startsAt,
+            allDay: allDay,
             endsAt: endsAt,
             notes: notes,
             location: location,
@@ -6472,9 +6328,12 @@ ${_truncateDiagnostic(stack, 2200)}
 
   Future<void> _switchWorkspaceFromTopBar(HermesWorkspace workspace) async {
     final workspaceId = workspace.numericId;
-    if (workspaceId == null || _busy) return;
+    if (workspaceId == null || (_busy && !_beanChatHasActiveTurn)) return;
     if ((_user?.activeWorkspace?.id ?? '').toString() == workspace.id ||
         _user?.activeWorkspace?.numericId == workspaceId) {
+      return;
+    }
+    if (_beanChatHasActiveTurn && !await _cancelActiveBeanChatRequests()) {
       return;
     }
     final previousUser = _user;
@@ -6563,7 +6422,8 @@ ${_truncateDiagnostic(stack, 2200)}
       for (final workspace in workspaces)
         ListTile(
           key: Key('more-workspace-option-${workspace.id}'),
-          enabled: !_busy && workspace.numericId != null,
+          enabled:
+              (!_busy || _beanChatHasActiveTurn) && workspace.numericId != null,
           leading: Icon(
             workspace.id == activeWorkspace.id
                 ? Icons.check_circle_rounded
@@ -6577,7 +6437,8 @@ ${_truncateDiagnostic(stack, 2200)}
             overflow: TextOverflow.ellipsis,
             style: TextStyle(fontWeight: FontWeight.w800),
           ),
-          onTap: _busy || workspace.numericId == null
+          onTap:
+              (_busy && !_beanChatHasActiveTurn) || workspace.numericId == null
               ? null
               : () {
                   Navigator.pop(context);

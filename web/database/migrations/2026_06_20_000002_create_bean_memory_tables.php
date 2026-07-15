@@ -54,6 +54,7 @@ return new class extends Migration
 
                 $table->index(['user_id', 'workspace_id', 'event_type']);
                 $table->index(['conversation_session_id', 'conversation_message_id'], 'memory_events_session_message_idx');
+                $table->unique(['conversation_message_id', 'event_type'], 'memory_events_message_type_unique');
             });
         }
 

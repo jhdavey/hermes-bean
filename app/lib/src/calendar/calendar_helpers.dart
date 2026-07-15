@@ -94,7 +94,7 @@ List<_TimelineEventLayout> _timelineEventLayoutsForDay(
   var start = _parseCalendarEventDateTime(event.startsAt);
   if (start == null) return null;
   var end =
-      _parseCalendarEventDateTime(event.endsAt, event.startsAt) ??
+      _parseCalendarEventDateTime(event.endsAt) ??
       start.add(const Duration(minutes: 30));
   if (!end.isAfter(start)) {
     end = start.add(const Duration(minutes: 30));
@@ -174,31 +174,6 @@ String _ordinalDay(int day) {
 String _calendarHeaderMonthLabel(DateTime date) =>
     "${_shortMonthName(date.month)} '${(date.year % 100).toString().padLeft(2, '0')}";
 
-int? _weekdayNumber(String name) {
-  final normalized = name.toLowerCase().replaceAll('.', '');
-  const aliases = <String, int>{
-    'mon': DateTime.monday,
-    'monday': DateTime.monday,
-    'tue': DateTime.tuesday,
-    'tues': DateTime.tuesday,
-    'tuesday': DateTime.tuesday,
-    'wed': DateTime.wednesday,
-    'weds': DateTime.wednesday,
-    'wednesday': DateTime.wednesday,
-    'thu': DateTime.thursday,
-    'thur': DateTime.thursday,
-    'thurs': DateTime.thursday,
-    'thursday': DateTime.thursday,
-    'fri': DateTime.friday,
-    'friday': DateTime.friday,
-    'sat': DateTime.saturday,
-    'saturday': DateTime.saturday,
-    'sun': DateTime.sunday,
-    'sunday': DateTime.sunday,
-  };
-  return aliases[normalized];
-}
-
 String _shortMonthName(int month) => const [
   'Jan',
   'Feb',
@@ -214,64 +189,28 @@ String _shortMonthName(int month) => const [
   'Dec',
 ][month - 1];
 
-int? _monthNumber(String name) {
-  final normalized = name.toLowerCase();
-  for (var index = 1; index <= 12; index++) {
-    final full = _monthName(index).toLowerCase();
-    final short = _shortMonthName(index).toLowerCase();
-    if (normalized == full || normalized == short) return index;
-  }
-  return null;
-}
-
 String _formatCalendarEventDateTime(String? value) =>
     _formatNaturalDateTime(value);
 
-String _formatCalendarEventDate(String? value) {
+String _formatCalendarDateTimeInput(String? value) {
   final parsed = _parseCalendarEventDateTime(value);
-  return parsed == null ? '' : _formatCalendarDateLabel(parsed);
+  if (parsed == null) return '';
+  final local = parsed.toLocal();
+  return '${local.year.toString().padLeft(4, '0')}-'
+      '${local.month.toString().padLeft(2, '0')}-'
+      '${local.day.toString().padLeft(2, '0')} '
+      '${local.hour.toString().padLeft(2, '0')}:'
+      '${local.minute.toString().padLeft(2, '0')}';
 }
+
+String _formatCalendarDateInput(DateTime value) =>
+    '${value.year.toString().padLeft(4, '0')}-'
+    '${value.month.toString().padLeft(2, '0')}-'
+    '${value.day.toString().padLeft(2, '0')}';
 
 String _formatCalendarAllDayEventDate(String? value) {
-  final parsed = _calendarEventStoredDate(value);
-  if (parsed != null) return _formatCalendarDateLabel(parsed);
-  return _formatCalendarEventDate(value);
-}
-
-String _formatCalendarEventEndDate(String? startsAt, String? endsAt) {
-  final start = _parseCalendarEventDateTime(startsAt);
-  final end = _parseCalendarEventDateTime(endsAt, startsAt);
-  if (end == null) return start == null ? '' : _formatCalendarDateLabel(start);
-  return _formatCalendarDateLabel(_displayEndDateForAllDay(start, end));
-}
-
-String _formatCalendarAllDayEventEndDate(String? startsAt, String? endsAt) {
-  final start = _calendarEventStoredDate(startsAt);
-  final end = _calendarEventStoredDate(endsAt);
-  if (end == null) {
-    return start == null
-        ? _formatCalendarEventEndDate(startsAt, endsAt)
-        : _formatCalendarDateLabel(start);
-  }
-  if (start != null && end.isAfter(start)) {
-    return _formatCalendarDateLabel(end.subtract(const Duration(days: 1)));
-  }
-  return _formatCalendarDateLabel(end);
-}
-
-DateTime _displayEndDateForAllDay(DateTime? start, DateTime? end) {
-  if (end == null) return _dateOnly(start ?? DateTime.now());
-  final normalizedEnd = _dateOnly(end);
-  final isExclusiveMidnight =
-      end.hour == 0 &&
-      end.minute == 0 &&
-      end.second == 0 &&
-      end.millisecond == 0 &&
-      start != null &&
-      end.isAfter(_dateOnly(start));
-  return isExclusiveMidnight
-      ? normalizedEnd.subtract(const Duration(days: 1))
-      : normalizedEnd;
+  final parsed = _parseCalendarEventDateTime(value);
+  return parsed == null ? '' : _formatCalendarDateInput(parsed);
 }
 
 String _formatCalendarDateLabel(DateTime value) {
@@ -311,7 +250,7 @@ String _naturalTimeLabel(DateTime value) {
 
 String _eventDateRangeLabel({String? startsAt, String? endsAt}) {
   final start = _parseCalendarEventDateTime(startsAt);
-  final end = _parseCalendarEventDateTime(endsAt, startsAt);
+  final end = _parseCalendarEventDateTime(endsAt);
   if (start == null && end == null) return 'Unscheduled';
   if (start == null) return _formatNaturalDateTime(endsAt);
   final startLabel = _formatNaturalDateTime(startsAt);
@@ -332,91 +271,63 @@ String? _calendarEventWireValueToUtcIso(String? value) {
 String? _calendarEventInputToWireValue(
   String value, {
   required String? originalValue,
-  String? referenceValue,
   bool allowEmpty = false,
 }) {
   final trimmed = value.trim();
   if (trimmed.isEmpty) return allowEmpty ? null : trimmed;
 
-  final originalDisplay = _formatCalendarEventDateTime(originalValue);
+  final originalDisplay = _formatCalendarDateTimeInput(originalValue);
   if (originalValue != null && trimmed == originalDisplay) {
     return _calendarEventWireValueToUtcIso(originalValue) ?? originalValue;
   }
 
-  final parsed = _parseCalendarEventDateTime(
-    trimmed,
-    referenceValue ?? originalValue,
-  );
+  final parsed = _parseCalendarEventDateTime(trimmed);
   return parsed?.toUtc().toIso8601String() ?? trimmed;
 }
 
 DateTime? _calendarEventDateInputToDate(
   String? value, {
   String? originalValue,
-  DateTime? referenceValue,
 }) {
   final trimmed = value?.trim() ?? '';
-  if (trimmed.isEmpty) {
-    final original = _parseCalendarEventDateTime(originalValue);
-    return original == null ? null : _dateOnly(original);
-  }
+  if (trimmed.isEmpty) return null;
 
-  final parsed = _parseCalendarDateOnly(
-    trimmed,
-    referenceValue: referenceValue,
-  );
+  final parsed = _parseCalendarDateOnly(trimmed);
   if (parsed != null) return parsed;
 
-  final originalDisplay = _formatCalendarEventDate(originalValue);
+  final original = _parseCalendarEventDateTime(originalValue);
+  final originalDisplay = original == null
+      ? ''
+      : _formatCalendarDateInput(original);
   if (originalValue != null && trimmed == originalDisplay) {
-    final original = _parseCalendarEventDateTime(originalValue);
     return original == null ? null : _dateOnly(original);
   }
 
-  final parsedDateTime = _parseCalendarEventDateTime(trimmed);
-  return parsedDateTime == null ? null : _dateOnly(parsedDateTime);
+  return null;
 }
 
-DateTime? _parseCalendarDateOnly(String value, {DateTime? referenceValue}) {
+DateTime? _parseCalendarDateOnly(String value) {
   final trimmed = value.trim();
   if (trimmed.isEmpty) return null;
 
-  final isoMatch = RegExp(r'^(\d{4})-(\d{1,2})-(\d{1,2})$').firstMatch(trimmed);
+  final isoMatch = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(trimmed);
   if (isoMatch != null) {
     final year = int.tryParse(isoMatch.group(1)!);
     final month = int.tryParse(isoMatch.group(2)!);
     final day = int.tryParse(isoMatch.group(3)!);
     if (year != null && month != null && day != null) {
-      return DateTime(year, month, day);
-    }
-  }
-
-  final relative = trimmed.toLowerCase();
-  if (relative == 'today' || relative == 'tomorrow') {
-    return _dateOnly(
-      DateTime.now().add(
-        relative == 'tomorrow' ? const Duration(days: 1) : Duration.zero,
-      ),
-    );
-  }
-
-  final friendlyMatch = RegExp(
-    r'^(?:[A-Za-z]{3,9},?\s+)?([A-Za-z]{3,9})\s+(\d{1,2})(?:,?\s+(\d{4}))?$',
-    caseSensitive: false,
-  ).firstMatch(trimmed);
-  if (friendlyMatch != null) {
-    final month = _monthNumber(friendlyMatch.group(1)!);
-    final day = int.tryParse(friendlyMatch.group(2)!);
-    final year =
-        int.tryParse(friendlyMatch.group(3) ?? '') ??
-        referenceValue?.year ??
-        DateTime.now().year;
-    if (month != null && day != null) {
-      return DateTime(year, month, day);
+      return _validatedCalendarDate(year, month, day);
     }
   }
 
   return null;
+}
+
+DateTime? _validatedCalendarDate(int year, int month, int day) {
+  final value = DateTime(year, month, day);
+  return value.year == year && value.month == month && value.day == day
+      ? value
+      : null;
 }
 
 String _dateTimeToWireIsoString(DateTime value) {
@@ -444,7 +355,7 @@ DateTime? _parseIsoDeviceLocalDateTime(String value) {
   final second = int.tryParse(match.group(6) ?? '0') ?? 0;
   final fraction = (match.group(7) ?? '').padRight(6, '0');
   final microsecond = int.tryParse(fraction) ?? 0;
-  return DateTime(
+  final parsed = DateTime(
     year,
     month,
     day,
@@ -454,89 +365,29 @@ DateTime? _parseIsoDeviceLocalDateTime(String value) {
     microsecond ~/ 1000,
     microsecond % 1000,
   );
+  if (parsed.year != year ||
+      parsed.month != month ||
+      parsed.day != day ||
+      parsed.hour != hour ||
+      parsed.minute != minute ||
+      parsed.second != second) {
+    return null;
+  }
+  return parsed;
 }
 
-DateTime? _parseCalendarEventDateTime(String? value, [String? referenceValue]) {
+DateTime? _parseCalendarEventDateTime(String? value) {
   if (value == null || value.trim().isEmpty) return null;
   final trimmed = value.trim();
-  final parsed = DateTime.tryParse(trimmed);
-  if (parsed != null) return parsed.isUtc ? parsed.toLocal() : parsed;
+  final absoluteIso = RegExp(
+    r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})$',
+  );
+  if (absoluteIso.hasMatch(trimmed)) {
+    final parsed = DateTime.tryParse(trimmed);
+    return parsed?.toLocal();
+  }
   final isoWallClock = _parseIsoDeviceLocalDateTime(trimmed);
-  if (isoWallClock != null) return isoWallClock;
-
-  final relativeMatch = RegExp(
-    r'^(today|tomorrow)\s*(?:@|·|at)?\s*(\d{1,2})(?::(\d{2}))?\s*([AP]M)$',
-    caseSensitive: false,
-  ).firstMatch(trimmed);
-  if (relativeMatch != null) {
-    final base = DateTime.now().add(
-      relativeMatch.group(1)!.toLowerCase() == 'tomorrow'
-          ? const Duration(days: 1)
-          : Duration.zero,
-    );
-    var hour = int.tryParse(relativeMatch.group(2)!);
-    final minute = int.tryParse(relativeMatch.group(3) ?? '0') ?? 0;
-    final meridiem = relativeMatch.group(4)!.toUpperCase();
-    if (hour != null) {
-      if (meridiem == 'PM' && hour != 12) hour += 12;
-      if (meridiem == 'AM' && hour == 12) hour = 0;
-      return DateTime(base.year, base.month, base.day, hour, minute);
-    }
-  }
-
-  final weekdayMatch = RegExp(
-    r'^(mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\.?\s*(?:@|·|at)?\s*'
-    r'(\d{1,2})(?::(\d{2}))?\s*([AP]M)$',
-    caseSensitive: false,
-  ).firstMatch(trimmed);
-  if (weekdayMatch != null) {
-    final weekday = _weekdayNumber(weekdayMatch.group(1)!);
-    var hour = int.tryParse(weekdayMatch.group(2)!);
-    final minute = int.tryParse(weekdayMatch.group(3) ?? '0') ?? 0;
-    final meridiem = weekdayMatch.group(4)!.toUpperCase();
-    if (weekday != null && hour != null) {
-      if (meridiem == 'PM' && hour != 12) hour += 12;
-      if (meridiem == 'AM' && hour == 12) hour = 0;
-      final today = _dateOnly(DateTime.now());
-      final daysUntil = (weekday - today.weekday) % DateTime.daysPerWeek;
-      final base = today.add(Duration(days: daysUntil));
-      return DateTime(base.year, base.month, base.day, hour, minute);
-    }
-  }
-
-  final friendlyMatch = RegExp(
-    r'^(?:[A-Za-z]{3,9},?\s+)?([A-Za-z]{3,9})\s+(\d{1,2})\s*(?:@|·|at)?\s*'
-    r'(\d{1,2})(?::(\d{2}))?\s*([AP]M)$',
-    caseSensitive: false,
-  ).firstMatch(trimmed);
-  if (friendlyMatch != null) {
-    final month = _monthNumber(friendlyMatch.group(1)!);
-    final day = int.tryParse(friendlyMatch.group(2)!);
-    var hour = int.tryParse(friendlyMatch.group(3)!);
-    final minute = int.tryParse(friendlyMatch.group(4) ?? '0') ?? 0;
-    final meridiem = friendlyMatch.group(5)!.toUpperCase();
-    if (month != null && day != null && hour != null) {
-      if (meridiem == 'PM' && hour != 12) hour += 12;
-      if (meridiem == 'AM' && hour == 12) hour = 0;
-      final reference = _parseCalendarEventDateTime(referenceValue);
-      final year = reference?.toLocal().year ?? DateTime.now().year;
-      return DateTime(year, month, day, hour, minute);
-    }
-  }
-
-  final match = RegExp(
-    r'^(\d{1,2})(?::(\d{2}))?\s*([AP]M)$',
-    caseSensitive: false,
-  ).firstMatch(trimmed);
-  if (match == null) return null;
-  var hour = int.parse(match.group(1)!);
-  final minute = int.tryParse(match.group(2) ?? '0') ?? 0;
-  final meridiem = match.group(3)!.toUpperCase();
-  if (meridiem == 'PM' && hour != 12) hour += 12;
-  if (meridiem == 'AM' && hour == 12) hour = 0;
-  final reference =
-      _parseCalendarEventDateTime(referenceValue) ?? DateTime.now();
-  return DateTime(reference.year, reference.month, reference.day, hour, minute);
+  return isoWallClock;
 }
 
 bool _sameCalendarDay(DateTime a, DateTime b) =>
@@ -565,43 +416,35 @@ bool _eventIsRecurring(HermesCalendarEvent event) {
       _calendarEventRecurrenceExpansionDisabled(event)) {
     return false;
   }
-  final recurrence = (event.recurrence ?? 'none').toLowerCase();
-  return recurrence.isNotEmpty && recurrence != 'none';
+  return const {
+    'daily',
+    'weekly',
+    'monthly',
+    'yearly',
+    'specific_days',
+    'interval',
+  }.contains(event.recurrence);
 }
 
-bool _metadataTruthy(Object? value) {
-  if (value == true) return true;
-  if (value is num) return value != 0;
-  final normalized = value?.toString().trim().toLowerCase();
-  return normalized == 'true' || normalized == '1' || normalized == 'yes';
-}
+bool _metadataTruthy(Object? value) => value == true;
 
 bool _calendarEventIsGeneratedOccurrence(HermesCalendarEvent event) {
   final metadata = event.metadata;
-  return _metadataTruthy(
-        metadata?['recurrence_generated'] ?? metadata?['recurrenceGenerated'],
-      ) ||
-      metadata?['recurrence_parent_event_id'] != null ||
-      metadata?['recurrenceParentEventId'] != null;
+  return _metadataTruthy(metadata?['recurrence_generated']) ||
+      metadata?['recurrence_parent_event_id'] != null;
 }
 
-bool _calendarEventSourceHidden(HermesCalendarEvent event) => _metadataTruthy(
-  event.metadata?['recurrence_source_hidden'] ??
-      event.metadata?['recurrenceSourceHidden'],
-);
+bool _calendarEventSourceHidden(HermesCalendarEvent event) =>
+    _metadataTruthy(event.metadata?['recurrence_source_hidden']);
 
 bool _calendarEventRecurrenceExpansionDisabled(HermesCalendarEvent event) =>
     _metadataTruthy(event.metadata?['_display_disable_recurrence_expansion']);
 
 String? _calendarGeneratedOccurrenceKey(HermesCalendarEvent event) {
   final metadata = event.metadata;
-  final parentId =
-      metadata?['recurrence_parent_event_id'] ??
-      metadata?['recurrenceParentEventId'];
+  final parentId = metadata?['recurrence_parent_event_id'];
   if (parentId == null) return null;
-  final occurrenceDate =
-      metadata?['recurrence_occurrence_date'] ??
-      metadata?['recurrenceOccurrenceDate'];
+  final occurrenceDate = metadata?['recurrence_occurrence_date'];
   final parsedStart = _parseCalendarEventDateTime(event.startsAt);
   final occurrenceKey =
       occurrenceDate?.toString() ??
@@ -628,11 +471,7 @@ List<HermesCalendarEvent> _normalizeCalendarEventsForDisplay(
   final normalized = <HermesCalendarEvent>[];
   final seen = <String>{};
   final materializedSeriesParentIds = events
-      .map(
-        (event) =>
-            event.metadata?['recurrence_parent_event_id'] ??
-            event.metadata?['recurrenceParentEventId'],
-      )
+      .map((event) => event.metadata?['recurrence_parent_event_id'])
       .whereType<Object>()
       .map((value) => value.toString())
       .toSet();
@@ -654,44 +493,8 @@ List<HermesCalendarEvent> _normalizeCalendarEventsForDisplay(
   return normalized;
 }
 
-DateTime? _calendarEventStoredDate(String? value) {
-  final trimmed = value?.trim() ?? '';
-  if (trimmed.isEmpty) return null;
-  final match = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(trimmed);
-  if (match == null) return null;
-  final year = int.tryParse(match.group(1)!);
-  final month = int.tryParse(match.group(2)!);
-  final day = int.tryParse(match.group(3)!);
-  if (year == null || month == null || day == null) return null;
-  return DateTime(year, month, day);
-}
-
-DateTime? _calendarEventDisplayStartDay(HermesCalendarEvent event) {
-  if (_eventIsAllDay(event)) {
-    final parsed = _parseCalendarEventDateTime(event.startsAt);
-    return _calendarEventStoredDate(event.startsAt) ??
-        (parsed == null ? null : _dateOnly(parsed));
-  }
-  final start = _parseCalendarEventDateTime(event.startsAt);
-  return start == null ? null : _dateOnly(start);
-}
-
-DateTime? _calendarEventDisplayEndExclusiveDay(HermesCalendarEvent event) {
-  if (_eventIsAllDay(event)) {
-    final start = _calendarEventDisplayStartDay(event);
-    final end = _calendarEventStoredDate(event.endsAt);
-    if (end == null) return start?.add(const Duration(days: 1));
-    return end.isAfter(start ?? end) ? end : end.add(const Duration(days: 1));
-  }
-  final end = _parseCalendarEventDateTime(event.endsAt, event.startsAt);
-  return end == null ? null : _dateOnly(end);
-}
-
 Set<String> _recurringExceptionDates(HermesCalendarEvent event) {
-  final raw =
-      event.metadata?['recurring_exception_dates'] ??
-      event.metadata?['recurringExceptionDates'] ??
-      event.metadata?['recurrence_exceptions'];
+  final raw = event.metadata?['recurring_exception_dates'];
   if (raw is! List) return const <String>{};
   return raw
       .map((value) => value.toString().trim())
@@ -720,22 +523,17 @@ Map<String, Object?> _metadataAfterRecurringDelete(
 
 bool _eventFallsOnDay(HermesCalendarEvent event, DateTime day) {
   final dayStart = DateTime(day.year, day.month, day.day);
-  if (_eventIsAllDay(event)) {
-    final startDay = _calendarEventDisplayStartDay(event);
-    if (startDay == null) return false;
-    final endExclusive =
-        _calendarEventDisplayEndExclusiveDay(event) ??
-        startDay.add(const Duration(days: 1));
-    return !dayStart.isBefore(startDay) && dayStart.isBefore(endExclusive);
-  }
   final start = _parseCalendarEventDateTime(event.startsAt);
   if (start == null) return false;
-  var end =
-      _parseCalendarEventDateTime(event.endsAt, event.startsAt) ??
-      start.add(const Duration(minutes: 30));
-  if (!end.isAfter(start)) {
-    end = start.add(const Duration(minutes: 30));
-  }
+  final parsedEnd = _parseCalendarEventDateTime(event.endsAt);
+  if (parsedEnd != null && !parsedEnd.isAfter(start)) return false;
+  final end =
+      parsedEnd ??
+      start.add(
+        _eventIsAllDay(event)
+            ? const Duration(days: 1)
+            : const Duration(minutes: 30),
+      );
   final dayEnd = dayStart.add(const Duration(days: 1));
   if (_eventIsRecurring(event)) {
     return _recurringEventFallsOnDay(event, start, end, dayStart, dayEnd);
@@ -756,8 +554,7 @@ bool _recurringEventFallsOnDay(
     return false;
   }
   final recurrenceUntil = _parseCalendarDateKey(
-    event.metadata?['recurrence_until']?.toString() ??
-        event.metadata?['recurrenceUntil']?.toString(),
+    event.metadata?['recurrence_until']?.toString(),
   );
   if (recurrenceUntil != null && !dayStart.isBefore(recurrenceUntil)) {
     return false;
@@ -770,25 +567,21 @@ bool _recurringEventFallsOnDay(
     return true;
   }
 
-  final recurrence = (event.recurrence ?? 'none').toLowerCase();
-  final interval = (event.metadata?['interval'] is num)
-      ? ((event.metadata!['interval'] as num).toInt()).clamp(1, 365)
-      : int.tryParse(event.metadata?['interval']?.toString() ?? '') ?? 1;
+  final recurrence = event.recurrence ?? 'none';
   final daysSinceStart = dayStart.difference(_dateOnly(start)).inDays;
 
   switch (recurrence) {
     case 'daily':
-      return daysSinceStart % interval == 0;
+      return daysSinceStart >= 0;
     case 'weekly':
-      return daysSinceStart >= 0 && daysSinceStart % (7 * interval) == 0;
+      return daysSinceStart >= 0 && daysSinceStart % 7 == 0;
     case 'monthly':
       final months =
           (dayStart.year - start.year) * 12 + (dayStart.month - start.month);
-      return months >= 0 && months % interval == 0 && dayStart.day == start.day;
+      return months >= 0 && dayStart.day == start.day;
     case 'yearly':
       final years = dayStart.year - start.year;
       return years >= 0 &&
-          years % interval == 0 &&
           dayStart.month == start.month &&
           dayStart.day == start.day;
     case 'specific_days':
@@ -807,18 +600,35 @@ bool _recurringEventFallsOnDay(
       };
       return selectedDays.contains(weekdayKeys[dayStart.weekday]);
     case 'interval':
-      final unit = (event.metadata?['unit'] ?? 'days').toString();
-      if (unit == 'weeks') {
-        return daysSinceStart >= 0 && daysSinceStart % (7 * interval) == 0;
+      final interval = event.metadata?['interval'];
+      final unit = event.metadata?['unit'];
+      if (interval is! int ||
+          interval < 1 ||
+          interval > 365 ||
+          unit is! String) {
+        return false;
       }
-      if (unit == 'months') {
-        final months =
-            (dayStart.year - start.year) * 12 + (dayStart.month - start.month);
-        return months >= 0 &&
-            months % interval == 0 &&
-            dayStart.day == start.day;
+      switch (unit) {
+        case 'days':
+          return daysSinceStart >= 0 && daysSinceStart % interval == 0;
+        case 'weeks':
+          return daysSinceStart >= 0 && daysSinceStart % (7 * interval) == 0;
+        case 'months':
+          final months =
+              (dayStart.year - start.year) * 12 +
+              (dayStart.month - start.month);
+          return months >= 0 &&
+              months % interval == 0 &&
+              dayStart.day == start.day;
+        case 'years':
+          final years = dayStart.year - start.year;
+          return years >= 0 &&
+              years % interval == 0 &&
+              dayStart.month == start.month &&
+              dayStart.day == start.day;
+        default:
+          return false;
       }
-      return daysSinceStart >= 0 && daysSinceStart % interval == 0;
     default:
       return end.isAfter(dayStart) && start.isBefore(dayEnd);
   }

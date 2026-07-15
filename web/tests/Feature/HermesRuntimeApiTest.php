@@ -2,19 +2,28 @@
 
 namespace Tests\Feature;
 
+use App\Data\HermesSemanticComposition;
+use App\Data\HermesSemanticCompositionRequest;
+use App\Data\HermesSemanticInterpretation;
+use App\Data\HermesSemanticInterpretationRequest;
+use App\Data\HermesSemanticOperation;
 use App\Jobs\ProcessAssistantRun;
+use App\Models\AssistantRun;
 use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
-use App\Models\Note;
-use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\AgentProfileService;
+use App\Services\AssistantRunService;
+use App\Services\HermesRuntimeService;
+use App\Services\HermesSemanticInterpreter;
+use App\Services\HermesSemanticRuntimeService;
+use App\Services\VoiceTurnLifecycleService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use RuntimeException;
 use Tests\TestCase;
 
 class HermesRuntimeApiTest extends TestCase
@@ -26,23 +35,18 @@ class HermesRuntimeApiTest extends TestCase
         parent::setUp();
 
         Carbon::setTestNow(Carbon::parse('2026-05-13 12:00:00'));
-        config()->set('services.hermes_runtime.default_provider', 'openai');
-        config()->set('services.hermes_runtime.default_model', 'gpt-test-tools');
-        config()->set('services.hermes_runtime.api_key', 'test-key');
-        config()->set('services.hermes_runtime.api_base', 'https://api.openai.test/v1');
+        Queue::fake();
     }
 
     protected function tearDown(): void
     {
         Carbon::setTestNow();
-
         parent::tearDown();
     }
 
-    public function test_runtime_can_start_resume_send_messages_and_poll_progress_events(): void
+    public function test_runtime_can_start_resume_send_a_model_interpreted_message_and_poll_progress(): void
     {
-        Http::fakeSequence()->push($this->assistantResponse('Planning complete.'), 200);
-
+        $this->bindSemanticFake([$this->respond('Planning complete.')]);
         $token = $this->apiToken();
 
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
@@ -50,649 +54,444 @@ class HermesRuntimeApiTest extends TestCase
             'metadata' => ['source' => 'feature-test'],
         ])->assertCreated()
             ->assertJsonPath('data.status', 'active')
-            ->assertJsonPath('data.runtime_mode', 'tools')
-            ->assertJsonPath('data.title', 'Kitchen remodel')
+            ->assertJsonPath('data.session_kind', 'onboarding')
             ->json('data.id');
 
         $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}")
             ->assertOk()
             ->assertJsonPath('data.status', 'active');
 
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'What should I do first?',
-        ])->assertCreated()
-            ->assertJsonPath('data.session.id', $sessionId)
+        $run = $this->queueAndRun($token, $sessionId, 'What should I do first?');
+        $this->assertSame('Planning complete.', $run->assistantMessage?->content);
+
+        $this->withToken($token)->getJson("/api/assistant/runs/{$run->id}")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed')
             ->assertJsonPath('data.user_message.role', 'user')
-            ->assertJsonPath('data.assistant_message.role', 'assistant')
-            ->assertJsonPath('data.assistant_message.content', 'Planning complete.')
-            ->assertJsonFragment(['event_type' => 'runtime.intent_routed'])
-            ->assertJsonFragment(['event_type' => 'runtime.fast_response_completed']);
+            ->assertJsonPath('data.assistant_message.content', 'Planning complete.');
 
         $events = $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/events")
             ->assertOk()
             ->json('data');
-
         $this->assertSame([
             'runtime.session_started',
             'runtime.session_resumed',
-            'runtime.message_received',
-            'runtime.intent_routed',
-            'runtime.fast_response_started',
-            'runtime.fast_response_completed',
-            'runtime.message_completed',
+            'runtime.run_queued',
+            'runtime.run_started',
+            'runtime.semantic_interpretation_started',
+            'runtime.semantic_interpretation_completed',
+            'runtime.run_completed',
         ], collect($events)->pluck('event_type')->all());
     }
 
-    public function test_web_queued_chat_returns_background_run_without_inline_model_call(): void
+    public function test_session_kind_is_derived_by_the_server_and_never_selects_a_runtime(): void
+    {
+        $token = $this->apiToken('server-owned-session-kind@example.com');
+        $user = User::query()->where('email', 'server-owned-session-kind@example.com')->firstOrFail();
+        $profiles = app(AgentProfileService::class);
+        $profiles->applyOnboarding($profiles->ensureForUser($user), [
+            'agent_personality' => 'balanced',
+            'onboarding_priorities' => ['Planning'],
+            'onboarding_context' => 'Session-kind contract test.',
+        ], 'test');
+        $user->forceFill(['onboard_complete' => true])->save();
+
+        $session = $this->withToken($token)->postJson('/api/assistant/sessions', [
+            'title' => 'Ordinary conversation',
+            'session_kind' => 'onboarding',
+        ])->assertCreated()
+            ->assertJsonPath('data.session_kind', 'conversation')
+            ->json('data');
+
+        $this->assertDatabaseHas('conversation_sessions', [
+            'id' => $session['id'],
+            'session_kind' => 'conversation',
+        ]);
+        $this->assertInstanceOf(HermesSemanticRuntimeService::class, app(HermesRuntimeService::class));
+    }
+
+    public function test_web_queued_chat_returns_a_background_run_without_inline_model_work(): void
     {
         Queue::fake();
-        Http::fake([
-            'https://api.openai.test/v1/chat/completions' => Http::response($this->assistantResponse('Should not run inline.'), 200),
-        ]);
-
+        $fake = $this->bindSemanticFake([$this->respond('Should not run inline.')]);
         $token = $this->apiToken('web-queued-chat@example.com');
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
+        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
             'content' => 'Add a task to take out trash tonight.',
             'metadata' => [
-                'source' => 'web_queued_chat',
                 'client_request_id' => 'web-chat-test-1',
             ],
-        ])->assertAccepted()
+        ])->assertCreated()
             ->assertJsonPath('data.status', 'queued')
             ->assertJsonPath('data.assistant_message', null)
-            ->assertJsonPath('data.user_message.content', 'Add a task to take out trash tonight.')
             ->assertJsonPath('data.run.status', 'queued');
 
         Queue::assertPushed(ProcessAssistantRun::class);
-        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
+        $this->assertCount(0, $fake->interpretationRequests);
     }
 
-    public function test_message_branch_replaces_the_selected_message_and_later_chat_history(): void
+    public function test_rapid_submits_are_both_durably_admitted_in_order_and_exposed_for_reload_recovery(): void
     {
-        Http::fakeSequence()
-            ->push($this->assistantResponse('Old answer.'), 200)
-            ->push($this->assistantResponse('Updated answer.'), 200);
+        Queue::fake();
+        $token = $this->apiToken('rapid-durable-chat@example.com');
+        $sessionId = (int) $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
 
+        $first = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => 'First durable request.',
+            'metadata' => [
+                'client_request_id' => 'rapid-durable-chat-0001',
+            ],
+        ])->assertCreated();
+        $second = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => 'Second durable request.',
+            'metadata' => [
+                'client_request_id' => 'rapid-durable-chat-0002',
+            ],
+        ])->assertCreated();
+
+        $firstRunId = (int) $first->json('data.run.id');
+        $secondRunId = (int) $second->json('data.run.id');
+        $this->assertGreaterThan($firstRunId, $secondRunId);
+        $this->assertSame(2, AssistantRun::query()
+            ->where('conversation_session_id', $sessionId)
+            ->whereNull('voice_turn_id')
+            ->count());
+        $this->assertSame(
+            ['First durable request.', 'Second durable request.'],
+            ConversationMessage::query()
+                ->where('conversation_session_id', $sessionId)
+                ->where('role', 'user')
+                ->orderBy('id')
+                ->pluck('content')
+                ->all(),
+        );
+
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}")
+            ->assertOk()
+            ->assertJsonPath('data.assistant_runs.0.id', $firstRunId)
+            ->assertJsonPath('data.assistant_runs.0.status', 'queued')
+            ->assertJsonPath('data.assistant_runs.1.id', $secondRunId)
+            ->assertJsonPath('data.assistant_runs.1.status', 'queued')
+            ->assertJsonPath('data.assistant_runs.0.user_message.content', 'First durable request.')
+            ->assertJsonPath('data.assistant_runs.1.user_message.content', 'Second durable request.');
+
+        $secondRun = AssistantRun::query()->findOrFail($secondRunId);
+        $secondAssistant = ConversationMessage::query()->create([
+            'user_id' => $secondRun->user_id,
+            'conversation_session_id' => $sessionId,
+            'role' => 'assistant',
+            'content' => 'Second final arrived first.',
+        ]);
+        $secondRun->forceFill([
+            'assistant_message_id' => $secondAssistant->id,
+            'status' => 'completed',
+            'completed_at' => now(),
+        ])->saveQuietly();
+
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/runs/lookup?client_request_id=rapid-durable-chat-0001")
+            ->assertStatus(202)
+            ->assertJsonPath('data.run.id', $firstRunId)
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.assistant_message', null);
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}/runs/lookup?client_request_id=rapid-durable-chat-0002")
+            ->assertOk()
+            ->assertJsonPath('data.run.id', $secondRunId)
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.assistant_message.content', 'Second final arrived first.');
+
+        Queue::assertPushed(ProcessAssistantRun::class, 2);
+    }
+
+    public function test_message_branch_preserves_immutable_history_and_excludes_the_replaced_turn_from_hermes_context(): void
+    {
+        $fake = $this->bindSemanticFake([
+            $this->respond('Old answer.'),
+            $this->respond('Updated answer.'),
+        ]);
         $token = $this->apiToken();
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
-            'title' => 'Branch test',
-        ])->assertCreated()->json('data.id');
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
-        $originalMessageId = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Plan today',
-        ])->assertCreated()
-            ->assertJsonPath('data.assistant_message.content', 'Old answer.')
-            ->json('data.user_message.id');
+        $originalRun = $this->queueAndRun($token, $sessionId, 'Plan today');
+        $originalMessageId = $originalRun->user_message_id;
+        $originalAssistantMessageId = $originalRun->assistant_message_id;
 
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages/{$originalMessageId}/branch", [
+        $branchPayload = [
             'content' => 'Plan tomorrow',
-            'metadata' => ['source' => 'web'],
-        ])->assertCreated()
+            'metadata' => [
+                'source' => 'web',
+                'client_request_id' => 'branch-plan-tomorrow',
+            ],
+        ];
+        $response = $this->withToken($token)->postJson(
+            "/api/assistant/sessions/{$sessionId}/messages/{$originalMessageId}/branch",
+            $branchPayload,
+        )->assertCreated()
+            ->assertJsonPath('data.status', 'queued')
             ->assertJsonPath('data.user_message.content', 'Plan tomorrow')
-            ->assertJsonPath('data.user_message.metadata.edited_from_message_id', $originalMessageId)
+            ->assertJsonPath('data.user_message.metadata.edited_from_message_id', $originalMessageId);
+        $updatedRunId = (int) $response->json('data.run.id');
+        $updatedRun = $this->executeRun($updatedRunId);
+        $this->assertSame('Updated answer.', $updatedRun->assistantMessage?->content);
+
+        $this->withToken($token)->postJson(
+            "/api/assistant/sessions/{$sessionId}/messages/{$originalMessageId}/branch",
+            $branchPayload,
+        )->assertOk()
+            ->assertJsonPath('data.run.id', $updatedRunId)
             ->assertJsonPath('data.assistant_message.content', 'Updated answer.');
 
-        $this->assertDatabaseMissing('conversation_messages', [
-            'conversation_session_id' => $sessionId,
+        $this->assertDatabaseHas('conversation_messages', [
+            'id' => $originalMessageId,
             'content' => 'Plan today',
         ]);
-        $this->assertDatabaseMissing('conversation_messages', [
-            'conversation_session_id' => $sessionId,
+        $this->assertDatabaseHas('conversation_messages', [
+            'id' => $originalAssistantMessageId,
             'content' => 'Old answer.',
         ]);
-        $this->assertDatabaseHas('conversation_messages', [
-            'conversation_session_id' => $sessionId,
-            'role' => 'user',
-            'content' => 'Plan tomorrow',
-        ]);
-        $this->assertDatabaseHas('conversation_messages', [
-            'conversation_session_id' => $sessionId,
-            'role' => 'assistant',
-            'content' => 'Updated answer.',
-        ]);
-    }
+        $originalRun->refresh();
+        $this->assertSame($originalMessageId, $originalRun->user_message_id);
+        $this->assertSame($originalAssistantMessageId, $originalRun->assistant_message_id);
+        $this->assertSame(1, AssistantRun::where('metadata->client_request_id', 'branch-plan-tomorrow')->count());
 
-    public function test_runtime_lists_previous_sessions_and_returns_today_session(): void
-    {
-        $token = $this->apiToken('history@example.com');
-        $user = User::where('email', 'history@example.com')->firstOrFail();
-        $workspaceId = $user->default_workspace_id;
+        $branchRequestMessages = collect(data_get($fake->interpretationRequests[1]->context, 'authorized_conversation', []))
+            ->pluck('content')
+            ->all();
+        $this->assertSame(['Plan tomorrow'], $branchRequestMessages);
 
-        $oldSession = ConversationSession::create([
-            'user_id' => $user->id,
-            'workspace_id' => $workspaceId,
-            'created_by_user_id' => $user->id,
-            'title' => 'Yesterday with Bean',
-            'status' => 'active',
-            'runtime_mode' => 'chat',
-            'last_activity_at' => now()->subDay(),
-        ]);
-        DB::table('conversation_sessions')->where('id', $oldSession->id)->update([
-            'created_at' => now()->subDay(),
-            'updated_at' => now()->subDay(),
-        ]);
-        $oldSession->refresh();
-
-        $todaySession = ConversationSession::create([
-            'user_id' => $user->id,
-            'workspace_id' => $workspaceId,
-            'created_by_user_id' => $user->id,
-            'title' => 'Today with Bean',
-            'status' => 'active',
-            'runtime_mode' => 'chat',
-            'last_activity_at' => now(),
-        ]);
-
-        ConversationMessage::create([
-            'user_id' => $user->id,
-            'conversation_session_id' => $todaySession->id,
-            'role' => 'assistant',
-            'content' => 'Latest today message.',
-        ]);
-
-        $this->withToken($token)->getJson("/api/assistant/sessions?workspace_id={$workspaceId}&date=2026-05-13&timezone=America/New_York")
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}")
             ->assertOk()
-            ->assertJsonPath('data.today_session.id', $todaySession->id)
-            ->assertJsonPath('data.sessions.0.id', $todaySession->id)
-            ->assertJsonPath('data.sessions.0.latest_message.content', 'Latest today message.')
-            ->assertJsonPath('data.sessions.0.messages_count', 1)
-            ->assertJsonPath('data.sessions.1.id', $oldSession->id);
+            ->assertJsonFragment(['content' => 'Plan today'])
+            ->assertJsonFragment(['content' => 'Old answer.'])
+            ->assertJsonFragment(['content' => 'Plan tomorrow'])
+            ->assertJsonFragment(['content' => 'Updated answer.']);
     }
 
-    public function test_stale_assistant_failure_copy_is_sanitized_when_serialized(): void
+    public function test_branching_from_a_completed_voice_turn_preserves_voice_messages_and_every_lifecycle_pointer(): void
     {
-        $token = $this->apiToken('stale-history@example.com');
-        $user = User::where('email', 'stale-history@example.com')->firstOrFail();
-        $workspaceId = $user->default_workspace_id;
-
-        $session = ConversationSession::create([
-            'user_id' => $user->id,
-            'workspace_id' => $workspaceId,
-            'created_by_user_id' => $user->id,
-            'title' => 'Old failure copy',
-            'status' => 'active',
-            'runtime_mode' => 'tools',
-            'last_activity_at' => now(),
+        $this->bindSemanticFake([$this->respond('Updated voice request.')]);
+        $token = $this->apiToken('voice-history-branch@example.com');
+        $user = User::where('email', 'voice-history-branch@example.com')->firstOrFail();
+        $sessionId = (int) $this->withToken($token)->postJson('/api/assistant/sessions')
+            ->assertCreated()
+            ->json('data.id');
+        $session = ConversationSession::findOrFail($sessionId);
+        $lifecycle = app(VoiceTurnLifecycleService::class);
+        $turn = $lifecycle->admit($user, $session, [
+            'turn_id' => 'voice-history-branch-turn-0001',
+            'transcript' => 'Plan today by voice.',
+            'conversation_context' => ['mode' => 'new_conversation', 'epoch' => 1],
         ]);
+        $turn = $lifecycle->complete($turn, 'The original literal voice final.');
+        $voiceUserMessageId = $turn->user_message_id;
+        $voiceFinalMessageId = $turn->final_assistant_message_id;
+        $voiceRunIds = $turn->runs()->pluck('id')->all();
 
-        $messages = collect([
+        $response = $this->withToken($token)->postJson(
+            "/api/assistant/sessions/{$sessionId}/messages/{$voiceUserMessageId}/branch",
+            [
+                'content' => 'Plan tomorrow by chat instead.',
+                'metadata' => [
+                    'source' => 'web',
+                    'client_request_id' => 'voice-history-branch-edit-0001',
+                    'edited_from_message_id' => 999999,
+                    'edited_message_id' => 999999,
+                ],
+            ],
+        )->assertCreated()
+            ->assertJsonPath('data.user_message.metadata.edited_from_message_id', $voiceUserMessageId)
+            ->assertJsonMissingPath('data.user_message.metadata.edited_message_id');
+        $branchRun = $this->executeRun((int) $response->json('data.run.id'));
+
+        $turn->refresh();
+        $this->assertSame($voiceUserMessageId, $turn->user_message_id);
+        $this->assertSame($voiceFinalMessageId, $turn->final_assistant_message_id);
+        $this->assertSame($voiceRunIds, $turn->runs()->pluck('id')->all());
+        foreach ($turn->runs as $voiceRun) {
+            $this->assertSame($voiceUserMessageId, $voiceRun->user_message_id);
+            $this->assertSame($voiceFinalMessageId, $voiceRun->assistant_message_id);
+        }
+        $this->assertSame($voiceUserMessageId, $branchRun->metadata['edited_from_message_id'] ?? null);
+
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}")
+            ->assertOk()
+            ->assertJsonFragment(['content' => 'Plan today by voice.'])
+            ->assertJsonFragment(['content' => 'The original literal voice final.'])
+            ->assertJsonFragment(['content' => 'Plan tomorrow by chat instead.'])
+            ->assertJsonFragment(['content' => 'Updated voice request.']);
+    }
+
+    public function test_hermes_assistant_copy_is_preserved_when_serialized(): void
+    {
+        $token = $this->apiToken('copy-preserved@example.com');
+        $user = User::where('email', 'copy-preserved@example.com')->firstOrFail();
+        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+
+        foreach ([
             'Bean could not finish that request.',
             'Bean hit a snag while trying to handle that request.',
             'HermesApiException(statusCode: 502)',
-        ])->map(fn (string $content): ConversationMessage => ConversationMessage::create([
-            'user_id' => $user->id,
-            'conversation_session_id' => $session->id,
-            'role' => 'assistant',
-            'content' => $content,
-        ]));
-
-        foreach ($messages as $message) {
-            $this->assertSame(
-                'I’m checking the latest app state now. If I need one more detail, I’ll ask.',
-                $message->content,
-            );
-            $this->assertDatabaseHas('conversation_messages', [
-                'id' => $message->id,
-                'content' => $message->getRawOriginal('content'),
+        ] as $content) {
+            ConversationMessage::create([
+                'user_id' => $user->id,
+                'conversation_session_id' => $sessionId,
+                'role' => 'assistant',
+                'content' => $content,
             ]);
         }
 
-        $this->withToken($token)->getJson("/api/assistant/sessions/{$session->id}")
+        $this->withToken($token)->getJson("/api/assistant/sessions/{$sessionId}")
             ->assertOk()
-            ->assertJsonPath('data.messages.0.content', 'I’m checking the latest app state now. If I need one more detail, I’ll ask.');
-        $this->withToken($token)->getJson("/api/assistant/sessions/{$session->id}")
-            ->assertOk()
-            ->assertJsonPath('data.messages.1.content', 'I’m checking the latest app state now. If I need one more detail, I’ll ask.')
-            ->assertJsonPath('data.messages.2.content', 'I’m checking the latest app state now. If I need one more detail, I’ll ask.');
-
-        $this->withToken($token)->getJson("/api/assistant/sessions?workspace_id={$workspaceId}&date=2026-05-13&timezone=America/New_York")
-            ->assertOk()
-            ->assertJsonPath('data.sessions.0.latest_message.content', 'I’m checking the latest app state now. If I need one more detail, I’ll ask.');
+            ->assertJsonPath('data.messages.0.content', 'Bean could not finish that request.')
+            ->assertJsonPath('data.messages.1.content', 'Bean hit a snag while trying to handle that request.')
+            ->assertJsonPath('data.messages.2.content', 'HermesApiException(statusCode: 502)');
     }
 
-    public function test_runtime_persists_tool_created_events_tasks_and_reminders_to_domain_tables(): void
+    public function test_model_selected_canonical_tools_persist_resources_and_literal_times(): void
     {
-        Http::fakeSequence()
-            ->push($this->toolCallResponse([
-                $this->toolCall('call_task', 'create_task', ['title' => 'Persist DB task', 'due_at' => '2026-05-13T17:00:00Z']),
-                $this->toolCall('call_reminder', 'create_reminder', ['title' => 'Persist DB reminder', 'remind_at' => '2026-05-13T18:00:00Z']),
-                $this->toolCall('call_event', 'create_calendar_event', ['title' => 'Persist DB event', 'starts_at' => '2026-05-13T19:00:00Z', 'ends_at' => '2026-05-13T20:00:00Z']),
-            ]), 200)
-            ->push($this->assistantResponse('Saved the task, reminder, and event.'), 200);
+        $this->bindSemanticFake([
+            new HermesSemanticInterpretation(
+                outcome: HermesSemanticInterpretation::OUTCOME_EXECUTE,
+                responseText: null,
+                clarificationQuestion: null,
+                acknowledgementText: null,
+                closeAfterResponse: false,
+                responseExpected: false,
+                operations: [
+                    new HermesSemanticOperation('call_task', 'app.task.create', [
+                        'title' => 'Persist DB task',
+                        'due_at' => '2026-05-13T17:00:00Z',
+                    ]),
+                    new HermesSemanticOperation('call_event', 'app.calendar.create', [
+                        'title' => 'Retreat',
+                        'starts_at' => '2026-05-18T13:00:00-04:00',
+                        'ends_at' => '2026-05-21T20:00:00-04:00',
+                    ]),
+                ],
+            ),
+        ], [new HermesSemanticComposition('Saved the task and retreat.', false, false)]);
 
         $token = $this->apiToken();
         $userId = User::where('email', 'test@example.com')->value('id');
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
-            'title' => 'Persistence contract',
-        ])->assertCreated()->json('data.id');
-
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Save a task, a reminder, and a calendar event.',
-        ])->assertCreated()
-            ->assertJsonFragment(['event_type' => 'assistant.task.created'])
-            ->assertJsonFragment(['event_type' => 'assistant.reminder.created'])
-            ->assertJsonFragment(['event_type' => 'assistant.calendar_event.created']);
-
-        $this->assertDatabaseHas('tasks', ['user_id' => $userId, 'conversation_session_id' => $sessionId, 'title' => 'Persist DB task']);
-        $this->assertDatabaseHas('reminders', ['user_id' => $userId, 'conversation_session_id' => $sessionId, 'title' => 'Persist DB reminder']);
-        $this->assertDatabaseHas('calendar_events', ['user_id' => $userId, 'conversation_session_id' => $sessionId, 'title' => 'Persist DB event']);
-    }
-
-    public function test_agent_created_task_reminder_and_event_are_visible_in_today_dashboard(): void
-    {
-        Http::fakeSequence()
-            ->push($this->toolCallResponse([
-                $this->toolCall('call_task', 'create_task', ['title' => 'Draft proposal', 'type' => 'todo', 'due_at' => '2026-05-13T17:00:00Z']),
-                $this->toolCall('call_reminder', 'create_reminder', ['title' => 'Check oven', 'remind_at' => '2026-05-13T18:00:00Z']),
-                $this->toolCall('call_event', 'create_calendar_event', ['title' => 'Design sync', 'starts_at' => '2026-05-13T19:00:00Z', 'ends_at' => '2026-05-13T20:00:00Z']),
-            ]), 200)
-            ->push($this->assistantResponse('Added those to today.'), 200);
-
-        $token = $this->apiToken();
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions', [
-            'title' => 'Visible dashboard resources',
-        ])->assertCreated()->json('data.id');
-
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Add a proposal task, oven reminder, and design sync.',
-        ])->assertCreated()
-            ->assertJsonFragment(['event_type' => 'assistant.task.created']);
-
-        $this->withToken($token)->getJson('/api/today')
-            ->assertOk()
-            ->assertJsonFragment(['title' => 'Draft proposal'])
-            ->assertJsonFragment(['title' => 'Check oven'])
-            ->assertJsonFragment(['title' => 'Design sync'])
-            ->assertJsonPath('data.counts.tasks', 1)
-            ->assertJsonPath('data.counts.reminders', 1)
-            ->assertJsonPath('data.counts.calendar_events', 1);
-    }
-
-    public function test_runtime_tool_updates_preserve_local_wall_clock_times(): void
-    {
-        Http::fakeSequence()
-            ->push($this->toolCallResponse([
-                $this->toolCall('call_event', 'create_calendar_event', [
-                    'title' => 'Retreat',
-                    'starts_at' => '2026-05-18T13:00:00-04:00',
-                    'ends_at' => '2026-05-21T20:00:00-04:00',
-                ]),
-            ]), 200)
-            ->push($this->assistantResponse('Saved the retreat from 1:00 PM to 8:00 PM.'), 200);
-
-        $token = $this->apiToken();
         $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
 
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Schedule retreat today at 1pm through three days later at 8pm.',
-            'metadata' => $this->clientTemporalMetadata(),
-        ])->assertCreated()
-            ->assertJsonPath('data.assistant_message.content', 'Done - I added Retreat to your calendar from May 18, 1:00 PM to May 21, 8:00 PM.');
+        $run = $this->queueAndRun($token, $sessionId, 'Save a task and the retreat.', [
+            'client_context' => [
+                'timezone' => 'America/New_York',
+                'current_local_time' => '2026-05-13T08:00:00-04:00',
+            ],
+        ]);
+        $this->assertSame('Saved the task and retreat.', $run->assistantMessage?->content);
+        $this->assertDatabaseHas('activity_events', ['event_type' => 'assistant.task.created']);
+        $this->assertDatabaseHas('activity_events', ['event_type' => 'assistant.calendar_event.created']);
 
-        $event = CalendarEvent::where('title', 'Retreat')->firstOrFail();
+        $this->assertDatabaseHas('tasks', [
+            'user_id' => $userId,
+            'conversation_session_id' => $sessionId,
+            'title' => 'Persist DB task',
+        ]);
+        $event = CalendarEvent::where('conversation_session_id', $sessionId)->where('title', 'Retreat')->firstOrFail();
         $this->assertSame('2026-05-18T17:00:00+00:00', $event->starts_at->utc()->toIso8601String());
         $this->assertSame('2026-05-22T00:00:00+00:00', $event->ends_at->utc()->toIso8601String());
+        $this->assertSame(1, Task::where('conversation_session_id', $sessionId)->count());
     }
 
-    public function test_runtime_deterministically_creates_multiple_dated_calendar_items_without_model_planner(): void
+    private function queueAndRun(string $token, int $sessionId, string $content, array $metadata = []): AssistantRun
     {
-        Queue::fake();
-        config()->set('services.hermes_runtime.crud_planner_enabled', true);
-        Http::fake([
-            'https://api.openai.test/v1/chat/completions' => Http::response($this->assistantResponse('Unexpected model call.'), 200),
-        ]);
-
-        $token = $this->apiToken('calendar-list@example.com');
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
-
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Please add the following to my calendar: 7/9 Dr Chen Cardio at 100 N Dean rd. at 3pm, 7/15 Ventura at 6pm, 7/19 Azalea Lane 2pm',
-            'metadata' => $this->clientTemporalMetadata(),
+        $metadata = array_merge([
+            'client_request_id' => 'test-'.str()->uuid(),
+        ], $metadata);
+        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
+            'content' => $content,
+            'metadata' => $metadata,
         ])->assertCreated()
-            ->assertJsonPath('data.assistant_message.content', 'Done - I added Dr Chen Cardio to your calendar for Jul 9, 3:00 PM, I added Ventura to your calendar for Jul 15, 6:00 PM, and I added Azalea Lane to your calendar for Jul 19, 2:00 PM.');
+            ->assertJsonPath('data.status', 'queued')
+            ->assertJsonPath('data.assistant_message', null);
 
-        $events = CalendarEvent::where('conversation_session_id', $sessionId)->orderBy('starts_at')->get();
-
-        $this->assertCount(3, $events);
-        $this->assertSame('Dr Chen Cardio', $events[0]->title);
-        $this->assertSame('100 N Dean rd', $events[0]->location);
-        $this->assertSame('2026-07-09T19:00:00+00:00', $events[0]->starts_at->utc()->toIso8601String());
-        $this->assertSame('Ventura', $events[1]->title);
-        $this->assertNull($events[1]->location);
-        $this->assertSame('2026-07-15T22:00:00+00:00', $events[1]->starts_at->utc()->toIso8601String());
-        $this->assertSame('Azalea Lane', $events[2]->title);
-        $this->assertNull($events[2]->location);
-        $this->assertSame('2026-07-19T18:00:00+00:00', $events[2]->starts_at->utc()->toIso8601String());
-
-        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
+        return $this->executeRun((int) $response->json('data.run.id'));
     }
 
-    public function test_runtime_followup_after_workout_does_not_duplicate_existing_workout(): void
+    private function executeRun(int $runId): AssistantRun
     {
-        Queue::fake();
-        config()->set('services.hermes_runtime.crud_planner_enabled', true);
-        Http::fake([
-            'https://api.openai.test/v1/chat/completions' => Http::response($this->assistantResponse('Unexpected model call.'), 200),
-        ]);
+        $queuedRun = AssistantRun::findOrFail($runId);
+        (new ProcessAssistantRun($runId, (int) $queuedRun->execution_generation + 1))->handle(
+            app(HermesRuntimeService::class),
+            app(AssistantRunService::class),
+        );
 
-        $token = $this->apiToken('calendar-followup-workout@example.com');
-        $user = User::where('email', 'calendar-followup-workout@example.com')->firstOrFail();
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
+        $run = AssistantRun::with(['assistantMessage', 'userMessage'])->findOrFail($runId);
+        $this->assertSame('completed', $run->status);
+        $this->assertNotNull($run->assistantMessage);
 
-        CalendarEvent::create([
-            'user_id' => $user->id,
-            'conversation_session_id' => $sessionId,
-            'title' => 'Workout',
-            'starts_at' => Carbon::parse('2026-05-18T17:30:00-04:00')->utc(),
-            'ends_at' => Carbon::parse('2026-05-18T18:30:00-04:00')->utc(),
-        ]);
-        ConversationMessage::create([
-            'user_id' => $user->id,
-            'conversation_session_id' => $sessionId,
-            'role' => 'user',
-            'content' => 'Add a workout today from 5:30pm to 6:30pm.',
-        ]);
-        ConversationMessage::create([
-            'user_id' => $user->id,
-            'conversation_session_id' => $sessionId,
-            'role' => 'assistant',
-            'content' => 'Done - I added Workout to your calendar from May 18, 5:30 PM to May 18, 6:30 PM.',
-        ]);
-
-        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Yes please. Add grocery shopping for 45 minutes after the workout, then cooking dinner for 30 minutes after grocery shopping, and create 15-minute reminders for both.',
-            'metadata' => $this->clientTemporalMetadata(),
-        ])->assertCreated()
-            ->assertJsonPath('data.status', 'completed');
-
-        $assistantContent = (string) $response->json('data.assistant_message.content');
-        $this->assertStringContainsString('Grocery shopping', $assistantContent);
-        $this->assertStringContainsString('Cook dinner', $assistantContent);
-        $this->assertStringNotContainsString('added Workout', $assistantContent);
-
-        $this->assertSame(1, CalendarEvent::where('conversation_session_id', $sessionId)->where('title', 'Workout')->count());
-        $this->assertSame(1, CalendarEvent::where('conversation_session_id', $sessionId)->where('title', 'Grocery shopping')->count());
-        $this->assertSame(1, CalendarEvent::where('conversation_session_id', $sessionId)->where('title', 'Cook dinner')->count());
-        $this->assertSame(1, Reminder::where('conversation_session_id', $sessionId)->where('title', 'like', '%Grocery%')->count());
-        $this->assertSame(1, Reminder::where('conversation_session_id', $sessionId)->where('title', 'like', '%Cook%')->count());
-
-        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
-    }
-
-    public function test_runtime_followup_moves_target_event_and_deletes_its_reminder_without_touching_anchor_event(): void
-    {
-        Queue::fake();
-        config()->set('services.hermes_runtime.crud_planner_enabled', true);
-        Http::fake([
-            'https://api.openai.test/v1/chat/completions' => Http::response($this->assistantResponse('Unexpected model call.'), 200),
-        ]);
-
-        $token = $this->apiToken('calendar-followup-move-delete@example.com');
-        $user = User::where('email', 'calendar-followup-move-delete@example.com')->firstOrFail();
-        $workspaceId = $user->default_workspace_id;
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
-
-        $workout = CalendarEvent::create([
-            'user_id' => $user->id,
-            'workspace_id' => $workspaceId,
-            'conversation_session_id' => $sessionId,
-            'title' => 'Workout',
-            'starts_at' => Carbon::parse('2026-05-18T17:00:00-04:00')->utc(),
-            'ends_at' => Carbon::parse('2026-05-18T18:00:00-04:00')->utc(),
-        ]);
-        $grocery = CalendarEvent::create([
-            'user_id' => $user->id,
-            'workspace_id' => $workspaceId,
-            'conversation_session_id' => $sessionId,
-            'title' => 'Grocery shopping',
-            'starts_at' => Carbon::parse('2026-05-18T18:00:00-04:00')->utc(),
-            'ends_at' => Carbon::parse('2026-05-18T18:45:00-04:00')->utc(),
-        ]);
-        Reminder::create([
-            'user_id' => $user->id,
-            'workspace_id' => $workspaceId,
-            'conversation_session_id' => $sessionId,
-            'calendar_event_id' => $grocery->id,
-            'title' => 'Grocery shopping reminder',
-            'remind_at' => Carbon::parse('2026-05-18T17:45:00-04:00')->utc(),
-        ]);
-
-        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Move grocery shopping to start after the workout at 6:15pm and delete the grocery shopping reminder.',
-            'metadata' => $this->clientTemporalMetadata(),
-        ])->assertCreated()
-            ->assertJsonPath('data.status', 'completed');
-
-        $assistantContent = (string) $response->json('data.assistant_message.content');
-        $this->assertStringContainsString('Grocery shopping', $assistantContent);
-        $this->assertStringNotContainsString('updated Workout', $assistantContent);
-
-        $workout->refresh();
-        $grocery->refresh();
-        $this->assertSame('2026-05-18T21:00:00+00:00', $workout->starts_at->utc()->toIso8601String());
-        $this->assertSame('2026-05-18T22:15:00+00:00', $grocery->starts_at->utc()->toIso8601String());
-        $this->assertSame('2026-05-18T23:00:00+00:00', $grocery->ends_at->utc()->toIso8601String());
-        $this->assertSame(0, Reminder::where('conversation_session_id', $sessionId)->where('title', 'like', '%Grocery%')->count());
-
-        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
-    }
-
-    public function test_runtime_multi_event_setup_then_followup_move_delete_stays_in_same_session(): void
-    {
-        Queue::fake();
-        config()->set('services.hermes_runtime.crud_planner_enabled', true);
-        Http::fake([
-            'https://api.openai.test/v1/chat/completions' => Http::response($this->assistantResponse('Unexpected model call.'), 200),
-        ]);
-
-        $token = $this->apiToken('calendar-followup-smoke-path@example.com');
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
-
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Add a workout today from 5pm to 6pm, grocery shopping today from 6pm to 6:45pm, and a reminder 15 minutes before grocery shopping.',
-            'metadata' => $this->clientTemporalMetadata(),
-        ])->assertCreated()
-            ->assertJsonPath('data.status', 'completed');
-
-        $this->assertSame(1, CalendarEvent::where('conversation_session_id', $sessionId)->where('title', 'Workout')->count());
-        $this->assertSame(1, CalendarEvent::where('conversation_session_id', $sessionId)->where('title', 'Grocery shopping')->count());
-        $this->assertSame(1, Reminder::where('conversation_session_id', $sessionId)->where('title', 'like', '%Grocery%')->count());
-
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Move grocery shopping to start after the workout at 6:15pm and delete the grocery shopping reminder.',
-            'metadata' => $this->clientTemporalMetadata(),
-        ])->assertCreated()
-            ->assertJsonPath('data.status', 'completed');
-
-        $workout = CalendarEvent::where('conversation_session_id', $sessionId)->where('title', 'Workout')->firstOrFail();
-        $grocery = CalendarEvent::where('conversation_session_id', $sessionId)->where('title', 'Grocery shopping')->firstOrFail();
-        $this->assertSame('2026-05-18T21:00:00+00:00', $workout->starts_at->utc()->toIso8601String());
-        $this->assertSame('2026-05-18T22:15:00+00:00', $grocery->starts_at->utc()->toIso8601String());
-        $this->assertSame('2026-05-18T23:00:00+00:00', $grocery->ends_at->utc()->toIso8601String());
-        $this->assertSame(0, Reminder::where('conversation_session_id', $sessionId)->where('title', 'like', '%Grocery%')->count());
-
-        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
-    }
-
-    public function test_runtime_request_history_recall_about_domain_item_uses_history_not_current_records(): void
-    {
-        Queue::fake();
-        Http::fake([
-            'https://api.openai.test/v1/chat/completions' => Http::response($this->assistantResponse('Unexpected model call.'), 200),
-        ]);
-
-        $token = $this->apiToken('request-history-fast-path@example.com');
-        $user = User::where('email', 'request-history-fast-path@example.com')->firstOrFail();
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
-
-        ConversationMessage::create([
-            'user_id' => $user->id,
-            'conversation_session_id' => $sessionId,
-            'role' => 'user',
-            'content' => 'REQ-011: Add three calendar events: 7/9 Dr Chen Cardio at 100 N Dean Rd at 3pm, 7/15 Ventura at 6pm, and 7/19 Azalea Lane at 2pm.',
-            'created_at' => now()->subMinutes(10),
-        ]);
-        ConversationMessage::create([
-            'user_id' => $user->id,
-            'conversation_session_id' => $sessionId,
-            'role' => 'user',
-            'content' => 'REQ-073: Find a nearby Wawa around 32820 and tell me the closest address.',
-            'created_at' => now()->subMinutes(5),
-        ]);
-        CalendarEvent::create([
-            'user_id' => $user->id,
-            'workspace_id' => $user->default_workspace_id,
-            'conversation_session_id' => $sessionId,
-            'title' => 'Dr Chen Cardio',
-            'starts_at' => Carbon::parse('2026-07-09T15:00:00-04:00')->utc(),
-            'ends_at' => Carbon::parse('2026-07-09T16:00:00-04:00')->utc(),
-        ]);
-
-        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'What request did I make about Dr Chen Cardio earlier in this smoke run?',
-            'metadata' => $this->clientTemporalMetadata(),
-        ])->assertCreated()
-            ->assertJsonPath('data.status', 'completed');
-
-        $content = (string) $response->json('data.assistant_message.content');
-        $this->assertStringContainsString('You asked:', $content);
-        $this->assertStringContainsString('REQ-011', $content);
-        $this->assertStringContainsString('Dr Chen Cardio', $content);
-        $this->assertStringNotContainsString('REQ-073', $content);
-        $this->assertStringNotContainsString('Wawa', $content);
-        $this->assertStringNotContainsString('You scheduled a calendar event', $content);
-
-        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
-    }
-
-    public function test_runtime_request_history_recall_does_not_return_generic_note_matches(): void
-    {
-        Queue::fake();
-        Http::fake([
-            'https://api.openai.test/v1/chat/completions' => Http::response($this->assistantResponse('Unexpected model call.'), 200),
-        ]);
-
-        $token = $this->apiToken('request-history-strict-none@example.com');
-        $user = User::where('email', 'request-history-strict-none@example.com')->firstOrFail();
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
-
-        ConversationMessage::create([
-            'user_id' => $user->id,
-            'conversation_session_id' => $sessionId,
-            'role' => 'user',
-            'content' => 'REQ-053: Create a project follow-up workflow for the budget cleanup: calendar focus block Friday at 9am, task to prepare notes, and reminder Thursday afternoon.',
-            'created_at' => now()->subMinutes(10),
-        ]);
-
-        $response = $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'What was my earlier request about Egg Protein Note, if any? If there was none, say so clearly.',
-            'metadata' => $this->clientTemporalMetadata(),
-        ])->assertCreated()
-            ->assertJsonPath('data.status', 'completed');
-
-        $content = (string) $response->json('data.assistant_message.content');
-        $this->assertStringContainsString('did not find', $content);
-        $this->assertStringNotContainsString('REQ-053', $content);
-        $this->assertStringNotContainsString('budget cleanup', $content);
-
-        Http::assertNotSent(fn ($request): bool => $request->url() === 'https://api.openai.test/v1/chat/completions');
-    }
-
-    public function test_runtime_explains_note_plan_limits_without_generic_failure_copy(): void
-    {
-        config()->set('services.hermes_runtime.crud_planner_enabled', true);
-        Http::fake([
-            'https://api.openai.test/v1/chat/completions' => Http::response($this->assistantResponse(json_encode([
-                'actions' => [[
-                    'type' => 'note.create',
-                    'risk' => 'low',
-                    'parameters' => [
-                        'title' => 'Note: hello',
-                        'plain_text' => 'hello',
-                        'body' => 'hello',
-                    ],
-                ]],
-            ], JSON_THROW_ON_ERROR)), 200),
-        ]);
-
-        $token = $this->apiToken('base-note-limit@example.com');
-        $user = User::where('email', 'base-note-limit@example.com')->firstOrFail();
-        $workspace = $user->workspaces()->firstOrFail();
-        for ($i = 1; $i <= 10; $i++) {
-            Note::create([
-                'user_id' => $user->id,
-                'workspace_id' => $workspace->id,
-                'created_by_user_id' => $user->id,
-                'title' => "Existing note {$i}",
-                'plain_text' => 'Already at the base note limit.',
-            ]);
-        }
-        $sessionId = $this->withToken($token)->postJson('/api/assistant/sessions')->assertCreated()->json('data.id');
-
-        $this->withToken($token)->postJson("/api/assistant/sessions/{$sessionId}/messages", [
-            'content' => 'Can you create a note that says hello',
-            'metadata' => $this->clientTemporalMetadata(),
-        ])->assertCreated()
-            ->assertJsonPath('data.assistant_message.content', 'Your current plan includes up to 10 notes. Upgrade your plan to create and manage more notes.');
-
-        $this->assertDatabaseMissing('notes', [
-            'conversation_session_id' => $sessionId,
-            'title' => 'Note: hello',
-        ]);
-    }
-
-    private function assistantResponse(string $content): array
-    {
-        return [
-            'id' => 'chatcmpl-test',
-            'model' => 'gpt-test-tools',
-            'choices' => [[
-                'finish_reason' => 'stop',
-                'message' => ['role' => 'assistant', 'content' => $content],
-            ]],
-        ];
-    }
-
-    private function toolCallResponse(array $toolCalls): array
-    {
-        return [
-            'id' => 'chatcmpl-tool-call',
-            'model' => 'gpt-test-tools',
-            'choices' => [[
-                'finish_reason' => 'tool_calls',
-                'message' => ['role' => 'assistant', 'content' => null, 'tool_calls' => $toolCalls],
-            ]],
-        ];
-    }
-
-    private function toolCall(string $id, string $name, array $arguments): array
-    {
-        return [
-            'id' => $id,
-            'type' => 'function',
-            'function' => [
-                'name' => $name,
-                'arguments' => json_encode($arguments, JSON_THROW_ON_ERROR),
-            ],
-        ];
+        return $run;
     }
 
     /**
-     * @return array<string, mixed>
+     * @param  list<HermesSemanticInterpretation|\Throwable>  $interpretations
+     * @param  list<HermesSemanticComposition|\Throwable>  $compositions
      */
-    private function clientTemporalMetadata(): array
+    private function bindSemanticFake(array $interpretations, array $compositions = []): HermesRuntimeApiSemanticFake
     {
-        return [
-            'source' => 'web',
-            'client_context' => [
-                'current_local_time' => '2026-05-18T13:14:00.000',
-                'current_utc_time' => '2026-05-18T17:14:00.000Z',
-                'timezone_name' => 'EDT',
-                'timezone_offset' => '-04:00',
-                'timezone_offset_minutes' => -240,
-            ],
-        ];
+        $fake = new HermesRuntimeApiSemanticFake($interpretations, $compositions);
+        $this->app->instance(HermesSemanticInterpreter::class, $fake);
+
+        return $fake;
+    }
+
+    private function respond(string $content): HermesSemanticInterpretation
+    {
+        return new HermesSemanticInterpretation(
+            outcome: HermesSemanticInterpretation::OUTCOME_RESPOND,
+            responseText: $content,
+            clarificationQuestion: null,
+            acknowledgementText: null,
+            closeAfterResponse: false,
+            responseExpected: false,
+            operations: [],
+        );
+    }
+}
+
+final class HermesRuntimeApiSemanticFake implements HermesSemanticInterpreter
+{
+    /** @var list<HermesSemanticInterpretationRequest> */
+    public array $interpretationRequests = [];
+
+    /** @var list<HermesSemanticCompositionRequest> */
+    public array $compositionRequests = [];
+
+    public function __construct(
+        private array $interpretations,
+        private array $compositions = [],
+    ) {}
+
+    public function interpret(HermesSemanticInterpretationRequest $request): HermesSemanticInterpretation
+    {
+        $this->interpretationRequests[] = $request;
+        $next = array_shift($this->interpretations);
+        if ($next instanceof \Throwable) {
+            throw $next;
+        }
+        if (! $next instanceof HermesSemanticInterpretation) {
+            throw new RuntimeException('No Hermes runtime API interpretation remains.');
+        }
+
+        return $next;
+    }
+
+    public function compose(HermesSemanticCompositionRequest $request): HermesSemanticComposition
+    {
+        $this->compositionRequests[] = $request;
+        $next = array_shift($this->compositions);
+        if ($next instanceof \Throwable) {
+            throw $next;
+        }
+        if (! $next instanceof HermesSemanticComposition) {
+            throw new RuntimeException('No Hermes runtime API composition remains.');
+        }
+
+        return $next;
     }
 }

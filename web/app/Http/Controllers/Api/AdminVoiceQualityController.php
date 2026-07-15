@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Services\VoiceQualityReportService;
+use App\Services\BrowserVoiceV2DiagnosticsReportService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -11,14 +11,14 @@ use Illuminate\Validation\ValidationException;
 
 class AdminVoiceQualityController extends Controller
 {
-    public function index(Request $request, VoiceQualityReportService $reports): JsonResponse
+    public function index(Request $request, BrowserVoiceV2DiagnosticsReportService $reports): JsonResponse
     {
         $data = $request->validate([
             'days' => [
                 'nullable',
                 'integer',
                 'min:1',
-                'max:'.VoiceQualityReportService::MAX_WINDOW_DAYS,
+                'max:'.BrowserVoiceV2DiagnosticsReportService::MAX_WINDOW_DAYS,
             ],
             'from' => ['nullable', 'required_with:to', 'date_format:Y-m-d'],
             'to' => ['nullable', 'required_with:from', 'date_format:Y-m-d', 'after_or_equal:from'],
@@ -35,13 +35,13 @@ class AdminVoiceQualityController extends Controller
             $to = CarbonImmutable::parse($data['to'], 'UTC')->endOfDay();
             $inclusiveDays = (int) $from->diffInDays($to->startOfDay()) + 1;
 
-            if ($inclusiveDays > VoiceQualityReportService::MAX_WINDOW_DAYS) {
+            if ($inclusiveDays > BrowserVoiceV2DiagnosticsReportService::MAX_WINDOW_DAYS) {
                 throw ValidationException::withMessages([
-                    'from' => 'The voice quality date window may not exceed '.VoiceQualityReportService::MAX_WINDOW_DAYS.' days.',
+                    'from' => 'The voice quality date window may not exceed '.BrowserVoiceV2DiagnosticsReportService::MAX_WINDOW_DAYS.' days.',
                 ]);
             }
         } else {
-            $days = (int) ($data['days'] ?? VoiceQualityReportService::DEFAULT_WINDOW_DAYS);
+            $days = (int) ($data['days'] ?? BrowserVoiceV2DiagnosticsReportService::DEFAULT_WINDOW_DAYS);
             $to = CarbonImmutable::now('UTC');
             $from = $to->startOfDay()->subDays($days - 1);
         }

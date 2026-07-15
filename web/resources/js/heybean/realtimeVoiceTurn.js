@@ -114,33 +114,20 @@ export function shouldDisplayRealtimeTranscriptDraft(text) {
     return !/^h(?:e(?:y(?:[\s,.-]*b(?:e(?:a(?:n)?)?)?)?)?)?[\s.!?,-]*$/i.test(draft);
 }
 
-export function isLikelyNonEnglishRealtimeTranscript(text) {
-    const letters = String(text || '').match(/\p{L}/gu) || [];
-    if (!letters.length) return false;
-    const latinLetters = letters.filter((letter) => /\p{Script=Latin}/u.test(letter));
-    return latinLetters.length / letters.length < 0.65;
-}
-
-export function stripRealtimeLocalWakePrefix(text) {
-    return String(text || '')
+export function stripRealtimeLocalWakePrefix(text, { wakeConfirmed = false } = {}) {
+    const transcript = String(text || '').trim();
+    if (!wakeConfirmed) return transcript;
+    return transcript
         .replace(/^\s*(?:(?:hey|they|he)[\s,.-]+(?:bean|ben|bin|bing|being|beane|beam)|habe(?:en|ing)|bean)\b[\s,.:;!?-]*/i, '')
         .trim();
 }
 
-export function isRealtimeWakeAddressOnly(text) {
+export function isRealtimeWakeAddressOnly(text, { wakeConfirmed = false } = {}) {
+    if (!wakeConfirmed) return false;
     const transcript = String(text || '').trim();
     if (!transcript) return true;
-    return stripRealtimeLocalWakePrefix(transcript) === ''
+    return stripRealtimeLocalWakePrefix(transcript, { wakeConfirmed: true }) === ''
         && /^(?:(?:hey|they|he)[\s,.-]+(?:bean|ben|bin|bing|being|beane|beam)|habe(?:en|ing)|bean)\b[\s.!?,-]*$/i.test(transcript);
-}
-
-export function isVoiceFillerOnly(text) {
-    const normalized = String(text || '')
-        .toLowerCase()
-        .replace(/[^a-z\s]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    return /^(?:um+|uh+|erm+|hmm+|mm+|ah+)(?: (?:yeah|yes|okay|ok|right))?$/.test(normalized);
 }
 
 export class RealtimeInputTranscriptBuffer {

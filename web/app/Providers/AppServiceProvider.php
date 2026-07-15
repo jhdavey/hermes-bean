@@ -7,7 +7,9 @@ use App\Models\Reminder;
 use App\Models\Task;
 use App\Observers\DashboardResourceObserver;
 use App\Services\HermesRuntimeService;
-use App\Services\HermesToolRuntimeService;
+use App\Services\HermesSemanticInterpreter;
+use App\Services\HermesSemanticRuntimeService;
+use App\Services\OpenAiHermesSemanticInterpreter;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -17,7 +19,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->bind(HermesRuntimeService::class, HermesToolRuntimeService::class);
+        $this->app->bind(HermesRuntimeService::class, HermesSemanticRuntimeService::class);
+        $this->app->bind(HermesSemanticInterpreter::class, OpenAiHermesSemanticInterpreter::class);
     }
 
     /**

@@ -2,9 +2,10 @@
 
 namespace Tests\Feature;
 
-use App\Models\AdminSetting;
 use App\Models\ActivityEvent;
+use App\Models\AdminSetting;
 use App\Models\Approval;
+use App\Models\AssistantRun;
 use App\Models\Blocker;
 use App\Models\CalendarEvent;
 use App\Models\ConversationMessage;
@@ -16,9 +17,11 @@ use App\Models\NoteFolder;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
+use App\Models\VoiceTurn;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
 use App\Services\AiUsageService;
+use App\Services\PlanHistoryService;
 use App\Services\PlanLimitService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -125,6 +128,7 @@ class PlanLimitEntitlementTest extends TestCase
 
         $this->withToken($baseToken)->postJson('/api/calendar-events', [
             'title' => 'Weekly planning',
+            'all_day' => false,
             'starts_at' => now()->addDay()->toIso8601String(),
             'ends_at' => now()->addDay()->addHour()->toIso8601String(),
             'recurrence' => 'weekly',
@@ -149,6 +153,7 @@ class PlanLimitEntitlementTest extends TestCase
 
         $this->withToken($premiumToken)->postJson('/api/calendar-events', [
             'title' => 'Weekly planning',
+            'all_day' => false,
             'starts_at' => now()->addDay()->toIso8601String(),
             'ends_at' => now()->addDay()->addHour()->toIso8601String(),
             'recurrence' => 'weekly',
@@ -316,6 +321,7 @@ class PlanLimitEntitlementTest extends TestCase
 
         $this->withToken($token)->postJson('/api/calendar-events', [
             'title' => 'Admin recurring calendar',
+            'all_day' => false,
             'starts_at' => now()->addDay()->toIso8601String(),
             'ends_at' => now()->addDay()->addHour()->toIso8601String(),
             'recurrence' => 'weekly',
@@ -629,6 +635,173 @@ class PlanLimitEntitlementTest extends TestCase
             $this->assertDatabaseHas('blockers', ['id' => $oldOpenBlocker->id]);
             $this->assertDatabaseMissing('dashboard_changes', ['id' => $oldDashboardChange->id]);
             $this->assertDatabaseMissing('workspace_item_links', ['source_type' => 'tasks', 'source_id' => $oldCompletedTask->id]);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_message_retention_prunes_only_unreferenced_rows_inside_an_active_history_aggregate(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-18 12:00:00'));
+
+        try {
+            $this->apiToken('lifecycle-message-retention@example.com');
+            $user = User::where('email', 'lifecycle-message-retention@example.com')->firstOrFail();
+            $workspace = Workspace::where('personal_owner_user_id', $user->id)->firstOrFail();
+            $old = now()->subDays(20);
+            $recent = now()->subDays(2);
+            $cutoff = now()->subDays(14);
+            $recentSession = ConversationSession::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Recent lifecycle history',
+                'last_activity_at' => $recent,
+            ]);
+            $genericUser = ConversationMessage::create([
+                'user_id' => $user->id,
+                'conversation_session_id' => $recentSession->id,
+                'role' => 'user',
+                'content' => 'Old generic request with a durable run.',
+                'created_at' => $old,
+                'updated_at' => $old,
+            ]);
+            $genericFinal = ConversationMessage::create([
+                'user_id' => $user->id,
+                'conversation_session_id' => $recentSession->id,
+                'role' => 'assistant',
+                'content' => 'Old literal generic final.',
+                'created_at' => $old,
+                'updated_at' => $old,
+            ]);
+            $genericRun = AssistantRun::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'conversation_session_id' => $recentSession->id,
+                'user_message_id' => $genericUser->id,
+                'assistant_message_id' => $genericFinal->id,
+                'client_request_id' => 'retention-generic-run-0001',
+                'request_fingerprint' => str_repeat('a', 64),
+                'source' => 'web_chat',
+                'status' => 'completed',
+                'input' => $genericUser->content,
+                'completed_at' => $old,
+                'created_at' => $old,
+                'updated_at' => $old,
+            ]);
+            $voiceUser = ConversationMessage::create([
+                'user_id' => $user->id,
+                'conversation_session_id' => $recentSession->id,
+                'client_turn_id' => 'retention-voice-turn-0001',
+                'role' => 'user',
+                'content' => 'Old voice request with a durable turn.',
+                'created_at' => $old,
+                'updated_at' => $old,
+            ]);
+            $voiceFinal = ConversationMessage::create([
+                'user_id' => $user->id,
+                'conversation_session_id' => $recentSession->id,
+                'client_turn_id' => 'retention-voice-turn-0001',
+                'role' => 'assistant',
+                'content' => 'Old literal voice final.',
+                'created_at' => $old,
+                'updated_at' => $old,
+            ]);
+            $voiceTurn = VoiceTurn::create([
+                'turn_id' => 'retention-voice-turn-0001',
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'conversation_session_id' => $recentSession->id,
+                'user_message_id' => $voiceUser->id,
+                'final_assistant_message_id' => $voiceFinal->id,
+                'source' => 'browser_voice_v2',
+                'client_kind' => 'browser_voice',
+                'transcript' => $voiceUser->content,
+                'sanitized_transcript' => $voiceUser->content,
+                'state' => 'completed',
+                'version' => 2,
+                'idempotency_key' => 'retention-voice-turn-0001',
+                'acknowledgement_required' => false,
+                'accepted_at' => $old,
+                'terminal_at' => $old,
+                'side_effect_status' => 'none',
+                'created_at' => $old,
+                'updated_at' => $old,
+            ]);
+            $unreferenced = ConversationMessage::create([
+                'user_id' => $user->id,
+                'conversation_session_id' => $recentSession->id,
+                'role' => 'user',
+                'content' => 'Old unreferenced history row.',
+                'created_at' => $old,
+                'updated_at' => $old,
+            ]);
+
+            $oldSession = ConversationSession::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'title' => 'Old aggregate',
+                'last_activity_at' => $old,
+                'created_at' => $old,
+                'updated_at' => $old,
+            ]);
+            $oldVoiceUser = ConversationMessage::create([
+                'user_id' => $user->id,
+                'conversation_session_id' => $oldSession->id,
+                'client_turn_id' => 'retention-old-aggregate-turn-0001',
+                'role' => 'user',
+                'content' => 'Old aggregate voice request.',
+                'created_at' => $old,
+                'updated_at' => $old,
+            ]);
+            $oldVoiceTurn = VoiceTurn::create([
+                'turn_id' => 'retention-old-aggregate-turn-0001',
+                'user_id' => $user->id,
+                'workspace_id' => $workspace->id,
+                'conversation_session_id' => $oldSession->id,
+                'user_message_id' => $oldVoiceUser->id,
+                'source' => 'browser_voice_v2',
+                'client_kind' => 'browser_voice',
+                'transcript' => $oldVoiceUser->content,
+                'sanitized_transcript' => $oldVoiceUser->content,
+                'state' => 'canceled',
+                'version' => 2,
+                'idempotency_key' => 'retention-old-aggregate-turn-0001',
+                'acknowledgement_required' => false,
+                'accepted_at' => $old,
+                'terminal_at' => $old,
+                'side_effect_status' => 'none',
+                'created_at' => $old,
+                'updated_at' => $old,
+            ]);
+
+            foreach ([
+                $genericUser,
+                $genericFinal,
+                $voiceUser,
+                $voiceFinal,
+                $unreferenced,
+                $oldSession,
+                $oldVoiceUser,
+                $oldVoiceTurn,
+            ] as $model) {
+                $this->stampModel($model, $old);
+            }
+            $this->stampModel($recentSession, $recent);
+
+            $counts = app(PlanHistoryService::class)->pruneUser($user, $cutoff);
+
+            $this->assertSame(1, $counts['conversation_sessions']);
+            $this->assertSame(1, $counts['conversation_messages']);
+            $this->assertDatabaseHas('assistant_runs', ['id' => $genericRun->id]);
+            $this->assertDatabaseHas('conversation_messages', ['id' => $genericUser->id]);
+            $this->assertDatabaseHas('conversation_messages', ['id' => $genericFinal->id]);
+            $this->assertDatabaseHas('voice_turns', ['id' => $voiceTurn->id]);
+            $this->assertDatabaseHas('conversation_messages', ['id' => $voiceUser->id]);
+            $this->assertDatabaseHas('conversation_messages', ['id' => $voiceFinal->id]);
+            $this->assertDatabaseMissing('conversation_messages', ['id' => $unreferenced->id]);
+            $this->assertDatabaseMissing('conversation_sessions', ['id' => $oldSession->id]);
+            $this->assertDatabaseMissing('voice_turns', ['id' => $oldVoiceTurn->id]);
+            $this->assertDatabaseMissing('conversation_messages', ['id' => $oldVoiceUser->id]);
         } finally {
             Carbon::setTestNow();
         }

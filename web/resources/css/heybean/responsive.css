@@ -15,6 +15,11 @@
         padding: 24px 0 16px;
     }
 
+    .hb-guided-setup-card {
+        gap: 16px;
+        padding: 20px;
+    }
+
     .hb-guided-message,
     .hb-guided-choice-panel,
     .hb-guided-onboarding-thinking {
@@ -700,15 +705,6 @@
 
     .hb-admin-growth-stats span {
         text-align: left;
-    }
-
-    .hb-admin-hermes-status {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .hb-admin-hermes-status .hb-admin-status {
-        width: fit-content;
     }
 
     .hb-admin-growth-chart {

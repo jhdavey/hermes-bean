@@ -22,7 +22,14 @@ class EnforceBrowserVoiceTurnDeadline implements ShouldQueue
 
     public function handle(VoiceTurnLifecycleService $lifecycle): void
     {
-        if (Carbon::parse($this->deadlineAt)->isFuture()) {
+        $deadline = Carbon::parse($this->deadlineAt);
+        if ($deadline->isFuture()) {
+            $queueAt = $deadline->copy();
+            if ((int) $queueAt->format('u') > 0) {
+                $queueAt = $queueAt->addSecond()->startOfSecond();
+            }
+            self::dispatch($this->voiceTurnId, $this->deadlineAt)->delay($queueAt);
+
             return;
         }
 

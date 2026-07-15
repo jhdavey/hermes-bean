@@ -7,9 +7,11 @@ Authoritative behavior: [`bean-voice-rules.md`](bean-voice-rules.md)
 
 ## Purpose
 
-This document turns the Bean voice product contract into a replacement architecture, migration plan, performance plan, and release gate. It is deliberately based on complete user journeys rather than individual reported symptoms.
+This document turns the Bean voice product contract into a replacement architecture, clean-cutover plan, performance plan, and release gate. It is deliberately based on complete user journeys rather than individual reported symptoms.
 
 The implementation must replace conflicting ownership. It must not add another coordinator, fallback lane, browser queue, or lifecycle flag beside the existing ones.
+
+Every activated spoken request follows one semantic path. Hermes owns meaning, completeness, conversational references, typed-operation selection and natural language. Deterministic code owns wake/privacy gates, admission, schemas, authorization, execution, lifecycle, deadlines, recovery and exact-once delivery. Time, date, voice-state, reads, writes, weather, conversational replies, spoken Stop and cancellation have no pre-Hermes shortcut.
 
 The browser wake detector is a first-party, self-contained component. It may use bundled open-source runtime code, but it cannot require a proprietary wake provider, cloud inference, an external account, a license key, or an external runtime request. Ordinary same-origin loading of versioned static application/model assets is permitted. Its model, preprocessing, inference, and evaluation path must be reproducible locally from repository-owned scripts and packaged static assets.
 
@@ -41,13 +43,13 @@ That makes valid events race one another. A stale provider event can reopen a cl
 | --- | --- | --- |
 | Follow-up window is 15 seconds | Browser constant is 10 seconds | One conversation timer owned by the browser controller, set to 15 seconds |
 | Utterance ends after 2 seconds of silence | Realtime session VAD is configured for 650 ms | One 2-second endpointing policy; incomplete-intent handling occurs after the endpoint |
-| Stop affects playback only | Spoken Stop resets the conversation, clears the browser queue, and calls the session cancel endpoint | Separate playback Stop from explicit job cancellation |
+| Stop affects playback only | Spoken Stop resets the conversation, clears the browser queue, and calls the session cancel endpoint | Visible Stop stays local; spoken Stop crosses Hermes and selects typed playback control, never implicit cancellation |
 | Background work does not keep follow-up active | Browser rearms the follow-up timer when queue/work is active | Conversation lifetime depends only on speech and clarification state |
 | Up to three independent background jobs | Browser drains one FIFO queue; worker applies a session-wide overlap lock and earlier-sequence gate | Server scheduler with three slots and resource-scoped locks |
 | Reads may bypass active work | Single active chat request and polling ownership blocks or supersedes other work | Independent durable turns/jobs plus a session event stream |
 | Missed `Hey` recovery remains local | Wake worker recognizes anchored variants of `Hey Bean` only | Local, fail-closed address confirmation mode for initial `Bean …` |
 | Confirmed interruption permanently stops audio | Existing paths conflate interruption, playback, conversation, and task cancellation | One playback adapter stops only the current speech item after meaningful confirmation |
-| Routing is decided once | Browser calls `realtimeNeedsAppRuntime`; Realtime can call a tool; Laravel routes again | One admission router and a persisted immutable lane/handler |
+| Meaning is decided once | Browser calls `realtimeNeedsAppRuntime`; Realtime can call a tool; Laravel routes again | One Hermes semantic path followed by schema-validated deterministic execution |
 | Server owns queued/running/completed state | Browser maintains non-durable and durable queues plus local dock items | Server turn/job snapshot is the only durable work state |
 | Every accepted turn reaches one terminal state | State is independently updated in controller, service, worker, and browser | One server lifecycle transition service with compare-and-set/versioning |
 | Exactly one final response | Provider direct speech, run completion, fallback bridges, and reconciliation can all produce output | One final-message writer and one browser delivery scheduler |
@@ -64,12 +66,12 @@ Every concern has exactly one authority.
 | Browser conversation state | Browser voice controller | UI renderer, provider adapter |
 | Live activated transcript draft | Browser voice controller | Input renderer |
 | End-of-utterance and clarification timers | Browser voice controller | Transcript/provider adapter |
-| Semantic request completeness and clarification question | Server admission completeness service | Browser voice controller, typed handlers |
-| Request lane and handler | Admission router | Turn lifecycle, job dispatcher |
+| Meaning, completeness, references, operation selection, and response language | Hermes semantic interpreter | Typed-operation validator, turn lifecycle |
+| Operation schemas, authorization, and entitlements | Deterministic typed-operation validator | Hermes semantic path, typed handlers |
+| Semantic model identity | Versioned server configuration | Hermes semantic interpreter, usage accounting |
 | Durable turn lifecycle | Server turn transition service | Browser event projection, admin |
 | Job state and concurrency | Server job scheduler | Working dock, admin |
-| Typed read/write execution | Typed server handlers | Turn finalizer |
-| Agent reasoning | Complex-work handler only | Typed operations, turn finalizer |
+| Typed read/write/work-control execution | Typed server handlers | Hermes semantic path, turn finalizer |
 | Acknowledgement/final speech order | Browser speech scheduler | Playback adapter |
 | Playback start, volume, interruption, and Stop | Browser playback adapter | Speech scheduler |
 | Final Bean chat message | Server turn finalizer | Browser projection |
@@ -155,8 +157,8 @@ Minimum fields:
 - user and final assistant message foreign keys
 - source/client kind (`browser_voice` for this release)
 - transcript and sanitized transcript
-- immutable lane and handler after admission
-- state: `capturing`, `awaiting_clarification`, `accepted`, `running`, `completed`, `failed`, or `canceled`
+- semantic sequence and interpretation metadata needed to resume clarification; per-run execution routing is not duplicated on the turn
+- state: `awaiting_clarification`, `accepted`, `running`, `completed`, `failed`, or `canceled`; pre-admission capture remains browser-private and is never a server turn
 - version for compare-and-set transitions
 - idempotency key
 - acknowledgement requirement and acknowledgement timestamp
@@ -169,42 +171,45 @@ Minimum fields:
 
 Conversation messages remain the chat transcript. They do not own lifecycle. A user message is created atomically when the turn becomes accepted. A final assistant message is created atomically once, only while terminalizing the turn.
 
-Add `voice_turn_id` to `assistant_runs`. One logical turn may have zero, one, or several runs. Add immutable lane/handler, priority, resource lock key, idempotency key, hard deadline, and progress timestamp to runs where needed.
+Add `voice_turn_id` to `assistant_runs`. Every accepted logical turn has one semantic-interpretation run and may add typed-operation and composition runs. Every voice run requires its own explicit, immutable execution category and handler; no turn-level fallback exists. Add the semantic-plan version, priority, resource lock key, idempotency key, hard deadline, and progress timestamp to runs where needed. An execution category is assigned only after Hermes interpretation; it is never a shortcut around interpretation.
 
-### 5. Admission and routing
+### 5. Admission, semantic interpretation, and typed execution
 
 Expose one idempotent endpoint:
 
 `POST /api/assistant/voice/turns`
 
-Input includes stable turn ID, complete logical transcript, session/workspace, timezone/location context, transcript timing, and browser connection generation. It atomically:
+Input includes stable turn ID, complete logical transcript, session/workspace, timezone/location context, transcript timing, and browser connection generation. Durable admission atomically:
 
 1. deduplicates by stable turn ID;
-2. routes once;
-3. stores the immutable lane and handler;
-4. creates the accepted user chat message;
-5. executes an eligible fast handler or creates server jobs;
-6. returns the complete turn/job snapshot and event cursor.
+2. creates the accepted user chat message exactly once;
+3. records the lifecycle and interpretation deadline.
 
-The browser may use a closed, deterministic exact-intent classifier for time/date/voice-state requests, but it still obtains durable admission before final delivery. Laravel validates and executes that declared local handler; it does not reinterpret the request through a model. All other requests are routed once on the server.
+After commit, the server idempotently starts or resumes one Hermes semantic path for that turn.
 
-Supported routing order:
+Hermes receives the complete transcript, durable conversation and work context, and trusted current time, date, timezone and location. A configurable low-latency backend model is selected by versioned server configuration; its identity and per-request usage are recorded for accounting and diagnostics. The model may request clarification, produce a no-tool response, or select one or more typed operations with structured arguments. Conversational references, corrections, multiple clauses, temporal interpretation, natural closings, spoken Stop and cancellation are resolved here. The durable projection carries semantic conversation dispositions such as `response_expected` and `close_after_response`; the browser never infers them from punctuation or phrase lists.
 
-1. exact instant handlers;
-2. typed app read handlers;
-3. typed app write handlers with completeness validation;
-4. typed weather/external handler;
-5. complex agent handler.
+Deterministic code validates every selected operation against its schema, authorization, subscription and resource entitlements before execution. It may reject a missing schema requirement or contradictory tool payload, but it never determines conversational completeness, repairs meaning, authors a clarification, or selects among possible targets; the structured rejection returns to Hermes for a corrected plan or one specific Hermes-authored question. Voice uses one canonical argument form: exact supplied domain statuses and recurrence values, direct update fields, absolute temporal values, explicit provider kind/location/topic, concrete IDs, or an exact-title unique reference that is sealed to one authorized ID before jobs exist. Memory is the sole exception to title-only sealing because its title is optional: `app.memory.search` may explicitly request `exact_title` or `exact_content`, and a unique result may be sealed to one authorized memory ID. Metadata, aliases, `items.N` selection, fuzzy mutation targets, and post-Hermes prose interpretation are rejected. Execution adapters may translate canonical values into provider or database calls and apply documented incidental create defaults, but may not infer user meaning. Semantic values that Hermes does supply—including `all_day`, `starts_at`, and `ends_at`—are stored literally without changing their timezone or end-boundary convention.
 
-No lane silently falls through to another runtime. A typed handler failure is a scoped failure. The OpenAI Realtime model does not call `send_bean_request`; the browser does not send an approved tool request through a second `/runs` routing pass.
+The canonical durable-memory surface is `app.memory.search`, `app.memory.create`, `app.memory.update`, and `app.memory.delete`. Create requires an explicit canonical type and non-empty content; update exposes only explicit mutable memory fields; update/delete require a trusted memory ID or a sealed exact-title/exact-content unique search reference. Search and execution remain scoped to the authenticated user and workspace and active, unexpired items. The executor may validate, authorize, lock, deduplicate, and perform the CRUD transaction, but it may not infer a memory type, extract content from transcript prose, translate aliases, fill a missing field, or select an ambiguous item. Ordinary identity or preference disclosures do not persist unless the user explicitly requests durable memory and Hermes selects `app.memory.create`.
+
+The application owns idempotency, ordering, locks, deadlines, database/provider calls and side-effect reconciliation. A Hermes acknowledgement is made durable only in the same lifecycle transaction that stages a fully validated plan, so an invalid plan cannot speak before Hermes repairs it or asks a clarification. Tool results—including expected negative outcomes discovered only during execution, such as a duplicate-prevention or stale-target race—return as machine-readable receipts to the same turn's Hermes composition. Deterministic exceptions and lifecycle state contain no conversational question or natural operation-failure copy; only Hermes authors that language, and only the turn finalizer may persist the final Bean message.
+
+After that final is durable, every projection and client treats its content as opaque text. Storage accessors, browser adapters, Flutter adapters, and TTS may neither phrase-match, unwrap JSON-looking content, substitute fallback prose, nor suppress a valid Hermes final. Speech synthesis verifies the exact durable text before playback.
+
+There is no browser intent classifier, deterministic phrase router, Realtime tool route, regex fallback, or second model runtime. Invalid or ambiguous structured output returns to the same semantic path for one specific clarification. A semantically selected no-tool response or read-only operation may bypass unrelated background capacity after interpretation, but no activated request bypasses interpretation.
+
+The configured semantic model may retry once with the same stable turn ID only before a typed side effect begins and within the original deadline. That semantic retry has one owner: a terminal provider, validation, or composition failure is never requeued as a new whole semantic attempt. Lifecycle recovery may replace only a stale or crashed worker generation behind the same durable identity and receipts. Generic-versus-voice lifecycle ownership is determined solely by the server-owned voice-turn relationship; client source labels and metadata are diagnostic input and cannot select a lifecycle. A failure terminalizes naturally; it never falls through to a heuristic or another model. OpenAI Realtime remains transcription-only and does not call `send_bean_request` or own application tools.
+
+When the semantic model itself is unavailable or cannot produce a valid final after that retry, the lifecycle owner emits one fixed, content-neutral operational fallback to preserve terminalization and exactly-once delivery. This is not a semantic fallback path: it cannot inspect transcript meaning, choose an operation, or claim success. Ordinary typed-operation failures and partial successes still return to Hermes for grounded final language.
 
 ### 6. Completeness and clarification
 
-The browser closes an utterance after two seconds of silence. Its only pre-admission guard is a domain-agnostic check for an unmistakably open grammatical boundary, such as an utterance ending in “about” or “for”. That uncertain pause listens silently for up to five seconds and, if speech resumes, admits the combined utterance once.
+The browser closes an utterance after two seconds of silence and durably admits every non-empty activated transcript immediately at that endpoint. It performs no phrase, grammar, mutation, temporal, or completeness classification and never extends capture because of transcript shape. Hermes alone decides whether the admitted request is complete or needs one specific clarification.
 
-The browser must not classify reminder, calendar, task, note, weather, or other application-specific semantic completeness. Every otherwise finalized transcript is admitted exactly once. Server admission is the sole semantic completeness authority because it owns application context and typed-handler requirements.
+The browser must not classify application intent, conversational relevance, natural closing, spoken Stop, cancellation, or semantic completeness. Every otherwise finalized activated transcript is admitted exactly once. Hermes is the sole semantic completeness authority because it receives application and conversation context.
 
-A semantically incomplete admitted request remains the same durable turn in `awaiting_clarification`, creates no executable job, and receives one specific clarification question. Its five-second answer is appended through the dedicated clarification endpoint using the same stable turn ID. Partial utterances never become separate durable jobs, and no browser/server completeness decision can conflict.
+A semantically incomplete admitted request remains the same durable turn in `awaiting_clarification`, creates no executable job, and receives one Hermes-authored specific clarification question. Its five-second answer is appended through the dedicated clarification endpoint using the same stable turn ID and returns to the same semantic path. Partial utterances never become separate durable jobs, and no browser/server completeness decision can conflict.
 
 ### 7. Server job scheduler
 
@@ -214,8 +219,8 @@ Replace session-wide FIFO execution with server-owned capacity and resource rule
 - independent resource keys may run together;
 - matching or conflicting resource keys serialize;
 - explicit corrections, deletions, and cancellations receive priority;
-- instant and supported read-only handlers bypass background capacity;
-- a complex turn can create multiple runs but has one finalizer barrier and one final response;
+- semantically selected no-tool responses and read-only operations bypass background capacity;
+- a multi-operation turn can create multiple runs but has one finalizer barrier and one final response;
 - jobs may complete out of spoken order.
 
 Remove the session-wide `WithoutOverlapping` key and `voice_turn_sequence` earlier-run gate. Use a scheduler transaction/advisory lock only while claiming capacity, plus resource-scoped execution locks. Queue release must not consume failure attempts.
@@ -242,7 +247,7 @@ Rules enforced mechanically:
 - cancel an unstarted acknowledgement if the final is ready;
 - once acknowledgement audio starts, its final waits;
 - never play two speech items together;
-- Stop changes playback state only;
+- playback Stop changes playback state only;
 - final text remains visible even when its audio is stopped;
 - background work state is unaffected.
 
@@ -252,23 +257,25 @@ Potential user speech may briefly lower playback volume while it is evaluated. I
 
 ### 10. Barge-in
 
-Potential speech may duck playback without admitting a turn. The activated transcript/classifier confirms meaningful speech. Outcomes:
+Potential speech may duck playback without admitting a turn. Transport/VAD evidence can reject empty input, transcription failure, noise, or verified speaker echo; it cannot classify intent or conversational relevance. A non-empty activated transcript confirms the interruption and is admitted for Hermes interpretation. Outcomes:
 
 - meaningful address/request: stop the current speech item, retain its full chat text, accept the new utterance once;
-- background noise or unrelated speech: discard the candidate, restore normal volume, and let the current audio continue;
+- empty input, noise, failed transcription, verified echo, or independent wake/privacy rejection: discard the candidate, restore normal volume, and let the current audio continue;
 - wake phrase: always confirm immediately, even while speaking or working.
 
 Provider echo and the controller's own output fingerprint are rejected. Barge-in never changes server job state.
 
-### 11. Stop and cancel APIs
+### 11. Physical Stop, semantic spoken Stop, and cancellation
 
-Stop is purely local playback control. It has no server cancel call and does not clear conversation jobs. It returns to wake-only except when an active clarification explicitly remains open.
+Pressing the visible Stop control is purely local deterministic playback control. It creates no spoken turn, invokes no model, makes no server cancel call, and does not clear conversation jobs. It returns to wake-only unless an explicit active clarification remains open.
 
-Explicit cancellation uses a dedicated endpoint targeted to a job, a turn, or all eligible active work:
+Saying `Stop` is different: the transcript is admitted through Hermes like every other activated utterance. During barge-in the interruption controller has already stopped current audio promptly; Hermes then determines whether the utterance means playback Stop, cancellation, correction, or something else. An unqualified spoken Stop selects the typed playback-Stop operation, which deterministic code executes without changing background work.
+
+Semantically selected cancellation uses a dedicated deterministic endpoint targeted to a job, a turn, or all eligible active work:
 
 `POST /api/assistant/voice/cancellations`
 
-The server resolves context, atomically marks cancellable work, stops uncommitted execution, reconciles possible writes, terminalizes the turn when appropriate, and emits events. The UI briefly projects canceled then removes the normal chat request and dock item while retaining audit history.
+Hermes resolves the conversational reference and supplies a target; deterministic code validates that target, atomically marks cancellable work, stops uncommitted execution, reconciles possible writes, terminalizes the turn when appropriate, and emits events. The UI briefly projects canceled then removes the normal chat request and dock item while retaining audit history.
 
 The existing session cancel endpoint remains available for explicit non-voice lifecycle needs but is never called by the browser playback Stop path.
 
@@ -276,19 +283,20 @@ The existing session cancel endpoint remains available for explicit non-voice li
 
 Use the exact targets in `bean-voice-rules.md`. Each admitted turn stores its hard and no-progress deadlines. Deadline enforcement occurs outside the request/worker that may be stuck, so a timed-out provider cannot prevent terminalization.
 
-- Instant handler: terminal by 2 seconds.
-- App read: terminal by 3 seconds.
-- Direct write: background state by 2 seconds; terminal by 5 seconds when classified simple.
+- Semantic interpretation: terminal interpretation failure by 2 seconds.
+- Semantic no-tool response: final audio or terminal failure by 3 seconds.
+- Typed read: final audio or terminal failure by 4 seconds.
+- Typed write: background state or terminal failure by 2 seconds; simple final by 6 seconds.
 - External lookup: terminal by 8 seconds.
-- Complex job: first progress by 2 seconds, no-progress action at 10 seconds, terminal by 120 seconds unless explicitly extended.
+- Long-running typed work: first progress by 2 seconds, no-progress action at 10 seconds, terminal by 120 seconds unless explicitly extended.
 
-Read-only work may retry once within the original deadline. Writes reuse the same idempotency key and retry only after authoritative reconciliation. There is no silent general-agent fallback after a typed handler or fast-model timeout.
+Semantic interpretation may retry once using the same configured model and stable turn ID before any typed side effect starts. Read-only work may retry once within the original deadline. Writes reuse the same idempotency key and retry only after authoritative reconciliation. There is no heuristic, local-answer, or second-model fallback after a semantic or typed-operation timeout.
 
-## Legacy removal plan
+## Replaced code
 
-Removal is part of the migration, not deferred cleanup.
+Bean is still in development. Removal is part of this cutover, not deferred cleanup, and no compatibility owner or legacy execution path is retained.
 
-After replacement coverage passes, delete:
+The clean cutover deletes:
 
 - browser voice queue ownership in `VoiceOrchestrator`;
 - the separate queued-follow-up persistence/drain path in `webApp.js`;
@@ -296,29 +304,30 @@ After replacement coverage passes, delete:
 - duplicate `backendActive`, `responseActive`, guard, and follow-up flags outside the new controller;
 - `realtimeNeedsAppRuntime` as a voice router;
 - Realtime `send_bean_request` tool routing for browser voice;
-- spoken Stop's call to `cancelBeanTurn` and all queue-clearing Stop behavior;
+- browser and server phrase classifiers for time, date, voice state, reads, writes, weather, conversational replies, natural closings, spoken Stop, and cancellation;
+- spoken Stop interception, its call to `cancelBeanTurn`, and all queue-clearing Stop behavior;
 - session-wide voice FIFO enforcement and `voice_turn_sequence` scheduling;
-- lifecycle writes to `voice_turn_state`/`voice_turn_outcome` metadata from controllers, services, and workers after data migration;
+- lifecycle writes to `voice_turn_state`/`voice_turn_outcome` metadata from controllers, services, and workers;
 - recovery bridges that create provisional or final assistant messages outside the turn finalizer;
 - single-request work polling once the session event projection is live;
 - tests that assert Stop cancels work or FIFO is the universal voice scheduling rule.
 
-Preserve unrelated typed chat behavior and explicit task cancellation. Do not delete metadata compatibility reads until existing production rows are migrated or safely aged out.
+Explicit non-voice task cancellation and direct resource APIs remain. Deterministic chat intent routing, local time/date answers, fast calendar/weather resolvers, regex CRUD planning, voice-only compatibility reads, bridges, schemas, commands, schedules, and contradictory tests do not. Development rows do not justify keeping a second semantic or lifecycle owner.
 
-## Migration sequence
+## Clean cutover sequence
 
-1. Add schema, models, transition service, immutable router contract, event log, and read-only admin projection behind `browser_voice_v2`.
+1. Add schema, models, transition service, semantic-result schema, typed-operation registry, event log, and read-only admin projection behind `browser_voice_v2`.
 2. Add deterministic lifecycle, deadline, idempotency, concurrency, and reconciliation tests.
 3. Implement the new browser activation/controller/transcript/playback adapters behind the flag.
-4. Implement turn admission, typed lanes, scheduler, event feed, finalizer, and cancellation endpoint.
+4. Implement turn admission, the single Hermes semantic path, typed-operation validation/execution, scheduler, event feed, finalizer, and cancellation endpoint.
 5. Implement snapshot hydration and reload recovery.
 6. Add complete browser journey tests and representative-device latency collection.
-7. Run shadow classification only: compare old and new lane decisions without executing v2 side effects.
-8. Enable v2 in the owner's development environment with the operational flag; no user allowlist exists. Keep old and v2 execution mutually exclusive per stable turn ID.
-9. Pass the release gate, remove old browser voice entry points, migrate compatible metadata, and delete legacy code/tests.
-10. Keep the flag as a kill switch for one observation window; rollback disables new admissions but continues processing already admitted v2 jobs to terminal states.
+7. Remove the superseded browser/server voice entry points, metadata bridges, commands, schedules, and contradictory tests. Do not retain shadow or dual execution.
+8. Enable v2 in the owner's development environment with the operational flag; no user allowlist exists.
+9. Pass the release gate with only the replacement architecture reachable for new voice work.
+10. Keep the flag as an operational kill switch. Disabling it stops new admissions while already admitted jobs continue to their deterministic terminal states.
 
-At no point may both architectures execute a voice request. A stable turn ID and unique constraints enforce this at the server boundary.
+Only the replacement architecture may execute a browser voice request. A stable turn ID and unique constraints enforce this at the server boundary.
 
 ## Admin and operational telemetry
 
@@ -351,7 +360,8 @@ Dashboard alerts:
 - Local wake/address matcher with noise, accents, missed-Hey, and third-person corpora.
 - Local-audio boundary and provider-input tests proving no pre-address samples cross the gate, ordered catch-up adds no permanent delay, and overflow or transport loss fails closed.
 - Turn transition service with optimistic version conflicts and terminal idempotency.
-- Immutable router fixtures for every supported typed intent.
+- Semantic-path fixtures proving every activated request reaches Hermes, plus structured-plan validation for every typed operation.
+- Complete explicit-memory journeys for remember/create, search/read, correction/update, forget/delete, ambiguous clarification, non-persistence of ordinary disclosure, and duplicate/reload exactly-once delivery.
 - Resource conflict matrix and three-slot scheduler tests.
 - Deadline/retry/reconciliation tests with fake providers and workers.
 - Speech scheduler ordering, volume ducking, and permanent-stop tests.
@@ -392,22 +402,25 @@ Browser voice may replace the current path only when all are true:
 | Activated provider audio boundary | Local activation gate/provider-input adapter | Exact PCM sentinel test proves no sample before the accepted wake/address boundary reaches the provider and ordered catch-up adds no fixed delay |
 | Live partial transcript | Browser controller | Timed synthetic partials update input before final transcript |
 | Two-second utterance closure | Browser controller | Fake-clock boundary tests at 1,999 and 2,000 ms |
-| Incomplete request and five-second clarification | Browser endpoint controller/server admission completeness service | One stable turn, no premature job, one final |
-| Fifteen-second follow-up and natural closing | Browser controller | Fake-clock and closing-phrase journeys |
-| Instant lane | Admission router/instant handler | Exact route, no acknowledgement, latency and terminal deadline |
-| Direct app read | Typed read handler | Authoritative result, read bypass, no model fallback |
-| Direct app write | Typed write handler | Stable idempotency, authoritative success, reconciliation |
-| Local and remote weather | Typed weather handler | Location/context preservation and scoped provider failure |
-| Complex lane | Complex handler/finalizer | Prompt acknowledgement, visible jobs, one combined final |
+| Incomplete request and five-second clarification | Hermes interpreter/browser controller | One stable turn, one specific semantic clarification, no premature job, one final |
+| Fifteen-second follow-up and natural closing | Hermes interpreter/browser controller | Fake-clock window plus Hermes closing disposition and response |
+| Every activated request crosses one semantic path | Hermes semantic interpreter | Time, date, voice state, conversation, read, write, weather, Stop, cancellation, correction, temporal, and multi-clause fixtures all record interpretation before action |
+| Configurable fast semantic model | Versioned server configuration/deadline service | Selected model, usage, timeout, same-model retry, and terminal failure evidence with no heuristic or second-model fallback |
+| No-tool semantic response | Hermes interpreter/turn finalizer | Grounded final, acknowledgement grace, latency and terminal deadline |
+| Typed app read after interpretation | Typed read handler | Hermes-selected schema, authoritative result, read bypass, no shortcut |
+| Typed app write after interpretation | Typed write handler | Hermes-selected schema, stable idempotency, authoritative success, reconciliation |
+| Local and remote weather after interpretation | Typed weather handler | Hermes selection, location/context preservation, and scoped provider failure |
+| Multi-operation request | Hermes interpreter/job finalizer | Structured decomposition, visible jobs, dependency order, one combined final |
 | Fast acknowledgement skip | Speech scheduler | Final wins grace race and no acknowledgement item starts |
 | Slow acknowledgement then final | Speech scheduler | Non-overlap and measured start latency |
 | Meaningful barge-in | Controller/playback adapter | Duck if needed, confirm, permanently stop old audio, accept new turn once |
 | False barge-in | Controller/playback adapter | Reject noise, restore normal volume, and do not restart audio |
-| Stop in every speech/work phase | Playback adapter | Audio stops; server turn/jobs and queue remain unchanged |
-| Explicit single/all cancellation | Cancellation service | Authoritative cancellation, reconciliation, transient dock state, hidden normal chat |
+| Visible Stop in every speech/work phase | Playback adapter | Audio stops without a semantic turn; server turn/jobs and queue remain unchanged |
+| Spoken Stop in every speech/work phase | Hermes interpreter/playback operation | One admitted semantic turn; current audio stops promptly, background work remains unchanged, and the literal Hermes final is projected and delivered without suppression |
+| Explicit single/all cancellation | Hermes interpreter/cancellation service | Contextual target resolution, validated authoritative cancellation, reconciliation, transient dock state, hidden normal chat |
 | Three independent concurrent jobs | Job scheduler | Three simultaneous leases and independent completion |
 | Same-resource serialization | Job scheduler | Conflict matrix proves no overlapping mutations |
-| Read-only bypass | Router/typed read handler | Read completes while three background slots are occupied |
+| Read-only bypass after interpretation | Hermes plan/typed read handler | Read crosses Hermes, then completes while three background slots are occupied |
 | Out-of-order completion | Event projection/speech scheduler | Named finals match turns and never overlap |
 | Reload in every lifecycle phase | Snapshot/event projection | Stable IDs, state, messages, dock, and final delivery without duplication |
 | Duplicate/out-of-order events | Reducers/transition service | Property/permutation tests prove monotonic lifecycle and exact-once effects |
@@ -419,14 +432,14 @@ Every row must link to named automated test IDs in the final completion evidence
 
 ## Implementation goal draft
 
-Implement and release the browser-only Bean Voice v2 architecture defined in `browser-voice-implementation-spec.md`, satisfying every invariant and acceptance journey in `bean-voice-rules.md`. Replace duplicated browser/server voice state with one browser conversation/playback controller and one server-owned durable turn/job lifecycle; implement local fail-closed wake and missed-Hey recovery, live transcription, two-second endpointing, five-second clarification, 15-second follow-up, single-pass typed routing, meaningful barge-in with permanent playback stop, playback-only Stop, explicit cancellation, three-job resource-aware concurrency, exact-once finalization, reload recovery, deadlines, retries, and complete admin telemetry. Prove correctness with deterministic journey tests and representative-browser latency benchmarks, migrate safely behind a mutually exclusive feature flag, and remove all superseded legacy voice code and contradictory tests before declaring the goal complete. Flutter is explicitly excluded.
+Implement and release the browser-only Bean Voice v2 architecture defined in `browser-voice-implementation-spec.md`, satisfying every invariant and acceptance journey in `bean-voice-rules.md`. Replace duplicated browser/server voice state with one browser conversation/playback controller and one server-owned durable turn/job lifecycle; implement local fail-closed wake and missed-Hey recovery, live transcription, two-second endpointing, five-second clarification, 15-second follow-up, one configurable low-latency Hermes semantic path for every activated request, schema-validated deterministic typed execution, meaningful barge-in with permanent playback stop, local physical Stop, semantic spoken Stop, explicit cancellation, three-job resource-aware concurrency, exact-once finalization, reload recovery, deadlines, retries, and complete admin telemetry. Prove correctness with deterministic journey tests and representative-browser latency benchmarks, cut over cleanly behind the admissions kill switch, and remove all superseded voice code and contradictory tests before declaring the goal complete. Flutter is explicitly excluded.
 
 ## Goal completion evidence
 
 The implementation goal must not be marked complete with a code summary alone. Its final evidence must include:
 
 - contract-to-test traceability table;
-- migration and legacy-deletion diff;
+- cutover and replaced-code deletion diff;
 - database exact-once and terminal-state audit;
 - browser journey suite results;
 - fault-injection results;

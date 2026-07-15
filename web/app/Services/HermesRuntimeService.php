@@ -2,10 +2,9 @@
 
 namespace App\Services;
 
-use App\Models\ActivityEvent;
+use App\Data\AssistantRunExecutionClaim;
 use App\Models\ConversationMessage;
 use App\Models\ConversationSession;
-use Illuminate\Support\Collection;
 
 interface HermesRuntimeService
 {
@@ -13,20 +12,12 @@ interface HermesRuntimeService
 
     public function resumeSession(ConversationSession $session): ConversationSession;
 
-    public function cancelSession(ConversationSession $session, ?string $clientRequestId = null): ConversationSession;
-
-    /**
-     * @return Collection<int, ActivityEvent>
-     */
-    public function progressEvents(ConversationSession $session): Collection;
-
     /**
      * @return array{status:string, session:ConversationSession, user_message:mixed, assistant_message:mixed|null, assistant_content?:string, events:mixed, blocker:mixed|null}
      */
-    public function sendMessage(ConversationSession $session, string $content, array $metadata = []): array;
-
-    /**
-     * @return array{status:string, session:ConversationSession, user_message:mixed, assistant_message:mixed|null, assistant_content?:string, events:mixed, blocker:mixed|null}
-     */
-    public function sendExistingMessage(ConversationSession $session, ConversationMessage $userMessage): array;
+    public function sendExistingMessage(
+        ConversationSession $session,
+        ConversationMessage $userMessage,
+        AssistantRunExecutionClaim $claim,
+    ): array;
 }

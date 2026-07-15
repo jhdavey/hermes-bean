@@ -476,15 +476,11 @@ class _BeanFab extends StatefulWidget {
     required this.onPressed,
     this.onVoiceHoldStart,
     this.onVoiceHoldEnd,
-    this.widgetKey = const Key('nav-bean'),
-    this.semanticLabel = 'Bean chat',
   });
 
-  final Key widgetKey;
   final bool selected;
   final bool working;
   final bool voiceRecording;
-  final String semanticLabel;
   final VoidCallback onPressed;
   final VoidCallback? onVoiceHoldStart;
   final VoidCallback? onVoiceHoldEnd;
@@ -537,7 +533,7 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
     final activeColor = HeyBeanTheme.accentStrong;
     final visuallyWorking = _visuallyWorking;
     return GestureDetector(
-      key: widget.widgetKey,
+      key: const Key('nav-bean'),
       behavior: HitTestBehavior.opaque,
       onTap: widget.onPressed,
       onLongPressStart: (_) {
@@ -589,7 +585,7 @@ class _BeanFabState extends State<_BeanFab> with TickerProviderStateMixin {
                       width: 38,
                       height: 38,
                       fit: BoxFit.contain,
-                      semanticLabel: widget.semanticLabel,
+                      semanticLabel: 'Bean chat',
                     ),
                   ),
                 ),

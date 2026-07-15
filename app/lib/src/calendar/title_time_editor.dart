@@ -9,8 +9,8 @@ Future<DateTime?> _showStandardDateTimeDock(
   bool dateOnly = false,
 }) async {
   final parsed =
-      _parseCalendarEventDateTime(initialText, referenceValue) ??
-      _parseCalendarEventDateTime(originalValue, referenceValue) ??
+      _parseCalendarEventDateTime(initialText) ??
+      _parseCalendarEventDateTime(originalValue) ??
       _parseCalendarEventDateTime(referenceValue) ??
       DateTime.now();
   final initialYear = parsed.year;
@@ -481,6 +481,7 @@ const _titleTimeEditorIntervalUnits = <({String value, String label})>[
   (value: 'days', label: 'days'),
   (value: 'weeks', label: 'weeks'),
   (value: 'months', label: 'months'),
+  (value: 'years', label: 'years'),
 ];
 
 const _titleTimeEditorCategoryColors = <({String value, String label})>[
@@ -501,11 +502,7 @@ String _recurrenceFromMetadata(Map<String, Object?>? metadata) {
 }
 
 Set<String> _recurrenceDaysFromMetadata(Map<String, Object?>? metadata) =>
-    ((metadata?['days'] ??
-                    metadata?['specific_days'] ??
-                    metadata?['specificDays'])
-                as List? ??
-            const <Object?>[])
+    ((metadata?['days'] as List?) ?? const <Object?>[])
         .map((value) => value.toString())
         .where(
           (value) => _titleTimeEditorWeekdays.any((day) => day.value == value),
@@ -513,11 +510,7 @@ Set<String> _recurrenceDaysFromMetadata(Map<String, Object?>? metadata) =>
         .toSet();
 
 String _recurrenceIntervalUnitFromMetadata(Map<String, Object?>? metadata) {
-  final value =
-      metadata?['unit']?.toString() ??
-      metadata?['interval_unit']?.toString() ??
-      metadata?['intervalUnit']?.toString() ??
-      'days';
+  final value = metadata?['unit']?.toString() ?? 'days';
   return _titleTimeEditorIntervalUnits.any((unit) => unit.value == value)
       ? value
       : 'days';
@@ -533,17 +526,13 @@ Map<String, Object?> _metadataWithRecurrence(
   final metadata = <String, Object?>{...?existing};
   metadata
     ..remove('days')
-    ..remove('specific_days')
-    ..remove('specificDays')
     ..remove('interval')
     ..remove('unit')
-    ..remove('interval_unit')
-    ..remove('intervalUnit')
     ..['recurrence'] = recurrence;
   if (recurrence == 'specific_days') {
     metadata['days'] = days.toList()..sort();
   }
-  if (recurrence == 'specific_days' || recurrence == 'interval') {
+  if (recurrence == 'interval') {
     metadata['interval'] = interval;
     metadata['unit'] = unit;
   }
@@ -667,10 +656,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
       return null;
     }
     if (time.isNotEmpty && _taskReminderInputToWireValue(time) == null) {
-      setModalState(
-        () => validationError =
-            'Use a recognizable date/time, like Today 5:00 PM.',
-      );
+      setModalState(() => validationError = 'Choose a valid date and time.');
       return null;
     }
     Object? payloadPrimaryWorkspaceId = selectedPrimaryWorkspaceId;
@@ -762,7 +748,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
     );
     if (selected == null) return;
     setModalState(() {
-      timeController.text = _formatCalendarEventDateTime(
+      timeController.text = _formatCalendarDateTimeInput(
         selected.toIso8601String(),
       );
       validationError = null;

@@ -12,8 +12,6 @@ export const BROWSER_VOICE_SPEECH_PURPOSES = Object.freeze({
     ACKNOWLEDGEMENT: 'acknowledgement',
     FINAL: 'final',
     CLARIFICATION: 'clarification',
-    INTERRUPTION: 'interruption',
-    CANCELLATION: 'cancellation',
 });
 
 const DEFAULT_ACK_GRACE_MS = 350;

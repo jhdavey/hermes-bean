@@ -128,13 +128,19 @@ class LandingPageFeatureTest extends TestCase
             .file_get_contents(resource_path('js/heybean/config.js'))."\n"
             .file_get_contents(resource_path('js/heybean/webApp.js'));
 
-        $this->assertStringContainsString('Hello, please enter your name below.', $appJs);
-        $this->assertStringContainsString('Do you prefer light or dark mode?', $appJs);
-        $this->assertStringContainsString('keep it in Light mode. What email address should I use for your account?', $appJs);
-        $this->assertStringContainsString('That email format does not look right.', $appJs);
-        $this->assertStringContainsString('Next, what personality type would you like me to have?', $appJs);
+        $this->assertStringContainsString('What should Bean call you?', $appJs);
+        $this->assertStringContainsString('Choose a theme', $appJs);
+        $this->assertStringContainsString('Add your email address', $appJs);
+        $this->assertStringContainsString('Create a password', $appJs);
+        $this->assertStringContainsString('Choose a response style', $appJs);
+        $this->assertStringContainsString('Share your city?', $appJs);
+        $this->assertStringContainsString('data-guided-theme-mode=', $appJs);
+        $this->assertStringContainsString('data-guided-personality=', $appJs);
+        $this->assertStringContainsString('data-guided-location="allow"', $appJs);
+        $this->assertStringNotContainsString('guidedSignupMessages', $appJs);
+        $this->assertStringNotContainsString('Bean is thinking', $appJs);
+        $this->assertStringNotContainsString('guidedPersonalityKeyFromText', $appJs);
         $this->assertStringContainsString('Your account has been created. Check your email to verify. Next, choose the plan that fits how much of your calendar, tasks, reminders, and daily context you want Bean to handle.', $appJs);
-        $this->assertStringContainsString('Show me', $appJs);
         $this->assertStringContainsString('Command center', $appJs);
         $this->assertStringContainsString('Calendar views', $appJs);
         $this->assertStringContainsString('Notes hold plans, lists, and longer writing.', $appJs);

@@ -34,11 +34,6 @@ class LandingPageScreenshotSeeder extends Seeder
 
     public function run(): void
     {
-        config([
-            'services.hermes_runtime.users_home' => storage_path('app/hermes-users'),
-            'services.hermes_runtime.base_home' => null,
-        ]);
-
         DB::transaction(function (): void {
             $user = User::updateOrCreate(
                 ['email' => self::EMAIL],
@@ -620,7 +615,6 @@ class LandingPageScreenshotSeeder extends Seeder
             'created_by_user_id' => $user->id,
             'title' => $title,
             'status' => 'active',
-            'runtime_mode' => 'tools',
             'metadata' => ['seeded_from' => self::SOURCE],
             'last_activity_at' => $this->at('2026-07-06 15:30:00'),
         ]);

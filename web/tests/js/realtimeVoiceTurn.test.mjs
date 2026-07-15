@@ -6,11 +6,9 @@ import {
     RealtimeInputTranscriptBuffer,
     buildRealtimeConversationItemDeleteEvent,
     buildRealtimeTargetedResponseCancellationEvent,
-    isLikelyNonEnglishRealtimeTranscript,
     isRealtimeWakeAddressOnly,
     isRealtimeDuplicateCallConflict,
     isStrictRealtimeWakePhrase,
-    isVoiceFillerOnly,
     realtimeMicrophoneConstraints,
     reportRealtimeUsageReliably,
     realtimeUsageReportFromProviderEvent,
@@ -24,8 +22,33 @@ globalThis.window ??= { matchMedia: () => null };
 const {
     browserVoiceV2OwnsStopAction,
     captureHeyBeanChatControlFocus,
+    reconcileAllDayEndDateInput,
     restoreHeyBeanChatControlFocus,
 } = await import('../../resources/js/heybean/webApp.js');
+
+test('all-day start edits preserve an independently valid literal end boundary', () => {
+    assert.equal(
+        reconcileAllDayEndDateInput('2026-07-15', '2026-07-19'),
+        '2026-07-19',
+    );
+});
+
+test('all-day start edits synthesize only an empty end boundary', () => {
+    assert.equal(reconcileAllDayEndDateInput('2026-07-15', ''), '2026-07-16');
+    assert.equal(
+        reconcileAllDayEndDateInput('2026-07-15', '2026-07-15'),
+        '2026-07-15',
+    );
+    assert.equal(
+        reconcileAllDayEndDateInput('2026-07-15', '2026-02-30'),
+        '2026-02-30',
+    );
+    assert.equal(
+        reconcileAllDayEndDateInput('2028-02-29', '2028-02-28'),
+        '2028-02-28',
+    );
+    assert.equal(reconcileAllDayEndDateInput('not-a-date', ''), '');
+});
 
 test('[BV2-USAGE-03] transient usage accounting retries idempotently without disabling voice prematurely', async () => {
     const attempts = [];
@@ -129,25 +152,21 @@ test('wake-only draft fragments stay hidden while accepted speech can display', 
     assert.equal(shouldDisplayRealtimeTranscriptDraft('Hey Bean, what is the weather?'), true);
 });
 
-test('v2 transcript filters reject filler and non-Latin recognition artifacts', () => {
-    assert.equal(isVoiceFillerOnly('Um, yeah.'), true);
-    assert.equal(isVoiceFillerOnly('yes'), false);
-    assert.equal(isLikelyNonEnglishRealtimeTranscript('Take care.'), false);
-    assert.equal(isLikelyNonEnglishRealtimeTranscript('ありがとうございます。'), true);
-});
-
-test('strict wake and released transcript prefix handling remain conservative', () => {
+test('strict wake and evidence-gated transcript prefix handling remain conservative', () => {
     assert.equal(isStrictRealtimeWakePhrase('Hey Bean, are you there?'), true);
     assert.equal(isStrictRealtimeWakePhrase('Hey Ben'), false);
     assert.equal(isStrictRealtimeWakePhrase('To begin, say Hey Bean'), false);
-    assert.equal(stripRealtimeLocalWakePrefix('Hey Bean, what is the weather?'), 'what is the weather?');
-    assert.equal(stripRealtimeLocalWakePrefix('Bean, what time is it?'), 'what time is it?');
-    assert.equal(stripRealtimeLocalWakePrefix('Bean.'), '');
-    assert.equal(stripRealtimeLocalWakePrefix('Being honest is important'), 'Being honest is important');
-    assert.equal(isRealtimeWakeAddressOnly('Hey Bean.'), true);
-    assert.equal(isRealtimeWakeAddressOnly('Bean.'), true);
-    assert.equal(isRealtimeWakeAddressOnly('Bean, what time is it?'), false);
-    assert.equal(isRealtimeWakeAddressOnly('Being honest is important'), false);
+    assert.equal(stripRealtimeLocalWakePrefix('Hey Bean, what is the weather?'), 'Hey Bean, what is the weather?');
+    assert.equal(stripRealtimeLocalWakePrefix('Bean soup is for dinner'), 'Bean soup is for dinner');
+    assert.equal(stripRealtimeLocalWakePrefix('Hey Bean, what is the weather?', { wakeConfirmed: true }), 'what is the weather?');
+    assert.equal(stripRealtimeLocalWakePrefix('Bean, what time is it?', { wakeConfirmed: true }), 'what time is it?');
+    assert.equal(stripRealtimeLocalWakePrefix('Bean.', { wakeConfirmed: true }), '');
+    assert.equal(stripRealtimeLocalWakePrefix('Being honest is important', { wakeConfirmed: true }), 'Being honest is important');
+    assert.equal(isRealtimeWakeAddressOnly('Hey Bean.'), false);
+    assert.equal(isRealtimeWakeAddressOnly('Hey Bean.', { wakeConfirmed: true }), true);
+    assert.equal(isRealtimeWakeAddressOnly('Bean.', { wakeConfirmed: true }), true);
+    assert.equal(isRealtimeWakeAddressOnly('Bean, what time is it?', { wakeConfirmed: true }), false);
+    assert.equal(isRealtimeWakeAddressOnly('Being honest is important', { wakeConfirmed: true }), false);
 });
 
 test('provider event helpers target only the intended response or transcript item', () => {
