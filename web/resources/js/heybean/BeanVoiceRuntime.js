@@ -234,10 +234,26 @@ export class BeanVoiceRuntime {
         this.pendingStartupFailure = null;
         this.#emitView();
 
-        let startupLocalWakeFailure = null;
-        let startupTransportFailure = null;
         let preparedAudioContext = null;
         let gate = null;
+        const rememberStartupFailure = (error, stage) => {
+            if (!this.pendingStartupFailure && this.#current(generation)) {
+                this.pendingStartupFailure = { generation, error, stage };
+            }
+            return error;
+        };
+        const assertStartupHealthy = () => {
+            const pendingFailure = this.pendingStartupFailure?.generation === generation
+                ? this.pendingStartupFailure
+                : null;
+            if (pendingFailure) throw pendingFailure.error;
+            if (this.transport.snapshot().connected !== true) {
+                throw rememberStartupFailure(Object.assign(
+                    new Error('Realtime transport closed during voice startup.'),
+                    { code: 'realtime_transport_closed_during_startup' },
+                ), 'connection');
+            }
+        };
         try {
             // Web Audio must be created and resumed in the original button
             // gesture. Conversation and microphone setup are asynchronous and
@@ -261,7 +277,7 @@ export class BeanVoiceRuntime {
                     onError: (error) => {
                         if (!this.#current(generation)) return;
                         if (this.mode === BEAN_VOICE_MODES.STARTING) {
-                            startupLocalWakeFailure = startupLocalWakeFailure || error;
+                            rememberStartupFailure(error, 'local_wake');
                             return;
                         }
                         this.#handleFailure(error, 'local_wake');
@@ -297,8 +313,7 @@ export class BeanVoiceRuntime {
             this.rawMicrophoneStream = rawMicrophoneStream;
             const localWakePromise = Promise.resolve(gate.start(rawMicrophoneStream))
                 .catch((error) => {
-                    startupLocalWakeFailure = startupLocalWakeFailure || error;
-                    throw error;
+                    throw rememberStartupFailure(error, 'local_wake');
                 });
             const transportPromise = this.transport.connect({
                 controllerGeneration: generation,
@@ -310,14 +325,14 @@ export class BeanVoiceRuntime {
                     providerConnectionGeneration: this.providerConnectionGeneration,
                 }),
             }).catch((error) => {
-                startupTransportFailure = error;
-                throw error;
+                throw rememberStartupFailure(error, 'connection');
             });
             const [localAudio, realtimeSession] = await Promise.all([
                 localWakePromise,
                 transportPromise,
             ]);
             if (!this.#current(generation) || this.localWakeGate !== gate) return false;
+            assertStartupHealthy();
             if (Number(localAudio?.sampleRate) !== 16000) {
                 throw new Error('Private wake detection did not provide 16 kHz local PCM.');
             }
@@ -337,6 +352,7 @@ export class BeanVoiceRuntime {
             if (!gate.isConsumerAdmissionReady()) {
                 throw new Error('Private wake detection did not complete its admission barrier.');
             }
+            assertStartupHealthy();
             this.projection.start(sessionId);
             this.#clearActivityTimer();
             this.activityLevel = 0;
@@ -349,10 +365,8 @@ export class BeanVoiceRuntime {
             const pendingFailure = this.pendingStartupFailure?.generation === generation
                 ? this.pendingStartupFailure
                 : null;
-            const failure = pendingFailure?.error || startupLocalWakeFailure || startupTransportFailure || error;
-            const stage = pendingFailure?.stage
-                || (failure === startupLocalWakeFailure ? 'local_wake' : null)
-                || (failure === startupTransportFailure ? 'connection' : 'startup');
+            const failure = pendingFailure?.error || error;
+            const stage = pendingFailure?.stage || 'startup';
             this.pendingStartupFailure = null;
             this.#handleFailure(failure, stage);
             await this.stop('startup_failed');

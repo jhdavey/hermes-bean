@@ -152,6 +152,16 @@ const CONTROLLED_LOCAL_FAILURE_CODES = Object.freeze({
         'start_failed',
         'unsupported',
     ]),
+    connection: new Set([
+        'realtime_data_channel_closed',
+        'realtime_data_channel_failed',
+        'realtime_peer_connection_failed',
+        'realtime_provider_error',
+        'realtime_remote_description_failed',
+        'realtime_transport_closed_during_startup',
+        'realtime_transport_readiness_failed',
+        'realtime_transport_readiness_timeout',
+    ]),
 });
 
 const RELOAD_SCOPED_FAILURE_STAGES = Object.freeze(new Set([
@@ -202,7 +212,9 @@ export function sanitizedVoiceClientFailure(error, stage = 'local_wake') {
     let current = error;
     while (current && typeof current === 'object' && chain.length < 4 && !seen.has(current)) {
         seen.add(current);
-        const code = contentNeutralCode || sanitizedVoiceFailureCode(current.code);
+        const code = controlledLocalFailureCode(normalizedStage, current.code)
+            || contentNeutralCode
+            || sanitizedVoiceFailureCode(current.code);
         const rawMessage = String(current.message || '');
         const message = contentNeutralMessage || sanitizedVoiceFailureMessage(rawMessage);
         if (!code && !rawMessage) {

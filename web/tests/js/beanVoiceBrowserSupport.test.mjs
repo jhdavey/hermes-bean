@@ -156,6 +156,15 @@ test('[BEAN-DIAGNOSTIC-03] connection diagnostics stay content-neutral', () => {
         ['Browser voice connection failed.', 'Browser voice connection failed.'],
     );
     assert.doesNotMatch(JSON.stringify(diagnostic), /provider-secret|Can_you_hear_me|pcm=|AAAA/);
+
+    const controlled = sanitizedVoiceClientFailure(
+        Object.assign(new Error(hostileMessage), { code: 'realtime_remote_description_failed' }),
+        'connection',
+    );
+    assert.equal(controlled.code, 'realtime_remote_description_failed');
+    assert.equal(controlled.message, 'Browser voice connection failed.');
+    assert.equal(controlled.cause_chain[0].code, 'realtime_remote_description_failed');
+    assert.doesNotMatch(JSON.stringify(controlled), /provider-secret|Can_you_hear_me|pcm=|AAAA/);
 });
 
 test('[BEAN-DIAGNOSTIC-03] playback authorization failures retain the server-supported playback stage', () => {

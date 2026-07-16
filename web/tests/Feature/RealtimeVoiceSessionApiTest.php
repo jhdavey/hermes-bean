@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\ActivityEvent;
 use App\Models\ConversationSession;
 use App\Models\User;
 use App\Models\VoiceRealtimeSession;
@@ -177,5 +178,44 @@ class RealtimeVoiceSessionApiTest extends TestCase
 
         $this->assertDatabaseCount('voice_realtime_sessions', 0);
         $this->assertDatabaseCount('ai_usage_logs', 0);
+    }
+
+    public function test_remote_description_failure_keeps_its_stable_code_without_persisting_native_sdp_detail(): void
+    {
+        $token = $this->apiToken('realtime-client-failure@example.com');
+        $user = User::query()->where('email', 'realtime-client-failure@example.com')->firstOrFail();
+        $conversation = ConversationSession::query()->where('user_id', $user->id)->firstOrFail();
+        $payload = [
+            'failure_id' => 'remote-description-failure-0001',
+            'stage' => 'connection',
+            'code' => 'realtime_remote_description_failed',
+            'message' => 'Native SDP detail with ephemeral-secret must not persist.',
+            'cause_chain' => [[
+                'code' => 'realtime_remote_description_failed',
+                'message' => 'a=ice-pwd:ephemeral-secret Invalid SDP line.',
+            ]],
+            'session_id' => $conversation->id,
+        ];
+
+        $this->withToken($token)
+            ->postJson('/api/assistant/voice/client-failures', $payload)
+            ->assertOk()
+            ->assertJsonPath('data.duplicate', false);
+        $this->withToken($token)
+            ->postJson('/api/assistant/voice/client-failures', $payload)
+            ->assertOk()
+            ->assertJsonPath('data.duplicate', true);
+
+        $event = ActivityEvent::query()
+            ->where('event_type', 'browser_voice_realtime.client_failure')
+            ->sole();
+        $this->assertSame('connection', data_get($event->payload, 'stage'));
+        $this->assertSame('realtime_remote_description_failed', data_get($event->payload, 'code'));
+        $this->assertSame('Browser voice connection failed.', data_get($event->payload, 'message'));
+        $this->assertSame(
+            'realtime_remote_description_failed',
+            data_get($event->payload, 'cause_chain.0.code'),
+        );
+        $this->assertStringNotContainsString('ephemeral-secret', json_encode($event->payload, JSON_THROW_ON_ERROR));
     }
 }

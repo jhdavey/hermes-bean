@@ -19,6 +19,10 @@ function integer(value, fallback = -1) {
     return Number.isSafeInteger(number) && number >= 0 ? number : fallback;
 }
 
+function transportError(code, message = 'Bean voice Realtime transport failed.') {
+    return Object.assign(new Error(message), { code });
+}
+
 function metadataForResponse(payload = {}) {
     const response = payload.response && typeof payload.response === 'object' ? payload.response : {};
     return response.metadata && typeof response.metadata === 'object' ? response.metadata : {};
@@ -211,6 +215,8 @@ export class BeanVoiceRealtimeTransport {
         let rejectReady;
         let channelReady = channel.readyState === 'open';
         let mediaReady = peer.connectionState === 'connected';
+        let readinessSettled = false;
+        let readinessFailure = null;
         const ready = new Promise((resolve, reject) => {
             resolveReady = resolve;
             rejectReady = reject;
@@ -220,7 +226,19 @@ export class BeanVoiceRealtimeTransport {
         // so mark that early rejection handled without changing its state.
         void ready.catch(() => {});
         const settleReady = () => {
-            if (channelReady && mediaReady) resolveReady();
+            if (readinessSettled || !channelReady || !mediaReady) return;
+            readinessSettled = true;
+            resolveReady();
+        };
+        const failReadiness = (code, message) => {
+            if (this.connected) {
+                this.#connectionFailure(code);
+                return;
+            }
+            readinessFailure = readinessFailure || transportError(code, message);
+            if (readinessSettled) return;
+            readinessSettled = true;
+            rejectReady(readinessFailure);
         };
         channel.addEventListener('open', () => {
             if (!this.#current(generation, peer)) return;
@@ -235,13 +253,17 @@ export class BeanVoiceRealtimeTransport {
         });
         channel.addEventListener('close', () => {
             if (!this.#current(generation, peer)) return;
-            rejectReady(new Error('Realtime data channel closed before readiness.'));
-            this.#connectionFailure('realtime_data_channel_closed');
+            failReadiness(
+                'realtime_data_channel_closed',
+                'Realtime data channel closed before readiness.',
+            );
         });
         channel.addEventListener('error', () => {
             if (!this.#current(generation, peer)) return;
-            rejectReady(new Error('Realtime data channel failed before readiness.'));
-            this.#connectionFailure('realtime_data_channel_failed');
+            failReadiness(
+                'realtime_data_channel_failed',
+                'Realtime data channel failed before readiness.',
+            );
         });
         peer.addEventListener('connectionstatechange', () => {
             if (!this.#current(generation, peer)) return;
@@ -249,8 +271,10 @@ export class BeanVoiceRealtimeTransport {
                 mediaReady = true;
                 settleReady();
             } else if (['failed', 'closed'].includes(peer.connectionState)) {
-                rejectReady(new Error('Realtime peer connection failed before readiness.'));
-                this.#connectionFailure('realtime_peer_connection_failed');
+                failReadiness(
+                    'realtime_peer_connection_failed',
+                    'Realtime peer connection failed before readiness.',
+                );
             }
         });
         settleReady();
@@ -276,9 +300,9 @@ export class BeanVoiceRealtimeTransport {
             try {
                 await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
             } catch (_) {
-                throw Object.assign(
-                    new Error('Realtime remote description could not be applied.'),
-                    { code: 'realtime_remote_description_failed' },
+                throw transportError(
+                    'realtime_remote_description_failed',
+                    'Realtime remote description could not be applied.',
                 );
             }
             let timer = null;
@@ -287,7 +311,10 @@ export class BeanVoiceRealtimeTransport {
                     ready,
                     new Promise((_, reject) => {
                         timer = this.setTimeout?.(
-                            () => reject(new Error('Realtime transport readiness timed out.')),
+                            () => reject(transportError(
+                                'realtime_transport_readiness_timeout',
+                                'Realtime transport readiness timed out.',
+                            )),
                             this.readyTimeoutMs,
                         );
                     }),
@@ -296,6 +323,13 @@ export class BeanVoiceRealtimeTransport {
                 if (timer !== null) this.clearTimeout?.(timer);
             }
             if (!this.#current(generation, peer)) throw Object.assign(new Error('Realtime connection was superseded.'), { name: 'AbortError' });
+            if (readinessFailure) throw readinessFailure;
+            if (channel.readyState !== 'open' || peer.connectionState !== 'connected') {
+                throw transportError(
+                    'realtime_transport_readiness_failed',
+                    'Realtime transport became unavailable during readiness.',
+                );
+            }
             this.connected = true;
             this.onEvent(Object.freeze({ type: 'transport_ready', realtimeSessionId }));
             return Object.freeze({ ...session, realtimeSessionId, playbackCapability });

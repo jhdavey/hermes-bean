@@ -392,3 +392,63 @@ test('[BV2-FIRST-WAKE-01:A-E][BV2-DIAGNOSTIC-03][BV2-PRIVACY-PCM-03] malformed S
     assert.deepEqual(activated, []);
     transport.close('retry_journey_complete');
 });
+
+test('[BV2-DIAGNOSTIC-03] a channel close immediately after readiness cannot return a false successful connection', async () => {
+    const channelListeners = new Map();
+    const peerListeners = new Map();
+    const failures = [];
+    const channel = {
+        readyState: 'connecting',
+        bufferedAmount: 0,
+        closeCount: 0,
+        addEventListener: (type, listener) => channelListeners.set(type, listener),
+        send() {},
+        close() {
+            this.closeCount += 1;
+            this.readyState = 'closed';
+            channelListeners.get('close')?.();
+        },
+    };
+    const peer = {
+        connectionState: 'connected',
+        localDescription: null,
+        closeCount: 0,
+        addTransceiver() {},
+        createDataChannel: () => channel,
+        addEventListener: (type, listener) => peerListeners.set(type, listener),
+        async createOffer() { return { type: 'offer', sdp: 'v=0\r\n' }; },
+        async setLocalDescription(offer) { this.localDescription = offer; },
+        async setRemoteDescription() {
+            channel.readyState = 'open';
+            channelListeners.get('open')?.();
+            channel.readyState = 'closed';
+            channelListeners.get('close')?.();
+        },
+        close() {
+            this.closeCount += 1;
+            this.connectionState = 'closed';
+            peerListeners.get('connectionstatechange')?.();
+        },
+    };
+    const transport = new BeanVoiceRealtimeTransport({
+        openSession: async () => ({
+            sdp: 'v=0\r\n',
+            realtime_session_id: sessionId,
+            playback_capability: capability,
+        }),
+        inputTransport: { append() {}, deactivate() {} },
+        peerConnectionFactory: () => peer,
+        audioFactory: () => ({ muted: true, volume: 0, play: () => Promise.resolve(), pause() {} }),
+        onFailure: (error, stage) => failures.push({ error, stage }),
+    });
+
+    await assert.rejects(
+        transport.connect({ controllerGeneration: 1, providerConnectionGeneration: 1 }),
+        (error) => error.code === 'realtime_data_channel_closed',
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(transport.snapshot().connected, false);
+    assert.equal(channel.closeCount, 1);
+    assert.equal(peer.closeCount, 1);
+    assert.deepEqual(failures, [], 'negotiation failure has one owner: the connect rejection');
+});

@@ -82,6 +82,16 @@ class AssistantVoiceController extends Controller
             'voice_diagnostic_outbox_corrupt',
             'voice_diagnostic_outbox_overflow',
         ],
+        'connection' => [
+            'realtime_data_channel_closed',
+            'realtime_data_channel_failed',
+            'realtime_peer_connection_failed',
+            'realtime_provider_error',
+            'realtime_remote_description_failed',
+            'realtime_transport_closed_during_startup',
+            'realtime_transport_readiness_failed',
+            'realtime_transport_readiness_timeout',
+        ],
     ];
 
     public function __construct(
@@ -279,7 +289,9 @@ class AssistantVoiceController extends Controller
 
             return match ($data['stage']) {
                 'admission' => 'voice_admission_failure',
-                'connection' => 'voice_connection_failure',
+                'connection' => in_array($code, self::CONTROLLED_CLIENT_FAILURE_CODES['connection'], true)
+                    ? $code
+                    : 'voice_connection_failure',
                 'delivery' => 'voice_delivery_failure',
                 'projection' => 'voice_projection_failure',
                 'playback' => 'voice_playback_failure',

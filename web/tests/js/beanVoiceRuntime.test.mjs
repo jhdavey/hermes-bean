@@ -456,6 +456,34 @@ test('[BV2-FIRST-WAKE-01:A-E][BV2-DIAGNOSTIC-03] failed startup tears down its p
     assert.ok(h.rawTracks[1].stopped >= 1);
 });
 
+test('[BV2-FIRST-WAKE-01:A-E][BV2-DIAGNOSTIC-03] connection loss during cold local readiness cannot publish wake-only', async () => {
+    const h = harness({ gateAdmissionReady: false, gestureAudioContext: true });
+    const startup = h.runtime.start();
+    const startupGate = h.gate;
+
+    await h.flush();
+    assert.equal(h.runtime.snapshot().mode, 'starting');
+    assert.equal(h.transport.connected, true);
+    h.transport.connected = false;
+    h.transport.fail(Object.assign(new Error('connection closed while the wake model warmed'), {
+        code: 'realtime_data_channel_closed',
+    }), 'connection');
+    startupGate.readyNow();
+
+    assert.equal(await startup, false);
+    assert.equal(h.runtime.snapshot().mode, 'failed');
+    assert.equal(startupGate.stopped, true);
+    assert.equal(h.projection.sessionId, undefined);
+    assert.equal(h.failures.length, 1);
+    assert.equal(h.failures[0].context.stage, 'connection');
+    assert.equal(h.failures[0].error.code, 'realtime_data_channel_closed');
+    assert.deepEqual(h.transport.activated, []);
+    assert.deepEqual(h.transport.appended, []);
+    assert.equal(h.audioContexts[0].closeCount, 1);
+    assert.ok(h.rawTracks[0].stopped >= 1);
+    assert.equal(h.views.some((view) => view.mode === 'wake_only'), false);
+});
+
 test('[BV2-FIRST-WAKE-01:A-E][BV2-PRIVACY-PCM-03] stop during cold readiness prevents stale wake-only publication', async () => {
     const h = harness({ gateAdmissionReady: false, gestureAudioContext: true });
     const startup = h.runtime.start();
