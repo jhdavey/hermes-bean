@@ -86,6 +86,28 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
         $this->assertSame(hash('sha256', 'Yes, I can hear you.'), $final->approved_text_hash);
         $this->assertSame('none', data_get($final->payload, 'response.tool_choice'));
         $this->assertSame('resp_plan_direct', $plan->fresh()->provider_response_id);
+        $this->assertSame('spoken_voice', $turn->userMessage?->origin);
+        $this->assertSame('voice_only', $turn->userMessage?->display_mode);
+        $this->assertSame('spoken_voice', $turn->finalAssistantMessage?->origin);
+        $this->assertSame('voice_only', $turn->finalAssistantMessage?->display_mode);
+        $this->assertFalse((bool) data_get($turn->metadata, 'raw_audio_retained', true));
+
+        $this->sendConversationOutputThenAcknowledgeResponse(
+            $fixture['session'],
+            'handler-daemon',
+            $final,
+            'resp_direct_final_audio',
+        );
+        $playback = [
+            'purpose' => 'final',
+            'speech_item_id' => $final->speech_item_id,
+            'provider_response_id' => 'resp_direct_final_audio',
+        ];
+        $lifecycle = app(VoiceTurnLifecycleService::class);
+        $lifecycle->recordBrowserEvent($turn, 'playback_started', $playback);
+        $lifecycle->recordBrowserEvent($turn, 'playback_finished', $playback);
+        $this->assertSame(1, $turn->events()->where('event_type', 'playback_started')->count());
+        $this->assertSame(1, $turn->events()->where('event_type', 'playback_finished')->count());
 
         $commandCount = VoiceRealtimeCommand::query()->where('voice_turn_id', $turn->id)->count();
         $this->providerEvent($fixture['session'], [
@@ -1374,9 +1396,12 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
     ): array {
         return [
             'outcome' => $outcome,
-            'response_text' => $responseText,
-            'clarification_question' => $clarificationQuestion,
-            'acknowledgement_text' => $acknowledgementText,
+            'outcome_text' => match ($outcome) {
+                'respond' => $responseText,
+                'clarify' => $clarificationQuestion,
+                'execute' => $acknowledgementText,
+                default => null,
+            },
             'close_after_response' => $closeAfterResponse,
             'response_expected' => $responseExpected,
             'operations' => $operations,

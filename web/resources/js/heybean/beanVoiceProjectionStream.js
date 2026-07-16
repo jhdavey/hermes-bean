@@ -1,5 +1,6 @@
 const ACTIVE_TURN_STATES = new Set(['pre_admitted', 'awaiting_audio', 'awaiting_clarification', 'accepted', 'running']);
 const ACTIVE_JOB_STATES = new Set(['queued', 'running', 'finalizing']);
+const SPEECH_AUTHORIZATION_PURPOSES = new Set(['acknowledgement', 'clarification', 'final']);
 
 function text(value) {
     return String(value ?? '').trim();
@@ -96,6 +97,23 @@ function normalizeSpeechAuthorization(item = {}) {
     });
 }
 
+function completeSpeechAuthorization(item) {
+    const expiresAt = Date.parse(item?.expiresAt);
+    return Boolean(
+        item?.authorizationId
+        && item.turnId
+        && item.speechItemId
+        && SPEECH_AUTHORIZATION_PURPOSES.has(item.purpose)
+        && item.realtimeSessionId
+        && item.controllerGeneration >= 0
+        && item.providerConnectionGeneration >= 0
+        && /^[a-f0-9]{64}$/.test(item.approvedTextSha256)
+        && item.playbackCapability
+        && Number.isFinite(expiresAt)
+        && expiresAt > Date.now()
+    );
+}
+
 function normalizeEvent(event = {}) {
     const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
     const metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
@@ -166,9 +184,15 @@ export function normalizeBeanVoiceProjection(payload = {}) {
         || projection.playbackAuthorizations,
     ).map(normalizeSpeechAuthorization);
     const authorizationsById = new Map();
-    [...explicitAuthorizations, ...eventSpeechAuthorizations(events)].forEach((authorization) => {
-        if (authorization.speechItemId) authorizationsById.set(authorization.speechItemId, authorization);
-    });
+    // A safe projected event intentionally omits capability, text hash, and
+    // expiry. It may announce that speech was authorized, but it cannot be the
+    // browser's playback capability. Apply event-derived fallbacks first and
+    // let the server's complete, validated authorization record win.
+    [...eventSpeechAuthorizations(events), ...explicitAuthorizations]
+        .filter(completeSpeechAuthorization)
+        .forEach((authorization) => {
+            if (authorization.speechItemId) authorizationsById.set(authorization.speechItemId, authorization);
+        });
     const invalidations = objects(
         projection.dashboard_invalidations
         || projection.dashboardInvalidations,

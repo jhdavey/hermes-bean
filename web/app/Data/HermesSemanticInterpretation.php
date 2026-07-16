@@ -45,6 +45,8 @@ final readonly class HermesSemanticInterpretation
     /** @param array<string, mixed> $payload */
     public static function fromProviderPayload(array $payload): self
     {
+        $outcome = is_string($payload['outcome'] ?? null) ? $payload['outcome'] : '';
+        $outcomeText = self::nullableString($payload, 'outcome_text');
         $operationPayloads = $payload['operations'] ?? null;
         if (! is_array($operationPayloads) || ! array_is_list($operationPayloads)) {
             throw new InvalidArgumentException('Semantic interpretation operations must be a list.');
@@ -60,10 +62,10 @@ final readonly class HermesSemanticInterpretation
         }
 
         return new self(
-            outcome: is_string($payload['outcome'] ?? null) ? $payload['outcome'] : '',
-            responseText: self::nullableString($payload, 'response_text'),
-            clarificationQuestion: self::nullableString($payload, 'clarification_question'),
-            acknowledgementText: self::nullableString($payload, 'acknowledgement_text'),
+            outcome: $outcome,
+            responseText: $outcome === self::OUTCOME_RESPOND ? $outcomeText : null,
+            clarificationQuestion: $outcome === self::OUTCOME_CLARIFY ? $outcomeText : null,
+            acknowledgementText: $outcome === self::OUTCOME_EXECUTE ? $outcomeText : null,
             closeAfterResponse: self::requiredBoolean($payload, 'close_after_response'),
             responseExpected: self::requiredBoolean($payload, 'response_expected'),
             operations: $operations,

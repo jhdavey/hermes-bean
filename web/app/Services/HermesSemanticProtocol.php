@@ -7,9 +7,9 @@ use App\Data\HermesSemanticOperation;
 
 final class HermesSemanticProtocol
 {
-    public const SCHEMA_VERSION = 2;
+    public const SCHEMA_VERSION = 3;
 
-    public const INTERPRETATION_SCHEMA_NAME = 'bean_semantic_interpretation_v2';
+    public const INTERPRETATION_SCHEMA_NAME = 'bean_semantic_interpretation_v3';
 
     public const COMPOSITION_SCHEMA_NAME = 'bean_grounded_response_v1';
 
@@ -25,9 +25,10 @@ Determine what the user means, whether anything required is missing, resolve con
 Allowed tools: {$tools}.
 
 Rules:
-- Use outcome "respond" only for a conversational answer requiring no application or provider operation. Put the answer in response_text and return no operations.
-- Use outcome "clarify" when a required detail or target is genuinely unresolved. Ask exactly one short question in clarification_question and return no operations.
-- Use outcome "execute" for every selected typed operation. response_text and clarification_question must be null because no operation has succeeded yet. acknowledgement_text may briefly describe intent but may not claim success.
+- outcome_text is the only outcome-language field. Never return separate final, clarification, or acknowledgement strings.
+- Use outcome "respond" only for a conversational answer requiring no application or provider operation. Put the one non-empty final answer in outcome_text and return no operations.
+- Use outcome "clarify" when a required detail or target is genuinely unresolved. Put exactly one short question in outcome_text and return no operations.
+- Use outcome "execute" for every selected typed operation. outcome_text may be null or a brief acknowledgement of intent, but it may not claim success because no operation has succeeded yet.
 - arguments_json must be a JSON-encoded object string. current_time is a trusted server UTC instant. Use the supplied timezone or explicit UTC offset to resolve local temporal meaning into absolute ISO-8601 values; never pass relative phrases such as "tomorrow" to execution. timezone may be null. When local temporal meaning depends on an unknown timezone, clarify instead of assuming UTC or another zone.
 - Mutations must identify either one concrete id from trusted context or one result_ref, never both. Put update fields directly in the arguments object; never wrap them in a changes object. A result_ref must be {"operation_id":"earlier-search-operation-id","path":"unique_id"}; put that search operation id in dependencies. Its same-domain search must supply the exact resource title as query, match_mode "exact_title", and require_unique true. app.memory.update and app.memory.delete may instead use an app.memory.search with match_mode "exact_content" because memory titles are optional. If the intended target cannot be expressed this way, clarify instead. Never select items.N from substring or multi-match results, and never leave targets as pronouns, ordinals, or unresolved names.
 - Search arguments may use id, ids, query, match_mode, require_unique, status, statuses, from, to, and limit. match_mode, when supplied, must be "exact_title"; require_unique true requires that mode. app.memory.search instead accepts id, ids, query, match_mode, require_unique, type, and limit, with match_mode "exact_title" or "exact_content". from and to must be absolute ISO-8601 timestamps with offsets.
@@ -75,9 +76,10 @@ PROMPT;
                         HermesSemanticInterpretation::OUTCOME_EXECUTE,
                     ],
                 ],
-                'response_text' => ['type' => ['string', 'null']],
-                'clarification_question' => ['type' => ['string', 'null']],
-                'acknowledgement_text' => ['type' => ['string', 'null']],
+                'outcome_text' => [
+                    'type' => ['string', 'null'],
+                    'description' => 'The sole outcome-specific text: a final answer for respond, one question for clarify, or an optional non-success acknowledgement for execute.',
+                ],
                 'close_after_response' => ['type' => 'boolean'],
                 'response_expected' => ['type' => 'boolean'],
                 'operations' => [
@@ -103,9 +105,7 @@ PROMPT;
             ],
             'required' => [
                 'outcome',
-                'response_text',
-                'clarification_question',
-                'acknowledgement_text',
+                'outcome_text',
                 'close_after_response',
                 'response_expected',
                 'operations',

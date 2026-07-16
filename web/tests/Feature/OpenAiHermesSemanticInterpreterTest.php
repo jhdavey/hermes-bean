@@ -58,9 +58,7 @@ class OpenAiHermesSemanticInterpreterTest extends TestCase
         Http::fake([
             'https://api.openai.test/v1/chat/completions' => Http::response($this->providerResponse([
                 'outcome' => 'execute',
-                'response_text' => null,
-                'clarification_question' => null,
-                'acknowledgement_text' => 'I’ll move that task.',
+                'outcome_text' => 'I’ll move that task.',
                 'close_after_response' => false,
                 'response_expected' => false,
                 'operations' => [
@@ -96,6 +94,9 @@ class OpenAiHermesSemanticInterpreterTest extends TestCase
         $this->assertSame(HermesSemanticInterpretation::OUTCOME_EXECUTE, $first->outcome);
         $this->assertFalse($first->closeAfterResponse);
         $this->assertFalse($first->responseExpected);
+        $this->assertSame('I’ll move that task.', $first->acknowledgementText);
+        $this->assertNull($first->responseText);
+        $this->assertNull($first->clarificationQuestion);
         $this->assertCount(2, $first->operations);
         $this->assertSame('app.task.update', $first->operations[1]->tool);
         $this->assertSame('unique_id', $first->operations[1]->arguments['result_ref']['path']);
@@ -116,10 +117,17 @@ class OpenAiHermesSemanticInterpreterTest extends TestCase
                 && ($payload['reasoning_effort'] ?? null) === 'none'
                 && ($payload['max_completion_tokens'] ?? null) === 800
                 && data_get($payload, 'response_format.type') === 'json_schema'
-                && data_get($payload, 'response_format.json_schema.name') === 'bean_semantic_interpretation_v2'
+                && data_get($payload, 'response_format.json_schema.name') === 'bean_semantic_interpretation_v3'
                 && data_get($payload, 'response_format.json_schema.strict') === true
                 && data_get($schema, 'additionalProperties') === false
                 && data_get($schema, 'properties.operations.items.additionalProperties') === false
+                && array_keys($schema['properties'] ?? []) === [
+                    'outcome',
+                    'outcome_text',
+                    'close_after_response',
+                    'response_expected',
+                    'operations',
+                ]
                 && data_get($schema, 'properties.operations.items.properties.tool.enum') === HermesSemanticOperation::TOOLS
                 && str_contains(
                     (string) data_get($schema, 'properties.operations.items.properties.arguments_json.description'),
@@ -282,28 +290,21 @@ class OpenAiHermesSemanticInterpreterTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_execute_output_that_claims_success_is_rejected_and_metered_as_failed(): void
+    public function test_execute_output_without_operations_is_rejected_and_metered_as_failed(): void
     {
         Http::fake([
             'https://api.openai.test/v1/chat/completions' => Http::response($this->providerResponse([
                 'outcome' => 'execute',
-                'response_text' => 'Done — I deleted it.',
-                'clarification_question' => null,
-                'acknowledgement_text' => null,
+                'outcome_text' => 'I’ll delete that task.',
                 'close_after_response' => false,
                 'response_expected' => false,
-                'operations' => [[
-                    'id' => 'delete_task',
-                    'tool' => 'app.task.delete',
-                    'arguments_json' => json_encode(['id' => 42]),
-                    'dependencies' => [],
-                ]],
+                'operations' => [],
             ], id: 'chatcmpl-invalid-1'), 200),
         ]);
 
         try {
             $this->app->make(HermesSemanticInterpreter::class)->interpret($this->interpretationRequest());
-            $this->fail('Expected an execute outcome with a success claim to be rejected.');
+            $this->fail('Expected an execute outcome without operations to be rejected.');
         } catch (HermesSemanticProviderException $exception) {
             $this->assertSame('invalid_structured_output', $exception->category);
             $this->assertTrue($exception->retriable);

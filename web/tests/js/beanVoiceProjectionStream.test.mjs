@@ -6,6 +6,7 @@ import {
     normalizeBeanVoiceProjection,
     parseBeanVoiceSseChunk,
 } from '../../resources/js/heybean/beanVoiceProjectionStream.js';
+import { BeanVoiceRealtimeTransport } from '../../resources/js/heybean/beanVoiceRealtimeTransport.js';
 
 function projectionPayload() {
     return {
@@ -68,6 +69,113 @@ test('[BV-PROJECTION-01] browser projection discards transcripts, messages, and 
     ]) {
         assert.doesNotMatch(serialized, new RegExp(privateValue));
     }
+});
+
+test('[BV-PLAYBACK-03][BV-PROJECTION-01] safe event metadata cannot replace the complete playback authorization', () => {
+    const realtimeSessionId = '11111111-1111-4111-8111-111111111111';
+    const playbackCapability = 'playback-capability-1';
+    const approvedTextSha256 = 'b'.repeat(64);
+    const projection = normalizeBeanVoiceProjection({
+        cursor: 13,
+        events: [{
+            id: 13,
+            type: 'speech_authorized',
+            turn_id: 'browser-voice-live-regression',
+            metadata: {
+                authorization_id: 'speech:browser-voice-live-regression:final:1:delivery:1',
+                speech_item_id: 'browser-voice-live-regression:final:1:delivery:1',
+                purpose: 'final',
+                realtime_session_id: realtimeSessionId,
+                controller_generation: 1,
+                provider_connection_generation: 1,
+                transcript: 'private speech must never survive normalization',
+            },
+        }],
+        speech_authorizations: [{
+            authorization_id: 'speech:browser-voice-live-regression:final:1:delivery:1',
+            turn_id: 'browser-voice-live-regression',
+            speech_item_id: 'browser-voice-live-regression:final:1:delivery:1',
+            purpose: 'final',
+            realtime_session_id: realtimeSessionId,
+            controller_generation: 1,
+            provider_connection_generation: 1,
+            approved_text_sha256: approvedTextSha256,
+            playback_capability: playbackCapability,
+            expires_at: '2099-01-01T00:00:00.000Z',
+            authorized: true,
+        }],
+    });
+
+    assert.equal(projection.speechAuthorizations.length, 1);
+    assert.equal(projection.speechAuthorizations[0].approvedTextSha256, approvedTextSha256);
+    assert.equal(projection.speechAuthorizations[0].playbackCapability, playbackCapability);
+    assert.equal(projection.speechAuthorizations[0].expiresAt, '2099-01-01T00:00:00.000Z');
+    assert.doesNotMatch(JSON.stringify(projection), /private speech/);
+
+    const sent = [];
+    const playbackEvents = [];
+    const failures = [];
+    const audio = {
+        autoplay: false,
+        muted: true,
+        volume: 0,
+        play() { return Promise.resolve(); },
+        pause() {},
+    };
+    const transport = new BeanVoiceRealtimeTransport({
+        openSession: async () => { throw new Error('not used'); },
+        inputTransport: { append() {}, deactivate() {} },
+        audioFactory: () => audio,
+        onEvent: (event) => playbackEvents.push(event),
+        onFailure: (error, stage) => failures.push({ error, stage }),
+    });
+    transport.prime();
+    transport.dataChannel = {
+        readyState: 'open',
+        send: (payload) => sent.push(JSON.parse(payload)),
+    };
+    transport.connected = true;
+    transport.realtimeSessionId = realtimeSessionId;
+    transport.playbackCapability = playbackCapability;
+    transport.controllerGeneration = 1;
+    transport.providerConnectionGeneration = 1;
+
+    assert.equal(transport.authorizeSpeech(projection.speechAuthorizations[0]), true);
+    transport.handleProviderEvent({
+        type: 'response.created',
+        response: {
+            id: 'response-live-regression',
+            metadata: {
+                authorization_id: 'speech:browser-voice-live-regression:final:1:delivery:1',
+                turn_id: 'browser-voice-live-regression',
+                speech_item_id: 'browser-voice-live-regression:final:1:delivery:1',
+                purpose: 'final',
+                realtime_session_id: realtimeSessionId,
+                controller_generation: 1,
+                provider_connection_generation: 1,
+                approved_text_sha256: approvedTextSha256,
+                playback_capability: playbackCapability,
+            },
+        },
+    });
+    transport.handleProviderEvent({
+        type: 'output_audio_buffer.started',
+        response_id: 'response-live-regression',
+    });
+    transport.handleProviderEvent({
+        type: 'output_audio_buffer.stopped',
+        response_id: 'response-live-regression',
+    });
+
+    assert.deepEqual(failures, []);
+    assert.deepEqual(sent, []);
+    assert.deepEqual(
+        playbackEvents.map((event) => event.type),
+        ['response_authorized', 'playback_started', 'playback_finished'],
+    );
+    assert.equal(audio.muted, true);
+    assert.equal(audio.volume, 0);
+    assert.equal(transport.snapshot().activeResponse, null);
 });
 
 test('[BV-PROJECTION-02] SSE parser preserves event identity across split chunks', () => {

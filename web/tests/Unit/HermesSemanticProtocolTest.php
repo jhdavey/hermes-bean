@@ -12,11 +12,11 @@ class HermesSemanticProtocolTest extends TestCase
     {
         $protocol = new HermesSemanticProtocol;
 
-        $this->assertSame(2, HermesSemanticProtocol::SCHEMA_VERSION);
-        $this->assertSame('bean_semantic_interpretation_v2', HermesSemanticProtocol::INTERPRETATION_SCHEMA_NAME);
+        $this->assertSame(3, HermesSemanticProtocol::SCHEMA_VERSION);
+        $this->assertSame('bean_semantic_interpretation_v3', HermesSemanticProtocol::INTERPRETATION_SCHEMA_NAME);
         $this->assertSame('bean_grounded_response_v1', HermesSemanticProtocol::COMPOSITION_SCHEMA_NAME);
         $this->assertSame(
-            '7b55066b8e97e6ab790b920b287a63d121d6f0f7ff322dd450715e9284c8cb24',
+            '32ba7ec52f3efad9dce50cb4d192588bef2ede4a510c86a60b06344ae41a5f6e',
             hash('sha256', serialize($protocol->interpretationInstructions())),
         );
         $this->assertSame(
@@ -24,7 +24,7 @@ class HermesSemanticProtocolTest extends TestCase
             hash('sha256', serialize($protocol->compositionInstructions())),
         );
         $this->assertSame(
-            '8de2bde347e03d4a6740e4ab6eec51f18dd383dc06480b88bff08ad3baf0c3be',
+            'eb1dda60425f7d55a4ddbcbefb9874f514daccd81814e019001ce6bb1c6d0a35',
             hash('sha256', serialize($protocol->interpretationSchema())),
         );
         $this->assertSame(
@@ -49,6 +49,20 @@ class HermesSemanticProtocolTest extends TestCase
             ['id', 'tool', 'arguments_json', 'dependencies'],
             $schema['properties']['operations']['items']['required'],
         );
+        $this->assertSame(
+            [
+                'outcome',
+                'outcome_text',
+                'close_after_response',
+                'response_expected',
+                'operations',
+            ],
+            $schema['required'],
+        );
+        $this->assertArrayHasKey('outcome_text', $schema['properties']);
+        $this->assertArrayNotHasKey('response_text', $schema['properties']);
+        $this->assertArrayNotHasKey('clarification_question', $schema['properties']);
+        $this->assertArrayNotHasKey('acknowledgement_text', $schema['properties']);
         foreach (HermesSemanticOperation::TOOLS as $tool) {
             $this->assertStringContainsString($tool, $instructions);
         }
