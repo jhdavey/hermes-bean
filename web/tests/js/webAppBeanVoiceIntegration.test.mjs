@@ -15,6 +15,33 @@ const transportSource = await readFile(
     'utf8',
 );
 
+globalThis.window ??= { matchMedia: () => null };
+const {
+    applyBeanVoiceActivityViewInPlace,
+    beanVoiceViewRequiresRender,
+} = await import('../../resources/js/heybean/webApp.js');
+
+function voiceElement(classes = []) {
+    const classNames = new Set(classes);
+    const styles = new Map();
+    const attributes = new Map();
+    return {
+        classNames,
+        styles,
+        attributes,
+        classList: {
+            toggle(name, enabled) {
+                if (enabled) classNames.add(name);
+                else classNames.delete(name);
+            },
+        },
+        style: {
+            setProperty(name, value) { styles.set(name, value); },
+        },
+        setAttribute(name, value) { attributes.set(name, String(value)); },
+    };
+}
+
 test('[BV-INTEGRATION-01] web app delegates browser voice lifecycle to exactly one runtime', () => {
     assert.match(source, /import \{ BeanVoiceRuntime \} from '\.\/BeanVoiceRuntime\.js'/);
     assert.equal((source.match(/new BeanVoiceRuntime\(/g) || []).length, 1);
@@ -124,4 +151,85 @@ test('[BV-CONCURRENCY-01] dock projection retains unchanged active jobs beside e
     const implementation = source.slice(projectionStart, projectionEnd);
     assert.match(implementation, /\[\.\.\.activeJobs, \.\.\.jobs\]/);
     assert.match(implementation, /projectedById\.set\(key, job\)/);
+});
+
+test('[BV2-VOICE-UI-01] activity snapshots preserve the thinking button and update hearing feedback in place', () => {
+    const dock = voiceElement(['hb-chat-dock']);
+    const button = voiceElement([
+        'hb-chat-voice-button',
+        'hb-chat-voice-button-thinking',
+    ]);
+    const originalButton = button;
+    const mount = {
+        querySelectorAll(selector) {
+            if (selector === '.hb-chat-dock') return [dock];
+            if (selector === '.hb-chat-voice-button') return [button];
+            return [];
+        },
+    };
+    let previous = {
+        mode: 'thinking',
+        enabled: true,
+        processing: true,
+        playbackActive: false,
+        recording: false,
+        activityLevel: 0,
+        activeTurnId: 'turn-1',
+        error: '',
+    };
+
+    for (let index = 0; index < 30; index += 1) {
+        const next = {
+            ...previous,
+            recording: index % 2 === 1,
+            activityLevel: (index + 1) / 30,
+            realtimeSessionId: `session-${index}`,
+        };
+        assert.equal(applyBeanVoiceActivityViewInPlace(mount, previous, next), true);
+        previous = next;
+    }
+
+    assert.strictEqual(button, originalButton);
+    assert.equal(button.classNames.has('hb-chat-voice-button-thinking'), true);
+    assert.equal(button.classNames.has('hb-chat-voice-button-hearing'), true);
+    assert.equal(dock.classNames.has('hb-chat-dock-hearing'), true);
+    assert.equal(button.styles.get('--hb-voice-level'), '1.000');
+    assert.equal(button.styles.get('--hb-voice-scale'), '1.190');
+    assert.equal(button.attributes.get('aria-label'), 'Microphone is hearing you');
+
+    const quiet = { ...previous, recording: false, activityLevel: 0.9 };
+    assert.equal(applyBeanVoiceActivityViewInPlace(mount, previous, quiet), true);
+    assert.equal(button.classNames.has('hb-chat-voice-button-hearing'), false);
+    assert.equal(dock.classNames.has('hb-chat-dock-hearing'), false);
+    assert.equal(button.styles.get('--hb-voice-level'), '0.000');
+    assert.equal(button.attributes.get('aria-label'), 'Turn off realtime Bean voice');
+});
+
+test('[BV2-VOICE-UI-03] structural voice transitions still require one full render', () => {
+    const base = {
+        mode: 'thinking',
+        enabled: true,
+        processing: true,
+        playbackActive: false,
+        recording: false,
+        activityLevel: 0,
+        error: '',
+    };
+    assert.equal(beanVoiceViewRequiresRender(base, { ...base, activityLevel: 0.8 }), false);
+    assert.equal(beanVoiceViewRequiresRender(base, { ...base, recording: true }), false);
+    assert.equal(beanVoiceViewRequiresRender(base, { ...base, activeTurnId: 'turn-2' }), false);
+    assert.equal(beanVoiceViewRequiresRender(base, { ...base, mode: 'wake_only' }), true);
+    assert.equal(beanVoiceViewRequiresRender(base, { ...base, enabled: false }), true);
+    assert.equal(beanVoiceViewRequiresRender(base, { ...base, processing: false }), true);
+    assert.equal(beanVoiceViewRequiresRender(base, { ...base, playbackActive: true }), true);
+    assert.equal(beanVoiceViewRequiresRender(base, { ...base, error: 'Voice unavailable' }), true);
+
+    const applyStart = source.indexOf('function applyBeanVoiceViewState(');
+    const applyEnd = source.indexOf('\n    function applyBeanVoiceWorkProjection(', applyStart);
+    const implementation = source.slice(applyStart, applyEnd);
+    assert.match(implementation, /const previousVoiceView = beanVoiceView/);
+    assert.match(
+        implementation,
+        /if \(applyBeanVoiceActivityViewInPlace\(mount, previousVoiceView, beanVoiceView\)\) return;\s+render\(\);/,
+    );
 });

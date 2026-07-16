@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bean voice thinking ring harness</title>
+    <link rel="stylesheet" href="/resources/css/heybean/chat-nav.css">
+    <style>
+        :root {
+            --hb-accent: #5eead4;
+            --hb-accent-rgb: 45, 212, 191;
+            --hb-accent-strong: #14b8a6;
+            --hb-accent-strong-rgb: 20, 184, 166;
+            --hb-accent-ink: #042f2e;
+            --hb-border-strong: #475569;
+        }
+
+        body {
+            min-height: 100vh;
+            margin: 0;
+            display: grid;
+            place-items: center;
+            background: #111a21;
+        }
+
+        button {
+            border-style: solid;
+        }
+    </style>
+</head>
+<body class="heybean-app-body" data-hb-theme-resolved="dark">
+    <form class="hb-chat-dock">
+        <button
+            id="bean-thinking-button"
+            class="hb-chat-text-send-button hb-chat-voice-button hb-chat-voice-button-listening hb-chat-voice-button-thinking"
+            type="button"
+            aria-label="Turn off realtime Bean voice"
+        ><span class="hb-chat-voice-button-inner"></span></button>
+    </form>
+    <script type="module">
+        import { applyBeanVoiceActivityViewInPlace } from '/resources/js/heybean/webApp.js';
+
+        const mount = document.body;
+        const originalButton = document.querySelector('#bean-thinking-button');
+        let previous = {
+            mode: 'thinking',
+            enabled: true,
+            processing: true,
+            playbackActive: false,
+            recording: false,
+            activityLevel: 0,
+            error: '',
+        };
+        let ticks = 0;
+        const timer = window.setInterval(() => {
+            const next = {
+                ...previous,
+                recording: ticks % 3 === 0,
+                activityLevel: (ticks % 10) / 10,
+                activeTurnId: `turn-${ticks}`,
+            };
+            if (!applyBeanVoiceActivityViewInPlace(mount, previous, next)) {
+                throw new Error('Activity-only thinking state unexpectedly required a render.');
+            }
+            previous = next;
+            ticks += 1;
+        }, 50);
+
+        window.beanThinkingRingHarness = {
+            finish() {
+                window.clearInterval(timer);
+                const ready = {
+                    ...previous,
+                    mode: 'wake_only',
+                    processing: false,
+                    recording: false,
+                    activityLevel: 0,
+                };
+                const updatedInPlace = applyBeanVoiceActivityViewInPlace(mount, previous, ready);
+                if (!updatedInPlace) originalButton.classList.remove('hb-chat-voice-button-thinking');
+                previous = ready;
+                return updatedInPlace;
+            },
+            snapshot() {
+                const button = document.querySelector('#bean-thinking-button');
+                return {
+                    ticks,
+                    sameButton: button === originalButton,
+                    animationName: getComputedStyle(button, '::after').animationName,
+                    transform: getComputedStyle(button, '::after').transform,
+                };
+            },
+        };
+        window.beanThinkingRingHarnessReady = true;
+    </script>
+</body>
+</html>

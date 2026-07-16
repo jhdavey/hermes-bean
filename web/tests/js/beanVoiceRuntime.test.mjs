@@ -19,6 +19,7 @@ function harness({
     gestureAudioContext = false,
     transportFailures = [],
     freshMicrophonePerStart = false,
+    turnAdmissionBarrier = null,
 } = {}) {
     const requests = [];
     const views = [];
@@ -202,6 +203,7 @@ function harness({
         request: async (path, options = {}) => {
             requests.push({ path, options: structuredClone(options) });
             if (path === '/assistant/voice/turns') {
+                if (turnAdmissionBarrier) await turnAdmissionBarrier;
                 return {
                     turn_id: options.body.turn_id,
                     state: 'awaiting_audio',
@@ -298,8 +300,14 @@ function harness({
     };
 }
 
-test('[BV2-FIRST-WAKE-01:A-E][BV2-WAKE-01] slow local startup completes wake, admission, and one authorized final', async () => {
-    const h = harness({ gateAdmissionReady: false, gestureAudioContext: true });
+test('[BV2-FIRST-WAKE-01:A-E][BV2-WAKE-01][BV2-WAKE-11][BV2-SIDEBAND-01][BV2-PRIVACY-PCM-03] slow startup and delayed pre-admission complete one private authorized turn', async () => {
+    let admitTurn;
+    const turnAdmissionBarrier = new Promise((resolve) => { admitTurn = resolve; });
+    const h = harness({
+        gateAdmissionReady: false,
+        gestureAudioContext: true,
+        turnAdmissionBarrier,
+    });
     let settled = false;
     const startup = h.runtime.start().then((result) => {
         settled = true;
@@ -336,7 +344,20 @@ test('[BV2-FIRST-WAKE-01:A-E][BV2-WAKE-01] slow local startup completes wake, ad
     assert.equal(h.projection.sessionId, '42');
 
     const detection = strictDetection();
-    assert.equal(await h.gate.options.beforeRelease(detection), true);
+    const preAdmission = h.gate.options.beforeRelease(detection);
+    await h.flush();
+    assert.equal(h.runtime.snapshot().mode, 'pre_admitting');
+    assert.equal(h.requests.filter(({ path }) => path === '/assistant/voice/turns').length, 1);
+    assert.deepEqual(h.transport.activated, []);
+    assert.deepEqual(h.transport.appended, []);
+    assert.equal(h.failures.length, 0);
+
+    admitTurn();
+    assert.equal(await preAdmission, true);
+    assert.equal(
+        h.transport.activated.filter((generation) => generation === detection.generation).length,
+        1,
+    );
     h.gate.options.onDetected(detection);
     h.gate.options.onActivatedPcm({
         generation: detection.generation,
@@ -376,8 +397,17 @@ test('[BV2-FIRST-WAKE-01:A-E][BV2-WAKE-01] slow local startup completes wake, ad
     h.transport.finishResponse();
 
     assert.equal(h.runtime.snapshot().mode, 'wake_only');
+    assert.equal(h.requests.filter(({ path, options }) => (
+        path === '/assistant/voice/turns'
+        && options.body.turn_id === 'browser-voice-test-turn'
+    )).length, 1);
+    assert.equal(
+        h.transport.activated.filter((generation) => generation === detection.generation).length,
+        1,
+    );
     assert.equal(h.transport.appended.length, 1);
     assert.equal(h.transport.authorizations.length, 1);
+    assert.equal(h.failures.length, 0);
     await h.runtime.stop('journey_complete');
     assert.equal(h.audioContexts[0].closeCount, 1);
     assert.ok(h.rawTracks[0].stopped >= 1);

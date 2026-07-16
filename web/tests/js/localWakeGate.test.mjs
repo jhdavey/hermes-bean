@@ -2308,6 +2308,29 @@ test('[BV2-WAKE-01][BV2-DIAGNOSTIC-03] out-of-order or unexplained current-gener
     assert.equal(rejected.errors[0]?.code, 'pcm_decode_rejected');
     assert.equal(rejected.gate.state, 'failed');
     assert.equal(rejected.activatedPcm.length, 0);
+
+    const unexplainedActivation = createHarness();
+    await unexplainedActivation.gate.start(unexplainedActivation.rawStream);
+    const unexplainedGeneration = unexplainedActivation.gate.currentGeneration();
+    completeReadinessBarrier(unexplainedActivation, unexplainedGeneration);
+    unexplainedActivation.emitPcm({ generation: unexplainedGeneration });
+    const unexplainedSequence = unexplainedActivation.workers[0].messages
+        .filter(({ message }) => message.type === 'audio'
+            && message.generation === unexplainedGeneration)
+        .at(-1).message.sequence;
+    unexplainedActivation.workers[0].emit({
+        type: 'ack',
+        generation: unexplainedGeneration,
+        sequence: unexplainedSequence,
+        accepted: false,
+        reason: 'activation_pending',
+    });
+    assert.equal(unexplainedActivation.errors[0]?.code, 'pcm_decode_rejected');
+    assert.equal(unexplainedActivation.errors.length, 1);
+    assert.equal(unexplainedActivation.gate.state, 'failed');
+    assert.equal(unexplainedActivation.activatedPcm.length, 0);
+    assert.equal(unexplainedActivation.rawTrack.stopped, true);
+    assert.equal(unexplainedActivation.workers[0].terminated, true);
 });
 
 test('[BV2-WAKE-01] post-confirmation activation-pending acknowledgements drain safely without weakening readiness', async () => {
@@ -2547,24 +2570,28 @@ test('unsupported or failed startup rejects and stops raw capture instead of pas
     assert.equal(failed.errors.length, 1);
 });
 
-test('[BV-PRIVACY-01] confirmed wake PCM stays memory-only until durable pre-admission approves release', async () => {
+test('[BV2-FIRST-WAKE-01:C-E][BV2-WAKE-01][BV2-WAKE-11][BV2-SIDEBAND-01][BV2-PRIVACY-PCM-03] in-flight PCM drains privately while durable pre-admission is pending', async () => {
     let approve;
     const admission = new Promise((resolve) => { approve = resolve; });
-    const harness = createHarness({ beforeRelease: () => admission });
+    const harness = createHarness({ beforeRelease: () => admission, maxInFlightPcm: 2 });
     await harness.gate.start(harness.rawStream);
     const generation = harness.gate.currentGeneration();
     completeReadinessBarrier(harness, generation);
-    harness.emitPcm({ generation, samples: new Float32Array(1600).fill(0.25) });
-    const candidate = harness.workers[0].messages
+    harness.emitPcm({ generation, samples: new Float32Array(1_280).fill(0.25) });
+    harness.emitPcm({ generation, samples: new Float32Array(1_280).fill(0.5) });
+    const candidates = harness.workers[0].messages
         .filter(({ message }) => message.type === 'audio' && message.generation === generation)
-        .at(-1).message;
+        .slice(-2)
+        .map(({ message }) => message);
     harness.workers[0].emit({
         type: 'ack',
         generation,
-        sequence: candidate.sequence,
+        sequence: candidates[0].sequence,
         accepted: true,
     });
-    harness.workers[0].emit(wakeMessage(harness, generation));
+    harness.workers[0].emit(wakeMessage(harness, generation, {
+        sourceSequence: candidates[0].sourceSequence,
+    }));
 
     assert.equal(harness.gate.state, 'admission_pending');
     assert.equal(harness.gate.isOpen(), false);
@@ -2575,23 +2602,61 @@ test('[BV-PRIVACY-01] confirmed wake PCM stays memory-only until durable pre-adm
         0,
     );
 
-    harness.emitPcm({ generation, samples: new Float32Array(1600).fill(0.5) });
+    // The real worker disarms as soon as it confirms the wake. Any PCM already
+    // queued behind the confirming batch is acknowledged as activation-pending
+    // while the durable server admission is still unresolved.
+    harness.workers[0].emit({
+        type: 'ack',
+        generation,
+        sequence: candidates[1].sequence,
+        accepted: false,
+        reason: 'activation_pending',
+    });
+    assert.equal(harness.errors.length, 0);
+    assert.equal(harness.gate.state, 'admission_pending');
+    assert.equal(harness.gate.pendingPcmChunks(), 0);
+    assert.equal(harness.timers.size, 0);
+    assert.equal(harness.rawTrack.stopped, false);
+    assert.equal(harness.workers[0].terminated, false);
+
+    const workerAudioCount = harness.workers[0].messages
+        .filter(({ message }) => message.type === 'audio' && message.generation === generation)
+        .length;
+    harness.emitPcm({ generation, samples: new Float32Array(1_280).fill(0.75) });
     assert.equal(harness.activatedPcm.length, 0, 'live PCM must remain private while admission is pending');
+    assert.equal(harness.gate.bufferedPcmChunks(), 1, 'pending PCM remains in the bounded local bridge queue');
+    assert.equal(
+        harness.workers[0].messages
+            .filter(({ message }) => message.type === 'audio' && message.generation === generation)
+            .length,
+        workerAudioCount,
+        'a disarmed worker must not receive more PCM while admission is pending',
+    );
+
     approve(true);
     await admission;
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(harness.gate.isOpen(), true);
     assert.equal(harness.detections.length, 1);
-    assert.ok(harness.activatedPcm.length >= 2);
+    assert.deepEqual(
+        harness.activatedPcm.map(({ sourceSequence }) => sourceSequence),
+        [candidates[0].sourceSequence, candidates[1].sourceSequence, candidates[1].sourceSequence + 1],
+    );
     assert.ok(harness.activatedPcm.every((event) => event.released === true));
     assert.equal(
         harness.worklets[0].port.messages.filter(({ message }) => message.type === 'activate').length,
         1,
     );
+
+    harness.emitPcm({ generation, samples: new Float32Array(1_280).fill(0.9) });
+    assert.equal(harness.activatedPcm.at(-1).released, false);
+    assert.equal(harness.activatedPcm.at(-1).sourceSequence, candidates[1].sourceSequence + 2);
+    harness.advance(LOCAL_WAKE_PCM_ACK_TIMEOUT_MS * 2);
+    assert.equal(harness.errors.length, 0);
 });
 
-test('[BV-PRIVACY-02] rejected pre-admission releases no PCM and rearms a fresh wake generation', async () => {
+test('[BV2-WAKE-01][BV2-WAKE-11][BV2-DIAGNOSTIC-03][BV2-PRIVACY-PCM-03] rejected pre-admission after activation-pending PCM rearms a clean generation', async () => {
     let rejectAdmission;
     let attempts = 0;
     const firstAdmission = new Promise((resolve) => { rejectAdmission = resolve; });
@@ -2604,7 +2669,33 @@ test('[BV-PRIVACY-02] rejected pre-admission releases no PCM and rearms a fresh 
     await harness.gate.start(harness.rawStream);
     const firstGeneration = harness.gate.currentGeneration();
     completeReadinessBarrier(harness, firstGeneration);
-    harness.workers[0].emit(wakeMessage(harness, firstGeneration));
+    harness.emitPcm({ generation: firstGeneration, samples: new Float32Array(1_280).fill(0.25) });
+    harness.emitPcm({ generation: firstGeneration, samples: new Float32Array(1_280).fill(0.5) });
+    const candidates = harness.workers[0].messages
+        .filter(({ message }) => message.type === 'audio' && message.generation === firstGeneration)
+        .slice(-2)
+        .map(({ message }) => message);
+    harness.workers[0].emit({
+        type: 'ack',
+        generation: firstGeneration,
+        sequence: candidates[0].sequence,
+        accepted: true,
+    });
+    harness.workers[0].emit(wakeMessage(harness, firstGeneration, {
+        sourceSequence: candidates[0].sourceSequence,
+    }));
+    harness.workers[0].emit({
+        type: 'ack',
+        generation: firstGeneration,
+        sequence: candidates[1].sequence,
+        accepted: false,
+        reason: 'activation_pending',
+    });
+    harness.emitPcm({ generation: firstGeneration, samples: new Float32Array(1_280).fill(0.75) });
+
+    assert.equal(harness.gate.state, 'admission_pending');
+    assert.equal(harness.errors.length, 0);
+    assert.equal(harness.activatedPcm.length, 0);
     rejectAdmission(false);
     await firstAdmission;
     await new Promise((resolve) => setImmediate(resolve));
@@ -2615,16 +2706,81 @@ test('[BV-PRIVACY-02] rejected pre-admission releases no PCM and rearms a fresh 
     assert.equal(harness.detections.length, 0);
     assert.equal(harness.activatedPcm.length, 0);
     assert.equal(harness.releaseRejections.length, 1);
+    assert.equal(harness.errors.length, 0);
+    assert.equal(harness.gate.pendingPcmChunks(), 0);
+    assert.equal(harness.gate.bufferedPcmChunks(), 0);
     assert.deepEqual(harness.workers[0].messages.at(-1).message, {
         type: 'reset',
         generation: secondGeneration,
         reason: 'pre_admission_rejected',
     });
 
+    harness.workers[0].emit({
+        type: 'ack',
+        generation: firstGeneration,
+        sequence: candidates[1].sequence,
+        accepted: false,
+        reason: 'activation_pending',
+    });
+    assert.equal(harness.errors.length, 0, 'a stale acknowledgement cannot fail the replacement generation');
+
     completeReadinessBarrier(harness, secondGeneration);
     harness.workers[0].emit(wakeMessage(harness, secondGeneration));
     assert.equal(harness.gate.isOpen(), true);
     assert.deepEqual(harness.detections.map(({ generation }) => generation), [secondGeneration]);
+    assert.ok(harness.activatedPcm.every(({ generation }) => generation === secondGeneration));
+});
+
+test('[BV2-WAKE-11][BV2-DIAGNOSTIC-03][BV2-PRIVACY-PCM-03] stop invalidates a pending wake admission and its late approval', async () => {
+    let approve;
+    const admission = new Promise((resolve) => { approve = resolve; });
+    const harness = createHarness({ beforeRelease: () => admission, maxInFlightPcm: 2 });
+    await harness.gate.start(harness.rawStream);
+    const generation = harness.gate.currentGeneration();
+    completeReadinessBarrier(harness, generation);
+    harness.emitPcm({ generation, samples: new Float32Array(1_280).fill(0.25) });
+    harness.emitPcm({ generation, samples: new Float32Array(1_280).fill(0.5) });
+    const candidates = harness.workers[0].messages
+        .filter(({ message }) => message.type === 'audio' && message.generation === generation)
+        .slice(-2)
+        .map(({ message }) => message);
+    harness.workers[0].emit({
+        type: 'ack',
+        generation,
+        sequence: candidates[0].sequence,
+        accepted: true,
+    });
+    harness.workers[0].emit(wakeMessage(harness, generation, {
+        sourceSequence: candidates[0].sourceSequence,
+    }));
+    harness.workers[0].emit({
+        type: 'ack',
+        generation,
+        sequence: candidates[1].sequence,
+        accepted: false,
+        reason: 'activation_pending',
+    });
+    harness.emitPcm({ generation, samples: new Float32Array(1_280).fill(0.75) });
+
+    assert.equal(harness.gate.state, 'admission_pending');
+    const stopping = harness.gate.stop();
+    approve(true);
+    await admission;
+    await stopping;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(harness.gate.state, 'stopped');
+    assert.equal(harness.gate.isOpen(), false);
+    assert.equal(harness.detections.length, 0);
+    assert.equal(harness.activatedPcm.length, 0);
+    assert.equal(harness.errors.length, 0);
+    assert.equal(harness.rawTrack.stopped, true);
+    assert.equal(harness.workers[0].terminated, true);
+    assert.equal(harness.timers.size, 0);
+    assert.equal(
+        harness.worklets[0].port.messages.filter(({ message }) => message.type === 'activate').length,
+        0,
+    );
 });
 
 test('[BV-FOLLOW-UP-01] contextual capture starts at a fresh live boundary without releasing pre-admission PCM', async () => {

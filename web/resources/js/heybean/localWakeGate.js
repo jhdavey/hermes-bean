@@ -623,6 +623,7 @@ export class LocalWakeGate {
         if (generation !== this.generation
             || !this.workerReady
             || this.gateOpen
+            || this.pendingReleaseAuthorization
             || !this.worker) return;
 
         while (this.bufferedPcm.length > 0 && this.inFlightPcm.size < this.maxInFlightPcm) {
@@ -767,7 +768,8 @@ export class LocalWakeGate {
             }
             const activationPending = data.accepted !== true
                 && data.reason === 'activation_pending'
-                && this.gateOpen;
+                && (this.gateOpen
+                    || this.pendingReleaseAuthorization?.generation === generation);
             if (data.accepted !== true && !activationPending) {
                 const fatalReason = String(data.reason || '');
                 if (LOCAL_WAKE_FATAL_ACK_REASONS.has(fatalReason)) {

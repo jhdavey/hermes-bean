@@ -55,3 +55,24 @@ test('[BV-BROWSER-02] playback binding fails closed on a stale controller genera
     }));
     expect(failure).toBe('controller_generation_mismatch');
 });
+
+test('[BV2-VOICE-UI-02] thinking ring keeps orbiting through 50 ms microphone activity updates', async ({ page }) => {
+    await page.goto('/tests/browser/fixtures/voice-thinking-ring-harness.html');
+    await page.waitForFunction(() => window.beanThinkingRingHarnessReady === true);
+
+    const transforms = [];
+    for (let index = 0; index < 4; index += 1) {
+        await page.waitForTimeout(320);
+        transforms.push(await page.evaluate(() => window.beanThinkingRingHarness.snapshot().transform));
+    }
+
+    const snapshot = await page.evaluate(() => window.beanThinkingRingHarness.snapshot());
+    expect(snapshot.ticks).toBeGreaterThanOrEqual(20);
+    expect(snapshot.sameButton).toBe(true);
+    expect(snapshot.animationName).toBe('hbBeanVoiceSpin');
+    expect(new Set(transforms).size).toBeGreaterThanOrEqual(3);
+
+    const updatedInPlace = await page.evaluate(() => window.beanThinkingRingHarness.finish());
+    expect(updatedInPlace).toBe(false);
+    await expect(page.locator('#bean-thinking-button')).not.toHaveClass(/hb-chat-voice-button-thinking/);
+});

@@ -82,6 +82,55 @@ export function reconcileAllDayEndDateInput(startValue, endValue) {
     return next.toISOString().slice(0, 10);
 }
 
+export function beanVoiceActivityProperties(level) {
+    const normalized = Math.max(0, Math.min(1, Number(level) || 0));
+    return {
+        '--hb-voice-level': normalized.toFixed(3),
+        '--hb-voice-scale': (1.03 + normalized * 0.16).toFixed(3),
+        '--hb-voice-opacity': (0.48 + normalized * 0.5).toFixed(3),
+        '--hb-voice-border-opacity': (0.46 + normalized * 0.42).toFixed(3),
+        '--hb-voice-glow-opacity': (0.12 + normalized * 0.26).toFixed(3),
+        '--hb-voice-glow-size': (5 + normalized * 12).toFixed(1) + 'px',
+        '--hb-voice-dock-ring': (1 + normalized * 2).toFixed(1) + 'px',
+        '--hb-voice-dock-glow-opacity': (0.08 + normalized * 0.18).toFixed(3),
+    };
+}
+
+export function beanVoiceViewRequiresRender(previousView, nextView) {
+    return String(previousView?.mode || '') !== String(nextView?.mode || '')
+        || Boolean(previousView?.enabled) !== Boolean(nextView?.enabled)
+        || Boolean(previousView?.processing) !== Boolean(nextView?.processing)
+        || Boolean(previousView?.playbackActive) !== Boolean(nextView?.playbackActive)
+        || String(previousView?.error || '') !== String(nextView?.error || '');
+}
+
+export function applyBeanVoiceActivityViewInPlace(mount, previousView, nextView) {
+    if (beanVoiceViewRequiresRender(previousView, nextView)) return false;
+
+    const buttons = Array.from(mount?.querySelectorAll?.('.hb-chat-voice-button') || []);
+    if (!buttons.length) return false;
+
+    const recording = Boolean(nextView?.recording);
+    const properties = beanVoiceActivityProperties(recording ? nextView?.activityLevel : 0);
+    Array.from(mount?.querySelectorAll?.('.hb-chat-dock') || []).forEach((dock) => {
+        dock.classList.toggle('hb-chat-dock-hearing', recording);
+        Object.entries(properties).forEach(([name, value]) => dock.style.setProperty(name, value));
+    });
+    buttons.forEach((button) => {
+        button.classList.toggle('hb-chat-voice-button-hearing', recording);
+        Object.entries(properties).forEach(([name, value]) => button.style.setProperty(name, value));
+        button.setAttribute(
+            'aria-label',
+            recording
+                ? 'Microphone is hearing you'
+                : nextView?.enabled
+                    ? 'Turn off realtime Bean voice'
+                    : 'Turn on realtime Bean voice',
+        );
+    });
+    return true;
+}
+
 export function mountHeyBeanWebApp(mount) {
     const logoUrl = mount.dataset.logo || '/images/bean-logo.png';
     const browserVoiceV2Configured = mount.dataset.browserVoiceV2 === 'true';
@@ -9007,6 +9056,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function applyBeanVoiceViewState(view) {
+        const previousVoiceView = beanVoiceView;
         beanVoiceView = Object.freeze({ ...view });
         state.voiceWakeListening = Boolean(view.enabled);
         state.voiceRecording = Boolean(view.recording);
@@ -9020,6 +9070,7 @@ export function mountHeyBeanWebApp(mount) {
             lastBeanVoiceError = '';
         }
         if (!state.busy || view.enabled) state.chatRunState = beanVoiceRunState(view);
+        if (applyBeanVoiceActivityViewInPlace(mount, previousVoiceView, beanVoiceView)) return;
         render();
     }
 
@@ -9082,20 +9133,6 @@ export function mountHeyBeanWebApp(mount) {
             console.warn('Bean voice client failure', body);
         }
         return body;
-    }
-
-    function beanVoiceActivityProperties(level) {
-        const normalized = Math.max(0, Math.min(1, Number(level) || 0));
-        return {
-            '--hb-voice-level': normalized.toFixed(3),
-            '--hb-voice-scale': (1.03 + normalized * 0.16).toFixed(3),
-            '--hb-voice-opacity': (0.48 + normalized * 0.5).toFixed(3),
-            '--hb-voice-border-opacity': (0.46 + normalized * 0.42).toFixed(3),
-            '--hb-voice-glow-opacity': (0.12 + normalized * 0.26).toFixed(3),
-            '--hb-voice-glow-size': (5 + normalized * 12).toFixed(1) + 'px',
-            '--hb-voice-dock-ring': (1 + normalized * 2).toFixed(1) + 'px',
-            '--hb-voice-dock-glow-opacity': (0.08 + normalized * 0.18).toFixed(3),
-        };
     }
 
     function beanVoiceActivityStyle(level) {
