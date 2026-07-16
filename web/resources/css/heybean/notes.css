@@ -521,6 +521,7 @@
 .hb-note-actions-menu {
     position: relative;
     flex: 0 0 auto;
+    margin-left: auto;
 }
 
 .hb-note-actions-menu summary {
@@ -650,6 +651,22 @@
     min-height: 1.58em;
 }
 
+.hb-note-list-line {
+    display: flex;
+    align-items: baseline;
+    min-height: 1.58em;
+}
+
+.hb-note-line-indent {
+    flex: 0 0 auto;
+    white-space: pre;
+}
+
+.hb-note-line-content {
+    min-width: 0;
+    white-space: pre-wrap;
+}
+
 .hb-note-body h1 {
     margin: 0 0 10px;
     color: var(--hb-text);
@@ -667,19 +684,21 @@
 
 .hb-note-checkbox-marker,
 .hb-note-bullet-marker {
+    box-sizing: border-box;
     display: inline-grid;
+    flex: 0 0 18px;
     place-items: center;
-    vertical-align: -2px;
+    align-self: baseline;
     margin-right: 8px;
 }
 
 .hb-note-checkbox-marker {
-    width: 17px;
-    height: 17px;
+    width: 18px;
+    height: 18px;
     border: 1.6px solid var(--hb-muted);
     border-radius: 5px;
     color: transparent;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 900;
     line-height: 1;
 }
@@ -691,7 +710,7 @@
 }
 
 .hb-note-bullet-marker {
-    width: 17px;
+    width: 18px;
     color: var(--hb-text);
     font-weight: 900;
 }

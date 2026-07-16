@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\CalendarEvent;
+use App\Models\NoteFolder;
 use App\Models\Reminder;
 use App\Models\Task;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -11,6 +12,22 @@ use Tests\TestCase;
 class CanonicalDomainResourceContractTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_note_folder_creation_is_idempotent_within_a_workspace(): void
+    {
+        $token = $this->premiumApiToken('canonical-note-folder@example.com');
+
+        $firstId = $this->withToken($token)->postJson('/api/note-folders', [
+            'name' => 'Project Notes',
+        ])->assertCreated()->json('data.id');
+
+        $secondId = $this->withToken($token)->postJson('/api/note-folders', [
+            'name' => 'project notes',
+        ])->assertOk()->json('data.id');
+
+        $this->assertSame($firstId, $secondId);
+        $this->assertSame(1, NoteFolder::query()->count());
+    }
 
     public function test_history_endpoints_accept_only_complete_absolute_intervals(): void
     {

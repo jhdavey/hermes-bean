@@ -272,10 +272,9 @@
     gap: 6px;
     padding: 4px 4px 4px 7px;
     border: 0;
-    border-bottom: 1px solid var(--hb-border);
     border-radius: 0;
     background: transparent;
-    box-shadow: inset 2px 0 0 color-mix(in srgb, var(--hb-item-color, var(--hb-accent)) 62%, transparent);
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--hb-item-color, var(--hb-accent)) 72%, transparent);
 }
 
 .hb-item > .hb-icon-button[aria-label^="Edit"] {
@@ -576,7 +575,6 @@
     align-items: center;
     gap: 8px;
     border: 0;
-    border-top: 1px solid color-mix(in srgb, var(--hb-border) 62%, transparent);
     border-radius: 0;
     background: transparent;
     box-shadow: inset 3px 0 0 color-mix(in srgb, var(--hb-command-center-item-color, var(--hb-accent)) 70%, transparent);
@@ -589,11 +587,6 @@
 .hb-command-center-row:hover {
     border-radius: 0;
     background: color-mix(in srgb, var(--hb-surface2) 70%, transparent);
-}
-
-.hb-command-center-agenda-list > .hb-command-center-row:first-child,
-.hb-command-center-agenda-list .hb-glance-events > .hb-command-center-row:first-child {
-    border-top-color: transparent;
 }
 
 .heybean-app-body .hb-command-center-agenda-list .hb-command-center-row,

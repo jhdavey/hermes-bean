@@ -2440,18 +2440,11 @@ class _EventCategoryCreateDialogState
           onPressed: () => Navigator.of(context).pop(),
           child: Text('Cancel'),
         ),
-        if (widget.editing)
-          FilledButton(
-            key: const Key('event-category-modal-save-action'),
-            onPressed: _submit,
-            child: Text('Save'),
-          )
-        else
-          _CreateButton(
-            key: const Key('event-category-modal-save-action'),
-            tooltip: 'Create category',
-            onPressed: _submit,
-          ),
+        FilledButton(
+          key: const Key('event-category-modal-save-action'),
+          onPressed: _submit,
+          child: Text('Save'),
+        ),
       ],
     );
   }

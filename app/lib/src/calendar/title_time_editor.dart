@@ -620,7 +620,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
       (isReminderEditor
           ? 'Title and required reminder time'
           : 'Title and optional due date');
-  final actionLabel = deleteLabel == null ? 'Create' : 'Save';
+  const actionLabel = 'Save';
   final matchingInitialCategoryColor = categories
       .where(
         (category) =>

@@ -136,7 +136,7 @@ void main() {
     await tester.tap(find.byKey(const Key('note-list-item-1')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('note-body-field')), '');
-    await tester.pump();
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('note-format-bold')));
     await tester.pumpAndSettle();
     await tester.enterText(
@@ -144,6 +144,10 @@ void main() {
       'Launch plan',
     );
     await tester.pumpAndSettle();
+    final titleField = tester.widget<TextField>(
+      find.byKey(const Key('note-detail-title')),
+    );
+    expect(titleField.decoration?.suffixIcon, isNull);
     await tester.tap(find.byKey(const Key('note-detail-back')));
     await tester.pumpAndSettle();
 
@@ -531,6 +535,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('new-note-folder-name')), findsOneWidget);
+    expect(find.text('Save'), findsWidgets);
 
     await tester.tap(find.text('Cancel').last);
     await tester.pumpAndSettle();
@@ -3698,7 +3703,7 @@ void main() {
   });
 
   testWidgets(
-    'signed-in screens show inline loading while dashboard data loads',
+    'initial dashboard load shows one full-screen loading indicator',
     (WidgetTester tester) async {
       final api = _SlowDashboardFakeHermesApiClient();
 
@@ -3710,35 +3715,15 @@ void main() {
 
       expect(
         find.byKey(const Key('signed-in-loading-indicator')),
-        findsNothing,
+        findsOneWidget,
       );
       expect(find.text('Loading...'), findsNothing);
       expect(
         find.byKey(const Key('command-center-agenda-loading')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const Key('command-center-agenda-empty')),
         findsNothing,
       );
-
-      await tester.tap(find.byKey(const Key('nav-tasks')));
-      await tester.pump();
-      expect(
-        find.byKey(const Key('signed-in-loading-indicator')),
-        findsNothing,
-      );
-      expect(find.byKey(const Key('tasks-screen-loading')), findsOneWidget);
-      expect(find.text('No active tasks'), findsNothing);
-
-      await tester.tap(find.byKey(const Key('nav-reminders')));
-      await tester.pump();
-      expect(
-        find.byKey(const Key('signed-in-loading-indicator')),
-        findsNothing,
-      );
-      expect(find.byKey(const Key('reminders-screen-loading')), findsOneWidget);
-      expect(find.text('No scheduled reminders'), findsNothing);
+      expect(find.byKey(const Key('tasks-screen-loading')), findsNothing);
+      expect(find.byKey(const Key('reminders-screen-loading')), findsNothing);
 
       api.completeDashboardLoad();
       await tester.pumpAndSettle();
@@ -3747,7 +3732,10 @@ void main() {
         find.byKey(const Key('signed-in-loading-indicator')),
         findsNothing,
       );
-      expect(find.byKey(const Key('reminders-screen-loading')), findsNothing);
+      expect(
+        find.byKey(const Key('command-center-agenda-empty')),
+        findsOneWidget,
+      );
     },
   );
 
@@ -4052,6 +4040,7 @@ void main() {
       find.byKey(const Key('event-category-modal-name-field')),
       'Errands',
     );
+    expect(find.text('Save'), findsWidgets);
     await tester.tap(find.byKey(const Key('event-category-modal-save-action')));
     await tester.pumpAndSettle();
     expect(api.savedCategory?.name, 'Errands');
@@ -4101,8 +4090,11 @@ void main() {
       find.byKey(const Key('reminder-row-surface-601')),
     );
     final reminderDecoration = reminderSurface.decoration! as BoxDecoration;
-    expect(reminderDecoration.color?.a, closeTo(.14, .001));
-    expect(reminderDecoration.color?.b, 1);
+    final reminderBorder = reminderDecoration.border! as Border;
+    expect(reminderDecoration.color, isNull);
+    expect(reminderBorder.left.width, 3);
+    expect(reminderBorder.top.width, 0);
+    expect(find.text('Travel'), findsNothing);
     await tester.tap(find.byKey(const Key('reminder-edit-action-601')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('title-time-editor-time')), findsNothing);
@@ -4145,7 +4137,7 @@ void main() {
     expect(api.updatedReminder?.color, '#007AFF');
     expect(api.updatedReminder?.metadata?['recurrence'], 'specific_days');
     expect(api.updatedReminder?.metadata?['days'], ['mon', 'wed']);
-    expect(find.textContaining('Work'), findsWidgets);
+    expect(find.textContaining('Work'), findsNothing);
   });
 
   testWidgets('uncategorized task and reminder saves use selected color', (
@@ -5153,7 +5145,7 @@ void main() {
       expect(find.text('Yesterday one-off'), findsOneWidget);
       expect(find.byKey(const Key('task-critical-star-103')), findsOneWidget);
       expect(find.text('Recurring vitamins'), findsOneWidget);
-      expect(find.textContaining('Travel'), findsWidgets);
+      expect(find.textContaining('Travel'), findsNothing);
       expect(
         find.textContaining(RegExp(r'Due \d{1,2}(:\d{2})?(am|pm)')),
         findsWidgets,
@@ -5162,8 +5154,10 @@ void main() {
         find.byKey(const Key('task-row-surface-101')),
       );
       final taskDecoration = taskSurface.decoration! as BoxDecoration;
-      expect(taskDecoration.color?.a, closeTo(.14, .001));
-      expect(taskDecoration.color?.b, 1);
+      final taskBorder = taskDecoration.border! as Border;
+      expect(taskDecoration.color, isNull);
+      expect(taskBorder.left.width, 3);
+      expect(taskBorder.top.width, 0);
 
       final firstOpenTaskBefore = tester.getRect(find.text('Pack bags'));
       final secondOpenTaskBefore = tester.getRect(find.text('Call pharmacy'));

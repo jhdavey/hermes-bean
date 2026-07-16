@@ -37,34 +37,20 @@ class _TaskItemTileState extends State<_TaskItemTile> {
     final task = widget.task;
     final completed = _taskIsCompleted(task);
     final categoryColor = _safeCategoryColor(task.color);
-    final surfaceColor = completed
-        ? _quietSurfaceColor(alpha: .42)
-        : categoryColor.withValues(alpha: .14);
-    final borderColor = _quietBorderColor(alpha: completed ? .28 : .38);
     return Container(
       key: Key('task-row-surface-${task.id}'),
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       decoration: BoxDecoration(
-        color: surfaceColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: borderColor),
+        border: Border(
+          left: BorderSide(
+            color: categoryColor.withValues(alpha: completed ? .38 : .72),
+            width: 3,
+          ),
+        ),
       ),
       child: Stack(
         children: [
-          if (!completed)
-            Positioned(
-              left: 0,
-              top: 12,
-              bottom: 12,
-              child: Container(
-                width: 3,
-                decoration: BoxDecoration(
-                  color: categoryColor.withValues(alpha: .72),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
-            ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -337,34 +323,20 @@ class _ReminderItemTile extends StatelessWidget {
     final completed = _reminderIsCompleted(reminder);
     final critical = _reminderIsCritical(reminder);
     final categoryColor = _safeCategoryColor(reminder.color);
-    final surfaceColor = completed
-        ? _quietSurfaceColor(alpha: .42)
-        : categoryColor.withValues(alpha: .14);
-    final borderColor = _quietBorderColor(alpha: completed ? .28 : .38);
     return Container(
       key: Key('reminder-row-surface-${reminder.id}'),
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       decoration: BoxDecoration(
-        color: surfaceColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: borderColor),
+        border: Border(
+          left: BorderSide(
+            color: categoryColor.withValues(alpha: completed ? .38 : .72),
+            width: 3,
+          ),
+        ),
       ),
       child: Stack(
         children: [
-          if (!completed)
-            Positioned(
-              left: 0,
-              top: 12,
-              bottom: 12,
-              child: Container(
-                width: 3,
-                decoration: BoxDecoration(
-                  color: categoryColor.withValues(alpha: .72),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
-            ),
           Row(
             children: [
               Checkbox(
@@ -530,9 +502,7 @@ class _InlineLoadingSurface extends StatelessWidget {
       ),
       child: Row(
         mainAxisSize: fillHeight ? MainAxisSize.min : MainAxisSize.max,
-        mainAxisAlignment: fillHeight
-            ? MainAxisAlignment.center
-            : MainAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           SizedBox.square(
             dimension: 16,
@@ -564,48 +534,6 @@ class _InlineLoadingSurface extends StatelessWidget {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 260),
         child: content,
-      ),
-    );
-  }
-}
-
-class _InlineLoadingBadge extends StatelessWidget {
-  const _InlineLoadingBadge({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: _quietSurfaceColor(alpha: .94),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _quietBorderColor(alpha: .42)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox.square(
-              dimension: 13,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: HeyBeanTheme.accentStrong,
-                backgroundColor: HeyBeanTheme.accent.withValues(alpha: .14),
-              ),
-            ),
-            const SizedBox(width: 7),
-            Text(
-              label,
-              style: TextStyle(
-                color: HeyBeanTheme.muted,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

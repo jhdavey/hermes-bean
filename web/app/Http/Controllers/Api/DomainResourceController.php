@@ -245,6 +245,16 @@ class DomainResourceController extends Controller
                 ->max('sort_order')) + 1;
         }
 
+        $existing = NoteFolder::query()
+            ->where('user_id', $attributes['user_id'])
+            ->where('workspace_id', $attributes['workspace_id'])
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower(trim($attributes['name']))])
+            ->first();
+
+        if ($existing) {
+            return response()->json(['data' => $existing]);
+        }
+
         return $this->created(NoteFolder::create($attributes));
     }
 

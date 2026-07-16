@@ -1737,7 +1737,7 @@ class _WorkspacesSettingsCardState extends State<_WorkspacesSettingsCard> {
         labelText: 'Workspace name',
         fieldKey: Key('workspace-create-name-field'),
         submitKey: Key('workspace-create-save'),
-        submitLabel: 'Create',
+        submitLabel: 'Save',
       ),
     );
     if (name == null || name.trim().isEmpty) return;

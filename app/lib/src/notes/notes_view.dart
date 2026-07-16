@@ -49,8 +49,8 @@ class _NotesViewState extends State<_NotesView> {
   String _noteSort = 'recent';
   int? _selectedId;
   int? _editingFolderId;
-  bool _saving = false;
   bool _searchExpanded = false;
+  final Set<String> _pendingFolderNames = <String>{};
   Timer? _autosaveTimer;
   String _lastBodyText = '';
 
@@ -197,34 +197,29 @@ class _NotesViewState extends State<_NotesView> {
   }) async {
     final note = _selectedNote;
     if (note == null || (_noteIsLocked(note) && metadata == null)) return;
-    setState(() => _saving = true);
     final title = _titleController.text.trim().isEmpty
         ? 'New Note'
         : _titleController.text.trim();
     final plain = _normalizedNotePlainText(_bodyController.text);
-    try {
-      final saved = await widget.onNoteSaved(
-        note,
-        title: title,
-        bodyHtml: _htmlFromFormattedPlainText(plain, _bodyController.formats),
-        plainText: plain,
-        folderId: _editingFolderId,
-        clearFolder: _editingFolderId == null,
-        isPinned: isPinned ?? note.isPinned,
-        metadata: _metadataWithNoteFormats(
-          metadata ?? note.metadata,
-          _bodyController.formats,
-        ),
-        syncToWorkspaceIds: syncToWorkspaceIds,
-      );
-      if (mounted && _selectedId == note.id) {
-        setState(() {
-          _selectedId = saved.id;
-          _editingFolderId = saved.folderId;
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
+    final saved = await widget.onNoteSaved(
+      note,
+      title: title,
+      bodyHtml: _htmlFromFormattedPlainText(plain, _bodyController.formats),
+      plainText: plain,
+      folderId: _editingFolderId,
+      clearFolder: _editingFolderId == null,
+      isPinned: isPinned ?? note.isPinned,
+      metadata: _metadataWithNoteFormats(
+        metadata ?? note.metadata,
+        _bodyController.formats,
+      ),
+      syncToWorkspaceIds: syncToWorkspaceIds,
+    );
+    if (mounted && _selectedId == note.id) {
+      setState(() {
+        _selectedId = saved.id;
+        _editingFolderId = saved.folderId;
+      });
     }
   }
 
@@ -315,8 +310,23 @@ class _NotesViewState extends State<_NotesView> {
       builder: (context) => const _NewNoteFolderDialog(),
     );
     if (name == null || name.isEmpty) return;
-    final folder = await widget.onFolderCreated(name);
-    if (mounted) setState(() => _folderFilter = folder.id.toString());
+    final normalizedName = name.trim();
+    final nameKey = normalizedName.toLowerCase();
+    final existing = widget.folders
+        .where((folder) => folder.name.trim().toLowerCase() == nameKey)
+        .cast<HermesNoteFolder?>()
+        .firstOrNull;
+    if (existing != null) {
+      if (mounted) setState(() => _folderFilter = existing.id.toString());
+      return;
+    }
+    if (!_pendingFolderNames.add(nameKey)) return;
+    try {
+      final folder = await widget.onFolderCreated(normalizedName);
+      if (mounted) setState(() => _folderFilter = folder.id.toString());
+    } finally {
+      _pendingFolderNames.remove(nameKey);
+    }
   }
 
   Future<bool> _deleteFolder(HermesNoteFolder folder) async {
@@ -475,18 +485,16 @@ class _NotesViewState extends State<_NotesView> {
     final note = _selectedNote;
     if (note == null || _noteIsLocked(note)) return;
     _autosaveTimer?.cancel();
-    _autosaveTimer = Timer(const Duration(milliseconds: 700), () {
-      if (mounted) unawaited(_save());
-    });
-    if (!_saving) setState(() => _saving = true);
+    // The shell applies this draft locally before the next frame and coalesces
+    // server writes in the background. Navigation never owns the draft.
+    unawaited(_save());
   }
 
   Future<void> _flushAutosave() async {
     final note = _selectedNote;
     if (note == null || _noteIsLocked(note)) return;
-    final hadPending = _autosaveTimer?.isActive ?? false;
     _autosaveTimer?.cancel();
-    if (hadPending) await _save();
+    await _save();
   }
 
   bool _noteIsLocked(HermesNote? note) {
@@ -1082,21 +1090,7 @@ class _NotesViewState extends State<_NotesView> {
                           errorBorder: InputBorder.none,
                           focusedErrorBorder: InputBorder.none,
                           hintText: 'New Note',
-                          suffixIcon: _saving
-                              ? const SizedBox(
-                                  width: 26,
-                                  height: 26,
-                                  child: Center(
-                                    child: SizedBox(
-                                      width: 14,
-                                      height: 14,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 1.6,
-                                      ),
-                                    ),
-                                  ),
-                                )
-                              : locked
+                          suffixIcon: locked
                               ? Icon(
                                   Icons.lock_rounded,
                                   size: 16,
@@ -2264,10 +2258,10 @@ class _NewNoteFolderDialogState extends State<_NewNoteFolderDialog> {
         onPressed: () => Navigator.pop(context),
         child: Text('Cancel'),
       ),
-      _CreateButton(
+      FilledButton(
         key: const Key('new-note-folder-create'),
-        tooltip: 'Create folder',
         onPressed: _submit,
+        child: Text('Save'),
       ),
     ],
   );

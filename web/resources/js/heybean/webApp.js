@@ -365,7 +365,10 @@ export function mountHeyBeanWebApp(mount) {
     let dashboardRefreshGeneration = 0;
     let localResourceSequence = -1;
     const noteAutosaveTimers = new Map();
-    const noteAutosaveDelay = 650;
+    const noteSaveInFlight = new Set();
+    const pendingNoteSaveBodies = new Map();
+    const pendingNoteFolderNames = new Set();
+    const noteAutosaveDelay = 300;
     let chatRequestCounter = 0;
     let chatContextGeneration = 0;
     let chatSessionLoadGeneration = 0;
@@ -387,6 +390,7 @@ export function mountHeyBeanWebApp(mount) {
     bindDashboardRealtimeFallbacks();
     bindOnboardingTourViewport();
     bindDeferredDashboardRenderFlush();
+    bindNoteAutosaveTeardown();
     bindRealtimeVoiceTeardown();
 
     async function boot() {
@@ -405,6 +409,10 @@ export function mountHeyBeanWebApp(mount) {
 
     function bindRealtimeVoiceTeardown() {
         window.addEventListener('pagehide', () => stopRealtimeVoiceForContextChange());
+    }
+
+    function bindNoteAutosaveTeardown() {
+        window.addEventListener('pagehide', () => flushAllNoteAutosaves({ keepalive: true }));
     }
 
     async function loadSubscriptionPage() {
@@ -565,6 +573,7 @@ export function mountHeyBeanWebApp(mount) {
             headers,
             body: options.body ? JSON.stringify(options.body) : undefined,
             signal: options.signal,
+            keepalive: options.keepalive === true,
         }, options.timeoutMs || 0);
         if (response.status === 204) return null;
         const payload = await response.json().catch(() => ({}));
@@ -711,7 +720,10 @@ export function mountHeyBeanWebApp(mount) {
             state.dashboardChangeLastId = Number(localStorage.getItem(dashboardChangeStorageKey()) || 0);
             const cachedWorkspaceId = currentWorkspaceIdFromUser(state.user);
             const cacheApplied = Boolean(cachedWorkspaceId && applyDashboardCache(cachedWorkspaceId));
-            state.phase = 'signedIn';
+            // Keep the launch screen covered until the authoritative workspace
+            // snapshot is ready. Persisted data is a fallback, not a stale
+            // intermediate frame for the user to watch reconcile.
+            state.phase = 'loading';
             state.dashboardDataLoading = !cacheApplied;
             state.error = '';
             applyBillingReturnNotice();
@@ -783,7 +795,9 @@ export function mountHeyBeanWebApp(mount) {
             state.outlookStatus = outlookStatus;
             state.phase = 'signedIn';
             state.dashboardDataLoading = false;
-            state.error = refreshError ? friendlyError(refreshError, 'refresh your latest data') : '';
+            // A partial background refresh should never become a global red
+            // error when the cached/remaining resources can render normally.
+            state.error = '';
             applyBillingReturnNotice();
             if (needsBeanOnboarding()) {
                 state.selected = 'bean';
@@ -1331,12 +1345,16 @@ export function mountHeyBeanWebApp(mount) {
                 const [, indent, marker, rest] = markerMatch;
                 const checked = marker === '☑';
                 const bullet = marker === '•';
+                const normalizedIndent = indent.replaceAll('\t', '  ').slice(0, 10);
+                const indentMarkup = normalizedIndent
+                    ? `<span class="hb-note-line-indent" contenteditable="false" aria-hidden="true">${escapeHtml(normalizedIndent)}</span>`
+                    : '';
                 const visualMarker = bullet
-                    ? '<span class="hb-note-bullet-marker" aria-hidden="true">•</span>'
-                    : `<span class="hb-note-checkbox-marker ${checked ? 'hb-note-checkbox-marker-checked' : ''}" aria-hidden="true">${checked ? '☑' : '☐'}</span>`;
-                return `<div>${escapeHtml(indent)}${visualMarker}<span>${escapeHtml(rest || '')}</span></div>`;
+                    ? '<span class="hb-note-bullet-marker" contenteditable="false" aria-hidden="true">•</span>'
+                    : `<span class="hb-note-checkbox-marker ${checked ? 'hb-note-checkbox-marker-checked' : ''}" contenteditable="false" role="checkbox" aria-checked="${checked}">${checked ? '✓' : ''}</span>`;
+                return `<div class="hb-note-list-line">${indentMarkup}${visualMarker}<span class="hb-note-line-content">${escapeHtml(rest || '')}</span></div>`;
             }
-            return `<div>${escaped || '<br>'}</div>`;
+            return `<div class="hb-note-text-line">${escaped || '<br>'}</div>`;
         }).join('');
     }
 
@@ -2553,7 +2571,6 @@ export function mountHeyBeanWebApp(mount) {
                     ${noteCommandButton('outdent', '', icons.indentDecrease, locked, 'Decrease indent', true)}
                     ${noteCommandButton('indent', '', icons.indentIncrease, locked, 'Increase indent', true)}
                     ${noteCommandButton('insertHorizontalRule', '', '---', locked, 'Divider')}
-                    <span class="hb-note-save-state" aria-live="polite">${locked ? 'Locked' : state.notesSaving ? 'Saving...' : 'Auto-saved'}</span>
                     <details class="hb-note-actions-menu">
                         <summary aria-label="Note actions" title="Note actions">${icons.moreVertical}</summary>
                         <div class="hb-note-actions-popover" role="menu">
@@ -4713,7 +4730,7 @@ export function mountHeyBeanWebApp(mount) {
                 title: task.title || task.name || 'Untitled task',
                 time: overdue ? due : (dateOnlyDue ? endOfToday : due),
                 timeLabel: overdue && dateOnlyDue ? 'Overdue' : (dateOnlyDue ? 'Today' : formatCompactMeridiemTime(due)),
-                subtitle: [overdue ? 'overdue' : '', task.category || ''].filter(Boolean).join(' · '),
+                subtitle: overdue ? 'overdue' : '',
                 isOverdue: overdue,
                 color: itemColor(task),
             });
@@ -4734,7 +4751,7 @@ export function mountHeyBeanWebApp(mount) {
                 title: reminder.title || reminder.name || 'Untitled reminder',
                 time: overdue ? due : (dateOnlyDue ? endOfToday : due),
                 timeLabel: overdue && dateOnlyDue ? 'Overdue' : (dateOnlyDue ? 'Today' : formatCompactMeridiemTime(due)),
-                subtitle: [overdue ? 'overdue' : '', reminder.category || ''].filter(Boolean).join(' · '),
+                subtitle: overdue ? 'overdue' : '',
                 isOverdue: overdue,
                 color: itemColor(reminder),
             });
@@ -5661,7 +5678,7 @@ export function mountHeyBeanWebApp(mount) {
                     <div class="hb-modal-actions">
                         ${editing ? `<button class="hb-button-danger" type="button" data-modal-delete="${kind}" data-id="${item.id}">Delete</button>` : ''}
                         <button class="hb-button-secondary" type="button" data-close-modal>Cancel</button>
-                        <button class="hb-button" type="submit" data-modal-save-button>${editing ? 'Save' : 'Create'}</button>
+                        <button class="hb-button" type="submit" data-modal-save-button>Save</button>
                     </div>
                 </form>
             </div>`;
@@ -5819,7 +5836,7 @@ export function mountHeyBeanWebApp(mount) {
                     <div class="hb-inline-category-create">
                         <label class="hb-label">New category<input class="hb-input" type="text" data-inline-category-name placeholder="Category name"></label>
                         <label class="hb-label">Color<input class="hb-input hb-color-input" type="color" data-inline-category-color value="${escapeAttr(themeAccentColor())}"></label>
-                        <button class="hb-button-secondary" type="button" data-inline-category-create>Add</button>
+                        <button class="hb-button-secondary" type="button" data-inline-category-create>Save</button>
                     </div>
                     <div class="hb-list hb-category-list" data-inline-category-list>${inlineCategoryRowsMarkup()}</div>
                 </div>
@@ -5973,7 +5990,7 @@ export function mountHeyBeanWebApp(mount) {
                     ${sectionTitle(icons.calendar, create ? 'Create Workspace' : rename ? 'Rename household' : invite ? `Invite to ${workspace?.name || 'workspace'}` : 'Accept workspace invitation', '')}
                     ${labelInput(create ? 'Workspace name' : rename ? 'Household name' : invite ? 'Email' : 'Invitation token or link', create || rename ? 'name' : invite ? 'email' : 'token', invite ? 'email' : 'text', rename ? workspace?.name || '' : '', 'required')}
                     <input type="hidden" name="workspaceId" value="${escapeAttr(workspace?.id || '')}">
-                    <div class="hb-modal-actions"><button class="hb-button-secondary" type="button" data-close-modal>Cancel</button><button class="hb-button" type="submit">${create ? 'Create' : rename ? 'Save' : invite ? 'Invite' : 'Accept'}</button></div>
+                    <div class="hb-modal-actions"><button class="hb-button-secondary" type="button" data-close-modal>Cancel</button><button class="hb-button" type="submit">${create || rename ? 'Save' : invite ? 'Invite' : 'Accept'}</button></div>
                 </form>
             </div>`;
     }
@@ -6026,7 +6043,7 @@ export function mountHeyBeanWebApp(mount) {
                     ${sectionTitle(icons.tune, 'Categories', 'Create, recolor, or delete item categories.')}
                     <form class="hb-form hb-category-create" data-modal-form="category-create">
                         <div class="hb-field-row">${labelInput('Name', 'name', 'text', '', 'required')}${labelInput('Color', 'color', 'color', themeAccentColor())}</div>
-                        <button class="hb-button" type="submit">Add category</button>
+                        <button class="hb-button" type="submit">Save</button>
                     </form>
                     <div class="hb-list hb-category-list">
                         ${state.categories.map((category) => `
@@ -6602,8 +6619,18 @@ export function mountHeyBeanWebApp(mount) {
     async function createNoteFolder() {
         const name = window.prompt('Folder name');
         if (!name || !name.trim()) return;
+        const normalizedName = name.trim();
+        const nameKey = normalizedName.toLocaleLowerCase();
+        const existing = state.noteFolders.find((folder) => String(folder.name || '').trim().toLocaleLowerCase() === nameKey);
+        if (existing) {
+            state.selectedNoteFolderId = String(existing.id);
+            render();
+            return;
+        }
+        if (pendingNoteFolderNames.has(nameKey)) return;
+        pendingNoteFolderNames.add(nameKey);
         try {
-            const folder = await api(workspaceScopedPath('/note-folders'), { method: 'POST', body: { name: name.trim() } });
+            const folder = await api(workspaceScopedPath('/note-folders'), { method: 'POST', body: { name: normalizedName } });
             state.noteFolders = normalizeNoteFolders([...state.noteFolders, folder]);
             state.selectedNoteFolderId = String(folder.id);
             saveDashboardCache();
@@ -6611,6 +6638,8 @@ export function mountHeyBeanWebApp(mount) {
         } catch (error) {
             state.error = friendlyError(error, 'create that folder');
             render();
+        } finally {
+            pendingNoteFolderNames.delete(nameKey);
         }
     }
 
@@ -6654,7 +6683,7 @@ export function mountHeyBeanWebApp(mount) {
             ...body,
             noteFolderId: body.note_folder_id,
         }));
-        setNoteSaveStatus('Saving...');
+        saveDashboardCache();
         const queued = noteAutosaveTimers.get(String(id));
         if (queued?.timer) window.clearTimeout(queued.timer);
         const timer = window.setTimeout(() => saveNotePayload(id, body), immediate ? 1 : noteAutosaveDelay);
@@ -6670,29 +6699,56 @@ export function mountHeyBeanWebApp(mount) {
         if (body) saveNotePayload(id, body);
     }
 
+    function flushAllNoteAutosaves(options = {}) {
+        noteAutosaveTimers.forEach((queued, id) => {
+            if (queued?.timer) window.clearTimeout(queued.timer);
+            if (queued?.body) saveNotePayload(id, queued.body, options);
+        });
+    }
+
     function setNoteSaveStatus(text) {
         const status = mount.querySelector('.hb-note-save-state');
         if (status) status.textContent = text;
     }
 
-    async function saveNotePayload(id, body) {
+    async function saveNotePayload(id, body, options = {}) {
         if (!id) return;
         noteAutosaveTimers.delete(String(id));
+        if (noteSaveInFlight.has(String(id)) && !options.keepalive) {
+            pendingNoteSaveBodies.set(String(id), body);
+            return;
+        }
+        noteSaveInFlight.add(String(id));
         state.notesSaving = true;
         state.error = '';
-        setNoteSaveStatus('Saving...');
+        let saveFailed = false;
         try {
-            const note = await api(`/notes/${encodeURIComponent(id)}`, { method: 'PATCH', body });
+            const note = await api(`/notes/${encodeURIComponent(id)}`, {
+                method: 'PATCH',
+                body,
+                keepalive: options.keepalive === true,
+            });
             state.notes = normalizeNotes(upsertById(state.notes, note));
             state.selectedNoteId = String(note.id);
             saveDashboardCache();
-            setNoteSaveStatus('Auto-saved');
         } catch (error) {
-            state.error = friendlyError(error, 'save that note');
-            setNoteSaveStatus('Save failed');
-            render();
+            saveFailed = true;
+            state.notes = normalizeNotes(upsertById(state.notes, {
+                ...findById(state.notes, id),
+                ...body,
+            }));
+            saveDashboardCache();
         } finally {
+            noteSaveInFlight.delete(String(id));
             state.notesSaving = false;
+            const pendingBody = pendingNoteSaveBodies.get(String(id));
+            pendingNoteSaveBodies.delete(String(id));
+            if (pendingBody) {
+                saveNotePayload(id, pendingBody);
+            } else if (saveFailed && !options.keepalive) {
+                const timer = window.setTimeout(() => saveNotePayload(id, body), 3000);
+                noteAutosaveTimers.set(String(id), { timer, body });
+            }
         }
     }
 
@@ -6834,6 +6890,12 @@ export function mountHeyBeanWebApp(mount) {
         const prefix = marker ? `${marker.indent}${marker.marker}` : indentation;
         if (!prefix) return;
         event.preventDefault();
+        if (marker && line.text.slice(marker.end).trim() === '') {
+            const nextText = `${text.slice(0, line.start)}${marker.indent}${text.slice(line.end)}`;
+            replaceNoteBodyText(body, nextText, line.start + marker.indent.length);
+            scheduleNoteAutosave(form, true);
+            return;
+        }
         const nextText = `${text.slice(0, offset)}\n${prefix}${text.slice(offset)}`;
         replaceNoteBodyText(body, nextText, offset + 1 + prefix.length);
         scheduleNoteAutosave(form);
@@ -10571,7 +10633,6 @@ export function mountHeyBeanWebApp(mount) {
         const parts = [];
         const overdue = itemOverdue(task, 'task');
         const dueLabel = task.due_at || task.dueAt ? formatDueTime(task.due_at || task.dueAt, { includeDate: overdue }) : '';
-        if (task.category) parts.push(task.category);
         if (overdue) parts.push('overdue');
         if (dueLabel) parts.push(`Due ${dueLabel}`);
         if (taskIsRecurring(task)) parts.push(recurrenceSummary(task));
@@ -10582,7 +10643,6 @@ export function mountHeyBeanWebApp(mount) {
         const parts = [];
         const overdue = itemOverdue(reminder, 'reminder');
         const dateLabel = reminderDateValue(reminder) ? formatDueTime(reminderDateValue(reminder), { includeDate: overdue }) : '';
-        if (reminder.category) parts.push(reminder.category);
         if (overdue) parts.push('overdue');
         if (dateLabel) parts.push(dateLabel);
         if (itemIsRecurring(reminder)) parts.push(recurrenceSummary(reminder));
@@ -10592,7 +10652,6 @@ export function mountHeyBeanWebApp(mount) {
     function criticalEventSubtitle(event) {
         const parts = [];
         if (event.starts_at || event.startsAt || event.ends_at || event.endsAt) parts.push(eventTime(event));
-        if (event.category) parts.push(event.category);
         const recurrence = itemRecurrenceValue(event);
         if (recurrence && recurrence !== 'none') parts.push(recurrenceSummary(event));
         return parts.join(' · ') || 'Unscheduled';
@@ -10766,7 +10825,6 @@ export function mountHeyBeanWebApp(mount) {
     function reminderSubtitle(reminder) {
         const bits = [];
         const dueValue = reminder.remind_at || reminder.due_at || reminder.dueAt || '';
-        if (reminder.category) bits.push(reminder.category);
         if (dueValue) bits.push(formatDueTime(dueValue, { includeDate: itemOverdue(reminder, 'reminder') }));
         if (itemIsRecurring(reminder)) bits.push(recurrenceSummary(reminder));
         return bits.join(' · ') || 'No reminder time';

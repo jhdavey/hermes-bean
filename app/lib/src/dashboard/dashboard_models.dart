@@ -198,3 +198,29 @@ class _PendingReminderWrite {
   final int mutationVersion;
   final bool deleted;
 }
+
+class _PendingNoteSave {
+  const _PendingNoteSave({
+    required this.note,
+    required this.version,
+    required this.title,
+    required this.bodyHtml,
+    required this.plainText,
+    required this.folderId,
+    required this.clearFolder,
+    required this.isPinned,
+    required this.metadata,
+    required this.syncToWorkspaceIds,
+  });
+
+  final HermesNote note;
+  final int version;
+  final String title;
+  final String bodyHtml;
+  final String plainText;
+  final int? folderId;
+  final bool clearFolder;
+  final bool? isPinned;
+  final Map<String, Object?>? metadata;
+  final List<Object>? syncToWorkspaceIds;
+}

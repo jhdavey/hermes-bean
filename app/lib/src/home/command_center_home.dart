@@ -774,13 +774,6 @@ class _CommandCenterAgendaList extends StatelessWidget {
             ),
           ],
         ),
-        if (loading)
-          Positioned(
-            key: const Key('command-center-agenda-refreshing'),
-            top: 4,
-            right: 4,
-            child: _InlineLoadingBadge(label: 'Updating'),
-          ),
       ],
     );
   }
@@ -821,24 +814,20 @@ class _CommandCenterAgendaRow extends StatelessWidget {
           height: 42,
           padding: const EdgeInsets.only(left: 8, right: 6),
           decoration: BoxDecoration(
-            border: showTopDivider
-                ? Border(top: BorderSide(color: _quietBorderColor(alpha: .30)))
-                : null,
+            border: Border(
+              left: BorderSide(
+                color: categoryColor.withValues(alpha: .72),
+                width: 3,
+              ),
+            ),
           ),
           child: Stack(
             children: [
               Positioned(
                 key: Key('command-center-agenda-category-rail-${item.key}'),
                 left: 0,
-                top: 9,
-                bottom: 9,
-                child: Container(
-                  width: 3,
-                  decoration: BoxDecoration(
-                    color: categoryColor.withValues(alpha: .72),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
+                top: 0,
+                child: const SizedBox.shrink(),
               ),
               Row(
                 children: [

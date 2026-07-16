@@ -52,6 +52,7 @@ class _ActiveBeanChatRequest {
 
 class _CommandCenterShellState extends State<CommandCenterShell>
     with WidgetsBindingObserver {
+  static const _localPendingNoteMetadataKey = '_local_pending_save';
   _AuthPhase _phase = _AuthPhase.loading;
   HermesUser? _user;
   HermesSession? _session;
@@ -151,6 +152,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   final Map<int, int> _latestTaskWriteVersions = {};
   final Map<int, int> _latestReminderWriteVersions = {};
   final Map<int, int> _latestCalendarEventWriteVersions = {};
+  final Map<int, _PendingNoteSave> _pendingNoteSaves = {};
+  final Map<int, Timer> _pendingNoteSaveTimers = {};
+  final Set<int> _noteSavesInFlight = <int>{};
+  int _noteSaveVersion = 0;
 
   void _applyUserTheme(HermesUser? user) {
     widget.onThemeChanged(user?.theme ?? 'green');
@@ -210,6 +215,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _latestTaskWriteVersions.clear();
     _latestReminderWriteVersions.clear();
     _latestCalendarEventWriteVersions.clear();
+    for (final timer in _pendingNoteSaveTimers.values) {
+      timer.cancel();
+    }
+    _pendingNoteSaveTimers.clear();
+    _pendingNoteSaves.clear();
+    _noteSavesInFlight.clear();
     _dismissedReminderBannerIds.clear();
     _notifiedReminderIds.clear();
     _shownApprovalSheetId = null;
@@ -1220,6 +1231,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanWorkStatusClearTimer?.cancel();
     _beanResponsePreviewTimer?.cancel();
     _reminderDueTimer?.cancel();
+    for (final timer in _pendingNoteSaveTimers.values) {
+      timer.cancel();
+    }
+    _flushPendingNoteSaves();
     _stopDashboardChangePolling();
     _chatInputController.dispose();
     _chatInputFocusNode.dispose();
@@ -1232,6 +1247,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (state == AppLifecycleState.resumed) {
       _scheduleAppIconBadgeSync(_criticalItemCountForToday());
       unawaited(_pollDashboardChanges());
+    } else if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _flushPendingNoteSaves();
     }
   }
 
@@ -1607,7 +1626,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         } else {
           _restoreDashboardSnapshot(cachedSnapshot);
         }
-        _phase = _AuthPhase.signedIn;
+        // Keep the launch covered until the server snapshot is ready. The
+        // persisted snapshot is an offline fallback, not stale UI that should
+        // flash before completion/calendar changes reconcile.
+        _phase = _AuthPhase.loading;
         _loadingStatusText = null;
         _dashboardDataLoading = true;
       });
@@ -1707,9 +1729,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _phase = _AuthPhase.signedIn;
         _loadingStatusText = null;
         _dashboardDataLoading = false;
-        _error = refreshError == null
-            ? null
-            : 'You are signed in. ${beanFriendlyErrorMessage(refreshError!, action: 'refresh your latest data')}';
+        // Partial resource failures are retried by the dashboard feed and must
+        // not turn every usable screen into a global red warning.
+        _error = null;
       });
       _syncReminderNotifications();
       unawaited(_pushNotifications.registerForUser(widget.apiClient));
@@ -1768,8 +1790,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       googleCalendarStatusFuture,
       outlookCalendarStatusFuture,
     ]);
-    if (!_isCurrentAuthGeneration(authGeneration) ||
-        _phase != _AuthPhase.signedIn) {
+    if (!_isCurrentAuthGeneration(authGeneration)) {
       return;
     }
     setState(() {
@@ -1823,7 +1844,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       }
       setState(() {
         _noteFolders = _sortedNoteFolders(results[0] as List<HermesNoteFolder>);
-        _notes = _sortedNotes(results[1] as List<HermesNote>);
+        _notes = _notesWithLocalDrafts(results[1] as List<HermesNote>);
         _memoryItems = _sortedMemoryItems(results[2] as List<HermesMemoryItem>);
         _memorySummaries = results[3] as List<HermesMemorySummary>;
         _memoryHistory = results[4] as List<HermesRequestHistoryItem>;
@@ -1832,6 +1853,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         if (events.isNotEmpty) _events = events;
       });
       _cacheCurrentDashboardSnapshot();
+      _resumeLocalNoteDrafts();
     } catch (_) {
       // Secondary panels can retry on navigation or the next dashboard refresh.
     }
@@ -3639,7 +3661,7 @@ ${_truncateDiagnostic(stack, 2200)}
         );
       }
       if (noteFolders != null) _noteFolders = _sortedNoteFolders(noteFolders);
-      if (notes != null) _notes = _sortedNotes(notes);
+      if (notes != null) _notes = _notesWithLocalDrafts(notes);
       if (memoryItems != null) _memoryItems = _sortedMemoryItems(memoryItems);
       if (memorySummaries != null) _memorySummaries = memorySummaries;
       if (memoryHistory != null) _memoryHistory = memoryHistory;
@@ -4198,7 +4220,7 @@ ${_truncateDiagnostic(stack, 2200)}
           idFor: (task) => task.id,
         );
         _noteFolders = _sortedNoteFolders(results[4] as List<HermesNoteFolder>);
-        _notes = _sortedNotes(results[5] as List<HermesNote>);
+        _notes = _notesWithLocalDrafts(results[5] as List<HermesNote>);
         _memoryItems = _sortedMemoryItems(results[6] as List<HermesMemoryItem>);
         _memorySummaries = results[7] as List<HermesMemorySummary>;
         _memoryHistory = results[8] as List<HermesRequestHistoryItem>;
@@ -4232,7 +4254,8 @@ ${_truncateDiagnostic(stack, 2200)}
       });
       _syncReminderNotifications();
       _cacheCurrentDashboardSnapshot();
-    } catch (error) {
+      _resumeLocalNoteDrafts();
+    } catch (_) {
       if (!mounted ||
           _phase != _AuthPhase.signedIn ||
           authGeneration != _authGeneration ||
@@ -4240,10 +4263,7 @@ ${_truncateDiagnostic(stack, 2200)}
         return;
       }
       setState(() {
-        _error = beanFriendlyErrorMessage(
-          error,
-          action: 'refresh your latest data',
-        );
+        _error = null;
         _dashboardDataLoading = false;
       });
     }
@@ -4343,7 +4363,7 @@ ${_truncateDiagnostic(stack, 2200)}
         _resumeActiveBeanRuns(sessionDetails);
         _tasks = listedTasks.isEmpty ? summaryTasks : listedTasks;
         _noteFolders = _sortedNoteFolders(results[4] as List<HermesNoteFolder>);
-        _notes = _sortedNotes(results[5] as List<HermesNote>);
+        _notes = _notesWithLocalDrafts(results[5] as List<HermesNote>);
         _memoryItems = _sortedMemoryItems(results[6] as List<HermesMemoryItem>);
         _memorySummaries = results[7] as List<HermesMemorySummary>;
         _memoryHistory = results[8] as List<HermesRequestHistoryItem>;
@@ -4362,6 +4382,7 @@ ${_truncateDiagnostic(stack, 2200)}
       });
       _syncReminderNotifications();
       _cacheCurrentDashboardSnapshot();
+      _resumeLocalNoteDrafts();
     } catch (error) {
       if (!mounted ||
           _phase != _AuthPhase.signedIn ||
@@ -5195,9 +5216,8 @@ ${_truncateDiagnostic(stack, 2200)}
   Future<HermesNoteFolder> _createNoteFolder(String name) async {
     final folder = await widget.apiClient.createNoteFolder(name: name);
     if (!mounted) return folder;
-    setState(
-      () => _noteFolders = _sortedNoteFolders([..._noteFolders, folder]),
-    );
+    setState(() => _noteFolders = _upsertNoteFolder(_noteFolders, folder));
+    _cacheCurrentDashboardSnapshot();
     return folder;
   }
 
@@ -5235,30 +5255,163 @@ ${_truncateDiagnostic(stack, 2200)}
         'Notes are available on this plan after upgrading.',
       );
     }
-    final saved = note == null
-        ? await widget.apiClient.createNote(
-            title: title,
-            bodyHtml: bodyHtml,
-            plainText: plainText,
-            folderId: folderId,
-            isPinned: isPinned ?? false,
-            metadata: metadata,
-            syncToWorkspaceIds: syncToWorkspaceIds ?? const [],
-          )
-        : await widget.apiClient.updateNote(
-            note.id,
-            title: title,
-            bodyHtml: bodyHtml,
-            plainText: plainText,
-            folderId: folderId,
-            clearFolder: clearFolder,
-            isPinned: isPinned,
-            metadata: metadata,
-            syncToWorkspaceIds: syncToWorkspaceIds,
-          );
-    if (!mounted) return saved;
-    setState(() => _notes = _upsertNote(_notes, saved));
-    return saved;
+    if (note == null) {
+      final saved = await widget.apiClient.createNote(
+        title: title,
+        bodyHtml: bodyHtml,
+        plainText: plainText,
+        folderId: folderId,
+        isPinned: isPinned ?? false,
+        metadata: metadata,
+        syncToWorkspaceIds: syncToWorkspaceIds ?? const [],
+      );
+      if (mounted) {
+        setState(() => _notes = _upsertNote(_notes, saved));
+        _cacheCurrentDashboardSnapshot();
+      }
+      return saved;
+    }
+
+    final serverMetadata = _noteServerMetadata(metadata ?? note.metadata);
+    final optimistic = note.copyWith(
+      title: title,
+      bodyHtml: bodyHtml,
+      plainText: plainText,
+      folderId: folderId,
+      clearFolder: clearFolder,
+      isPinned: isPinned,
+      updatedAt: DateTime.now().toUtc().toIso8601String(),
+      metadata: {...serverMetadata, _localPendingNoteMetadataKey: true},
+      linkedWorkspaceIds: syncToWorkspaceIds == null
+          ? note.linkedWorkspaceIds
+          : syncToWorkspaceIds
+                .map((id) => int.tryParse(id.toString()))
+                .whereType<int>()
+                .toList(growable: false),
+    );
+    final version = ++_noteSaveVersion;
+    final pending = _PendingNoteSave(
+      note: optimistic,
+      version: version,
+      title: title,
+      bodyHtml: bodyHtml,
+      plainText: plainText,
+      folderId: folderId,
+      clearFolder: clearFolder,
+      isPinned: isPinned,
+      metadata: serverMetadata,
+      syncToWorkspaceIds: syncToWorkspaceIds,
+    );
+    _pendingNoteSaves[note.id] = pending;
+    if (mounted) {
+      setState(() => _notes = _upsertNote(_notes, optimistic));
+      _cacheCurrentDashboardSnapshot();
+    }
+    _schedulePendingNoteSave(note.id);
+    return optimistic;
+  }
+
+  Map<String, Object?> _noteServerMetadata(Map<String, Object?> metadata) {
+    final serverMetadata = Map<String, Object?>.from(metadata);
+    serverMetadata.remove(_localPendingNoteMetadataKey);
+    return serverMetadata;
+  }
+
+  void _schedulePendingNoteSave(
+    int noteId, {
+    Duration delay = const Duration(milliseconds: 240),
+  }) {
+    _pendingNoteSaveTimers.remove(noteId)?.cancel();
+    _pendingNoteSaveTimers[noteId] = Timer(
+      delay,
+      () => unawaited(_drainPendingNoteSave(noteId)),
+    );
+  }
+
+  void _flushPendingNoteSaves() {
+    final noteIds = _pendingNoteSaves.keys.toList(growable: false);
+    for (final noteId in noteIds) {
+      _pendingNoteSaveTimers.remove(noteId)?.cancel();
+      unawaited(_drainPendingNoteSave(noteId));
+    }
+  }
+
+  Future<void> _drainPendingNoteSave(int noteId) async {
+    _pendingNoteSaveTimers.remove(noteId)?.cancel();
+    if (_noteSavesInFlight.contains(noteId)) return;
+    final pending = _pendingNoteSaves.remove(noteId);
+    if (pending == null) return;
+    _noteSavesInFlight.add(noteId);
+    try {
+      final saved = await widget.apiClient.updateNote(
+        noteId,
+        title: pending.title,
+        bodyHtml: pending.bodyHtml,
+        plainText: pending.plainText,
+        folderId: pending.folderId,
+        clearFolder: pending.clearFolder,
+        isPinned: pending.isPinned,
+        metadata: pending.metadata,
+        syncToWorkspaceIds: pending.syncToWorkspaceIds,
+      );
+      final newerSave = _pendingNoteSaves[noteId];
+      if (mounted &&
+          (newerSave == null || newerSave.version <= pending.version)) {
+        setState(() => _notes = _upsertNote(_notes, saved));
+        _cacheCurrentDashboardSnapshot();
+      }
+    } catch (_) {
+      final newerSave = _pendingNoteSaves[noteId];
+      if (newerSave == null || newerSave.version < pending.version) {
+        _pendingNoteSaves[noteId] = pending;
+      }
+      if (mounted) {
+        _cacheCurrentDashboardSnapshot();
+        _schedulePendingNoteSave(noteId, delay: const Duration(seconds: 3));
+      }
+    } finally {
+      _noteSavesInFlight.remove(noteId);
+      if (_pendingNoteSaves.containsKey(noteId) &&
+          !_pendingNoteSaveTimers.containsKey(noteId)) {
+        _schedulePendingNoteSave(noteId);
+      }
+    }
+  }
+
+  List<HermesNote> _notesWithLocalDrafts(List<HermesNote> serverNotes) {
+    final merged = <int, HermesNote>{
+      for (final note in serverNotes) note.id: note,
+    };
+    for (final note in _notes) {
+      if (note.metadata[_localPendingNoteMetadataKey] == true) {
+        merged[note.id] = note;
+      }
+    }
+    return _sortedNotes(merged.values.toList(growable: false));
+  }
+
+  void _resumeLocalNoteDrafts() {
+    for (final note in _notes.where(
+      (note) => note.metadata[_localPendingNoteMetadataKey] == true,
+    )) {
+      if (_pendingNoteSaves.containsKey(note.id) ||
+          _noteSavesInFlight.contains(note.id)) {
+        continue;
+      }
+      unawaited(
+        _saveNote(
+          note,
+          title: note.title,
+          bodyHtml: note.bodyHtml ?? '',
+          plainText: note.plainText ?? '',
+          folderId: note.folderId,
+          clearFolder: note.folderId == null,
+          isPinned: note.isPinned,
+          metadata: _noteServerMetadata(note.metadata),
+          syncToWorkspaceIds: note.linkedWorkspaceIds,
+        ),
+      );
+    }
   }
 
   Future<void> _createNoteFromTopMenu() async {
@@ -6640,7 +6793,9 @@ ${_truncateDiagnostic(stack, 2200)}
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const CircularProgressIndicator(),
+            const CircularProgressIndicator(
+              key: Key('signed-in-loading-indicator'),
+            ),
             if (_loadingStatusText != null) ...[
               const SizedBox(height: 12),
               Text(

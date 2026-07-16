@@ -42,6 +42,20 @@ List<HermesNoteFolder> _sortedNoteFolders(List<HermesNoteFolder> folders) {
   return sorted;
 }
 
+List<HermesNoteFolder> _upsertNoteFolder(
+  List<HermesNoteFolder> folders,
+  HermesNoteFolder folder,
+) {
+  final next = [...folders];
+  final index = next.indexWhere((item) => item.id == folder.id);
+  if (index == -1) {
+    next.add(folder);
+  } else {
+    next[index] = folder;
+  }
+  return _sortedNoteFolders(next);
+}
+
 List<HermesNote> _upsertNote(List<HermesNote> notes, HermesNote note) {
   final next = [...notes];
   final index = next.indexWhere((item) => item.id == note.id);
@@ -307,7 +321,6 @@ String _taskSubtitle(HermesTask task) {
   );
   final parts = <String>[
     if (_taskIsCompleted(task)) 'Completed',
-    if ((task.category ?? '').trim().isNotEmpty) task.category!.trim(),
     if (overdue) 'overdue',
     if (dueLabel.isNotEmpty) 'Due $dueLabel',
     if (_taskIsRecurring(task)) _recurrenceSummaryFromMetadata(task.metadata),
@@ -323,7 +336,6 @@ String _reminderSubtitle(HermesReminder reminder) {
   );
   final parts = <String>[
     _reminderIsCompleted(reminder) ? 'Completed' : 'Scheduled',
-    if ((reminder.category ?? '').trim().isNotEmpty) reminder.category!.trim(),
     if (overdue) 'overdue',
     if (dueLabel.isNotEmpty) dueLabel else 'No time set',
     if (reminder.calendarEventId != null) 'Linked event',
@@ -568,10 +580,7 @@ List<_CommandCenterAgendaItem> _commandCenterAgendaItems({
             : dateOnly
             ? 'Today'
             : _naturalTimeLabel(due),
-        subtitle: [
-          if (overdue) 'overdue',
-          if ((task.category ?? '').trim().isNotEmpty) task.category!.trim(),
-        ].join(' · '),
+        subtitle: [if (overdue) 'overdue'].join(' · '),
         isOverdue: overdue,
         task: task,
       ),
@@ -600,11 +609,7 @@ List<_CommandCenterAgendaItem> _commandCenterAgendaItems({
             : dateOnly
             ? 'Today'
             : _naturalTimeLabel(due),
-        subtitle: [
-          if (overdue) 'overdue',
-          if ((reminder.category ?? '').trim().isNotEmpty)
-            reminder.category!.trim(),
-        ].join(' · '),
+        subtitle: [if (overdue) 'overdue'].join(' · '),
         isOverdue: overdue,
         reminder: reminder,
       ),
