@@ -11,7 +11,6 @@ class EnterpriseCustomerLimit extends Model
         'user_id',
         'billing_type',
         'monthly_rate_usd',
-        'usage_rate_usd',
         'limits',
         'notes',
         'updated_by_user_id',
@@ -21,7 +20,6 @@ class EnterpriseCustomerLimit extends Model
     {
         return [
             'monthly_rate_usd' => 'float',
-            'usage_rate_usd' => 'float',
             'limits' => 'array',
         ];
     }

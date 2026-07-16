@@ -5,7 +5,6 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Workspace extends Model
 {
@@ -36,11 +35,6 @@ class Workspace extends Model
         return $this->memberships()->where('status', 'active');
     }
 
-    public function agentProfile(): HasOne
-    {
-        return $this->hasOne(AgentProfile::class);
-    }
-
     public function tasks(): HasMany
     {
         return $this->hasMany(Task::class);
@@ -54,11 +48,6 @@ class Workspace extends Model
     public function calendarEvents(): HasMany
     {
         return $this->hasMany(CalendarEvent::class);
-    }
-
-    public function voiceTurns(): HasMany
-    {
-        return $this->hasMany(VoiceTurn::class);
     }
 
     public function eventCategories(): HasMany

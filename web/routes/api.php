@@ -1,20 +1,9 @@
 <?php
 
-use App\Http\Controllers\Api\ActivityEventController;
-use App\Http\Controllers\Api\AdminLiveLookupController;
 use App\Http\Controllers\Api\AdminPlanLimitController;
-use App\Http\Controllers\Api\AdminSettingsController;
-use App\Http\Controllers\Api\AdminUsageController;
-use App\Http\Controllers\Api\AdminVoiceQualityController;
 use App\Http\Controllers\Api\AppleCalendarController;
-use App\Http\Controllers\Api\AssistantRunController;
-use App\Http\Controllers\Api\AssistantVoiceController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BillingController;
-use App\Http\Controllers\Api\BrowserVoiceStreamController;
-use App\Http\Controllers\Api\BrowserVoiceTurnController;
-use App\Http\Controllers\Api\ConversationMessageController;
-use App\Http\Controllers\Api\ConversationSessionController;
 use App\Http\Controllers\Api\CouponCodeController;
 use App\Http\Controllers\Api\DashboardChangeController;
 use App\Http\Controllers\Api\DomainResourceController;
@@ -70,25 +59,6 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/workspaces/{source}/sync-all', [WorkspaceController::class, 'syncAll']);
         Route::patch('/workspaces/{workspace}/google-calendars', [WorkspaceController::class, 'calendars']);
 
-        Route::get('/assistant/sessions', [ConversationSessionController::class, 'index']);
-        Route::post('/assistant/sessions', [ConversationSessionController::class, 'store']);
-        Route::get('/assistant/sessions/{session}', [ConversationSessionController::class, 'show']);
-        Route::post('/assistant/sessions/{session}/cancel', [ConversationSessionController::class, 'cancel']);
-        Route::post('/assistant/sessions/{session}/messages/{message}/branch', [ConversationMessageController::class, 'branch']);
-        Route::post('/assistant/sessions/{session}/runs', [AssistantRunController::class, 'store']);
-        Route::get('/assistant/sessions/{session}/runs/lookup', [AssistantRunController::class, 'lookup']);
-        Route::get('/assistant/sessions/{session}/events', [ActivityEventController::class, 'index']);
-        Route::get('/assistant/runs/{run}', [AssistantRunController::class, 'show']);
-        Route::post('/assistant/runs/{run}/cancel', [AssistantRunController::class, 'cancel']);
-        Route::get('/assistant/voice/voices', [AssistantVoiceController::class, 'voices']);
-        Route::post('/assistant/voice/realtime/session', [AssistantVoiceController::class, 'realtimeSession']);
-        Route::post('/assistant/voice/client-failures', [AssistantVoiceController::class, 'clientFailure']);
-        Route::get('/assistant/voice/capabilities', [BrowserVoiceTurnController::class, 'capabilities']);
-        Route::post('/assistant/voice/turns', [BrowserVoiceTurnController::class, 'store']);
-        Route::post('/assistant/voice/turns/{turnId}/delivery', [BrowserVoiceTurnController::class, 'delivery']);
-        Route::get('/assistant/voice/state', [BrowserVoiceTurnController::class, 'state']);
-        Route::get('/assistant/voice/stream', BrowserVoiceStreamController::class);
-        Route::post('/assistant/voice/cancellations', [BrowserVoiceTurnController::class, 'cancel']);
         Route::get('/today', [TodaySummaryController::class, 'show']);
         Route::get('/places/autocomplete', [PlaceController::class, 'autocomplete']);
         Route::get('/places/details', [PlaceController::class, 'details']);
@@ -111,13 +81,6 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/external-calendars/import', [ExternalCalendarController::class, 'import']);
         Route::post('/apple-calendar/import', [AppleCalendarController::class, 'import']);
 
-        Route::get('/memory-items', [DomainResourceController::class, 'listMemoryItems']);
-        Route::post('/memory-items', [DomainResourceController::class, 'storeMemoryItem']);
-        Route::patch('/memory-items/{memoryItem}', [DomainResourceController::class, 'updateMemoryItem']);
-        Route::delete('/memory-items/{memoryItem}', [DomainResourceController::class, 'destroyMemoryItem']);
-        Route::get('/memory-summaries', [DomainResourceController::class, 'listMemorySummaries']);
-        Route::get('/memory/request-history', [DomainResourceController::class, 'requestHistory']);
-        Route::get('/memory/activity-timeline', [DomainResourceController::class, 'activityTimeline']);
         Route::get('/note-folders', [DomainResourceController::class, 'listNoteFolders']);
         Route::post('/note-folders', [DomainResourceController::class, 'storeNoteFolder']);
         Route::patch('/note-folders/{noteFolder}', [DomainResourceController::class, 'updateNoteFolder']);
@@ -143,21 +106,8 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/event-categories', [DomainResourceController::class, 'storeEventCategory']);
         Route::patch('/event-categories/{eventCategory}', [DomainResourceController::class, 'updateEventCategory']);
         Route::delete('/event-categories/{eventCategory}', [DomainResourceController::class, 'destroyEventCategory']);
-        Route::get('/approvals', [DomainResourceController::class, 'listApprovals']);
-        Route::post('/approvals', [DomainResourceController::class, 'storeApproval']);
-        Route::patch('/approvals/{approval}', [DomainResourceController::class, 'updateApproval']);
-        Route::delete('/approvals/{approval}', [DomainResourceController::class, 'destroyApproval']);
-        Route::post('/approvals/{approval}/approve', [DomainResourceController::class, 'approveApproval']);
-        Route::post('/approvals/{approval}/deny', [DomainResourceController::class, 'denyApproval']);
-        Route::get('/blockers', [DomainResourceController::class, 'listBlockers']);
-        Route::post('/blockers', [DomainResourceController::class, 'storeBlocker']);
-        Route::patch('/blockers/{blocker}', [DomainResourceController::class, 'updateBlocker']);
-        Route::delete('/blockers/{blocker}', [DomainResourceController::class, 'destroyBlocker']);
-
         Route::middleware('admin')->prefix('admin')->group(function (): void {
-            Route::get('/settings', [AdminSettingsController::class, 'show']);
-            Route::get('/settings/models', [AdminSettingsController::class, 'models']);
-            Route::patch('/settings', [AdminSettingsController::class, 'update']);
+            Route::get('/issue-reports/summary', [IssueReportController::class, 'summary']);
             Route::get('/plan-limits', [AdminPlanLimitController::class, 'show']);
             Route::patch('/plan-limits/plans', [AdminPlanLimitController::class, 'updatePlans']);
             Route::post('/plan-limits/enterprise-customers', [AdminPlanLimitController::class, 'storeEnterpriseCustomer']);
@@ -166,11 +116,6 @@ Route::middleware('api.rate_limit')->group(function (): void {
             Route::get('/coupon-codes', [CouponCodeController::class, 'index']);
             Route::post('/coupon-codes', [CouponCodeController::class, 'store']);
             Route::delete('/coupon-codes/{couponCode}', [CouponCodeController::class, 'destroy']);
-            Route::get('/live-lookup/providers', [AdminLiveLookupController::class, 'index']);
-            Route::get('/usage/summary', [AdminUsageController::class, 'summary']);
-            Route::get('/usage/logs', [AdminUsageController::class, 'logs']);
-            Route::get('/usage/alerts', [AdminUsageController::class, 'alerts']);
-            Route::get('/voice-quality', [AdminVoiceQualityController::class, 'index']);
             Route::patch('/issue-reports/{issueReport}', [IssueReportController::class, 'update']);
         });
     });

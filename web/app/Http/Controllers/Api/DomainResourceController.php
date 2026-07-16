@@ -3,13 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Approval;
-use App\Models\Blocker;
 use App\Models\CalendarEvent;
-use App\Models\ConversationSession;
 use App\Models\EventCategory;
-use App\Models\MemoryItem;
-use App\Models\MemorySummary;
 use App\Models\Note;
 use App\Models\NoteFolder;
 use App\Models\Reminder;
@@ -17,13 +12,11 @@ use App\Models\Task;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
 use App\Models\WorkspaceMembership;
-use App\Services\BeanMemoryService;
 use App\Services\GoogleCalendarSyncService;
 use App\Services\OutlookCalendarSyncService;
 use App\Services\PlanHistoryService;
 use App\Services\PlanLimitService;
 use App\Services\RecurringCalendarEventService;
-use App\Services\StructuredHermesActionService;
 use App\Services\WorkspaceItemSyncService;
 use App\Services\WorkspaceService;
 use Illuminate\Database\Eloquent\Model;
@@ -34,7 +27,6 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
-use InvalidArgumentException;
 
 class DomainResourceController extends Controller
 {
@@ -62,153 +54,12 @@ class DomainResourceController extends Controller
     ];
 
     public function __construct(
-        private readonly StructuredHermesActionService $actions,
         private readonly GoogleCalendarSyncService $googleCalendar,
         private readonly OutlookCalendarSyncService $outlookCalendar,
         private readonly RecurringCalendarEventService $recurringCalendarEvents,
         private readonly PlanLimitService $planLimits,
         private readonly PlanHistoryService $history,
-        private readonly BeanMemoryService $memory,
     ) {}
-
-    public function listMemoryItems(Request $request): JsonResponse
-    {
-        $workspace = $this->workspace($request);
-        $validated = $request->validate([
-            'query' => ['nullable', 'string', 'max:255'],
-            'type' => ['nullable', 'string', 'max:50'],
-            'status' => ['nullable', 'string', 'max:50'],
-            'include_archived' => ['nullable', 'boolean'],
-            'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
-            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
-        ]);
-
-        return response()->json(['data' => $this->memory->searchMemory($request->user(), $workspace, $validated)]);
-    }
-
-    public function storeMemoryItem(Request $request): JsonResponse
-    {
-        $workspace = $this->workspace($request);
-        $validated = $request->validate([
-            'type' => ['required', 'string', Rule::in(BeanMemoryService::CANONICAL_TYPES)],
-            'status' => ['nullable', 'string', 'max:50'],
-            'visibility' => ['nullable', 'string', 'max:50'],
-            'title' => ['nullable', 'string', 'max:255'],
-            'content' => ['required', 'string'],
-            'summary' => ['nullable', 'string'],
-            'confidence' => ['nullable', 'integer', 'min:0', 'max:100'],
-            'importance' => ['nullable', 'integer', 'min:0', 'max:100'],
-            'source_type' => ['nullable', 'string', 'max:80'],
-            'source_id' => ['nullable', 'integer'],
-            'expires_at' => ['nullable', 'date'],
-            'metadata' => ['nullable', 'array'],
-            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
-        ]);
-
-        return response()->json(['data' => $this->memory->createItem($request->user(), $workspace, $validated, $request->user())], 201);
-    }
-
-    public function updateMemoryItem(Request $request, string $memoryItem): JsonResponse
-    {
-        $item = MemoryItem::withTrashed()->where('user_id', $request->user()->id)->findOrFail($memoryItem);
-        $validated = $request->validate([
-            'type' => ['sometimes', 'required', 'string', Rule::in(BeanMemoryService::CANONICAL_TYPES)],
-            'status' => ['sometimes', 'nullable', 'string', 'max:50'],
-            'visibility' => ['sometimes', 'nullable', 'string', 'max:50'],
-            'title' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'content' => ['sometimes', 'required', 'string'],
-            'summary' => ['sometimes', 'nullable', 'string'],
-            'confidence' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:100'],
-            'importance' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:100'],
-            'last_verified_at' => ['sometimes', 'nullable', 'date'],
-            'expires_at' => ['sometimes', 'nullable', 'date'],
-            'metadata' => ['sometimes', 'nullable', 'array'],
-        ]);
-
-        return response()->json(['data' => $this->memory->updateItem($request->user(), $item, $validated)]);
-    }
-
-    public function destroyMemoryItem(Request $request, string $memoryItem): JsonResponse
-    {
-        $item = MemoryItem::where('user_id', $request->user()->id)->findOrFail($memoryItem);
-        $this->memory->forgetItem($request->user(), $item);
-
-        return response()->json(status: 204);
-    }
-
-    public function listMemorySummaries(Request $request): JsonResponse
-    {
-        $workspace = $this->workspace($request);
-        $summaries = MemorySummary::query()
-            ->where('user_id', $request->user()->id)
-            ->where('workspace_id', $workspace->id)
-            ->when($request->filled('summary_type'), fn ($query) => $query->where('summary_type', (string) $request->input('summary_type')))
-            ->latest('ends_at')
-            ->latest('updated_at')
-            ->limit(min(max((int) $request->input('limit', 20), 1), 100))
-            ->get();
-
-        return $this->listed($summaries);
-    }
-
-    public function requestHistory(Request $request): JsonResponse
-    {
-        $session = $this->historySession($request);
-        $this->rejectUnknownQueryParameters($request, [
-            'from', 'to', 'query', 'workspace_id', 'limit',
-        ]);
-        $validated = $request->validate([
-            'from' => ['nullable', 'string', 'required_with:to', 'max:40'],
-            'to' => ['nullable', 'string', 'required_with:from', 'max:40'],
-            'query' => ['nullable', 'string', 'max:255'],
-            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
-            'limit' => ['nullable', 'integer', 'min:1', 'max:50'],
-        ]);
-
-        try {
-            $history = $this->memory->requestHistory($session, $validated);
-        } catch (InvalidArgumentException $exception) {
-            throw ValidationException::withMessages(['from' => $exception->getMessage()]);
-        }
-
-        return response()->json(['data' => $history]);
-    }
-
-    public function activityTimeline(Request $request): JsonResponse
-    {
-        $session = $this->historySession($request);
-        $this->rejectUnknownQueryParameters($request, [
-            'from', 'to', 'event_type', 'tool_name', 'workspace_id', 'limit',
-        ]);
-        $validated = $request->validate([
-            'from' => ['nullable', 'string', 'required_with:to', 'max:40'],
-            'to' => ['nullable', 'string', 'required_with:from', 'max:40'],
-            'event_type' => ['nullable', 'string', 'max:120'],
-            'tool_name' => ['nullable', 'string', 'max:120'],
-            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
-            'limit' => ['nullable', 'integer', 'min:1', 'max:50'],
-        ]);
-
-        try {
-            $activity = $this->memory->activityTimeline($session, $validated);
-        } catch (InvalidArgumentException $exception) {
-            throw ValidationException::withMessages(['from' => $exception->getMessage()]);
-        }
-
-        return response()->json(['data' => $activity]);
-    }
-
-    /** @param list<string> $allowed */
-    private function rejectUnknownQueryParameters(Request $request, array $allowed): void
-    {
-        $errors = [];
-        foreach (array_diff(array_keys($request->query()), $allowed) as $field) {
-            $errors[(string) $field] = ['This query parameter is not supported.'];
-        }
-        if ($errors !== []) {
-            throw ValidationException::withMessages($errors);
-        }
-    }
 
     public function listNoteFolders(Request $request): JsonResponse
     {
@@ -495,26 +346,9 @@ class DomainResourceController extends Controller
         return $this->listed($categories);
     }
 
-    public function listApprovals(Request $request): JsonResponse
-    {
-        return $this->listed($this->history->filterApprovals(
-            Approval::where('user_id', $request->user()->id)->orderBy('id')->get(),
-            $request->user()
-        ));
-    }
-
-    public function listBlockers(Request $request): JsonResponse
-    {
-        return $this->listed($this->history->filterBlockers(
-            Blocker::where('user_id', $request->user()->id)->orderBy('id')->get(),
-            $request->user()
-        ));
-    }
-
     public function storeTask(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'conversation_session_id' => $this->ownedSessionRule($request),
             'title' => ['required', 'string', 'max:255'],
             'type' => ['required', Rule::in(['todo', 'chore', 'maintenance'])],
             'status' => ['sometimes', 'required', 'string', Rule::in(self::TASK_STATUSES)],
@@ -616,7 +450,6 @@ class DomainResourceController extends Controller
     public function storeReminder(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'conversation_session_id' => $this->ownedSessionRule($request),
             'calendar_event_id' => ['nullable', Rule::exists('calendar_events', 'id')->where('workspace_id', $this->workspace($request)->id)],
             'title' => ['required', 'string', 'max:255'],
             'notes' => ['nullable', 'string'],
@@ -695,7 +528,6 @@ class DomainResourceController extends Controller
     public function storeCalendarEvent(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'conversation_session_id' => $this->ownedSessionRule($request),
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'location' => ['nullable', 'string', 'max:255'],
@@ -941,88 +773,6 @@ class DomainResourceController extends Controller
         return response()->json(status: 204);
     }
 
-    public function storeApproval(Request $request): JsonResponse
-    {
-        return $this->created(Approval::create($this->owned($request, $request->validate([
-            'conversation_session_id' => $this->ownedSessionRule($request),
-            'title' => ['required', 'string', 'max:255'],
-            'description' => ['nullable', 'string'],
-            'status' => ['nullable', 'string', 'max:50'],
-            'payload' => ['nullable', 'array'],
-        ]))));
-    }
-
-    public function updateApproval(Request $request, string $approval): JsonResponse
-    {
-        $model = Approval::where('user_id', $request->user()->id)->findOrFail($approval);
-        $model->update($request->validate([
-            'title' => ['sometimes', 'required', 'string', 'max:255'],
-            'description' => ['sometimes', 'nullable', 'string'],
-            'status' => ['sometimes', 'nullable', 'string', 'max:50'],
-            'payload' => ['sometimes', 'nullable', 'array'],
-        ]));
-
-        return response()->json(['data' => $model->refresh()]);
-    }
-
-    public function destroyApproval(Request $request, string $approval): JsonResponse
-    {
-        return $this->destroyed(Approval::where('user_id', $request->user()->id)->findOrFail($approval));
-    }
-
-    public function approveApproval(Request $request, string $approval): JsonResponse
-    {
-        $ownedApproval = Approval::where('user_id', $request->user()->id)->findOrFail($approval);
-
-        try {
-            $result = $this->actions->approve($ownedApproval);
-        } catch (InvalidArgumentException $exception) {
-            return response()->json(['message' => $exception->getMessage()], 409);
-        }
-
-        return response()->json(['data' => $result]);
-    }
-
-    public function denyApproval(Request $request, string $approval): JsonResponse
-    {
-        $ownedApproval = Approval::where('user_id', $request->user()->id)->findOrFail($approval);
-
-        try {
-            $approval = $this->actions->deny($ownedApproval);
-        } catch (InvalidArgumentException $exception) {
-            return response()->json(['message' => $exception->getMessage()], 409);
-        }
-
-        return response()->json(['data' => ['approval' => $approval]]);
-    }
-
-    public function storeBlocker(Request $request): JsonResponse
-    {
-        return $this->created(Blocker::create($this->owned($request, $request->validate([
-            'conversation_session_id' => $this->ownedSessionRule($request),
-            'reason' => ['required', 'string'],
-            'status' => ['nullable', 'string', 'max:50'],
-            'context' => ['nullable', 'array'],
-        ]))));
-    }
-
-    public function updateBlocker(Request $request, string $blocker): JsonResponse
-    {
-        $model = Blocker::where('user_id', $request->user()->id)->findOrFail($blocker);
-        $model->update($request->validate([
-            'reason' => ['sometimes', 'required', 'string'],
-            'status' => ['sometimes', 'nullable', 'string', 'max:50'],
-            'context' => ['sometimes', 'nullable', 'array'],
-        ]));
-
-        return response()->json(['data' => $model->refresh()]);
-    }
-
-    public function destroyBlocker(Request $request, string $blocker): JsonResponse
-    {
-        return $this->destroyed(Blocker::where('user_id', $request->user()->id)->findOrFail($blocker));
-    }
-
     private function listed(mixed $models): JsonResponse
     {
         return response()->json(['data' => $models]);
@@ -1038,39 +788,6 @@ class DomainResourceController extends Controller
         $model->delete();
 
         return response()->json(status: 204);
-    }
-
-    /**
-     * @return array<int, mixed>
-     */
-    private function ownedSessionRule(Request $request): array
-    {
-        return [
-            'nullable',
-            'integer',
-            Rule::exists('conversation_sessions', 'id')->where('user_id', $request->user()->id),
-        ];
-    }
-
-    private function historySession(Request $request): ConversationSession
-    {
-        $workspace = $this->workspace($request);
-
-        return ConversationSession::query()
-            ->where('user_id', $request->user()->id)
-            ->where('workspace_id', $workspace->id)
-            ->orderByRaw('COALESCE(last_activity_at, updated_at, created_at) desc')
-            ->latest('id')
-            ->first()
-            ?? ConversationSession::create([
-                'user_id' => $request->user()->id,
-                'workspace_id' => $workspace->id,
-                'created_by_user_id' => $request->user()->id,
-                'title' => 'Memory lookup',
-                'status' => 'active',
-                'metadata' => ['source' => 'memory_lookup'],
-                'last_activity_at' => now(),
-            ]);
     }
 
     /**
@@ -1151,8 +868,6 @@ class DomainResourceController extends Controller
             'storeReminder' => 'reminders',
             'storeCalendarEvent' => 'calendar_events',
             'storeEventCategory' => 'event_categories',
-            'storeApproval' => 'approvals',
-            'storeBlocker' => 'blockers',
             default => 'tasks',
         };
     }

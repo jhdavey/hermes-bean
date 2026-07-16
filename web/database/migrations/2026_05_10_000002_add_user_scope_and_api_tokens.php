@@ -19,14 +19,9 @@ return new class extends Migration
         });
 
         foreach ([
-            'conversation_sessions',
-            'conversation_messages',
-            'activity_events',
             'tasks',
             'reminders',
             'calendar_events',
-            'approvals',
-            'blockers',
         ] as $tableName) {
             Schema::table($tableName, function (Blueprint $table): void {
                 $table->foreignId('user_id')->after('id')->nullable()->constrained()->cascadeOnDelete();
@@ -38,14 +33,9 @@ return new class extends Migration
     public function down(): void
     {
         foreach ([
-            'blockers',
-            'approvals',
             'calendar_events',
             'reminders',
             'tasks',
-            'activity_events',
-            'conversation_messages',
-            'conversation_sessions',
         ] as $tableName) {
             Schema::table($tableName, function (Blueprint $table): void {
                 $table->dropConstrainedForeignId('user_id');

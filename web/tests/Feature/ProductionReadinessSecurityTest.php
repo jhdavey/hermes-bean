@@ -24,21 +24,21 @@ class ProductionReadinessSecurityTest extends TestCase
             ->assertHeader('X-Content-Type-Options', 'nosniff')
             ->assertHeader('X-Frame-Options', 'DENY')
             ->assertHeader('Referrer-Policy', 'no-referrer')
-            ->assertHeader('Permissions-Policy', 'camera=(), geolocation=(self), microphone=(self), autoplay=(self)')
+            ->assertHeader('Permissions-Policy', 'camera=(), geolocation=(self)')
             ->assertJsonPath('error.code', 'unauthenticated')
             ->assertJsonPath('error.message', 'Unauthenticated.');
     }
 
     public function test_cors_preflight_allows_configured_owner_origins(): void
     {
-        config(['security.cors.allowed_origins' => ['https://app.hermesbean.example']]);
+        config(['security.cors.allowed_origins' => ['https://app.heybean.example']]);
 
         $this->withHeaders([
-            'Origin' => 'https://app.hermesbean.example',
+            'Origin' => 'https://app.heybean.example',
             'Access-Control-Request-Method' => 'POST',
         ])->options('/api/auth/login')
             ->assertNoContent()
-            ->assertHeader('Access-Control-Allow-Origin', 'https://app.hermesbean.example')
+            ->assertHeader('Access-Control-Allow-Origin', 'https://app.heybean.example')
             ->assertHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
             ->assertHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept, X-Requested-With');
     }
@@ -70,7 +70,7 @@ class ProductionReadinessSecurityTest extends TestCase
 
     public function test_web_pages_receive_security_headers(): void
     {
-        $contentSecurityPolicy = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.openai.com wss://api.openai.com; media-src 'self' blob: mediastream:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'";
+        $contentSecurityPolicy = "default-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'";
 
         foreach (['/', '/privacy', '/terms'] as $path) {
             $this->get($path)
@@ -78,7 +78,7 @@ class ProductionReadinessSecurityTest extends TestCase
                 ->assertHeader('X-Content-Type-Options', 'nosniff')
                 ->assertHeader('X-Frame-Options', 'DENY')
                 ->assertHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
-                ->assertHeader('Permissions-Policy', 'camera=(), geolocation=(self), microphone=(self), autoplay=(self)')
+                ->assertHeader('Permissions-Policy', 'camera=(), geolocation=(self)')
                 ->assertHeader('Content-Security-Policy', $contentSecurityPolicy)
                 ->assertHeaderMissing('Cross-Origin-Opener-Policy')
                 ->assertHeaderMissing('Cross-Origin-Embedder-Policy');

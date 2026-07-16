@@ -1,5 +1,5 @@
-name: hermes_bean_app
-description: "HeyBean personal assistant mobile app."
+name: heybean_app
+description: "HeyBean calendar and productivity mobile app."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -42,12 +42,7 @@ dependencies:
   firebase_core: ^4.10.0
   firebase_messaging: ^16.3.0
   flutter_stripe: ^13.0.0
-  geolocator: ^14.0.2
-  geocoding: ^4.0.0
-  record: ^6.2.1
-  just_audio: ^0.10.6
-  path_provider: ^2.1.5
-  speech_to_text: ^7.4.0
+  http: ^1.2.2
 
 dev_dependencies:
   flutter_test:

@@ -4,8 +4,6 @@ namespace Tests;
 
 use App\Models\PersonalAccessToken;
 use App\Models\User;
-use App\Services\AgentProfileService;
-use App\Services\WelcomeConversationService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 
@@ -24,9 +22,7 @@ abstract class TestCase extends BaseTestCase
             'email' => $email,
             'password' => 'correct-horse-battery-staple',
         ]);
-        app(AgentProfileService::class)->ensureForUser($user);
         app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
-        app(WelcomeConversationService::class)->ensureForUser($user);
 
         $token = bin2hex(random_bytes(32));
         PersonalAccessToken::create([

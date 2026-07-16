@@ -2,26 +2,15 @@
 
 namespace Tests\Feature;
 
-use App\Models\ActivityEvent;
-use App\Models\AdminSetting;
-use App\Models\Approval;
-use App\Models\AssistantRun;
-use App\Models\Blocker;
 use App\Models\CalendarEvent;
-use App\Models\ConversationMessage;
-use App\Models\ConversationSession;
 use App\Models\DashboardChange;
-use App\Models\EnterpriseCustomerLimit;
 use App\Models\Note;
 use App\Models\NoteFolder;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
-use App\Models\VoiceTurn;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
-use App\Services\AiUsageService;
-use App\Services\PlanHistoryService;
 use App\Services\PlanLimitService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -44,33 +33,28 @@ class PlanLimitEntitlementTest extends TestCase
 
         $this->withToken($adminToken)->patchJson('/api/admin/plan-limits/plans', [
             'plans' => [
-                'base' => $this->limits(['workspace_limit' => 3, 'daily_cost_limit' => 2.5]),
+                'base' => $this->limits(['workspace_limit' => 3]),
                 'premium' => $this->limits(['workspace_limit' => 8, 'email_reminders_enabled' => true]),
-                'pro' => $this->limits(['workspace_limit' => null, 'priority_background_work' => true]),
+                'pro' => $this->limits(['workspace_limit' => null]),
             ],
         ])
             ->assertOk()
-            ->assertJsonPath('data.plans.base.value.workspace_limit', 3)
-            ->assertJsonPath('data.plans.base.value.daily_cost_limit', 2.5);
+            ->assertJsonPath('data.plans.base.value.workspace_limit', 3);
 
         $this->assertDatabaseHas('admin_settings', ['key' => 'plan_limits.base']);
-        $this->assertSame(2.5, AdminSetting::where('key', 'usage.base_cost_limit')->firstOrFail()->value['value']);
 
         $this->withToken($adminToken)->postJson('/api/admin/plan-limits/enterprise-customers', [
             'user_id' => $customer->id,
-            'billing_type' => 'usage',
-            'monthly_rate_usd' => null,
-            'usage_rate_usd' => 0.18,
+            'billing_type' => 'monthly',
+            'monthly_rate_usd' => 199,
             'notes' => 'Pilot agreement',
             'limits' => $this->limits([
                 'workspace_limit' => 42,
-                'daily_cost_limit' => 99,
-                'daily_external_cost_limit' => 12,
             ]),
         ])
             ->assertCreated()
             ->assertJsonPath('data.enterprise_customers.0.user_id', $customer->id)
-            ->assertJsonPath('data.enterprise_customers.0.billing_type', 'usage')
+            ->assertJsonPath('data.enterprise_customers.0.billing_type', 'monthly')
             ->assertJsonPath('data.enterprise_customers.0.limits.workspace_limit', 42);
 
         $customer->refresh();
@@ -278,8 +262,6 @@ class PlanLimitEntitlementTest extends TestCase
         $this->assertTrue($limits['recurring_calendar_enabled']);
         $this->assertTrue($limits['email_reminders_enabled']);
         $this->assertTrue($limits['notes_enabled']);
-        $this->assertTrue($limits['priority_background_work']);
-
         $this->withToken($token)->getJson('/api/auth/me')
             ->assertOk()
             ->assertJsonPath('data.is_admin', true)
@@ -342,28 +324,6 @@ class PlanLimitEntitlementTest extends TestCase
         ])
             ->assertCreated()
             ->assertJsonPath('data.title', 'Admin note');
-    }
-
-    public function test_enterprise_customer_limits_drive_ai_budget_and_admins_have_unlimited_usage(): void
-    {
-        $enterprise = User::factory()->create(['subscription_tier' => 'enterprise']);
-        EnterpriseCustomerLimit::create([
-            'user_id' => $enterprise->id,
-            'billing_type' => 'monthly',
-            'monthly_rate_usd' => 500,
-            'limits' => $this->limits(['daily_cost_limit' => 50, 'daily_external_cost_limit' => 15]),
-        ]);
-        $admin = User::factory()->create(['is_admin' => true, 'subscription_tier' => 'base']);
-        $usage = app(AiUsageService::class);
-
-        $enterpriseBudget = $usage->budgetFor($enterprise);
-        $adminBudget = $usage->budgetFor($admin);
-
-        $this->assertSame('enterprise', $enterpriseBudget['tier']);
-        $this->assertSame(50.0, $enterpriseBudget['daily_cost_limit']);
-        $this->assertSame('admin', $adminBudget['tier']);
-        $this->assertNull($adminBudget['daily_cost_limit']);
-        $this->assertTrue($usage->preflightDirect($admin, null, 'gpt-test-tools', 0, 0, 1_000_000, 'text')['allowed']);
     }
 
     public function test_base_plan_history_filtering_and_pruning_preserve_active_and_future_items(): void
@@ -466,96 +426,6 @@ class PlanLimitEntitlementTest extends TestCase
                 'link_type' => 'sync',
             ]);
 
-            $oldSession = ConversationSession::create([
-                'user_id' => $user->id,
-                'workspace_id' => $workspace->id,
-                'title' => 'Old chat',
-                'last_activity_at' => $old,
-                'updated_at' => $old,
-            ]);
-            $recentSession = ConversationSession::create([
-                'user_id' => $user->id,
-                'workspace_id' => $workspace->id,
-                'title' => 'Recent chat',
-                'last_activity_at' => $recent,
-                'updated_at' => $recent,
-            ]);
-            $oldMessage = ConversationMessage::create([
-                'user_id' => $user->id,
-                'conversation_session_id' => $oldSession->id,
-                'role' => 'user',
-                'content' => 'Old message',
-                'created_at' => $old,
-                'updated_at' => $old,
-            ]);
-            $oldMessageInRecentSession = ConversationMessage::create([
-                'user_id' => $user->id,
-                'conversation_session_id' => $recentSession->id,
-                'role' => 'user',
-                'content' => 'Old message in recent session',
-                'created_at' => $old,
-                'updated_at' => $old,
-            ]);
-            $recentMessage = ConversationMessage::create([
-                'user_id' => $user->id,
-                'conversation_session_id' => $recentSession->id,
-                'role' => 'assistant',
-                'content' => 'Recent message',
-                'created_at' => $recent,
-                'updated_at' => $recent,
-            ]);
-
-            $oldActivity = ActivityEvent::create([
-                'user_id' => $user->id,
-                'workspace_id' => $workspace->id,
-                'conversation_session_id' => $recentSession->id,
-                'event_type' => 'tool',
-                'status' => 'recorded',
-                'created_at' => $old,
-                'updated_at' => $old,
-            ]);
-            $recentActivity = ActivityEvent::create([
-                'user_id' => $user->id,
-                'workspace_id' => $workspace->id,
-                'conversation_session_id' => $recentSession->id,
-                'event_type' => 'tool',
-                'status' => 'recorded',
-                'created_at' => $recent,
-                'updated_at' => $recent,
-            ]);
-
-            $oldApprovedApproval = Approval::create([
-                'user_id' => $user->id,
-                'workspace_id' => $workspace->id,
-                'title' => 'Old approved approval',
-                'status' => 'approved',
-                'updated_at' => $old,
-                'created_at' => $old,
-            ]);
-            $oldPendingApproval = Approval::create([
-                'user_id' => $user->id,
-                'workspace_id' => $workspace->id,
-                'title' => 'Old pending approval',
-                'status' => 'pending',
-                'updated_at' => $old,
-                'created_at' => $old,
-            ]);
-            $oldResolvedBlocker = Blocker::create([
-                'user_id' => $user->id,
-                'workspace_id' => $workspace->id,
-                'reason' => 'Old resolved blocker',
-                'status' => 'resolved',
-                'updated_at' => $old,
-                'created_at' => $old,
-            ]);
-            $oldOpenBlocker = Blocker::create([
-                'user_id' => $user->id,
-                'workspace_id' => $workspace->id,
-                'reason' => 'Old open blocker',
-                'status' => 'open',
-                'updated_at' => $old,
-                'created_at' => $old,
-            ]);
             $oldDashboardChange = DashboardChange::create([
                 'user_id' => $user->id,
                 'workspace_id' => $workspace->id,
@@ -565,23 +435,7 @@ class PlanLimitEntitlementTest extends TestCase
                 'created_at' => $old,
                 'updated_at' => $old,
             ]);
-
-            foreach ([
-                $oldSession,
-                $oldMessage,
-                $oldMessageInRecentSession,
-                $oldActivity,
-                $oldApprovedApproval,
-                $oldPendingApproval,
-                $oldResolvedBlocker,
-                $oldOpenBlocker,
-                $oldDashboardChange,
-            ] as $model) {
-                $this->stampModel($model, $old);
-            }
-            foreach ([$recentSession, $recentMessage, $recentActivity] as $model) {
-                $this->stampModel($model, $recent);
-            }
+            $this->stampModel($oldDashboardChange, $old);
 
             $this->withToken($token)->getJson('/api/tasks/past')
                 ->assertOk()
@@ -601,16 +455,6 @@ class PlanLimitEntitlementTest extends TestCase
                 ->assertJsonFragment(['title' => 'Ongoing monthly event'])
                 ->assertJsonFragment(['title' => 'Future event']);
 
-            $this->withToken($token)->getJson('/api/approvals')
-                ->assertOk()
-                ->assertJsonMissing(['title' => 'Old approved approval'])
-                ->assertJsonFragment(['title' => 'Old pending approval']);
-
-            $this->withToken($token)->getJson('/api/blockers')
-                ->assertOk()
-                ->assertJsonMissing(['reason' => 'Old resolved blocker'])
-                ->assertJsonFragment(['reason' => 'Old open blocker']);
-
             $this->artisan('plan-history:prune')->assertExitCode(0);
 
             $this->assertDatabaseMissing('tasks', ['id' => $oldCompletedTask->id]);
@@ -623,191 +467,8 @@ class PlanLimitEntitlementTest extends TestCase
             $this->assertDatabaseMissing('calendar_events', ['id' => $oldGeneratedOccurrence->id]);
             $this->assertDatabaseHas('calendar_events', ['id' => $ongoingRecurringEvent->id]);
             $this->assertDatabaseHas('calendar_events', ['id' => $futureEvent->id]);
-            $this->assertDatabaseMissing('conversation_sessions', ['id' => $oldSession->id]);
-            $this->assertDatabaseMissing('conversation_messages', ['id' => $oldMessage->id]);
-            $this->assertDatabaseMissing('conversation_messages', ['id' => $oldMessageInRecentSession->id]);
-            $this->assertDatabaseHas('conversation_messages', ['id' => $recentMessage->id]);
-            $this->assertDatabaseMissing('activity_events', ['id' => $oldActivity->id]);
-            $this->assertDatabaseHas('activity_events', ['id' => $recentActivity->id]);
-            $this->assertDatabaseMissing('approvals', ['id' => $oldApprovedApproval->id]);
-            $this->assertDatabaseHas('approvals', ['id' => $oldPendingApproval->id]);
-            $this->assertDatabaseMissing('blockers', ['id' => $oldResolvedBlocker->id]);
-            $this->assertDatabaseHas('blockers', ['id' => $oldOpenBlocker->id]);
             $this->assertDatabaseMissing('dashboard_changes', ['id' => $oldDashboardChange->id]);
             $this->assertDatabaseMissing('workspace_item_links', ['source_type' => 'tasks', 'source_id' => $oldCompletedTask->id]);
-        } finally {
-            Carbon::setTestNow();
-        }
-    }
-
-    public function test_message_retention_prunes_only_unreferenced_rows_inside_an_active_history_aggregate(): void
-    {
-        Carbon::setTestNow(Carbon::parse('2026-06-18 12:00:00'));
-
-        try {
-            $this->apiToken('lifecycle-message-retention@example.com');
-            $user = User::where('email', 'lifecycle-message-retention@example.com')->firstOrFail();
-            $workspace = Workspace::where('personal_owner_user_id', $user->id)->firstOrFail();
-            $old = now()->subDays(20);
-            $recent = now()->subDays(2);
-            $cutoff = now()->subDays(14);
-            $recentSession = ConversationSession::create([
-                'user_id' => $user->id,
-                'workspace_id' => $workspace->id,
-                'title' => 'Recent lifecycle history',
-                'last_activity_at' => $recent,
-            ]);
-            $genericUser = ConversationMessage::create([
-                'user_id' => $user->id,
-                'conversation_session_id' => $recentSession->id,
-                'role' => 'user',
-                'content' => 'Old generic request with a durable run.',
-                'created_at' => $old,
-                'updated_at' => $old,
-            ]);
-            $genericFinal = ConversationMessage::create([
-                'user_id' => $user->id,
-                'conversation_session_id' => $recentSession->id,
-                'role' => 'assistant',
-                'content' => 'Old literal generic final.',
-                'created_at' => $old,
-                'updated_at' => $old,
-            ]);
-            $genericRun = AssistantRun::create([
-                'user_id' => $user->id,
-                'workspace_id' => $workspace->id,
-                'conversation_session_id' => $recentSession->id,
-                'user_message_id' => $genericUser->id,
-                'assistant_message_id' => $genericFinal->id,
-                'client_request_id' => 'retention-generic-run-0001',
-                'request_fingerprint' => str_repeat('a', 64),
-                'source' => 'web_chat',
-                'status' => 'completed',
-                'input' => $genericUser->content,
-                'completed_at' => $old,
-                'created_at' => $old,
-                'updated_at' => $old,
-            ]);
-            $voiceUser = ConversationMessage::create([
-                'user_id' => $user->id,
-                'conversation_session_id' => $recentSession->id,
-                'client_turn_id' => 'retention-voice-turn-0001',
-                'role' => 'user',
-                'origin' => 'spoken_voice',
-                'display_mode' => 'voice_only',
-                'content' => 'Old voice request with a durable turn.',
-                'created_at' => $old,
-                'updated_at' => $old,
-            ]);
-            $voiceFinal = ConversationMessage::create([
-                'user_id' => $user->id,
-                'conversation_session_id' => $recentSession->id,
-                'client_turn_id' => 'retention-voice-turn-0001',
-                'role' => 'assistant',
-                'origin' => 'spoken_voice',
-                'display_mode' => 'voice_only',
-                'content' => 'Old literal voice final.',
-                'created_at' => $old,
-                'updated_at' => $old,
-            ]);
-            $voiceTurn = VoiceTurn::create([
-                'turn_id' => 'retention-voice-turn-0001',
-                'user_id' => $user->id,
-                'workspace_id' => $workspace->id,
-                'conversation_session_id' => $recentSession->id,
-                'user_message_id' => $voiceUser->id,
-                'final_assistant_message_id' => $voiceFinal->id,
-                'source' => 'browser_voice_realtime',
-                'client_kind' => 'browser_voice',
-                'display_mode' => 'voice_only',
-                'semantic_input' => 'Old voice request with a durable turn.',
-                'state' => 'completed',
-                'version' => 2,
-                'idempotency_key' => 'retention-voice-turn-0001',
-                'acknowledgement_required' => false,
-                'accepted_at' => $old,
-                'terminal_at' => $old,
-                'side_effect_status' => 'none',
-                'created_at' => $old,
-                'updated_at' => $old,
-            ]);
-            $unreferenced = ConversationMessage::create([
-                'user_id' => $user->id,
-                'conversation_session_id' => $recentSession->id,
-                'role' => 'user',
-                'content' => 'Old unreferenced history row.',
-                'created_at' => $old,
-                'updated_at' => $old,
-            ]);
-
-            $oldSession = ConversationSession::create([
-                'user_id' => $user->id,
-                'workspace_id' => $workspace->id,
-                'title' => 'Old aggregate',
-                'last_activity_at' => $old,
-                'created_at' => $old,
-                'updated_at' => $old,
-            ]);
-            $oldVoiceUser = ConversationMessage::create([
-                'user_id' => $user->id,
-                'conversation_session_id' => $oldSession->id,
-                'client_turn_id' => 'retention-old-aggregate-turn-0001',
-                'role' => 'user',
-                'origin' => 'spoken_voice',
-                'display_mode' => 'voice_only',
-                'content' => 'Old aggregate voice request.',
-                'created_at' => $old,
-                'updated_at' => $old,
-            ]);
-            $oldVoiceTurn = VoiceTurn::create([
-                'turn_id' => 'retention-old-aggregate-turn-0001',
-                'user_id' => $user->id,
-                'workspace_id' => $workspace->id,
-                'conversation_session_id' => $oldSession->id,
-                'user_message_id' => $oldVoiceUser->id,
-                'source' => 'browser_voice_realtime',
-                'client_kind' => 'browser_voice',
-                'display_mode' => 'voice_only',
-                'semantic_input' => 'Old aggregate voice request.',
-                'state' => 'canceled',
-                'version' => 2,
-                'idempotency_key' => 'retention-old-aggregate-turn-0001',
-                'acknowledgement_required' => false,
-                'accepted_at' => $old,
-                'terminal_at' => $old,
-                'side_effect_status' => 'none',
-                'created_at' => $old,
-                'updated_at' => $old,
-            ]);
-
-            foreach ([
-                $genericUser,
-                $genericFinal,
-                $voiceUser,
-                $voiceFinal,
-                $unreferenced,
-                $oldSession,
-                $oldVoiceUser,
-                $oldVoiceTurn,
-            ] as $model) {
-                $this->stampModel($model, $old);
-            }
-            $this->stampModel($recentSession, $recent);
-
-            $counts = app(PlanHistoryService::class)->pruneUser($user, $cutoff);
-
-            $this->assertSame(1, $counts['conversation_sessions']);
-            $this->assertSame(1, $counts['conversation_messages']);
-            $this->assertDatabaseHas('assistant_runs', ['id' => $genericRun->id]);
-            $this->assertDatabaseHas('conversation_messages', ['id' => $genericUser->id]);
-            $this->assertDatabaseHas('conversation_messages', ['id' => $genericFinal->id]);
-            $this->assertDatabaseHas('voice_turns', ['id' => $voiceTurn->id]);
-            $this->assertDatabaseHas('conversation_messages', ['id' => $voiceUser->id]);
-            $this->assertDatabaseHas('conversation_messages', ['id' => $voiceFinal->id]);
-            $this->assertDatabaseMissing('conversation_messages', ['id' => $unreferenced->id]);
-            $this->assertDatabaseMissing('conversation_sessions', ['id' => $oldSession->id]);
-            $this->assertDatabaseMissing('voice_turns', ['id' => $oldVoiceTurn->id]);
-            $this->assertDatabaseMissing('conversation_messages', ['id' => $oldVoiceUser->id]);
         } finally {
             Carbon::setTestNow();
         }
@@ -820,15 +481,12 @@ class PlanLimitEntitlementTest extends TestCase
             'calendar_connection_limit' => 1,
             'connected_account_limit' => 1,
             'history_days' => 14,
-            'daily_cost_limit' => 1.0,
-            'daily_external_cost_limit' => 0.25,
             'note_limit' => 10,
             'recurring_tasks_enabled' => false,
             'recurring_reminders_enabled' => false,
             'recurring_calendar_enabled' => false,
             'email_reminders_enabled' => false,
             'notes_enabled' => true,
-            'priority_background_work' => false,
             ...$overrides,
         ];
     }

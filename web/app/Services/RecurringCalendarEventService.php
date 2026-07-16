@@ -103,7 +103,6 @@ class RecurringCalendarEventService
                 'user_id' => $event->user_id,
                 'workspace_id' => $event->workspace_id,
                 'created_by_user_id' => $event->created_by_user_id,
-                'conversation_session_id' => $event->conversation_session_id,
                 'title' => $event->title,
                 'description' => $event->description,
                 'location' => $event->location,

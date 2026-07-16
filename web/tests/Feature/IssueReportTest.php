@@ -62,7 +62,7 @@ class IssueReportTest extends TestCase
             'resolved_at' => now(),
         ]);
 
-        $this->withToken($token)->getJson('/api/admin/usage/summary')
+        $this->withToken($token)->getJson('/api/admin/issue-reports/summary')
             ->assertOk()
             ->assertJsonPath('data.totals.open_issue_reports', 1)
             ->assertJsonPath('data.totals.archived_issue_reports', 1)
@@ -98,7 +98,7 @@ class IssueReportTest extends TestCase
         $this->assertNotNull($report->refresh()->resolved_at);
         $this->assertNotEmpty($report->metadata['archived_at'] ?? null);
 
-        $this->withToken($adminToken)->getJson('/api/admin/usage/summary')
+        $this->withToken($adminToken)->getJson('/api/admin/issue-reports/summary')
             ->assertOk()
             ->assertJsonPath('data.totals.open_issue_reports', 0)
             ->assertJsonPath('data.totals.archived_issue_reports', 1)

@@ -48,15 +48,9 @@ return new class extends Migration
     private function metadataTables(): array
     {
         return [
-            'conversation_sessions',
-            'conversation_messages',
-            'activity_events',
             'tasks',
             'reminders',
             'calendar_events',
-            'approvals',
-            'blockers',
-            'agent_profiles',
             'event_categories',
             'workspaces',
             'workspace_memberships',

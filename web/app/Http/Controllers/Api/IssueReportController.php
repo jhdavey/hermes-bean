@@ -12,6 +12,29 @@ use Illuminate\Validation\Rule;
 
 class IssueReportController extends Controller
 {
+    public function summary(): JsonResponse
+    {
+        $open = IssueReport::query()
+            ->with(['user:id,name,email', 'workspace:id,name,type'])
+            ->where('status', 'open')
+            ->latest()
+            ->get();
+        $archived = IssueReport::query()
+            ->with(['user:id,name,email', 'workspace:id,name,type'])
+            ->where('status', 'closed')
+            ->latest('resolved_at')
+            ->get();
+
+        return response()->json(['data' => [
+            'totals' => [
+                'open_issue_reports' => $open->count(),
+                'archived_issue_reports' => $archived->count(),
+            ],
+            'issue_reports' => $open,
+            'archived_issue_reports' => $archived,
+        ]]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([

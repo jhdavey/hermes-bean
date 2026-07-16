@@ -112,7 +112,7 @@ return new class extends Migration
             });
         }
 
-        foreach (['tasks', 'reminders', 'calendar_events', 'conversation_sessions', 'activity_events'] as $tableName) {
+        foreach (['tasks', 'reminders', 'calendar_events'] as $tableName) {
             if (! Schema::hasTable($tableName) || Schema::hasColumn($tableName, 'created_by_user_id')) {
                 continue;
             }
@@ -128,7 +128,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        foreach (array_reverse(['tasks', 'reminders', 'calendar_events', 'conversation_sessions', 'activity_events']) as $tableName) {
+        foreach (array_reverse(['tasks', 'reminders', 'calendar_events']) as $tableName) {
             if (! Schema::hasTable($tableName) || ! Schema::hasColumn($tableName, 'created_by_user_id')) {
                 continue;
             }
@@ -160,14 +160,9 @@ return new class extends Migration
     private function workspaceScopedTables(): array
     {
         return [
-            'agent_profiles' => 'null',
-            'conversation_sessions' => 'null',
-            'activity_events' => 'null',
             'tasks' => 'null',
             'reminders' => 'null',
             'calendar_events' => 'null',
-            'approvals' => 'null',
-            'blockers' => 'null',
             'event_categories' => 'null',
         ];
     }

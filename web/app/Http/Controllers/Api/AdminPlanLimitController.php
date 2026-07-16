@@ -70,9 +70,8 @@ class AdminPlanLimitController extends Controller
                 'exists:users,id',
                 Rule::unique('enterprise_customer_limits', 'user_id')->ignore($existing?->id),
             ],
-            'billing_type' => ['required', Rule::in(['monthly', 'usage'])],
+            'billing_type' => ['required', Rule::in(['monthly'])],
             'monthly_rate_usd' => ['nullable', 'numeric', 'min:0', 'max:1000000'],
-            'usage_rate_usd' => ['nullable', 'numeric', 'min:0', 'max:1000000'],
             'limits' => ['required', 'array'],
             ...$this->limitRules('limits'),
         ]);
@@ -80,9 +79,6 @@ class AdminPlanLimitController extends Controller
         $data['user_id'] = (int) $data['user_id'];
         if ($data['billing_type'] === 'monthly' && ($data['monthly_rate_usd'] ?? null) === null) {
             $data['monthly_rate_usd'] = 0;
-        }
-        if ($data['billing_type'] === 'usage' && ($data['usage_rate_usd'] ?? null) === null) {
-            $data['usage_rate_usd'] = 0;
         }
         $data['notes'] = $request->validate(['notes' => ['sometimes', 'nullable', 'string', 'max:5000']])['notes'] ?? null;
 
@@ -98,13 +94,10 @@ class AdminPlanLimitController extends Controller
             "{$prefix}.calendar_connection_limit" => ['nullable', 'integer', 'min:0', 'max:1000000'],
             "{$prefix}.connected_account_limit" => ['nullable', 'integer', 'min:0', 'max:1000000'],
             "{$prefix}.history_days" => ['nullable', 'integer', 'min:0', 'max:1000000'],
-            "{$prefix}.daily_cost_limit" => ['nullable', 'numeric', 'min:0', 'max:1000000'],
-            "{$prefix}.daily_external_cost_limit" => ['nullable', 'numeric', 'min:0', 'max:1000000'],
             "{$prefix}.recurring_tasks_enabled" => ['required_with:'.$prefix, 'boolean'],
             "{$prefix}.recurring_reminders_enabled" => ['required_with:'.$prefix, 'boolean'],
             "{$prefix}.recurring_calendar_enabled" => ['required_with:'.$prefix, 'boolean'],
             "{$prefix}.email_reminders_enabled" => ['required_with:'.$prefix, 'boolean'],
-            "{$prefix}.priority_background_work" => ['required_with:'.$prefix, 'boolean'],
         ];
     }
 }

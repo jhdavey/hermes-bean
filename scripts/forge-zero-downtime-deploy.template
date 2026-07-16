@@ -1,6 +1,4 @@
-# Paste this exact recipe into the Laravel Forge deployment-script editor.
-# Forge expands the three macro calls; this file is a source-of-truth template,
-# not a directly executable shell script.
+# Paste this recipe into the Laravel Forge deployment-script editor.
 
 $CREATE_RELEASE()
 
@@ -9,12 +7,6 @@ bash scripts/forge-deploy.sh prepare
 
 $ACTIVATE_RELEASE()
 $RESTART_QUEUES()
-
-cd "$FORGE_SITE_PATH"
-bash scripts/forge-deploy.sh activate
-
-cd "$FORGE_SITE_PATH/web"
-npm run preflight:voice:production
 
 cd "$FORGE_SITE_PATH"
 bash scripts/forge-deploy.sh status

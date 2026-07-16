@@ -14,7 +14,7 @@
     </ol>
 
     <h2>What deletion removes</h2>
-    <p>Account deletion permanently deletes your HeyBean account, authentication tokens, assistant history, tasks, reminders, calendar events, approvals, blockers, workspace-owned personal data, and related app records associated with your account.</p>
+    <p>Account deletion permanently deletes your HeyBean account, authentication tokens, tasks, reminders, calendar events, notes, workspace-owned personal data, and related app records associated with your account.</p>
 
     <h2>What may remain temporarily</h2>
     <p>Some limited records may remain for a short time in encrypted backups, security logs, fraud/abuse prevention records, or records we must keep for legal compliance. Shared household/workspace content may remain visible to other members when they own or still need access to that workspace.</p>

@@ -21,7 +21,6 @@
         data-auth-mode="{{ request()->is('subscribe') ? 'subscribe' : (request()->is('register') ? 'register' : (request()->is('forgot-password') ? 'forgot' : 'login')) }}"
         data-selected-plan="{{ in_array(request()->query('plan'), ['base', 'premium', 'pro'], true) ? request()->query('plan') : '' }}"
         data-selected-billing-interval="{{ request()->query('billing_interval') === 'yearly' ? 'yearly' : 'monthly' }}"
-        data-browser-voice-v2="{{ config('features.browser_voice_v2') ? 'true' : 'false' }}"
     >
         <div class="hb-loading-screen">
             <div class="hb-spinner" aria-hidden="true"></div>

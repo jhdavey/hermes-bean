@@ -5,17 +5,17 @@
     <h1>Terms of Use</h1>
     <p class="effective">Effective date: June 8, 2026</p>
 
-    <p>These Terms of Use govern your access to and use of HeyBean, including the mobile app, API-backed assistant features, connected calendar features, and website. By using HeyBean, you agree to these terms.</p>
+    <p>These Terms of Use govern your access to and use of HeyBean, including the mobile app, connected calendar features, and website. By using HeyBean, you agree to these terms.</p>
 
     <h2>Use of HeyBean</h2>
     <ul>
         <li>You must provide accurate account information and keep your login credentials secure.</li>
-        <li>You are responsible for reviewing Bean’s suggestions, approvals, calendar changes, reminders, tasks, and other actions before relying on them.</li>
+        <li>You are responsible for reviewing calendar changes, reminders, tasks, notes, and other information before relying on them.</li>
         <li>You may not misuse the service, attempt unauthorized access, disrupt infrastructure, reverse engineer restricted components, or use HeyBean for unlawful, harmful, or abusive activity.</li>
     </ul>
 
-    <h2>AI assistant limitations</h2>
-    <p>HeyBean uses AI and automation. Outputs may be incomplete, delayed, or incorrect. Do not rely on HeyBean for emergencies, medical advice, legal advice, financial advice, or other high-risk decisions. You should verify important calendar, task, reminder, and communication details.</p>
+    <h2>Service limitations</h2>
+    <p>Synchronization, notifications, and third-party integrations may be delayed, interrupted, or unavailable. Do not rely on HeyBean for emergencies or other time-critical needs. You should verify important calendar, task, and reminder details.</p>
 
     <h2>Connected services</h2>
     <p>If you connect a calendar or another third-party service, you authorize HeyBean to access and process data from that service as needed to provide requested features. Your use of connected services is also governed by their terms and policies. You can disconnect integrations in the app when available.</p>

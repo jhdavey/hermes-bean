@@ -93,8 +93,8 @@ class PlaceController extends Controller
         }
 
         try {
-            $response = Http::connectTimeout((float) config('services.hermes_runtime.google_places_connect_timeout', 2))
-                ->timeout((float) config('services.hermes_runtime.google_places_timeout', 6))
+            $response = Http::connectTimeout((float) config('services.places.google_places_connect_timeout', 2))
+                ->timeout((float) config('services.places.google_places_timeout', 6))
                 ->get($url);
         } catch (ConnectionException $exception) {
             Log::warning('Google Static Map failed', [
@@ -123,7 +123,7 @@ class PlaceController extends Controller
 
     private function placesConfigured(): bool
     {
-        return (bool) config('services.hermes_runtime.google_places_enabled', true)
+        return (bool) config('services.places.google_places_enabled', true)
             && $this->googleMapsApiKey() !== '';
     }
 
@@ -166,8 +166,8 @@ class PlaceController extends Controller
                     'X-Goog-Api-Key' => $this->googleMapsApiKey(),
                     'X-Goog-FieldMask' => 'suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat',
                 ])
-                ->connectTimeout((float) config('services.hermes_runtime.google_places_connect_timeout', 2))
-                ->timeout((float) config('services.hermes_runtime.google_places_timeout', 6))
+                ->connectTimeout((float) config('services.places.google_places_connect_timeout', 2))
+                ->timeout((float) config('services.places.google_places_timeout', 6))
                 ->post('https://places.googleapis.com/v1/places:autocomplete', $body);
         } catch (ConnectionException $exception) {
             Log::warning('Google Places autocomplete new endpoint failed', [
@@ -208,8 +208,8 @@ class PlaceController extends Controller
     {
         try {
             $response = Http::acceptJson()
-                ->connectTimeout((float) config('services.hermes_runtime.google_places_connect_timeout', 2))
-                ->timeout((float) config('services.hermes_runtime.google_places_timeout', 6))
+                ->connectTimeout((float) config('services.places.google_places_connect_timeout', 2))
+                ->timeout((float) config('services.places.google_places_timeout', 6))
                 ->get('https://maps.googleapis.com/maps/api/place/autocomplete/json', [
                     'input' => trim((string) $data['input']),
                     'components' => 'country:us',
@@ -259,8 +259,8 @@ class PlaceController extends Controller
                     'X-Goog-Api-Key' => $this->googleMapsApiKey(),
                     'X-Goog-FieldMask' => 'id,displayName,formattedAddress,location,googleMapsUri',
                 ])
-                ->connectTimeout((float) config('services.hermes_runtime.google_places_connect_timeout', 2))
-                ->timeout((float) config('services.hermes_runtime.google_places_timeout', 6))
+                ->connectTimeout((float) config('services.places.google_places_connect_timeout', 2))
+                ->timeout((float) config('services.places.google_places_timeout', 6))
                 ->get($url);
         } catch (ConnectionException $exception) {
             Log::warning('Google Place details new endpoint failed', [
@@ -297,8 +297,8 @@ class PlaceController extends Controller
     {
         try {
             $response = Http::acceptJson()
-                ->connectTimeout((float) config('services.hermes_runtime.google_places_connect_timeout', 2))
-                ->timeout((float) config('services.hermes_runtime.google_places_timeout', 6))
+                ->connectTimeout((float) config('services.places.google_places_connect_timeout', 2))
+                ->timeout((float) config('services.places.google_places_timeout', 6))
                 ->get('https://maps.googleapis.com/maps/api/place/details/json', [
                     'place_id' => $placeId,
                     'fields' => 'place_id,name,formatted_address,geometry,url',
@@ -338,6 +338,6 @@ class PlaceController extends Controller
 
     private function googleMapsApiKey(): string
     {
-        return trim((string) config('services.hermes_runtime.google_maps_api_key', ''));
+        return trim((string) config('services.places.google_maps_api_key', ''));
     }
 }

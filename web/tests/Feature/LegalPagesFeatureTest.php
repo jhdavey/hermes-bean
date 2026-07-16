@@ -17,7 +17,7 @@ class LegalPagesFeatureTest extends TestCase
                 ->assertSee('support@heybean.org', false)
                 ->assertHeader('X-Content-Type-Options', 'nosniff')
                 ->assertHeader('X-Frame-Options', 'DENY')
-                ->assertHeader('Permissions-Policy', 'camera=(), geolocation=(self), microphone=(self), autoplay=(self)')
+                ->assertHeader('Permissions-Policy', 'camera=(), geolocation=(self)')
                 ->assertHeader('Content-Security-Policy');
         }
     }
@@ -29,7 +29,7 @@ class LegalPagesFeatureTest extends TestCase
             ->assertSee('Privacy Policy', false)
             ->assertSee('Connected calendar data', false)
             ->assertDontSee('Google Calendar', false)
-            ->assertSee('AI processing', false)
+            ->assertSee('Data processing', false)
             ->assertSee('account deletion', false)
             ->assertSee('export account data', false)
             ->assertSee('Effective date', false);
@@ -40,7 +40,7 @@ class LegalPagesFeatureTest extends TestCase
         $this->get('/terms')
             ->assertOk()
             ->assertSee('Terms of Use', false)
-            ->assertSee('AI assistant limitations', false)
+            ->assertSee('Service limitations', false)
             ->assertSee('Account deletion', false);
 
         $this->get('/support')

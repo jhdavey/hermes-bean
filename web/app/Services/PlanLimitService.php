@@ -16,15 +16,12 @@ class PlanLimitService
         'calendar_connection_limit',
         'connected_account_limit',
         'history_days',
-        'daily_cost_limit',
-        'daily_external_cost_limit',
         'note_limit',
         'recurring_tasks_enabled',
         'recurring_reminders_enabled',
         'recurring_calendar_enabled',
         'email_reminders_enabled',
         'notes_enabled',
-        'priority_background_work',
     ];
 
     public const PLAN_KEYS = ['base', 'premium', 'pro'];
@@ -67,16 +64,6 @@ class PlanLimitService
                 ],
             );
 
-            foreach ($this->usageSettingMap($plan) as $adminSettingKey => $limitKey) {
-                AdminSetting::updateOrCreate(
-                    ['key' => $adminSettingKey],
-                    [
-                        'value' => ['value' => (float) ($limits[$limitKey] ?? 0)],
-                        'type' => 'float',
-                        'updated_by_user_id' => $actor?->id,
-                    ],
-                );
-            }
         }
 
         return $this->payload();
@@ -91,7 +78,6 @@ class PlanLimitService
             'user_id' => $user->id,
             'billing_type' => $data['billing_type'] ?? 'monthly',
             'monthly_rate_usd' => $data['monthly_rate_usd'] ?? null,
-            'usage_rate_usd' => $data['usage_rate_usd'] ?? null,
             'limits' => $limits,
             'notes' => $data['notes'] ?? null,
             'updated_by_user_id' => $actor?->id,
@@ -118,7 +104,6 @@ class PlanLimitService
                 'tier' => 'enterprise',
                 'billing_type' => $customer?->billing_type,
                 'monthly_rate_usd' => $customer?->monthly_rate_usd,
-                'usage_rate_usd' => $customer?->usage_rate_usd,
             ];
         }
 
@@ -127,17 +112,6 @@ class PlanLimitService
         return [
             ...$this->planLimits($tier),
             'tier' => $tier,
-        ];
-    }
-
-    public function budgetFor(User $user): array
-    {
-        $limits = $this->limitsFor($user);
-
-        return [
-            'tier' => $limits['tier'],
-            'daily_cost_limit' => array_key_exists('daily_cost_limit', $limits) ? $limits['daily_cost_limit'] : 0.0,
-            'daily_external_cost_limit' => array_key_exists('daily_external_cost_limit', $limits) ? $limits['daily_external_cost_limit'] : 0.0,
         ];
     }
 
@@ -172,7 +146,6 @@ class PlanLimitService
             'recurring_calendar_enabled' => (bool) ($limits['recurring_calendar_enabled'] ?? false),
             'email_reminders_enabled' => (bool) ($limits['email_reminders_enabled'] ?? false),
             'notes_enabled' => $this->notesAllowedByLimits($limits),
-            'priority_background_work' => (bool) ($limits['priority_background_work'] ?? false),
         ];
     }
 
@@ -309,7 +282,7 @@ class PlanLimitService
             }
 
             $value = $limits[$key];
-            if (str_ends_with($key, '_enabled') || $key === 'priority_background_work') {
+            if (str_ends_with($key, '_enabled')) {
                 $normalized[$key] = (bool) $value;
 
                 continue;
@@ -321,9 +294,7 @@ class PlanLimitService
                 continue;
             }
 
-            $normalized[$key] = in_array($key, ['daily_cost_limit', 'daily_external_cost_limit'], true)
-                ? max(0, (float) $value)
-                : max(0, (int) $value);
+            $normalized[$key] = max(0, (int) $value);
         }
 
         return $normalized;
@@ -331,64 +302,49 @@ class PlanLimitService
 
     public function defaultPlanLimits(string $plan): array
     {
-        $usageLimits = (array) config('services.ai_usage.limits', []);
-
         return match ($plan) {
             'premium' => [
                 'workspace_limit' => 5,
                 'calendar_connection_limit' => 5,
                 'connected_account_limit' => 3,
                 'history_days' => 365,
-                'daily_cost_limit' => $this->usageLimitValue('premium', 'cost_limit', (float) ($usageLimits['premium_cost_limit'] ?? 5.00)),
-                'daily_external_cost_limit' => $this->usageLimitValue('premium', 'external_cost_limit', (float) ($usageLimits['premium_external_cost_limit'] ?? 1.00)),
                 'note_limit' => null,
                 'recurring_tasks_enabled' => true,
                 'recurring_reminders_enabled' => true,
                 'recurring_calendar_enabled' => true,
                 'email_reminders_enabled' => true,
                 'notes_enabled' => true,
-                'priority_background_work' => false,
             ],
             'pro' => [
                 'workspace_limit' => null,
                 'calendar_connection_limit' => null,
                 'connected_account_limit' => null,
                 'history_days' => null,
-                'daily_cost_limit' => $this->usageLimitValue('pro', 'cost_limit', (float) ($usageLimits['pro_cost_limit'] ?? 20.00)),
-                'daily_external_cost_limit' => $this->usageLimitValue('pro', 'external_cost_limit', (float) ($usageLimits['pro_external_cost_limit'] ?? 5.00)),
                 'note_limit' => null,
                 'recurring_tasks_enabled' => true,
                 'recurring_reminders_enabled' => true,
                 'recurring_calendar_enabled' => true,
                 'email_reminders_enabled' => true,
                 'notes_enabled' => true,
-                'priority_background_work' => true,
             ],
             default => [
                 'workspace_limit' => 2,
                 'calendar_connection_limit' => 1,
                 'connected_account_limit' => 1,
                 'history_days' => 14,
-                'daily_cost_limit' => $this->usageLimitValue('base', 'cost_limit', (float) ($usageLimits['base_cost_limit'] ?? 1.00)),
-                'daily_external_cost_limit' => $this->usageLimitValue('base', 'external_cost_limit', (float) ($usageLimits['base_external_cost_limit'] ?? 0.25)),
                 'note_limit' => 10,
                 'recurring_tasks_enabled' => false,
                 'recurring_reminders_enabled' => false,
                 'recurring_calendar_enabled' => false,
                 'email_reminders_enabled' => false,
                 'notes_enabled' => true,
-                'priority_background_work' => false,
             ],
         };
     }
 
     private function enterpriseDefaults(): array
     {
-        return [
-            ...$this->defaultPlanLimits('pro'),
-            'daily_cost_limit' => null,
-            'daily_external_cost_limit' => null,
-        ];
+        return $this->defaultPlanLimits('pro');
     }
 
     private function adminLimits(): array
@@ -400,15 +356,12 @@ class PlanLimitService
             'calendar_connection_limit' => null,
             'connected_account_limit' => null,
             'history_days' => null,
-            'daily_cost_limit' => null,
-            'daily_external_cost_limit' => null,
             'note_limit' => null,
             'recurring_tasks_enabled' => true,
             'recurring_reminders_enabled' => true,
             'recurring_calendar_enabled' => true,
             'email_reminders_enabled' => true,
             'notes_enabled' => true,
-            'priority_background_work' => true,
         ];
     }
 
@@ -420,7 +373,6 @@ class PlanLimitService
             'user' => $customer->user,
             'billing_type' => $customer->billing_type,
             'monthly_rate_usd' => $customer->monthly_rate_usd,
-            'usage_rate_usd' => $customer->usage_rate_usd,
             'limits' => $this->normalizeLimits((array) ($customer->limits ?? []), $this->enterpriseDefaults()),
             'notes' => $customer->notes,
             'updated_at' => $customer->updated_at?->toIso8601String(),
@@ -443,19 +395,4 @@ class PlanLimitService
         return $noteLimit === null || (is_numeric($noteLimit) && (int) $noteLimit > 0);
     }
 
-    private function usageSettingMap(string $plan): array
-    {
-        return [
-            'usage.'.$plan.'_cost_limit' => 'daily_cost_limit',
-            'usage.'.$plan.'_external_cost_limit' => 'daily_external_cost_limit',
-        ];
-    }
-
-    private function usageLimitValue(string $plan, string $key, float $default): float
-    {
-        $setting = AdminSetting::where('key', 'usage.'.$plan.'_'.$key)->first();
-        $value = $setting instanceof AdminSetting ? data_get($setting->value, 'value') : null;
-
-        return is_numeric($value) ? (float) $value : $default;
-    }
 }

@@ -1,228 +1,45 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>HeyBean - AI executive assistance for real life</title>
-    <meta name="description" content="HeyBean helps you manage calendars, tasks, reminders, and daily follow-through from one calm assistant dashboard.">
-    <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="any">
-    <link rel="icon" type="image/png" href="{{ asset('favicon.png') }}">
-    <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
-    <link rel="manifest" href="{{ asset('site-manifest.json') }}">
-    <meta name="theme-color" content="#7bc98c">
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HeyBean — calendars, tasks, reminders, and notes</title>
+    <meta name="description" content="HeyBean keeps calendars, tasks, reminders, notes, and shared workspaces together in one calm productivity app.">
+    <link rel="icon" href="{{ asset('favicon.ico') }}"><link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
     @include('partials.public-postbridge-styles')
-    <style>
-        .bean-demo-proof-shell{position:absolute;inset:0;z-index:3;pointer-events:none;color:#17231b;font-family:inherit}
-        .bean-proof-screen{position:absolute;inset:0;border-radius:0;opacity:0;transform:translateX(18px);overflow:hidden;background:#edf8ec;box-shadow:none}
-        .bean-proof-screen img{display:block;width:100%;height:100%;object-fit:cover;object-position:top center}
-        .bean-demo-tap{position:absolute;z-index:8;width:42px;height:42px;border-radius:999px;background:rgba(22,163,74,.24);border:2px solid rgba(22,163,74,.95);box-shadow:0 0 0 0 rgba(22,163,74,.20);opacity:0;transform:translate(-50%,-50%) scale(.64)}
-        .bean-demo-tap:after{content:"";position:absolute;inset:10px;border-radius:inherit;background:#16a34a}
-        .bean-demo-tap.calendar{left:11.2%;top:94.1%}
-        .bean-demo-tap.reminders{left:70.2%;top:94.1%}
-        .bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-soft-mask{animation:beanSoftMaskProofCycle 16s linear infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-input:before{animation:beanInputPlaceholderProofCycle 16s linear infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-input-text{animation:beanInputTextProofCycle 16s linear infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-user{animation:beanCardUserProofCycle 16s ease infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-progress{animation:beanCardProgressProofCycle 16s ease infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-result{animation:beanCardResultProofCycle 16s ease infinite both}.bean-proof-screen.calendar{animation:beanCalendarScreenCycle 16s ease infinite both}.bean-proof-screen.reminders{animation:beanReminderScreenCycle 16s ease infinite both}.bean-demo-tap.calendar{animation:beanTapCalendarCycle 16s ease infinite both}.bean-demo-tap.reminders{animation:beanTapReminderCycle 16s ease infinite both}@keyframes beanSoftMaskProofCycle{0%,67.8%,100%{opacity:1}68.6%,96%{opacity:0}}@keyframes beanInputPlaceholderProofCycle{0%,3%,33%,100%{opacity:1}4%,32%{opacity:0}}@keyframes beanInputTextProofCycle{0%,4%{opacity:0;clip-path:inset(0 100% 0 0)}5%{opacity:1;clip-path:inset(0 100% 0 0)}24%,31%{opacity:1;clip-path:inset(0 0 0 0)}32%,100%{opacity:0;clip-path:inset(0 0 0 0)}}@keyframes beanCardUserProofCycle{0%,31%,96%,100%{opacity:0;transform:translateY(8px)}34%,62%{opacity:1;transform:translateY(0)}}@keyframes beanCardProgressProofCycle{0%,39%,52%,100%{opacity:0;transform:translateY(8px)}42%,49%{opacity:1;transform:translateY(0)}}@keyframes beanCardResultProofCycle{0%,50%,67%,100%{opacity:0;transform:translateY(8px)}53%,64%{opacity:1;transform:translateY(0)}}@keyframes beanTapCalendarCycle{0%,61.5%,68%,100%{opacity:0;transform:translate(-50%,-50%) scale(.64);box-shadow:0 0 0 0 rgba(22,163,74,.22)}62.5%,66%{opacity:1;transform:translate(-50%,-50%) scale(1);box-shadow:0 0 0 14px rgba(22,163,74,.08)}64%{opacity:.95;transform:translate(-50%,-50%) scale(.78);box-shadow:0 0 0 23px rgba(22,163,74,0)}}@keyframes beanCalendarScreenCycle{0%,66%,82%,100%{opacity:0;transform:translateX(18px)}68%,78.5%{opacity:1;transform:translateX(0)}}@keyframes beanTapReminderCycle{0%,77.5%,84%,100%{opacity:0;transform:translate(-50%,-50%) scale(.64);box-shadow:0 0 0 0 rgba(22,163,74,.22)}78.5%,82%{opacity:1;transform:translate(-50%,-50%) scale(1);box-shadow:0 0 0 14px rgba(22,163,74,.08)}80%{opacity:.95;transform:translate(-50%,-50%) scale(.78);box-shadow:0 0 0 23px rgba(22,163,74,0)}}@keyframes beanReminderScreenCycle{0%,82%,98%,100%{opacity:0;transform:translateX(18px)}84%,95%{opacity:1;transform:translateX(0)}}@media(prefers-reduced-motion:reduce){.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-soft-mask,.bean-proof-screen.reminders{opacity:1!important;transform:none!important}.bean-proof-screen.calendar,.bean-demo-tap{display:none!important}}
-    </style>
 </head>
 <body>
-    @include('partials.public-beta-banner')
-    @include('partials.public-nav')
-
-    <main class="wrap hero">
-        <div class="hero-icons" aria-label="HeyBean tools">
-            <span class="hero-icon" aria-label="Calendar">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="3"/></svg>
-            </span>
-            <span class="hero-icon" aria-label="Tasks">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12.5 11 14.5 15.5 9.5"/><circle cx="12" cy="12" r="9"/></svg>
-            </span>
-            <span class="hero-icon" aria-label="Notes">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="M9 4v16"/><path d="M12 8h4M12 12h4M12 16h3"/></svg>
-            </span>
-            <span class="hero-icon" aria-label="Reminders">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
-            </span>
-        </div>
-        <h1>Run your day with Bean</h1>
-        <p class="hero-subhead">Easy calendar, task, and reminder management with Bean, your AI assistant for the real-life details that keep slipping between apps.</p>
-        <div class="hero-actions">
-            <a class="button" href="#early-access">Try it for free <span aria-hidden="true">-></span></a>
-        </div>
-        <div class="agent-pills" aria-label="HeyBean highlights">
-            <a class="button ghost" href="#features">Capture once</a>
-            <a class="button ghost" href="#features">Coordinate home + work</a>
-            <a class="button ghost" href="#features">Approve sensitive changes</a>
-        </div>
-        <div class="proof" aria-label="Seeded HeyBean user proof">
-            <span class="avatar-stack" aria-hidden="true">
-                <img src="{{ asset('images/heybean-review-alex.svg') }}" alt="">
-                <img src="{{ asset('images/heybean-review-maya.svg') }}" alt="">
-                <img src="{{ asset('images/heybean-review-sam.svg') }}" alt="">
-                <img src="{{ asset('images/heybean-review-jordan.svg') }}" alt="">
-                <img src="{{ asset('images/heybean-review-priya.svg') }}" alt="">
-            </span>
-            <span>Used by <strong>{{ number_format($proofUserCount ?? 1122) }}</strong> busy households and operators</span>
-        </div>
-    </main>
-
-    <section class="section" id="features">
-        <div class="wrap">
-            <div class="feature-row">
-                <div class="feature-copy">
-                    <span class="section-kicker" style="text-align:left">BEAN ASSISTANT</span>
-                    <h3>Ask once. Bean organizes the follow-through.</h3>
-                    <p>Tell Bean what needs to happen and it can turn the request into calendar events, tasks, reminders, and a short plan you can approve before anything important changes.</p>
-                    <ul class="feature-list">
-                        <li>Create and update plans from plain language.</li>
-                        <li>Answer schedule questions without digging through screens.</li>
-                        <li>Keep approvals in front of you for sensitive actions.</li>
-                    </ul>
-                </div>
-                <div class="feature-media" aria-label="Animated HeyBean assistant mockup">
-                    <div class="feature-demo hero-phone image-mockup hero-device" data-bean-demo>
-                        <div class="hero-device-screen" aria-hidden="true">
-                            <img class="bean-real-screen" src="{{ asset('images/bean-real-home-screen.png') }}?v={{ filemtime(public_path('images/bean-real-home-screen.png')) }}" width="1320" height="2868" alt="">
-                            <div class="bean-demo-overlay">
-                                <div class="bean-demo-soft-mask"></div>
-                                <div class="bean-demo-thread">
-                                    <div class="bean-demo-card bean-demo-user" data-bean-user>
-                                        <strong>You</strong>
-                                        <span data-bean-submitted>Add dinner with Lauren Friday at 7 and remind me to bring the gift.</span>
-                                    </div>
-                                    <div class="bean-demo-card bean-demo-progress" data-bean-progress>
-                                        <span class="bean-demo-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-                                        <span>Bean is checking your calendar...</span>
-                                    </div>
-                                    <div class="bean-demo-card bean-demo-result" data-bean-result>
-                                        <strong>Done - dinner is on your calendar.</strong>
-                                        <div><span>✓</span><span>Friday at 7:00 PM with Lauren</span></div>
-                                        <div><span>✓</span><span>Reminder set: bring the gift before you leave.</span></div>
-                                    </div>
-                                </div>
-                                <div class="bean-demo-input" data-bean-input>
-                                    <span id="bean-demo-request" class="bean-demo-input-text placeholder">Add dinner with Lauren Friday at 7 and remind me to bring the gift.</span>
-                                    <span class="bean-demo-send">›</span>
-                                </div>
-                                <div class="bean-demo-proof-shell" aria-hidden="true">
-                                    <div class="bean-proof-screen calendar">
-                                        <img src="{{ asset('images/bean-real-calendar-screen.png') }}?v={{ filemtime(public_path('images/bean-real-calendar-screen.png')) }}" width="1320" height="2868" alt="">
-                                    </div>
-                                    <div class="bean-proof-screen reminders">
-                                        <img src="{{ asset('images/bean-real-reminders-screen.png') }}?v={{ filemtime(public_path('images/bean-real-reminders-screen.png')) }}" width="1320" height="2868" alt="">
-                                    </div>
-                                    <span class="bean-demo-tap calendar" aria-label="Calendar navigation tap"></span>
-                                    <span class="bean-demo-tap reminders" aria-label="Reminders navigation tap"></span>
-                                </div>
-                            </div>
-                        </div>
-                        <img class="hero-device-template" src="{{ asset('images/iphone16promax-template.png') }}?v={{ filemtime(public_path('images/iphone16promax-template.png')) }}" width="487" height="940" alt="HeyBean animated mobile assistant mockup">
-                    </div>
-                </div>
+    <div class="public-beta-banner"><div class="public-beta-banner-inner">HeyBean is currently in Beta. <a href="/register">Sign up here</a> to create your beta account.</div></div>
+    <header class="wrap nav">
+        <a class="brand" href="/"><img src="{{ asset('images/bean-logo.png') }}" alt="HeyBean logo">HeyBean</a>
+        <nav class="navlinks"><a href="#features">Features</a><a href="#reviews">Reviews</a><a href="/pricing">Pricing</a><a class="nav-login" href="/login">Login</a></nav>
+        <details class="mobile-menu"><summary aria-label="Open menu">Menu</summary><div class="mobile-menu-panel"><a href="#features">Features</a><a href="#reviews">Reviews</a><a href="/pricing">Pricing</a><a href="/login">Login</a></div></details>
+    </header>
+    <main>
+        <section class="wrap hero">
+            <h1>Run your day with Bean</h1>
+            <p class="hero-subhead">Easy calendar, task, reminder, note, and workspace management in one focused place.</p>
+            <div class="hero-actions"><a class="button" href="/register">Try it for free</a><a class="button outline" href="#features">See features</a></div>
+            <p class="proof">Used by <strong>{{ number_format($proofUserCount) }}</strong> busy households and operators</p>
+        </section>
+        <section class="section soft" id="features"><div class="wrap">
+            <div class="section-head"><span class="section-kicker">ONE ORGANIZED DAY</span><h2>Everything important stays visible</h2><p>Plan time, keep commitments, write things down, and coordinate shared spaces without jumping between disconnected tools.</p></div>
+            <div class="feature-grid">
+                <article class="feature-card"><img src="{{ asset('images/bean-real-calendar-screen.png') }}" alt="HeyBean calendar"><h3>Keep every calendar moving.</h3><p>See connected and local events together, manage recurring schedules, and attach locations and notes.</p></article>
+                <article class="feature-card"><img src="{{ asset('images/bean-real-home-screen.png') }}" alt="HeyBean daily overview"><h3>See the day you are running.</h3><p>Keep today’s events, overdue work, and upcoming commitments in a calm daily view.</p></article>
+                <article class="feature-card"><img src="{{ asset('images/bean-real-reminders-screen.png') }}" alt="HeyBean reminders"><h3>Turn loose ends into managed work.</h3><p>Track tasks and reminders across personal, household, work, and project spaces.</p></article>
             </div>
-
-            <div class="feature-row reverse">
-                <div class="feature-media">
-                    <figure class="mock-card landing-screenshot-card" aria-label="HeyBean scheduling screenshot">
-                        <img class="landing-screenshot" src="{{ asset('images/heybean-landing-scheduling.png') }}?v={{ filemtime(public_path('images/heybean-landing-scheduling.png')) }}" width="614" height="558" loading="lazy" alt="HeyBean scheduling screen showing a full calendar for Sarah's July schedule">
-                    </figure>
-                </div>
-                <div class="feature-copy">
-                    <span class="section-kicker" style="text-align:left">SCHEDULING</span>
-                    <h3>Keep every calendar moving.</h3>
-                    <p>Bean helps you create, adjust, and review events across the calendars that shape your day, without making scheduling feel like a separate job.</p>
-                    <ul class="feature-list">
-                        <li>Daily, weekly, and monthly calendar views.</li>
-                        <li>Shared workspaces for home, work, and recurring plans.</li>
-                        <li>Calendar-aware suggestions before Bean changes anything important.</li>
-                    </ul>
-                </div>
-            </div>
-
-            <div class="feature-row">
-                <div class="feature-media">
-                    <figure class="mock-card landing-screenshot-card" aria-label="HeyBean task management screenshot">
-                        <img class="landing-screenshot" src="{{ asset('images/heybean-landing-task-management.png') }}?v={{ filemtime(public_path('images/heybean-landing-task-management.png')) }}" width="762" height="434" loading="lazy" alt="HeyBean task management screen showing Sarah's tasks and follow-ups">
-                    </figure>
-                </div>
-                <div class="feature-copy">
-                    <span class="section-kicker" style="text-align:left">TASK MANAGEMENT</span>
-                    <h3>Turn loose ends into managed tasks.</h3>
-                    <p>Capture what needs to happen, let Bean sort the next step, and keep task work connected to the people, dates, and reminders that make it real.</p>
-                    <ul class="feature-list">
-                        <li>Fast capture before small details slip away.</li>
-                        <li>Due dates, owners, and workspace context in one list.</li>
-                        <li>Follow-up reminders when a task needs another nudge.</li>
-                    </ul>
-                </div>
-            </div>
-
-            <div class="feature-row reverse">
-                <div class="feature-media">
-                    <figure class="mock-card landing-screenshot-card" aria-label="HeyBean daily control screenshot">
-                        <img class="landing-screenshot" src="{{ asset('images/heybean-landing-daily-control.png') }}?v={{ filemtime(public_path('images/heybean-landing-daily-control.png')) }}" width="598" height="702" loading="lazy" alt="HeyBean daily control screen showing Sarah's events, tasks, reminders, and notes">
-                    </figure>
-                </div>
-                <div class="feature-copy">
-                    <span class="section-kicker" style="text-align:left">DAILY CONTROL</span>
-                    <h3>See the day Bean is helping you run.</h3>
-                    <p>HeyBean gives you a simple control layer for what is scheduled, what is due, and what still needs a nudge across home, work, school, errands, and recurring routines.</p>
-                    <ul class="feature-list">
-                        <li>One place for calendar events, tasks, and reminders.</li>
-                        <li>Approvals stay visible before sensitive actions happen.</li>
-                        <li>Daily planning that adapts as the day changes.</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <section class="section soft" id="reviews">
-        <div class="wrap">
-            <div class="section-head">
-                <span class="section-kicker">REVIEWS</span>
-                <h2>HeyBean is loved by busy people who need fewer loose ends.</h2>
-            </div>
+        </div></section>
+        <section class="section" id="reviews"><div class="wrap">
+            <div class="section-head"><span class="section-kicker">BUILT FOR REAL LIFE</span><h2>HeyBean is loved by busy people who need fewer loose ends.</h2></div>
             <div class="reviews-grid">
-                <article class="review-card">
-                    <div class="review-user"><img src="{{ asset('images/heybean-review-alex.svg') }}" alt="Alex Rivera"><div><h3>Alex Rivera</h3><span>Operations lead</span></div></div>
-                    <p>"Bean is the first assistant that feels built around the actual mess of a day. I can capture a request once and trust the reminder will be there later."</p>
-                </article>
-                <article class="review-card">
-                    <div class="review-user"><img src="{{ asset('images/heybean-review-maya.svg') }}" alt="Maya Chen"><div><h3>Maya Chen</h3><span>Parent + founder</span></div></div>
-                    <p>"The household workspace is the win. Dinner, school forms, calendar moves, and follow-ups finally live in one place instead of five apps."</p>
-                </article>
-                <article class="review-card">
-                    <div class="review-user"><img src="{{ asset('images/heybean-review-sam.svg') }}" alt="Sam Patel"><div><h3>Sam Patel</h3><span>Consultant</span></div></div>
-                    <p>"I use Bean to turn quick thoughts into real tasks and events. It saves me from reopening my calendar every time plans change."</p>
-                </article>
+                <article class="review-card"><div class="review-user"><img src="{{ asset('images/heybean-review-alex.svg') }}" alt=""><div><h3>Alex Rivera</h3><span>Operations lead</span></div></div><p>“My calendar and task list finally feel like parts of the same day.”</p></article>
+                <article class="review-card"><div class="review-user"><img src="{{ asset('images/heybean-review-maya.svg') }}" alt=""><div><h3>Maya Chen</h3><span>Parent and founder</span></div></div><p>“Shared workspaces make the handoff between home and work much easier.”</p></article>
+                <article class="review-card"><div class="review-user"><img src="{{ asset('images/heybean-review-sam.svg') }}" alt=""><div><h3>Sam Patel</h3><span>Independent consultant</span></div></div><p>“Recurring reminders and notes keep follow-through in one place.”</p></article>
             </div>
-        </div>
-    </section>
-
-    <section class="cta-band" id="early-access">
-        <div class="wrap">
-            <h2>Start with one place for the day you actually have.</h2>
-            <p class="hero-subhead">Join the HeyBean beta for product updates, or create an account when you are ready to start.</p>
-            <form class="hero-actions" method="POST" action="{{ route('early-access.store') }}">
-                @csrf
-                <input type="email" name="email" required placeholder="you@example.com" aria-label="Email address" style="min-height:56px;width:min(360px,100%);border:1px solid var(--pb-border);border-radius:9999px;padding:0 20px;font:inherit;color:var(--pb-ink);outline:none">
-                <button class="button" type="submit">Get Early Access <span aria-hidden="true">-></span></button>
-            </form>
-            @if (session('early_access_status'))
-                <p class="hero-subhead" style="font-size:15px"><strong>You are on the list - thank you.</strong></p>
-            @endif
-        </div>
-    </section>
-
-    @if (session('early_access_status'))
-        <div class="signup-modal" role="dialog" aria-modal="true" aria-labelledby="signup-modal-title">
-            <div class="signup-modal-card">
-                <div class="signup-modal-icon" aria-hidden="true">✓</div>
-                <h2 id="signup-modal-title">Thank you for signing up!</h2>
-                <p>We will send you an email as soon as we can share the app with you. We look forward to your help with making Bean great.</p>
-                <a class="button" href="/">Sounds good</a>
-            </div>
-        </div>
-    @endif
-
-    <footer class="wrap footer"><span>© {{ date('Y') }} HeyBean. AI executive assistance for real life.</span><span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Use</a> · <a href="/support">Support</a></span></footer>
+        </div></section>
+        <section class="cta-band soft" id="early-access"><div class="wrap"><h2>Get Early Access</h2><p>Join the beta and help shape a calmer productivity app.</p><form class="signup-form" action="{{ route('early-access.store') }}" method="post">@csrf<input type="email" name="email" placeholder="you@example.com" required><button class="button" type="submit">Request access</button></form></div></section>
+    </main>
+    <footer class="wrap footer"><span>© {{ date('Y') }} HeyBean. Productivity for real life.</span><span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Use</a> · <a href="/support">Support</a></span></footer>
+    @if(session('early_access_status'))<div class="signup-modal" role="dialog" aria-modal="true"><div class="signup-modal-card"><h2>Thank you for signing up!</h2><p>We will send you an email as soon as we can share the app with you.</p><p>We look forward to your help with making Bean great.</p><a class="button" href="/">Sounds good</a></div></div>@endif
 </body>
 </html>

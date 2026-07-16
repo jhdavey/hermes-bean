@@ -13,7 +13,6 @@ return new class extends Migration
             $table->foreignId('user_id')->unique()->constrained()->cascadeOnDelete();
             $table->string('billing_type')->default('monthly')->index();
             $table->decimal('monthly_rate_usd', 12, 2)->nullable();
-            $table->decimal('usage_rate_usd', 12, 6)->nullable();
             $table->json('limits')->nullable();
             $table->text('notes')->nullable();
             $table->foreignId('updated_by_user_id')->nullable()->constrained('users')->nullOnDelete();

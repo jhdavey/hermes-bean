@@ -1,7 +1,6 @@
 <?php
 
 use App\Models\User;
-use App\Services\AgentProfileService;
 use App\Services\PlanHistoryService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Inspiring;
@@ -47,7 +46,6 @@ Artisan::command('admin:user {email} {--password=} {--name=Hey Bean Admin}', fun
         ],
     );
 
-    app(AgentProfileService::class)->ensureForUser($user);
     app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
 
     $this->info("Admin user ready: {$user->email}");
@@ -76,8 +74,3 @@ Artisan::command('admin:grant {email}', function (string $email): int {
 Schedule::command('plan-history:prune')->daily();
 Schedule::command('calendar-events:materialize-recurring')->daily();
 Schedule::command('reminders:send-due-notifications')->everyMinute();
-// Deadline enforcement must run independently of the worker executing the
-// request. A blocked provider/queue worker therefore cannot strand a voice
-// turn beyond its hard or rolling no-progress deadline.
-Schedule::command('browser-voice:enforce-deadlines')->everySecond()->withoutOverlapping(1);
-Schedule::command('voice:reconcile-realtime-work')->everySecond()->withoutOverlapping(1);

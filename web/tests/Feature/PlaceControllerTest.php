@@ -14,8 +14,8 @@ class PlaceControllerTest extends TestCase
 
     public function test_static_map_supports_dark_mode_styles(): void
     {
-        config()->set('services.hermes_runtime.google_places_enabled', true);
-        config()->set('services.hermes_runtime.google_maps_api_key', 'google-test-key');
+        config()->set('services.places.google_places_enabled', true);
+        config()->set('services.places.google_maps_api_key', 'google-test-key');
 
         Http::fake([
             'maps.googleapis.com/maps/api/staticmap*' => Http::response('png-bytes', 200, [

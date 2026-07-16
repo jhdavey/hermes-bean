@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Workspace;
 use App\Models\WorkspaceMembership;
-use App\Services\AgentProfileService;
 use App\Services\GoogleCalendarSyncService;
 use App\Services\PlanLimitService;
 use App\Services\WorkspaceItemSyncService;
@@ -18,7 +17,6 @@ class WorkspaceController extends Controller
 {
     public function __construct(
         private readonly WorkspaceService $workspaces,
-        private readonly AgentProfileService $profiles,
         private readonly GoogleCalendarSyncService $googleCalendar,
         private readonly PlanLimitService $planLimits,
     ) {}
@@ -37,16 +35,12 @@ class WorkspaceController extends Controller
         }
 
         $workspace = $this->workspaces->createHousehold($request->user(), $data['name']);
-        $workspace->setRelation('agentProfile', $this->profiles->ensureForWorkspace($workspace, $request->user()));
-
         return response()->json(['data' => $workspace->load('memberships.user')], 201);
     }
 
     public function show(Request $request, Workspace $workspace): JsonResponse
     {
         $this->workspaces->authorizeMember($request->user(), $workspace);
-        $workspace->setRelation('agentProfile', $this->profiles->ensureForWorkspace($workspace, $request->user()));
-
         return response()->json(['data' => $workspace->load('memberships.user', 'googleCalendarMappings')]);
     }
 

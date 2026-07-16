@@ -17,7 +17,7 @@ return new class extends Migration
         Schema::table('reminders', function (Blueprint $table): void {
             $table->foreignId('calendar_event_id')
                 ->nullable()
-                ->after('conversation_session_id')
+                ->after('id')
                 ->constrained('calendar_events')
                 ->nullOnDelete();
         });

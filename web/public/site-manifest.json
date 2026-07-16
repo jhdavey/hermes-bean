@@ -1,7 +1,7 @@
 {
   "name": "HeyBean",
   "short_name": "HeyBean",
-  "description": "HeyBean plans your calendar, captures tasks, sets reminders, and coordinates home and work from one focused assistant.",
+  "description": "HeyBean keeps calendars, tasks, reminders, notes, and shared workspaces together.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#FFFFFF",

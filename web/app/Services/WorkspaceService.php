@@ -88,7 +88,7 @@ class WorkspaceService
 
         return Workspace::query()
             ->whereHas('memberships', fn ($query) => $query->where('user_id', $user->id)->where('status', 'active'))
-            ->with(['memberships.user', 'agentProfile', 'googleCalendarMappings'])
+            ->with(['memberships.user', 'googleCalendarMappings'])
             ->orderByRaw("case when type = 'personal' then 0 else 1 end")
             ->orderBy('name')
             ->get()
@@ -375,6 +375,6 @@ class WorkspaceService
 
     private function workspaceScopedTables(): array
     {
-        return ['agent_profiles', 'conversation_sessions', 'activity_events', 'tasks', 'reminders', 'calendar_events', 'approvals', 'blockers', 'event_categories'];
+        return ['tasks', 'reminders', 'calendar_events', 'event_categories'];
     }
 }

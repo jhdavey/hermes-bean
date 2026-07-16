@@ -37,16 +37,8 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>HeyBean uses your city-level location when you choose to share it so Bean can help with weather and planning context.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>HeyBean uses your location when you choose location features so Bean can provide local weather and planning context.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>HeyBean uses the camera only when you choose camera-based features, such as scanning a payment card with Stripe.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>HeyBean uses the microphone for Bean voice features when realtime voice is available.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>HeyBean may use speech recognition for Bean voice features when realtime voice is available.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>

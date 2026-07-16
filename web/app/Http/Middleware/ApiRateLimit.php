@@ -4,7 +4,6 @@ namespace App\Http\Middleware;
 
 use App\Models\PersonalAccessToken;
 use App\Models\User;
-use App\Services\AdminSettingsService;
 use Closure;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Http\JsonResponse;
@@ -15,7 +14,6 @@ class ApiRateLimit
 {
     public function __construct(
         private readonly RateLimiter $limiter,
-        private readonly AdminSettingsService $settings,
     ) {}
 
     public function handle(Request $request, Closure $next): Response

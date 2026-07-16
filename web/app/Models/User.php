@@ -10,7 +10,6 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -94,36 +93,6 @@ class User extends Authenticatable implements MustVerifyEmail
         return (bool) ($this->notification_preferences['reminder_push'] ?? true);
     }
 
-    public function conversationSessions(): HasMany
-    {
-        return $this->hasMany(ConversationSession::class);
-    }
-
-    public function conversationMessages(): HasMany
-    {
-        return $this->hasMany(ConversationMessage::class);
-    }
-
-    public function voiceTurns(): HasMany
-    {
-        return $this->hasMany(VoiceTurn::class);
-    }
-
-    public function activityEvents(): HasMany
-    {
-        return $this->hasMany(ActivityEvent::class);
-    }
-
-    public function aiUsageLogs(): HasMany
-    {
-        return $this->hasMany(AiUsageLog::class);
-    }
-
-    public function aiUsageAlerts(): HasMany
-    {
-        return $this->hasMany(AiUsageAlert::class);
-    }
-
     public function tasks(): HasMany
     {
         return $this->hasMany(Task::class);
@@ -139,29 +108,14 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->hasMany(CalendarEvent::class);
     }
 
-    public function googleCalendarConnection(): HasOne
+    public function googleCalendarConnection(): \Illuminate\Database\Eloquent\Relations\HasOne
     {
         return $this->hasOne(GoogleCalendarConnection::class);
     }
 
-    public function outlookCalendarConnection(): HasOne
+    public function outlookCalendarConnection(): \Illuminate\Database\Eloquent\Relations\HasOne
     {
         return $this->hasOne(OutlookCalendarConnection::class);
-    }
-
-    public function approvals(): HasMany
-    {
-        return $this->hasMany(Approval::class);
-    }
-
-    public function blockers(): HasMany
-    {
-        return $this->hasMany(Blocker::class);
-    }
-
-    public function agentProfile(): HasOne
-    {
-        return $this->hasOne(AgentProfile::class);
     }
 
     public function workspaceMemberships(): HasMany

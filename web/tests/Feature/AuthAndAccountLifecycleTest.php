@@ -2,17 +2,11 @@
 
 namespace Tests\Feature;
 
-use App\Data\HermesSemanticComposition;
-use App\Data\HermesSemanticCompositionRequest;
-use App\Data\HermesSemanticInterpretation;
-use App\Data\HermesSemanticInterpretationRequest;
-use App\Data\HermesSemanticOperation;
 use App\Models\EarlyAccessSignup;
 use App\Models\PersonalAccessToken;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\ResetPasswordLink;
-use App\Services\HermesSemanticInterpreter;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
@@ -36,20 +30,10 @@ class AuthAndAccountLifecycleTest extends TestCase
             'password_confirmation' => 'correct-horse-battery-staple',
             'plan' => 'pro',
             'theme_mode' => 'light',
-            'agent_personality' => 'organizer',
-            'onboarding_priorities' => ['Planning', 'Reminders', 'Focus'],
-            'onboarding_context' => 'Completed guided Bean signup onboarding. Preferred Bean personality: Organizer. City-level location: Orlando.',
-            'home_city' => 'Orlando',
         ])->assertCreated()
             ->assertJsonPath('data.user.email', 'bean@example.com')
             ->assertJsonPath('data.user.subscription_tier', 'base')
             ->assertJsonPath('data.user.theme_mode', 'light')
-            ->assertJsonPath('data.user.needs_bean_onboarding', false)
-            ->assertJsonPath('data.user.active_workspace_agent_profile.settings.personality_type', 'organizer')
-            ->assertJsonPath('data.user.active_workspace_agent_profile.settings.onboarding.completed', true)
-            ->assertJsonPath('data.user.active_workspace_agent_profile.settings.onboarding.priorities.0', 'Planning')
-            ->assertJsonPath('data.user.active_workspace_agent_profile.settings.onboarding.context', 'Completed guided Bean signup onboarding. Preferred Bean personality: Organizer. City-level location: Orlando.')
-            ->assertJsonPath('data.user.active_workspace_agent_profile.settings.weather.location', 'Orlando')
             ->assertJsonPath('data.user.is_early_access', true)
             ->assertJsonPath('data.selected_plan', 'pro');
 
@@ -315,117 +299,19 @@ class AuthAndAccountLifecycleTest extends TestCase
             ->assertOk()
             ->assertJsonCount(0, 'data');
 
-        $this->assertDatabaseMissing('conversation_sessions', [
-            'user_id' => User::where('email', 'clean@example.com')->value('id'),
-            'title' => 'Welcome to Bean',
-        ]);
         $this->assertDatabaseCount('tasks', 0);
         $this->assertDatabaseCount('reminders', 0);
         $this->assertDatabaseCount('calendar_events', 0);
-        $this->assertDatabaseCount('activity_events', 0);
     }
 
-    public function test_login_does_not_backfill_retired_welcome_conversation(): void
-    {
-        $user = User::factory()->create([
-            'name' => 'Existing User',
-            'email' => 'existing@example.com',
-            'password' => Hash::make('correct-horse-battery-staple'),
-        ]);
-
-        $token = $this->postJson('/api/auth/login', [
-            'email' => 'existing@example.com',
-            'password' => 'correct-horse-battery-staple',
-        ])->assertOk()->json('data.token');
-
-        $this->withToken($token)->getJson('/api/calendar-events')
-            ->assertOk()
-            ->assertJsonCount(0, 'data');
-
-        $this->assertDatabaseMissing('conversation_sessions', [
-            'user_id' => $user->id,
-            'title' => 'Welcome to Bean',
-        ]);
-        $this->assertDatabaseCount('tasks', 0);
-        $this->assertDatabaseCount('reminders', 0);
-        $this->assertDatabaseCount('calendar_events', 0);
-        $this->assertDatabaseCount('activity_events', 0);
-    }
-
-    public function test_assistant_routes_require_auth_and_scope_route_model_binding_to_owner(): void
+    public function test_export_returns_only_owned_productivity_data_and_delete_removes_account_data_and_tokens(): void
     {
         $aliceToken = $this->registerToken('alice@example.com');
         $bobToken = $this->registerToken('bob@example.com');
 
-        $this->postJson('/api/assistant/sessions', ['title' => 'No auth'])
-            ->assertUnauthorized();
-
-        $sessionId = $this->withToken($aliceToken)->postJson('/api/assistant/sessions', [
-            'title' => 'Alice planning',
-        ])->assertCreated()
-            ->assertJsonPath('data.user_id', User::where('email', 'alice@example.com')->value('id'))
-            ->json('data.id');
-
-        $this->withToken($bobToken)->getJson("/api/assistant/sessions/{$sessionId}")
-            ->assertNotFound();
-
-        $this->withToken($bobToken)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
-            'content' => 'Try to write into Alice session',
-        ])->assertNotFound();
-
-        $this->configureTaskCreatingAgent();
-
-        $this->withToken($aliceToken)->postJson("/api/assistant/sessions/{$sessionId}/runs", [
-            'content' => 'Add task Follow up with Sam.',
-            'metadata' => ['client_request_id' => 'alice-follow-up-task'],
-        ])->assertCreated();
-
-        $this->assertDatabaseHas('conversation_messages', [
-            'conversation_session_id' => $sessionId,
-            'user_id' => User::where('email', 'alice@example.com')->value('id'),
-            'role' => 'user',
-        ]);
-
-        $this->assertDatabaseHas('tasks', [
-            'conversation_session_id' => $sessionId,
-            'user_id' => User::where('email', 'alice@example.com')->value('id'),
-            'title' => 'Follow up with Sam',
-        ]);
-    }
-
-    public function test_domain_resources_are_owned_and_cannot_attach_to_another_users_session(): void
-    {
-        $aliceToken = $this->registerToken('alice@example.com');
-        $bobToken = $this->registerToken('bob@example.com');
-
-        $aliceSessionId = $this->withToken($aliceToken)->postJson('/api/assistant/sessions', [
-            'title' => 'Alice',
-        ])->assertCreated()->json('data.id');
-
-        $this->withToken($bobToken)->postJson('/api/tasks', [
-            'conversation_session_id' => $aliceSessionId,
-            'title' => 'Cross account task',
+        $this->withToken($aliceToken)->postJson('/api/tasks', [
+            'title' => 'Export Alice task',
             'type' => 'todo',
-        ])->assertUnprocessable();
-
-        $this->withToken($bobToken)->postJson('/api/tasks', [
-            'title' => 'Bob task',
-            'type' => 'todo',
-        ])->assertCreated()
-            ->assertJsonPath('data.user_id', User::where('email', 'bob@example.com')->value('id'));
-    }
-
-    public function test_export_returns_only_owned_assistant_data_and_delete_removes_account_data_and_tokens(): void
-    {
-        $aliceToken = $this->registerToken('alice@example.com');
-        $bobToken = $this->registerToken('bob@example.com');
-
-        $aliceSessionId = $this->withToken($aliceToken)->postJson('/api/assistant/sessions', ['title' => 'Alice export'])
-            ->assertCreated()->json('data.id');
-        $this->configureTaskCreatingAgent();
-        $this->withToken($aliceToken)->postJson("/api/assistant/sessions/{$aliceSessionId}/runs", [
-            'content' => 'Add task Export Alice task.',
-            'metadata' => ['client_request_id' => 'alice-export-task'],
         ])->assertCreated();
 
         $this->withToken($bobToken)->postJson('/api/tasks', [
@@ -449,59 +335,13 @@ class AuthAndAccountLifecycleTest extends TestCase
         $this->assertDatabaseMissing('personal_access_tokens', ['user_id' => $aliceId]);
         $this->assertDatabaseMissing('workspaces', ['id' => $alicePersonalWorkspaceId]);
         $this->assertDatabaseMissing('workspace_memberships', ['workspace_id' => $alicePersonalWorkspaceId]);
-        $this->assertDatabaseMissing('conversation_sessions', ['user_id' => $aliceId]);
         $this->assertDatabaseMissing('tasks', ['user_id' => $aliceId]);
         $this->assertDatabaseHas('users', ['email' => 'bob@example.com']);
         $this->assertDatabaseHas('tasks', ['title' => 'Bob private task']);
     }
 
-    private function configureTaskCreatingAgent(): void
-    {
-        $this->app->instance(
-            HermesSemanticInterpreter::class,
-            new AuthTaskSemanticInterpreter,
-        );
-    }
-
     private function registerToken(string $email): string
     {
         return $this->apiToken($email);
-    }
-}
-
-final class AuthTaskSemanticInterpreter implements HermesSemanticInterpreter
-{
-    public function interpret(HermesSemanticInterpretationRequest $request): HermesSemanticInterpretation
-    {
-        $title = trim(
-            (string) preg_replace('/^Add task\s+/i', '', $request->transcript),
-            " .\t\n\r\0\x0B",
-        );
-
-        return new HermesSemanticInterpretation(
-            outcome: HermesSemanticInterpretation::OUTCOME_EXECUTE,
-            responseText: null,
-            clarificationQuestion: null,
-            acknowledgementText: 'I’ll add that task.',
-            closeAfterResponse: false,
-            responseExpected: false,
-            operations: [new HermesSemanticOperation('create-task', 'app.task.create', [
-                'title' => $title,
-                'type' => 'todo',
-                'status' => 'open',
-                'notes' => null,
-                'category' => null,
-                'color' => '#34C759',
-                'is_critical' => false,
-                'due_at' => null,
-                'completed_at' => null,
-                'recurrence' => 'none',
-            ])],
-        );
-    }
-
-    public function compose(HermesSemanticCompositionRequest $request): HermesSemanticComposition
-    {
-        return new HermesSemanticComposition('Created the task.', false, false);
     }
 }

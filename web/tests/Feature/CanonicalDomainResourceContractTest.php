@@ -29,32 +29,6 @@ class CanonicalDomainResourceContractTest extends TestCase
         $this->assertSame(1, NoteFolder::query()->count());
     }
 
-    public function test_history_endpoints_accept_only_complete_absolute_intervals(): void
-    {
-        $token = $this->premiumApiToken('canonical-history-interval@example.com');
-
-        foreach (['request-history', 'activity-timeline'] as $endpoint) {
-            $base = "/api/memory/{$endpoint}";
-
-            $this->withToken($token)->getJson($base.'?date=2026-07-14')
-                ->assertUnprocessable()
-                ->assertJsonValidationErrors('date');
-            $this->withToken($token)->getJson($base.'?from_date=2026-07-14&to_date=2026-07-15')
-                ->assertUnprocessable()
-                ->assertJsonValidationErrors(['from_date', 'to_date']);
-            $this->withToken($token)->getJson($base.'?from=2026-07-14T00:00:00-04:00')
-                ->assertUnprocessable()
-                ->assertJsonValidationErrors('to');
-            $this->withToken($token)->getJson($base.'?from=tomorrow&to=2026-07-15T00:00:00-04:00')
-                ->assertUnprocessable()
-                ->assertJsonValidationErrors('from');
-
-            $this->withToken($token)->getJson(
-                $base.'?from=2026-07-14T00:00:00-04:00&to=2026-07-14T23:59:59-04:00',
-            )->assertOk()->assertJsonPath('data', []);
-        }
-    }
-
     public function test_task_status_accepts_only_open_and_completed(): void
     {
         $token = $this->premiumApiToken('canonical-task-status@example.com');
