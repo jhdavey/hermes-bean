@@ -58,6 +58,7 @@ function harness({
             this.stopped = false;
             this.resetCount = 0;
             this.closeCount = 0;
+            this.failNextReset = false;
             this.consumerAdmissionWaiter = null;
         }
 
@@ -99,9 +100,23 @@ function harness({
         close() { this.closeCount += 1; return true; }
         resetAfterTurn() {
             this.resetCount += 1;
+            if (this.failNextReset) {
+                this.failNextReset = false;
+                return false;
+            }
             this.generation += 1;
             this.ready = false;
             return this.generation;
+        }
+        emitWorkerAck({ generation, accepted = true, reason = '' }) {
+            if (generation !== this.generation) return false;
+            if (accepted !== true) {
+                this.options.onError?.(Object.assign(
+                    new Error('The local wake detector rejected live microphone processing.'),
+                    { code: reason === 'activation_pending' ? 'pcm_decode_rejected' : 'worker_error' },
+                ));
+            }
+            return true;
         }
         openContextualCapture({ generation }) {
             if (!this.ready || generation !== this.generation) return false;
@@ -486,6 +501,164 @@ test('[BV2-FIRST-WAKE-01:A-E][BV2-DIAGNOSTIC-03] failed startup tears down its p
     assert.ok(h.rawTracks[1].stopped >= 1);
 });
 
+test('[BV2-FIRST-WAKE-01:C-E][BV2-WAKE-01][BV2-WAKE-11][BV2-AUDIO-NATIVE-01][BV2-SIDEBAND-01][BV2-PRIVACY-PCM-03] provider input commit rotates the disarmed wake worker before accepting another wake', async () => {
+    const h = harness();
+    await h.runtime.start();
+    const firstWake = strictDetection();
+    assert.equal(await h.gate.options.beforeRelease(firstWake), true);
+    h.gate.options.onDetected(firstWake);
+    h.gate.options.onActivatedPcm({
+        generation: firstWake.generation,
+        sourceSequence: firstWake.sourceSequence,
+        sampleRate: 16000,
+        samples: new Float32Array(4),
+        released: true,
+    });
+
+    h.transport.emit({ type: 'input_committed', providerItemId: 'provider-input-1' });
+
+    assert.equal(h.transport.deactivated, true);
+    assert.equal(h.gate.closeCount, 0, 'commit cannot leave the confirmed-wake worker disarmed');
+    assert.equal(h.gate.resetCount, 1);
+    assert.equal(h.gate.currentGeneration(), firstWake.generation + 1);
+    assert.equal(h.runtime.snapshot().mode, 'thinking');
+    assert.equal(h.failures.length, 0);
+
+    assert.equal(h.gate.emitWorkerAck({
+        generation: firstWake.generation,
+        accepted: false,
+        reason: 'activation_pending',
+    }), false, 'the late acknowledgement belongs only to the superseded generation');
+    assert.equal(h.failures.length, 0);
+
+    // A later strict wake is admitted once on the clean generation. Nothing in
+    // the post-commit interval is released or persisted as a second turn.
+    h.gate.readyNow();
+    const secondWake = strictDetection(h.gate.currentGeneration(), firstWake.sourceSequence + 1);
+    assert.equal(await h.gate.options.beforeRelease(secondWake), true);
+    h.gate.options.onDetected(secondWake);
+    h.gate.options.onActivatedPcm({
+        generation: secondWake.generation,
+        sourceSequence: secondWake.sourceSequence,
+        sampleRate: 16000,
+        samples: new Float32Array(4),
+        released: true,
+    });
+    assert.deepEqual(h.transport.activated, [firstWake.generation, secondWake.generation]);
+    assert.equal(h.transport.appended.length, 2);
+    assert.equal(h.runtime.snapshot().mode, 'listening');
+
+    h.transport.emit({ type: 'input_speech_stopped', providerItemId: 'provider-input-2' });
+    h.transport.emit({ type: 'input_committed', providerItemId: 'provider-input-2' });
+    const secondTurnId = 'browser-voice-follow-up-one';
+    const finalAuthorization = {
+        authorizationId: 'post-commit-final-authorization',
+        turnId: secondTurnId,
+        speechItemId: 'post-commit-final-speech',
+        purpose: 'final',
+    };
+    h.projection.emit({
+        speechAuthorizations: [finalAuthorization],
+        turns: [{ turnId: secondTurnId, state: 'completed', closeAfterResponse: true }],
+        jobs: [],
+        activeJobs: [],
+        activeTurns: [],
+        events: [],
+        dashboardInvalidations: [],
+    });
+    h.transport.beginResponse({
+        responseId: 'post-commit-final-response',
+        turnId: secondTurnId,
+        speechItemId: 'post-commit-final-speech',
+        purpose: 'final',
+    });
+    await h.flush();
+    h.gate.readyNow();
+    await h.flush();
+    h.transport.finishResponse();
+    await h.flush();
+
+    const turnAdmissions = h.requests.filter(({ path }) => path === '/assistant/voice/turns');
+    assert.equal(turnAdmissions.filter(({ options }) => (
+        options.body.turn_id === 'browser-voice-test-turn'
+    )).length, 1);
+    assert.equal(turnAdmissions.filter(({ options }) => (
+        options.body.turn_id === secondTurnId
+    )).length, 1);
+    assert.equal(new Set(turnAdmissions.map(({ options }) => options.body.turn_id)).size, turnAdmissions.length);
+    assert.equal(h.transport.authorizations.filter(({ speechItemId }) => (
+        speechItemId === finalAuthorization.speechItemId
+    )).length, 1);
+    assert.equal(h.requests.filter(({ path, options }) => (
+        path === `/assistant/voice/turns/${secondTurnId}/delivery`
+        && options.body.event === 'final_audio_started'
+    )).length, 1);
+    assert.equal(h.requests.filter(({ path, options }) => (
+        path === `/assistant/voice/turns/${secondTurnId}/delivery`
+        && options.body.event === 'playback_finished'
+    )).length, 1);
+    assert.equal(h.runtime.snapshot().mode, 'wake_only');
+    assert.equal(h.failures.length, 0);
+});
+
+test('[BV2-WAKE-01][BV2-WAKE-11][BV2-DIAGNOSTIC-03][BV2-PRIVACY-PCM-03] provider-commit rearm failure tears down once and leaves the durable turn to the server owner', async () => {
+    const h = harness();
+    await h.runtime.start();
+    const detection = strictDetection();
+    assert.equal(await h.gate.options.beforeRelease(detection), true);
+    h.gate.options.onDetected(detection);
+    h.gate.failNextReset = true;
+
+    h.transport.emit({ type: 'input_committed', providerItemId: 'provider-input-reset-failure' });
+    await h.flush();
+
+    assert.equal(h.failures.length, 1);
+    assert.equal(h.failures[0].context.stage, 'local_wake');
+    assert.equal(h.failures[0].context.turnId, 'browser-voice-test-turn');
+    assert.equal(h.failures[0].error.code, 'reset_failed');
+    assert.equal(h.runtime.snapshot().mode, 'failed');
+    assert.equal(h.runtime.snapshot().enabled, false);
+    assert.equal(h.gate.resetCount, 1);
+    assert.equal(h.gate.stopped, true);
+    assert.deepEqual(h.transport.closeReasons, ['local_wake_failed']);
+    assert.equal(h.requests.filter(({ path }) => path === '/assistant/voice/turns').length, 1);
+    assert.equal(h.requests.some(({ path }) => path === '/assistant/voice/cancellations'), false);
+});
+
+test('[BV2-WAKE-11][BV2-FOLLOWUP-01] a duplicate provider commit cannot supersede the prepared follow-up generation', async () => {
+    const h = harness();
+    await h.runtime.start();
+    const detection = strictDetection();
+    assert.equal(await h.gate.options.beforeRelease(detection), true);
+    h.gate.options.onDetected(detection);
+
+    h.transport.emit({ type: 'input_committed', providerItemId: 'provider-input-deduplicated' });
+    assert.equal(h.gate.resetCount, 1);
+
+    h.transport.beginResponse({
+        responseId: 'provider-input-deduplicated-final',
+        turnId: 'browser-voice-test-turn',
+        speechItemId: 'provider-input-deduplicated-speech',
+        purpose: 'final',
+    });
+    await h.flush();
+    const followUpGeneration = h.gate.currentGeneration();
+    assert.equal(h.gate.resetCount, 2);
+
+    // A late replay of the prior provider event arrives after the next input
+    // has already been pre-admitted. It cannot rotate that input underneath
+    // the pending contextual capture.
+    h.transport.emit({ type: 'input_committed', providerItemId: 'provider-input-deduplicated' });
+    assert.equal(h.gate.resetCount, 2);
+    assert.equal(h.gate.currentGeneration(), followUpGeneration);
+
+    h.gate.readyNow();
+    await h.flush();
+    assert.equal(h.gate.contextualOpenGeneration, followUpGeneration);
+    assert.equal(h.failures.length, 0);
+    assert.equal(h.requests.filter(({ path }) => path === '/assistant/voice/turns').length, 2);
+});
+
 test('[BV2-FIRST-WAKE-01:A-E][BV2-DIAGNOSTIC-03] connection loss during cold local readiness cannot publish wake-only', async () => {
     const h = harness({ gateAdmissionReady: false, gestureAudioContext: true });
     const startup = h.runtime.start();
@@ -784,7 +957,8 @@ test('[BV-JOURNEY-03] clarification reopens the same stable turn with a fresh in
     h.transport.emit({ type: 'input_speech_stopped', providerItemId: 'clarification-answer' });
     assert.equal(h.runtime.snapshot().mode, 'thinking');
     h.transport.emit({ type: 'input_committed', providerItemId: 'clarification-answer' });
-    assert.equal(h.gate.closeCount, 1);
+    assert.equal(h.gate.closeCount, 0);
+    assert.equal(h.gate.resetCount, 2);
     assert.equal(h.transport.deactivated, true);
     h.runTimers();
     assert.equal(

@@ -21,6 +21,13 @@ const LOCAL_WAKE_WORKER_FAILURE_CODES = Object.freeze(new Set([
     'worker_error',
 ]));
 const LOCAL_WAKE_FATAL_ACK_REASONS = Object.freeze(new Set(['decode_failed']));
+const LOCAL_WAKE_CONTROLLED_ACK_REJECTION_REASONS = Object.freeze(new Set([
+    'activation_pending',
+    'failed',
+    'generation_mismatch',
+    'invalid_audio',
+    'not_ready',
+]));
 
 export class LocalWakeGateError extends Error {
     constructor(message, { code = 'local_wake_gate_error', cause } = {}) {
@@ -54,6 +61,11 @@ function sanitizedWorkerFailureMessage(value, fallback = 'The local wake detecto
         .trim()
         .slice(0, 240);
     return message || fallback;
+}
+
+function controlledAckRejectionReason(value) {
+    const reason = String(value || '').trim();
+    return LOCAL_WAKE_CONTROLLED_ACK_REJECTION_REASONS.has(reason) ? reason : 'unknown';
 }
 
 function isSameOriginStaticPath(value) {
@@ -780,9 +792,16 @@ export class LocalWakeGate {
                     });
                     return;
                 }
+                const controlledReason = controlledAckRejectionReason(data.reason);
                 this.#fail(new LocalWakeGateError(
                     'The local wake detector rejected live microphone processing.',
-                    { code: 'pcm_decode_rejected' },
+                    {
+                        code: 'pcm_decode_rejected',
+                        cause: new LocalWakeGateError(
+                            'The wake worker rejected an ordered microphone audio chunk.',
+                            { code: `pcm_ack_${controlledReason}` },
+                        ),
+                    },
                 ), generation);
                 return;
             }

@@ -897,6 +897,51 @@ class VoiceTurnLifecycleService
         );
     }
 
+    /**
+     * Fail a browser voice turn only while it still has no semantic or typed
+     * work. The turn lock makes this boundary mutually exclusive with
+     * prepareRealtimeInterpretation(), so a late client transport failure can
+     * never overwrite a plan that Laravel has already accepted.
+     *
+     * @param  array<string, mixed>  $metadata
+     * @return array{status: 'already_terminal'|'work_started'|'terminalized', turn: VoiceTurn}
+     */
+    public function failBeforeSemanticWork(
+        VoiceTurn $turn,
+        string $category,
+        string $internalDetail,
+        string $userFacingText,
+        array $metadata = [],
+    ): array {
+        return DB::transaction(function () use (
+            $turn,
+            $category,
+            $internalDetail,
+            $userFacingText,
+            $metadata,
+        ): array {
+            $locked = VoiceTurn::query()->whereKey($turn->id)->lockForUpdate()->firstOrFail();
+            if ($locked->state->isTerminal()) {
+                return ['status' => 'already_terminal', 'turn' => $locked->refresh()];
+            }
+            if (AssistantRun::query()->where('voice_turn_id', $locked->id)->exists()) {
+                return ['status' => 'work_started', 'turn' => $locked->refresh()];
+            }
+
+            return [
+                'status' => 'terminalized',
+                'turn' => $this->fail(
+                    $locked,
+                    $category,
+                    $internalDetail,
+                    $userFacingText,
+                    VoiceTurnSideEffectStatus::None,
+                    $metadata,
+                ),
+            ];
+        }, 3);
+    }
+
     /** @param array<string, mixed> $metadata */
     public function cancel(VoiceTurn $turn, string $reason = 'user_requested', array $metadata = []): VoiceTurn
     {

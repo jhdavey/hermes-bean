@@ -102,6 +102,300 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
         $this->assertSame(1, $turn->session->messages()->where('role', 'assistant')->count());
     }
 
+    public function test_bound_local_decoder_failure_before_semantic_work_terminalizes_once_and_recovers_final_on_replacement_session(): void
+    {
+        $fixture = $this->admittedTurn('handler-local-decoder-failure@example.com', 'handler-local-decoder-failure-0001');
+        $this->providerEvent($fixture['session'], [
+            'type' => 'input_audio_buffer.committed',
+            'item_id' => 'input_local_decoder_failure',
+        ]);
+        $plan = VoiceRealtimeCommand::query()
+            ->where('voice_turn_id', $fixture['turn']->id)
+            ->where('purpose', 'semantic_plan')
+            ->sole();
+        $commands = app(RealtimeVoiceCommandService::class);
+        $commands->markSent(
+            $commands->claimNext($fixture['session'], 'handler-daemon'),
+            'handler-daemon',
+        );
+
+        $failure = [
+            'failure_id' => 'local-decoder-failure-0001',
+            'stage' => 'local_wake',
+            'code' => 'pcm_decode_rejected',
+            'message' => 'Private wake detection failed.',
+            'cause_chain' => [[
+                'code' => 'pcm_ack_activation_pending',
+                'message' => 'PCM acknowledgement rejected.',
+            ]],
+            'session_id' => $fixture['conversation']->id,
+            'turn_id' => $fixture['turn']->turn_id,
+        ];
+        $this->withToken($fixture['token'])
+            ->postJson('/api/assistant/voice/client-failures', $failure)
+            ->assertOk()
+            ->assertJsonPath('data.duplicate', false)
+            ->assertJsonPath('data.turn_failure_recovery', 'terminalized');
+
+        $terminal = $fixture['turn']->fresh(['finalAssistantMessage']);
+        $this->assertSame(VoiceTurnState::Failed, $terminal->state);
+        $this->assertSame('browser_local_wake_failed', $terminal->failure_category);
+        $this->assertSame('none', $terminal->side_effect_status->value);
+        $this->assertSame('I’m sorry, I couldn’t finish that voice request. Please try again.', $terminal->finalAssistantMessage?->content);
+        $this->assertSame(0, $terminal->runs()->count());
+        $this->assertSame(1, $terminal->session->messages()->where('role', 'user')->count());
+        $this->assertSame(1, $terminal->session->messages()->where('role', 'assistant')->count());
+        $initialFinal = VoiceRealtimeCommand::query()
+            ->where('voice_turn_id', $terminal->id)
+            ->where('purpose', 'final')
+            ->sole();
+        $this->assertSame(
+            hash('sha256', (string) $terminal->finalAssistantMessage?->content),
+            $initialFinal->approved_text_hash,
+        );
+
+        $this->withToken($fixture['token'])
+            ->postJson('/api/assistant/voice/client-failures', $failure)
+            ->assertOk()
+            ->assertJsonPath('data.duplicate', true)
+            ->assertJsonPath('data.turn_failure_recovery', 'already_terminal');
+        $this->assertSame(1, VoiceRealtimeCommand::query()
+            ->where('voice_turn_id', $terminal->id)
+            ->where('purpose', 'final')
+            ->count());
+        $this->assertSame(1, $terminal->session->messages()->where('role', 'assistant')->count());
+
+        // Provider events that were already in flight remain harmless: the
+        // sent command may be acknowledged, but no semantic retry, run, work,
+        // or second final is allowed after terminalization.
+        $this->providerEvent($fixture['session'], [
+            'type' => 'response.created',
+            'response' => [
+                'id' => 'resp_late_local_decoder_failure',
+                'metadata' => ['bean_command_id' => $plan->command_id],
+            ],
+        ]);
+        $this->providerEvent($fixture['session'], [
+            'type' => 'response.output_item.done',
+            'response_id' => 'resp_late_local_decoder_failure',
+            'item' => [
+                'type' => 'function_call',
+                'call_id' => 'call_late_local_decoder_failure',
+                'name' => 'bean_turn_plan',
+                'arguments' => json_encode([
+                    'semantic_input' => 'The user is checking whether Bean can hear them.',
+                    'interpretation' => $this->interpretation(
+                        outcome: 'respond',
+                        responseText: 'Yes, I can hear you.',
+                    ),
+                ], JSON_THROW_ON_ERROR),
+            ],
+        ]);
+        $this->assertSame(VoiceRealtimeCommandStatus::Acknowledged, $plan->fresh()->status);
+        $this->assertSame(0, $terminal->runs()->count());
+        $this->assertSame(1, VoiceRealtimeCommand::query()
+            ->where('voice_turn_id', $terminal->id)
+            ->where('purpose', 'semantic_plan')
+            ->count());
+        $this->assertSame(1, $terminal->session->messages()->where('role', 'assistant')->count());
+
+        $sessions = app(RealtimeVoiceSessionService::class);
+        $replacement = $sessions->createPending(
+            $fixture['user'],
+            $fixture['conversation'],
+            'gpt-realtime-2.1-mini',
+            'marin',
+            2,
+            [
+                'provider_connection_generation' => 2,
+                'playback_capability' => 'local-decoder-replacement-capability',
+            ],
+        );
+        $replacement = $sessions->bindProviderCall($replacement, 'rtc_local_decoder_replacement');
+        $replacement = $sessions->markReady(
+            $sessions->acquireLease($replacement, 'local-decoder-replacement-daemon'),
+            'local-decoder-replacement-daemon',
+        );
+        $handler = app(RealtimeVoiceApplicationEventHandler::class);
+        $handler->handleSessionReady($replacement);
+        $handler->handleSessionReady($replacement);
+
+        $terminal = $terminal->fresh(['finalAssistantMessage']);
+        $this->assertSame($replacement->id, $terminal->realtime_session_id);
+        $replacementFinal = VoiceRealtimeCommand::query()
+            ->where('voice_realtime_session_id', $replacement->id)
+            ->where('voice_turn_id', $terminal->id)
+            ->where('purpose', 'final')
+            ->sole();
+        $this->assertSame($initialFinal->approved_text_hash, $replacementFinal->approved_text_hash);
+        $this->assertSame(
+            'local-decoder-replacement-capability',
+            data_get($replacementFinal->payload, 'response.metadata.playback_capability'),
+        );
+        $this->assertSame(1, $terminal->session->messages()->where('role', 'assistant')->count());
+    }
+
+    public function test_client_failure_turn_binding_cannot_cross_user_or_conversation_scope(): void
+    {
+        $reporter = $this->admittedTurn('handler-failure-reporter@example.com', 'handler-failure-reporter-0001');
+        $target = $this->admittedTurn('handler-failure-target@example.com', 'handler-failure-target-0001');
+        $payload = [
+            'stage' => 'local_wake',
+            'code' => 'pcm_decode_rejected',
+            'message' => 'Private wake detection failed.',
+            'cause_chain' => [],
+            'turn_id' => $target['turn']->turn_id,
+        ];
+
+        $this->withToken($reporter['token'])
+            ->postJson('/api/assistant/voice/client-failures', [
+                ...$payload,
+                'failure_id' => 'cross-user-failure-0001',
+                'session_id' => $target['conversation']->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.turn_failure_recovery', null);
+        $this->assertSame(VoiceTurnState::Accepted, $target['turn']->fresh()->state);
+
+        $otherConversation = ConversationSession::query()->create([
+            'user_id' => $target['user']->id,
+            'workspace_id' => $target['conversation']->workspace_id,
+            'created_by_user_id' => $target['user']->id,
+            'title' => 'Wrong voice failure scope',
+            'status' => 'active',
+            'session_kind' => 'conversation',
+            'last_activity_at' => now(),
+        ]);
+        $this->withToken($target['token'])
+            ->postJson('/api/assistant/voice/client-failures', [
+                ...$payload,
+                'failure_id' => 'cross-conversation-failure-0001',
+                'session_id' => $otherConversation->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.turn_failure_recovery', null);
+        $this->assertSame(VoiceTurnState::Accepted, $target['turn']->fresh()->state);
+        $this->assertSame(0, $target['turn']->session->messages()->where('role', 'assistant')->count());
+    }
+
+    public function test_duplicate_client_failure_identity_cannot_be_replayed_against_another_turn(): void
+    {
+        $fixture = $this->admittedTurn(
+            'handler-failure-replay@example.com',
+            'handler-failure-replay-first-0001',
+        );
+        $failure = [
+            'failure_id' => 'same-user-cross-turn-replay-0001',
+            'stage' => 'local_wake',
+            'code' => 'pcm_decode_rejected',
+            'message' => 'Private wake detection failed.',
+            'cause_chain' => [],
+            'session_id' => $fixture['conversation']->id,
+            'turn_id' => $fixture['turn']->turn_id,
+        ];
+
+        $this->withToken($fixture['token'])
+            ->postJson('/api/assistant/voice/client-failures', $failure)
+            ->assertOk()
+            ->assertJsonPath('data.duplicate', false)
+            ->assertJsonPath('data.turn_failure_recovery', 'terminalized');
+        $this->assertSame(VoiceTurnState::Failed, $fixture['turn']->fresh()->state);
+
+        $second = app(VoiceTurnLifecycleService::class)->preAdmitRealtime(
+            $fixture['user'],
+            $fixture['conversation'],
+            $fixture['session'],
+            [
+                'turn_id' => 'handler-failure-replay-second-0001',
+                'controller_generation' => 1,
+                'provider_connection_generation' => 1,
+                'input_generation' => 2,
+                'conversation_context' => ['mode' => 'new_conversation', 'epoch' => 2],
+                'client_milestones' => [],
+            ],
+        );
+        $this->withToken($fixture['token'])
+            ->postJson('/api/assistant/voice/client-failures', [
+                ...$failure,
+                'turn_id' => $second->turn_id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.duplicate', true)
+            ->assertJsonPath('data.turn_failure_recovery', 'already_terminal');
+
+        $this->assertSame(VoiceTurnState::Accepted, $second->fresh()->state);
+        $this->assertNull($second->fresh()->final_assistant_message_id);
+        $this->assertSame(0, $second->session->messages()
+            ->where('client_turn_id', $second->turn_id)
+            ->where('role', 'assistant')
+            ->count());
+    }
+
+    public function test_local_decoder_failure_preserves_semantic_work_that_already_started(): void
+    {
+        $fixture = $this->admittedTurn('handler-local-decoder-active-work@example.com', 'handler-local-decoder-active-work-0001');
+        $this->requestAndAcknowledgePlan(
+            $fixture,
+            'input_local_decoder_active_work',
+            'resp_plan_local_decoder_active_work',
+        );
+        $this->providerEvent($fixture['session'], [
+            'type' => 'response.output_item.done',
+            'response_id' => 'resp_plan_local_decoder_active_work',
+            'item' => [
+                'type' => 'function_call',
+                'call_id' => 'call_plan_local_decoder_active_work',
+                'name' => 'bean_turn_plan',
+                'arguments' => json_encode([
+                    'semantic_input' => 'Create a task named Preserve active work.',
+                    'interpretation' => $this->interpretation(
+                        outcome: 'execute',
+                        operations: [[
+                            'id' => 'create_task',
+                            'tool' => 'app.task.create',
+                            'arguments_json' => json_encode([
+                                ...$this->taskCreateDefaults(),
+                                'title' => 'Preserve active work',
+                            ], JSON_THROW_ON_ERROR),
+                            'dependencies' => [],
+                        ]],
+                    ),
+                ], JSON_THROW_ON_ERROR),
+            ],
+        ]);
+        $turn = $fixture['turn']->fresh(['runs']);
+        $operation = $turn->runs->firstWhere('handler', HermesSemanticOperationExecutor::OPERATION_HANDLER);
+        $this->assertInstanceOf(AssistantRun::class, $operation);
+        $this->assertSame('queued', $operation->status);
+
+        $this->withToken($fixture['token'])
+            ->postJson('/api/assistant/voice/client-failures', [
+                'failure_id' => 'local-decoder-active-work-0001',
+                'stage' => 'local_wake',
+                'code' => 'pcm_decode_rejected',
+                'message' => 'Private wake detection failed.',
+                'cause_chain' => [],
+                'session_id' => $fixture['conversation']->id,
+                'turn_id' => $turn->turn_id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.turn_failure_recovery', 'work_started');
+
+        $this->assertSame(VoiceTurnState::Running, $turn->fresh()->state);
+        $this->assertNull($turn->fresh()->final_assistant_message_id);
+        $this->assertSame('queued', $operation->fresh()->status);
+        app()->call([new ProcessAssistantRun($operation->id), 'handle']);
+
+        $terminal = $turn->fresh(['finalAssistantMessage']);
+        $this->assertSame(VoiceTurnState::Completed, $terminal->state);
+        $this->assertSame(1, Task::query()
+            ->where('user_id', $fixture['user']->id)
+            ->where('title', 'Preserve active work')
+            ->count());
+        $this->assertNotNull($terminal->finalAssistantMessage);
+        $this->assertSame(1, $terminal->session->messages()->where('role', 'assistant')->count());
+    }
+
     public function test_clarification_pauses_the_turn_and_divergent_audio_is_cancelled_and_cleared(): void
     {
         $fixture = $this->admittedTurn('handler-clarify@example.com', 'handler-clarify-0001');

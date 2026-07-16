@@ -2306,6 +2306,7 @@ test('[BV2-WAKE-01][BV2-DIAGNOSTIC-03] out-of-order or unexplained current-gener
         reason: 'not_ready',
     });
     assert.equal(rejected.errors[0]?.code, 'pcm_decode_rejected');
+    assert.equal(rejected.errors[0]?.cause?.code, 'pcm_ack_not_ready');
     assert.equal(rejected.gate.state, 'failed');
     assert.equal(rejected.activatedPcm.length, 0);
 
@@ -2326,6 +2327,7 @@ test('[BV2-WAKE-01][BV2-DIAGNOSTIC-03] out-of-order or unexplained current-gener
         reason: 'activation_pending',
     });
     assert.equal(unexplainedActivation.errors[0]?.code, 'pcm_decode_rejected');
+    assert.equal(unexplainedActivation.errors[0]?.cause?.code, 'pcm_ack_activation_pending');
     assert.equal(unexplainedActivation.errors.length, 1);
     assert.equal(unexplainedActivation.gate.state, 'failed');
     assert.equal(unexplainedActivation.activatedPcm.length, 0);
@@ -2367,6 +2369,128 @@ test('[BV2-WAKE-01] post-confirmation activation-pending acknowledgements drain 
     assert.equal(harness.gate.isReady(), true);
     assert.equal(harness.gate.isOpen(), true);
     await harness.gate.stop();
+});
+
+test('[BV2-FIRST-WAKE-01:C-E][BV2-WAKE-01][BV2-WAKE-11][BV2-AUDIO-NATIVE-01][BV2-SIDEBAND-01][BV2-PRIVACY-PCM-03] provider commit atomically rearms wake detection before the next local PCM chunk', async () => {
+    const harness = createHarness({ maxInFlightPcm: 2 });
+    await harness.gate.start(harness.rawStream);
+    const worker = harness.workers[0];
+    const firstGeneration = harness.gate.currentGeneration();
+    completeReadinessBarrier(harness, firstGeneration);
+
+    // Model a live strict wake with one already-posted PCM chunk queued behind
+    // the confirming chunk, as observed in Chromium with the 80 ms worklet
+    // bridge. The exact safe boundary remains local until the wake opens.
+    harness.emitPcm({
+        generation: firstGeneration,
+        samples: new Float32Array(1_280).fill(0.25),
+    });
+    harness.emitPcm({
+        generation: firstGeneration,
+        samples: new Float32Array(1_280).fill(0.5),
+    });
+    const firstWakePcm = worker.messages
+        .filter(({ message }) => message.type === 'audio'
+            && message.generation === firstGeneration)
+        .slice(-2)
+        .map(({ message }) => message);
+    worker.emit({
+        type: 'ack',
+        generation: firstGeneration,
+        sequence: firstWakePcm[0].sequence,
+        accepted: true,
+    });
+    worker.emit(wakeMessage(harness, firstGeneration, {
+        sourceSequence: firstWakePcm[0].sourceSequence,
+    }));
+
+    assert.equal(harness.gate.isOpen(), true);
+    assert.equal(harness.detections.length, 1);
+    assert.ok(harness.activatedPcm.length >= 2);
+    assert.ok(harness.activatedPcm.every(({ released }) => released === true));
+
+    // Provider input commit closes the activated handoff. The same operation
+    // must also rotate the disarmed worker before another worklet chunk can be
+    // decoded; it cannot leave the two halves claiming different armed states.
+    const activatedBeforeCommit = harness.activatedPcm.length;
+    const secondGeneration = harness.gate.resetAfterTurn();
+    assert.equal(secondGeneration, firstGeneration + 1);
+    assert.equal(harness.gate.isOpen(), false);
+    assert.equal(harness.gate.isReady(), false);
+    assert.equal(harness.gate.pendingPcmChunks(), 0);
+    assert.equal(harness.gate.bufferedPcmChunks(), 0);
+    assert.deepEqual(worker.messages.at(-1).message, {
+        type: 'reset',
+        generation: secondGeneration,
+        reason: 'turn_reset',
+    });
+
+    // The old worker response is stale after the atomic generation rotation.
+    // It cannot fail the new generation or release another copy of audio.
+    worker.emit({
+        type: 'ack',
+        generation: firstGeneration,
+        sequence: firstWakePcm[1].sequence,
+        accepted: false,
+        reason: 'activation_pending',
+    });
+    assert.equal(harness.errors.length, 0);
+    assert.equal(harness.activatedPcm.length, activatedBeforeCommit);
+
+    // PCM arriving immediately after commit remains memory-only while the
+    // replacement worker proves all readiness barriers.
+    harness.emitPcm({
+        generation: secondGeneration,
+        samples: new Float32Array(1_280).fill(0.75),
+    });
+    assert.equal(harness.activatedPcm.length, activatedBeforeCommit);
+    assert.equal(harness.gate.bufferedPcmChunks(), 1);
+    harness.worklets[0].port.emit({ type: 'processor_ready', generation: secondGeneration });
+    worker.emit(workerReadyMessage(secondGeneration));
+    const replacementPcm = worker.messages
+        .filter(({ message }) => message.type === 'audio'
+            && message.generation === secondGeneration)
+        .at(-1).message;
+    worker.emit({
+        type: 'ack',
+        generation: secondGeneration,
+        sequence: replacementPcm.sequence,
+        accepted: true,
+    });
+    assert.equal(harness.gate.isReady(), true);
+    assert.equal(harness.activatedPcm.length, activatedBeforeCommit);
+
+    // The next strict wake crosses the same classifier-owned boundary once;
+    // post-commit background PCM before that boundary is never released.
+    harness.emitPcm({
+        generation: secondGeneration,
+        samples: new Float32Array(1_280).fill(0.9),
+    });
+    const secondWakePcm = worker.messages
+        .filter(({ message }) => message.type === 'audio'
+            && message.generation === secondGeneration)
+        .at(-1).message;
+    worker.emit({
+        type: 'ack',
+        generation: secondGeneration,
+        sequence: secondWakePcm.sequence,
+        accepted: true,
+    });
+    worker.emit(wakeMessage(harness, secondGeneration, {
+        sourceSequence: secondWakePcm.sourceSequence,
+    }));
+
+    assert.equal(harness.errors.length, 0);
+    assert.equal(harness.gate.isOpen(), true);
+    assert.deepEqual(harness.detections.map(({ generation }) => generation), [
+        firstGeneration,
+        secondGeneration,
+    ]);
+    assert.equal(harness.activatedPcm.length, activatedBeforeCommit + 1);
+    assert.equal(harness.activatedPcm.at(-1).generation, secondGeneration);
+    assert.equal(harness.activatedPcm.at(-1).sourceSequence, secondWakePcm.sourceSequence);
+    assert.equal(harness.activatedPcm.at(-1).released, true);
+    assert.equal(harness.rawTrack.stopped, false);
 });
 
 test('[BV2-WAKE-01][BV2-DIAGNOSTIC-03] reset, close, and stop invalidate stale acknowledgement deadlines across generations', async () => {

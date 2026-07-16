@@ -190,6 +190,44 @@ class RealtimeVoiceApplicationEventHandler implements RealtimeVoiceProviderEvent
         );
     }
 
+    /**
+     * A terminal local decoder failure closes the browser's Realtime media
+     * connection. If no semantic run exists yet, fail that one pre-admitted
+     * turn immediately instead of leaving its plan command aimed at a dying
+     * provider call until the no-progress watchdog fires.
+     */
+    public function handleClientTurnFailure(VoiceTurn $turn, string $stage, string $code): string
+    {
+        if ($stage !== 'local_wake') {
+            return 'not_applicable';
+        }
+
+        $safeCode = mb_substr(
+            preg_replace('/[^A-Za-z0-9_.-]+/', '_', $code) ?: 'local_wake_failure',
+            0,
+            80,
+        );
+        $result = $this->lifecycle->failBeforeSemanticWork(
+            $turn,
+            'browser_local_wake_failed',
+            "The browser local wake transport failed before semantic work started ({$safeCode}).",
+            self::NEUTRAL_FAILURE,
+            [
+                'client_failure_stage' => 'local_wake',
+                'client_failure_code' => $safeCode,
+            ],
+        );
+        $terminal = $result['turn'];
+        if ($terminal->state === VoiceTurnState::Failed) {
+            $this->authorizeFinal(
+                $terminal,
+                recoveryReason: 'browser_local_wake_failure',
+            );
+        }
+
+        return $result['status'];
+    }
+
     public function handleCommandFailure(VoiceRealtimeCommand $command): void
     {
         $command->loadMissing('turn');
@@ -815,6 +853,11 @@ class RealtimeVoiceApplicationEventHandler implements RealtimeVoiceProviderEvent
         VoiceRealtimeCommand $command,
         Throwable $exception,
     ): void {
+        $turn = $turn->fresh();
+        if (! $turn instanceof VoiceTurn || $turn->state->isTerminal()) {
+            return;
+        }
+
         $attempt = max(1, (int) data_get($command->payload, 'response.metadata.semantic_attempt', 1));
         $this->lifecycle->recordSemanticEvent($turn, 'realtime_semantic_output_rejected', [
             'command_id' => $command->command_id,

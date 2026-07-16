@@ -167,6 +167,7 @@ export class BeanVoiceRuntime {
         this.closeAfterResponseTurnIds = new Set();
         this.deliveryKeys = new Set();
         this.deliveryInFlight = new Map();
+        this.committedProviderInputItemIds = new Set();
         this.pendingStartupFailure = null;
 
         let transport = null;
@@ -403,6 +404,7 @@ export class BeanVoiceRuntime {
         this.closeAfterResponseTurnIds.clear();
         this.deliveryKeys.clear();
         this.deliveryInFlight.clear();
+        this.committedProviderInputItemIds.clear();
         this.pendingStartupFailure = null;
         this.mode = BEAN_VOICE_MODES.OFF;
         this.#emitView();
@@ -558,9 +560,29 @@ export class BeanVoiceRuntime {
             return;
         }
         if (event.type === 'input_committed') {
+            const providerItemId = text(event.providerItemId);
+            if (providerItemId && this.committedProviderInputItemIds.has(providerItemId)) return;
+            if (providerItemId) {
+                // Provider item IDs contain no transcript/audio and remain
+                // bounded to this one microphone session. Retaining all of
+                // them makes even a very late replay idempotent.
+                this.committedProviderInputItemIds.add(providerItemId);
+            }
             if (this.pendingContextualCapture) this.pendingContextualCapture.committed = true;
             this.transport.deactivateInput();
-            this.localWakeGate?.close?.();
+            // Wake confirmation disarms the local worker. Provider commit must
+            // therefore rotate the complete local gate generation, not merely
+            // close its activated PCM release. Otherwise the first 80 ms chunk
+            // after commit reaches a disarmed worker and is falsely treated as
+            // a microphone decode failure.
+            const nextInputGeneration = Number(this.localWakeGate?.resetAfterTurn?.());
+            if (!Number.isSafeInteger(nextInputGeneration) || nextInputGeneration < 1) {
+                this.#handleFailure(Object.assign(
+                    new Error('Private wake detection could not rearm after provider input commit.'),
+                    { code: 'reset_failed' },
+                ), 'local_wake', this.activeTurnId);
+                return;
+            }
             if (!this.pendingBarge && !this.transport.snapshot().playbackActive) {
                 this.mode = BEAN_VOICE_MODES.THINKING;
                 this.#emitView();

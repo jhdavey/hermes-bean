@@ -49,6 +49,12 @@ class AssistantVoiceController extends Controller
             'microphone_stream_required',
             'missing_release_boundary',
             'pcm_ack_timeout',
+            'pcm_ack_activation_pending',
+            'pcm_ack_failed',
+            'pcm_ack_generation_mismatch',
+            'pcm_ack_invalid_audio',
+            'pcm_ack_not_ready',
+            'pcm_ack_unknown',
             'pcm_decode_rejected',
             'pcm_transfer_failed',
             'processor_failed',
@@ -341,14 +347,30 @@ class AssistantVoiceController extends Controller
             ]);
         }
 
-        $playbackRecovery = $data['stage'] === 'playback' && $turn instanceof VoiceTurn
-            ? $this->realtimeEvents->handleClientPlaybackFailure($turn)
+        $recordedTurnId = trim((string) data_get($event->payload, 'turn_id', ''));
+        $recordedTurn = $recordedTurnId !== '' && $event->conversation_session_id !== null
+            ? VoiceTurn::query()
+                ->where('user_id', $user->id)
+                ->where('conversation_session_id', $event->conversation_session_id)
+                ->where('turn_id', $recordedTurnId)
+                ->first()
+            : null;
+        $turnFailureRecovery = $data['stage'] === 'local_wake' && $recordedTurn instanceof VoiceTurn
+            ? $this->realtimeEvents->handleClientTurnFailure(
+                $recordedTurn,
+                (string) $data['stage'],
+                (string) data_get($event->payload, 'code', 'local_wake_failure'),
+            )
+            : null;
+        $playbackRecovery = $data['stage'] === 'playback' && $recordedTurn instanceof VoiceTurn
+            ? $this->realtimeEvents->handleClientPlaybackFailure($recordedTurn)
             : null;
 
         return response()->json(['data' => [
             'recorded' => true,
             'duplicate' => ! $event->wasRecentlyCreated,
             'failure_id' => $event->client_event_id,
+            'turn_failure_recovery' => $turnFailureRecovery,
             'playback_recovery' => $playbackRecovery,
         ]]);
     }
