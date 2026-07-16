@@ -215,6 +215,10 @@ export class BeanVoiceRealtimeTransport {
             resolveReady = resolve;
             rejectReady = reject;
         });
+        // Negotiation can fail before Promise.race begins awaiting readiness.
+        // The subsequent intentional close still emits a data-channel close,
+        // so mark that early rejection handled without changing its state.
+        void ready.catch(() => {});
         const settleReady = () => {
             if (channelReady && mediaReady) resolveReady();
         };
@@ -230,12 +234,14 @@ export class BeanVoiceRealtimeTransport {
             this.handleProviderEvent(payload);
         });
         channel.addEventListener('close', () => {
+            if (!this.#current(generation, peer)) return;
             rejectReady(new Error('Realtime data channel closed before readiness.'));
-            if (this.#current(generation, peer)) this.#connectionFailure('realtime_data_channel_closed');
+            this.#connectionFailure('realtime_data_channel_closed');
         });
         channel.addEventListener('error', () => {
+            if (!this.#current(generation, peer)) return;
             rejectReady(new Error('Realtime data channel failed before readiness.'));
-            if (this.#current(generation, peer)) this.#connectionFailure('realtime_data_channel_failed');
+            this.#connectionFailure('realtime_data_channel_failed');
         });
         peer.addEventListener('connectionstatechange', () => {
             if (!this.#current(generation, peer)) return;
@@ -252,8 +258,8 @@ export class BeanVoiceRealtimeTransport {
         try {
             const offer = await peer.createOffer();
             await peer.setLocalDescription(offer);
-            const sdp = text(peer.localDescription?.sdp || offer.sdp);
-            if (!sdp) throw new Error('Realtime offer did not include SDP.');
+            const sdp = String(peer.localDescription?.sdp || offer.sdp || '');
+            if (!sdp.trim()) throw new Error('Realtime offer did not include SDP.');
             const session = await this.openSession(sdp, context);
             if (!this.#current(generation, peer)) throw Object.assign(new Error('Realtime connection was superseded.'), { name: 'AbortError' });
             const realtimeSessionId = text(session?.realtime_session_id || session?.realtimeSessionId);
@@ -261,11 +267,20 @@ export class BeanVoiceRealtimeTransport {
             if (!realtimeSessionId || !playbackCapability) {
                 throw new Error('Realtime session did not include its public session and playback capability.');
             }
-            const answerSdp = text(session?.sdp);
-            if (!answerSdp) throw new Error('Realtime session did not include an SDP answer.');
+            // SDP is a framed protocol: the final line terminator is required.
+            // Validate emptiness separately and relay the provider answer intact.
+            const answerSdp = typeof session?.sdp === 'string' ? session.sdp : '';
+            if (!answerSdp.trim()) throw new Error('Realtime session did not include an SDP answer.');
             this.realtimeSessionId = realtimeSessionId;
             this.playbackCapability = playbackCapability;
-            await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+            try {
+                await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+            } catch (_) {
+                throw Object.assign(
+                    new Error('Realtime remote description could not be applied.'),
+                    { code: 'realtime_remote_description_failed' },
+                );
+            }
             let timer = null;
             try {
                 await Promise.race([

@@ -88,6 +88,11 @@ class RealtimeVoiceSessionApiTest extends TestCase
             ->assertJsonPath('data.sideband_ready', false)
             ->assertJsonStructure(['data' => ['realtime_session_id', 'playback_capability', 'sdp']])
             ->assertJsonMissing(['call_test_123', 'test-openai-key', 'client_secret', 'tools']);
+        $this->assertSame(
+            "v=0\r\no=- 123 456 IN IP4 127.0.0.1\r\n",
+            $response->json('data.sdp'),
+            'The browser must receive the provider answer with its final SDP line terminator intact.',
+        );
 
         $ledger = VoiceRealtimeSession::query()->sole();
         $this->assertSame('call_test_123', $ledger->provider_call_id);

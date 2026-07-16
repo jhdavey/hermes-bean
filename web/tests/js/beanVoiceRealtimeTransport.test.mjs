@@ -230,6 +230,8 @@ test('[BV-PLAYBACK-05] incomplete projected authorizations are rejected before p
 });
 
 test('[BV-AUDIO-NATIVE-01] WebRTC negotiates receive-only audio and never receives the raw microphone track', async () => {
+    const offerSdp = 'v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n';
+    const answerSdp = `v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=ice-pwd:${'a'.repeat(32)}\r\n`;
     const channelListeners = new Map();
     const peerListeners = new Map();
     const channel = {
@@ -248,9 +250,13 @@ test('[BV-AUDIO-NATIVE-01] WebRTC negotiates receive-only audio and never receiv
         addTransceiver(type, options) { this.transceivers.push({ type, options }); },
         createDataChannel(label) { this.channelLabel = label; return channel; },
         addEventListener: (type, listener) => peerListeners.set(type, listener),
-        async createOffer() { return { type: 'offer', sdp: 'offer-sdp' }; },
+        async createOffer() { return { type: 'offer', sdp: offerSdp }; },
         async setLocalDescription(offer) { this.localDescription = offer; },
-        async setRemoteDescription(answer) { this.remoteDescription = answer; },
+        async setRemoteDescription(answer) {
+            assert.equal(answer.sdp, answerSdp, 'the provider SDP framing must remain byte-for-byte intact');
+            assert.ok(answer.sdp.endsWith('\r\n'), 'Chrome requires the final SDP line terminator');
+            this.remoteDescription = answer;
+        },
         close() {},
     };
     const rawTrack = { stopCalls: 0, stop() { this.stopCalls += 1; } };
@@ -261,7 +267,7 @@ test('[BV-AUDIO-NATIVE-01] WebRTC negotiates receive-only audio and never receiv
         openSession: async (sdp, context) => {
             opened = { sdp, context };
             return {
-                sdp: 'answer-sdp',
+                sdp: answerSdp,
                 realtime_session_id: sessionId,
                 playback_capability: capability,
             };
@@ -280,7 +286,7 @@ test('[BV-AUDIO-NATIVE-01] WebRTC negotiates receive-only audio and never receiv
     });
     assert.equal(result.realtimeSessionId, sessionId);
     assert.deepEqual(opened, {
-        sdp: 'offer-sdp',
+        sdp: offerSdp,
         context: { conversationSessionId: '42' },
     });
     assert.deepEqual(peer.transceivers, [{ type: 'audio', options: { direction: 'recvonly' } }]);
@@ -289,4 +295,100 @@ test('[BV-AUDIO-NATIVE-01] WebRTC negotiates receive-only audio and never receiv
     transport.close('test_complete');
     assert.equal(rawTrack.stopCalls, 0, 'the Realtime transport never owns the raw microphone stream');
     assert.deepEqual(failures, [], 'intentional close events are stale before the peer is closed');
+});
+
+test('[BV2-FIRST-WAKE-01:A-E][BV2-DIAGNOSTIC-03][BV2-PRIVACY-PCM-03] malformed SDP framing tears down once and a fresh connection succeeds', async () => {
+    const validAnswerSdp = `v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=ice-pwd:${'b'.repeat(32)}\r\n`;
+    const invalidAnswerSdp = validAnswerSdp.slice(0, -2);
+    const sessionAnswers = [invalidAnswerSdp, validAnswerSdp];
+    const peers = [];
+    const appended = [];
+    const activated = [];
+    const failures = [];
+
+    function peerForAttempt(attempt) {
+        const channelListeners = new Map();
+        const peerListeners = new Map();
+        const immediatelyReady = attempt === 1;
+        const channel = {
+            readyState: immediatelyReady ? 'open' : 'connecting',
+            bufferedAmount: 0,
+            addEventListener: (type, listener) => channelListeners.set(type, listener),
+            send() {},
+            closeCount: 0,
+            close() {
+                this.closeCount += 1;
+                this.readyState = 'closed';
+                channelListeners.get('close')?.();
+            },
+        };
+        const peer = {
+            channel,
+            connectionState: immediatelyReady ? 'connected' : 'new',
+            localDescription: null,
+            closeCount: 0,
+            addTransceiver() {},
+            createDataChannel() { return channel; },
+            addEventListener: (type, listener) => peerListeners.set(type, listener),
+            async createOffer() { return { type: 'offer', sdp: 'v=0\r\n' }; },
+            async setLocalDescription(offer) { this.localDescription = offer; },
+            async setRemoteDescription(answer) {
+                this.remoteDescription = answer;
+                if (!answer.sdp.endsWith('\r\n')) {
+                    throw Object.assign(new Error('native parser detail must not escape'), {
+                        name: 'OperationError',
+                    });
+                }
+            },
+            close() {
+                this.closeCount += 1;
+                this.connectionState = 'closed';
+                peerListeners.get('connectionstatechange')?.();
+            },
+        };
+        peers.push(peer);
+        return peer;
+    }
+
+    let attempt = 0;
+    const transport = new BeanVoiceRealtimeTransport({
+        openSession: async () => ({
+            sdp: sessionAnswers[attempt++],
+            realtime_session_id: sessionId,
+            playback_capability: capability,
+        }),
+        inputTransport: {
+            append: (event) => { appended.push(event); return true; },
+            activate: (generation) => { activated.push(generation); return true; },
+            deactivate() {},
+        },
+        peerConnectionFactory: () => peerForAttempt(peers.length),
+        audioFactory: () => ({ muted: true, volume: 0, play: () => Promise.resolve(), pause() {} }),
+        onFailure: (error, stage) => failures.push({ error, stage }),
+    });
+
+    await assert.rejects(
+        transport.connect({ controllerGeneration: 1, providerConnectionGeneration: 1 }),
+        (error) => error.code === 'realtime_remote_description_failed'
+            && error.message === 'Realtime remote description could not be applied.'
+            && !error.message.includes('native parser detail'),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(transport.snapshot().connected, false);
+    assert.equal(peers[0].channel.closeCount, 1);
+    assert.equal(peers[0].closeCount, 1);
+    assert.deepEqual(failures, [], 'initial negotiation reports once through connect rejection');
+    assert.deepEqual(appended, [], 'failed startup never releases microphone PCM');
+    assert.deepEqual(activated, [], 'failed startup never activates provider input');
+
+    const result = await transport.connect({
+        controllerGeneration: 3,
+        providerConnectionGeneration: 2,
+    });
+    assert.equal(result.realtimeSessionId, sessionId);
+    assert.equal(transport.snapshot().connected, true);
+    assert.equal(peers[1].remoteDescription.sdp, validAnswerSdp);
+    assert.deepEqual(appended, []);
+    assert.deepEqual(activated, []);
+    transport.close('retry_journey_complete');
 });

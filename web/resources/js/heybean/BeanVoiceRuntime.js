@@ -167,6 +167,7 @@ export class BeanVoiceRuntime {
         this.closeAfterResponseTurnIds = new Set();
         this.deliveryKeys = new Set();
         this.deliveryInFlight = new Map();
+        this.pendingStartupFailure = null;
 
         let transport = null;
         this.inputTransport = inputTransportFactory({
@@ -177,7 +178,17 @@ export class BeanVoiceRuntime {
             openSession: (sdp, context) => this.openRealtimeSession(sdp, context),
             inputTransport: this.inputTransport,
             onEvent: (event) => this.#handleRealtimeEvent(event),
-            onFailure: (error, stage) => this.#handleFailure(error, stage),
+            onFailure: (error, stage) => {
+                if (this.mode === BEAN_VOICE_MODES.STARTING) {
+                    this.pendingStartupFailure = this.pendingStartupFailure || {
+                        generation: this.generation,
+                        error,
+                        stage,
+                    };
+                    return;
+                }
+                this.#handleFailure(error, stage);
+            },
             timers,
         });
         this.transport = transport;
@@ -220,9 +231,11 @@ export class BeanVoiceRuntime {
         this.enabled = true;
         this.error = '';
         this.mode = BEAN_VOICE_MODES.STARTING;
+        this.pendingStartupFailure = null;
         this.#emitView();
 
         let startupLocalWakeFailure = null;
+        let startupTransportFailure = null;
         let preparedAudioContext = null;
         let gate = null;
         try {
@@ -282,18 +295,27 @@ export class BeanVoiceRuntime {
             if (!sessionId) throw new Error('Bean voice could not establish its conversation session.');
             this.conversationSessionId = sessionId;
             this.rawMicrophoneStream = rawMicrophoneStream;
-            const [localAudio, realtimeSession] = await Promise.all([
-                gate.start(rawMicrophoneStream),
-                this.transport.connect({
+            const localWakePromise = Promise.resolve(gate.start(rawMicrophoneStream))
+                .catch((error) => {
+                    startupLocalWakeFailure = startupLocalWakeFailure || error;
+                    throw error;
+                });
+            const transportPromise = this.transport.connect({
+                controllerGeneration: generation,
+                providerConnectionGeneration: this.providerConnectionGeneration,
+                context: Object.freeze({
+                    conversationSessionId: sessionId,
+                    workspaceId: this.currentWorkspaceId() || null,
                     controllerGeneration: generation,
                     providerConnectionGeneration: this.providerConnectionGeneration,
-                    context: Object.freeze({
-                        conversationSessionId: sessionId,
-                        workspaceId: this.currentWorkspaceId() || null,
-                        controllerGeneration: generation,
-                        providerConnectionGeneration: this.providerConnectionGeneration,
-                    }),
                 }),
+            }).catch((error) => {
+                startupTransportFailure = error;
+                throw error;
+            });
+            const [localAudio, realtimeSession] = await Promise.all([
+                localWakePromise,
+                transportPromise,
             ]);
             if (!this.#current(generation) || this.localWakeGate !== gate) return false;
             if (Number(localAudio?.sampleRate) !== 16000) {
@@ -319,11 +341,20 @@ export class BeanVoiceRuntime {
             this.#clearActivityTimer();
             this.activityLevel = 0;
             this.mode = BEAN_VOICE_MODES.WAKE_ONLY;
+            this.pendingStartupFailure = null;
             this.#emitView();
             return true;
         } catch (error) {
             if (!this.#current(generation)) return false;
-            this.#handleFailure(startupLocalWakeFailure || error, 'startup');
+            const pendingFailure = this.pendingStartupFailure?.generation === generation
+                ? this.pendingStartupFailure
+                : null;
+            const failure = pendingFailure?.error || startupLocalWakeFailure || startupTransportFailure || error;
+            const stage = pendingFailure?.stage
+                || (failure === startupLocalWakeFailure ? 'local_wake' : null)
+                || (failure === startupTransportFailure ? 'connection' : 'startup');
+            this.pendingStartupFailure = null;
+            this.#handleFailure(failure, stage);
             await this.stop('startup_failed');
             this.mode = BEAN_VOICE_MODES.FAILED;
             this.error = 'Bean couldn’t connect voice right now. Tap Bean to try again.';
@@ -358,6 +389,7 @@ export class BeanVoiceRuntime {
         this.closeAfterResponseTurnIds.clear();
         this.deliveryKeys.clear();
         this.deliveryInFlight.clear();
+        this.pendingStartupFailure = null;
         this.mode = BEAN_VOICE_MODES.OFF;
         this.#emitView();
         try { await gate?.stop?.(); } catch (_) {}

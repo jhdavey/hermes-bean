@@ -17,7 +17,7 @@ function strictDetection(generation = 7, sourceSequence = 20) {
 function harness({
     gateAdmissionReady = true,
     gestureAudioContext = false,
-    sessionFailures = [],
+    transportFailures = [],
     freshMicrophonePerStart = false,
 } = {}) {
     const requests = [];
@@ -29,7 +29,7 @@ function harness({
     const audioContexts = [];
     const rawTracks = [];
     const rawStreams = [];
-    const pendingSessionFailures = [...sessionFailures];
+    const pendingTransportFailures = [...transportFailures];
     const timers = new Map();
     let nextTimer = 1;
     let microphoneAttempts = 0;
@@ -127,11 +127,15 @@ function harness({
             this.activated = [];
             this.appended = [];
             this.closeReasons = [];
+            this.connectInputs = [];
         }
 
         prime() { return {}; }
         async connect(input) {
             this.connectInput = input;
+            this.connectInputs.push(input);
+            const failure = pendingTransportFailures.shift();
+            if (failure) throw failure;
             this.connected = true;
             return {
                 realtimeSessionId: '11111111-1111-4111-8111-111111111111',
@@ -209,8 +213,6 @@ function harness({
         openProjectionStream: async () => { throw new Error('fake projection owns streaming'); },
         ensureConversationSession: async () => {
             startupOrder.push('session:start');
-            const failure = pendingSessionFailures.shift();
-            if (failure) throw failure;
             return { id: 42 };
         },
         openRealtimeSession: async () => { throw new Error('fake transport owns session setup'); },
@@ -384,7 +386,9 @@ test('[BV2-FIRST-WAKE-01:A-E][BV2-WAKE-01] slow local startup completes wake, ad
 test('[BV2-FIRST-WAKE-01:A-E][BV2-DIAGNOSTIC-03] failed startup tears down its primed context and retry uses a fresh generation', async () => {
     const h = harness({
         gestureAudioContext: true,
-        sessionFailures: [Object.assign(new Error('session unavailable'), { code: 'session_unavailable' })],
+        transportFailures: [Object.assign(new Error('remote description failed'), {
+            code: 'realtime_remote_description_failed',
+        })],
         freshMicrophonePerStart: true,
     });
 
@@ -397,7 +401,11 @@ test('[BV2-FIRST-WAKE-01:A-E][BV2-DIAGNOSTIC-03] failed startup tears down its p
     assert.equal(h.audioContexts[0].closeCount, 1);
     assert.ok(h.rawTracks[0].stopped >= 1);
     assert.equal(h.failures.length, 1, 'one startup cause produces one diagnostic');
-    assert.equal(h.failures[0].context.stage, 'startup');
+    assert.equal(h.failures[0].context.stage, 'connection');
+    assert.equal(h.failures[0].error.code, 'realtime_remote_description_failed');
+    assert.deepEqual(h.requests, [], 'failed negotiation cannot admit a voice turn');
+    assert.deepEqual(h.transport.activated, [], 'failed negotiation cannot activate provider input');
+    assert.deepEqual(h.transport.appended, [], 'failed negotiation cannot release microphone PCM');
 
     const secondStartup = h.runtime.start();
     const secondGate = h.gate;
@@ -408,6 +416,30 @@ test('[BV2-FIRST-WAKE-01:A-E][BV2-DIAGNOSTIC-03] failed startup tears down its p
     assert.equal(h.audioContexts[1].closeCount, 0);
     assert.equal(h.runtime.snapshot().mode, 'wake_only');
     assert.equal(h.rawTracks.length, 2);
+    assert.deepEqual(
+        h.transport.connectInputs.map(({ controllerGeneration, providerConnectionGeneration }) => ({
+            controllerGeneration,
+            providerConnectionGeneration,
+        })),
+        [
+            { controllerGeneration: 1, providerConnectionGeneration: 1 },
+            { controllerGeneration: 3, providerConnectionGeneration: 2 },
+        ],
+    );
+
+    const detection = strictDetection();
+    assert.equal(await secondGate.options.beforeRelease(detection), true);
+    secondGate.options.onDetected(detection);
+    secondGate.options.onActivatedPcm({
+        generation: detection.generation,
+        sourceSequence: detection.sourceSequence,
+        sampleRate: 16000,
+        samples: new Float32Array(4),
+        released: true,
+    });
+    assert.equal(h.requests.filter(({ path }) => path === '/assistant/voice/turns').length, 1);
+    assert.equal(h.transport.activated.length, 1);
+    assert.equal(h.transport.appended.length, 1);
 
     const resumeIndices = h.startupOrder
         .map((event, index) => (event === 'audio:resume' ? index : -1))
