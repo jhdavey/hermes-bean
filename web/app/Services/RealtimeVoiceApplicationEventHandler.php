@@ -597,13 +597,28 @@ class RealtimeVoiceApplicationEventHandler implements RealtimeVoiceProviderEvent
         if ($command->purpose !== 'semantic_plan') {
             throw new InvalidArgumentException('The plan call is not bound to a semantic-plan command.');
         }
-        $semanticInput = trim((string) ($arguments['semantic_input'] ?? ''));
-        $payload = $arguments['interpretation'] ?? null;
-        if (! is_array($payload)) {
-            throw new InvalidArgumentException('Realtime Hermes did not provide a structured interpretation.');
+        $unexpected = array_diff(array_keys($arguments), [
+            'semantic_input',
+            'outcome',
+            'outcome_text',
+            'close_after_response',
+            'response_expected',
+            'operations',
+        ]);
+        if ($unexpected !== []) {
+            throw new InvalidArgumentException('Realtime Hermes used unsupported semantic-plan fields.');
         }
-
-        $interpretation = HermesSemanticInterpretation::fromProviderPayload($payload);
+        $semanticInput = trim((string) ($arguments['semantic_input'] ?? ''));
+        if ($semanticInput === '') {
+            throw new InvalidArgumentException('Realtime Hermes did not provide a semantic meaning summary.');
+        }
+        $interpretation = HermesSemanticInterpretation::fromProviderPayload([
+            'outcome' => $arguments['outcome'] ?? null,
+            'outcome_text' => $arguments['outcome_text'] ?? null,
+            'close_after_response' => $arguments['close_after_response'] ?? null,
+            'response_expected' => $arguments['response_expected'] ?? null,
+            'operations' => $arguments['operations'] ?? null,
+        ]);
         $providerInputItemId = trim((string) data_get(
             $command->payload,
             'response.metadata.provider_input_item_id',
@@ -761,6 +776,7 @@ class RealtimeVoiceApplicationEventHandler implements RealtimeVoiceProviderEvent
         $instructions = $this->protocol->interpretationInstructions()
             ."\n\nInterpret the latest bound user audio item. Call bean_turn_plan exactly once."
             ."\nsemantic_input must be a concise sanitized meaning summary, not a verbatim transcript."
+            ."\nPass semantic_input, outcome, outcome_text, close_after_response, response_expected, and operations directly at the tool root. Do not use an interpretation wrapper."
             .($feedback === null ? '' : "\nThe previous structured plan was rejected. Correct this issue: ".$this->privacy->sanitizeTranscript($feedback))
             ."\nTrusted server context:\n".json_encode($trusted, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 
@@ -1490,6 +1506,8 @@ class RealtimeVoiceApplicationEventHandler implements RealtimeVoiceProviderEvent
     /** @return array<string, mixed> */
     private function planTool(): array
     {
+        $interpretation = $this->protocol->interpretationSchema();
+
         return [
             'type' => 'function',
             'name' => self::PLAN_TOOL,
@@ -1502,9 +1520,9 @@ class RealtimeVoiceApplicationEventHandler implements RealtimeVoiceProviderEvent
                         'type' => 'string',
                         'description' => 'A concise meaning summary, not a verbatim transcript.',
                     ],
-                    'interpretation' => $this->protocol->interpretationSchema(),
+                    ...$interpretation['properties'],
                 ],
-                'required' => ['semantic_input', 'interpretation'],
+                'required' => ['semantic_input', ...$interpretation['required']],
             ],
         ];
     }

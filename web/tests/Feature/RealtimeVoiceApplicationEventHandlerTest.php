@@ -48,7 +48,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_direct_semantic_response_returns_function_result_then_one_native_audio_authorization(): void
+    public function test_flat_direct_semantic_response_completes_on_first_attempt_then_delivers_one_native_audio_response(): void
     {
         $fixture = $this->admittedTurn('handler-direct@example.com', 'handler-direct-0001');
         $plan = $this->requestAndAcknowledgePlan($fixture, 'input_direct', 'resp_plan_direct');
@@ -62,7 +62,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
                 'name' => 'bean_turn_plan',
                 'arguments' => json_encode([
                     'semantic_input' => 'The user is checking whether Bean can hear them.',
-                    'interpretation' => $this->interpretation(
+                    ...$this->interpretation(
                         outcome: 'respond',
                         responseText: 'Yes, I can hear you.',
                     ),
@@ -86,6 +86,22 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
         $this->assertSame(hash('sha256', 'Yes, I can hear you.'), $final->approved_text_hash);
         $this->assertSame('none', data_get($final->payload, 'response.tool_choice'));
         $this->assertSame('resp_plan_direct', $plan->fresh()->provider_response_id);
+        $this->assertSame(0, $turn->retry_count);
+        $this->assertSame(1, VoiceRealtimeCommand::query()
+            ->where('voice_turn_id', $turn->id)
+            ->where('purpose', 'semantic_plan')
+            ->count());
+        $planParameters = data_get($plan->payload, 'response.tools.0.parameters');
+        $this->assertIsArray($planParameters);
+        $this->assertSame([
+            'semantic_input',
+            'outcome',
+            'outcome_text',
+            'close_after_response',
+            'response_expected',
+            'operations',
+        ], $planParameters['required']);
+        $this->assertArrayNotHasKey('interpretation', $planParameters['properties']);
         $this->assertSame('spoken_voice', $turn->userMessage?->origin);
         $this->assertSame('voice_only', $turn->userMessage?->display_mode);
         $this->assertSame('spoken_voice', $turn->finalAssistantMessage?->origin);
@@ -122,6 +138,56 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
         ]);
         $this->assertSame($commandCount, VoiceRealtimeCommand::query()->where('voice_turn_id', $turn->id)->count());
         $this->assertSame(1, $turn->session->messages()->where('role', 'assistant')->count());
+    }
+
+    public function test_live_malformed_nested_plan_shape_is_rejected_without_starting_semantic_work(): void
+    {
+        $fixture = $this->admittedTurn('handler-nested-plan@example.com', 'handler-nested-plan-0001');
+        $this->requestAndAcknowledgePlan($fixture, 'input_nested_plan', 'resp_nested_plan');
+
+        $this->providerEvent($fixture['session'], [
+            'type' => 'response.output_item.done',
+            'response_id' => 'resp_nested_plan',
+            'item' => [
+                'type' => 'function_call',
+                'call_id' => 'call_nested_plan',
+                'name' => 'bean_turn_plan',
+                'arguments' => json_encode([
+                    'interpretation' => [
+                        'outcome' => 'respond',
+                        'operations' => [],
+                        'arguments_json' => '{}',
+                    ],
+                    'outcome_text' => 'Yes, I can hear you.',
+                    'response_expected' => true,
+                    'close_after_response' => false,
+                ], JSON_THROW_ON_ERROR),
+            ],
+        ]);
+
+        $turn = $fixture['turn']->fresh();
+        $this->assertSame(VoiceTurnState::Accepted, $turn->state);
+        $this->assertSame(1, $turn->retry_count);
+        $this->assertSame(0, $turn->runs()->count());
+        $this->assertNull($turn->final_assistant_message_id);
+        $this->assertSame(0, $turn->session->messages()->where('role', 'assistant')->count());
+        $this->assertSame(1, $turn->events()
+            ->where('event_type', 'realtime_semantic_output_rejected')
+            ->count());
+        $retry = VoiceRealtimeCommand::query()
+            ->where('voice_turn_id', $turn->id)
+            ->where('purpose', 'semantic_plan')
+            ->latest('id')
+            ->firstOrFail();
+        $this->assertStringEndsWith(':2', $retry->command_id);
+        $this->assertStringContainsString(
+            'Do not use an interpretation wrapper.',
+            (string) data_get($retry->payload, 'response.instructions'),
+        );
+        $this->assertStringContainsString(
+            'unsupported semantic-plan fields',
+            (string) data_get($retry->payload, 'response.instructions'),
+        );
     }
 
     public function test_bound_local_decoder_failure_before_semantic_work_terminalizes_once_and_recovers_final_on_replacement_session(): void
@@ -206,7 +272,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
                 'name' => 'bean_turn_plan',
                 'arguments' => json_encode([
                     'semantic_input' => 'The user is checking whether Bean can hear them.',
-                    'interpretation' => $this->interpretation(
+                    ...$this->interpretation(
                         outcome: 'respond',
                         responseText: 'Yes, I can hear you.',
                     ),
@@ -370,7 +436,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
                 'name' => 'bean_turn_plan',
                 'arguments' => json_encode([
                     'semantic_input' => 'Create a task named Preserve active work.',
-                    'interpretation' => $this->interpretation(
+                    ...$this->interpretation(
                         outcome: 'execute',
                         operations: [[
                             'id' => 'create_task',
@@ -432,7 +498,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
                 'name' => 'bean_turn_plan',
                 'arguments' => json_encode([
                     'semantic_input' => 'The user wants a task changed but did not identify which task.',
-                    'interpretation' => $this->interpretation(
+                    ...$this->interpretation(
                         outcome: 'clarify',
                         clarificationQuestion: 'Which task should I change?',
                         responseExpected: true,
@@ -487,7 +553,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
                 'name' => 'bean_turn_plan',
                 'arguments' => json_encode([
                     'semantic_input' => 'The requested task is ambiguous.',
-                    'interpretation' => $this->interpretation(
+                    ...$this->interpretation(
                         outcome: 'clarify',
                         clarificationQuestion: 'Which task should I change?',
                         responseExpected: true,
@@ -536,7 +602,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
                 'name' => 'bean_turn_plan',
                 'arguments' => json_encode([
                     'semantic_input' => 'The user identified the first task and asked for its status.',
-                    'interpretation' => $this->interpretation(
+                    ...$this->interpretation(
                         outcome: 'respond',
                         responseText: 'The first task is still open.',
                     ),
@@ -580,7 +646,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
                 'name' => 'bean_turn_plan',
                 'arguments' => json_encode([
                     'semantic_input' => 'The user asked a direct conversational question.',
-                    'interpretation' => $this->interpretation(
+                    ...$this->interpretation(
                         outcome: 'respond',
                         responseText: 'I am ready to help.',
                     ),
@@ -675,7 +741,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
                 'name' => 'bean_turn_plan',
                 'arguments' => json_encode([
                     'semantic_input' => 'Create a task named Buy milk.',
-                    'interpretation' => $this->interpretation(
+                    ...$this->interpretation(
                         outcome: 'execute',
                         acknowledgementText: null,
                         operations: [[
@@ -788,7 +854,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
                 'name' => 'bean_turn_plan',
                 'arguments' => json_encode([
                     'semantic_input' => 'The user asked for a direct answer before reloading.',
-                    'interpretation' => $this->interpretation(
+                    ...$this->interpretation(
                         outcome: 'respond',
                         responseText: 'Your answer is ready after reload.',
                     ),
@@ -865,7 +931,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
                 'name' => 'bean_turn_plan',
                 'arguments' => json_encode([
                     'semantic_input' => 'The user asked for a direct answer.',
-                    'interpretation' => $this->interpretation(
+                    ...$this->interpretation(
                         outcome: 'respond',
                         responseText: 'This final remains authoritative.',
                     ),
@@ -946,7 +1012,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
                 'name' => 'bean_turn_plan',
                 'arguments' => json_encode([
                     'semantic_input' => 'The user requested a direct answer.',
-                    'interpretation' => $this->interpretation(
+                    ...$this->interpretation(
                         outcome: 'respond',
                         responseText: 'The durable final is unchanged.',
                     ),
@@ -994,7 +1060,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
                 'name' => 'bean_turn_plan',
                 'arguments' => json_encode([
                     'semantic_input' => 'The user requested a direct answer.',
-                    'interpretation' => $this->interpretation(
+                    ...$this->interpretation(
                         outcome: 'respond',
                         responseText: 'This audio has already started.',
                     ),
@@ -1035,7 +1101,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
                 'name' => 'bean_turn_plan',
                 'arguments' => json_encode([
                     'semantic_input' => 'Create a task named Call Alex.',
-                    'interpretation' => $this->interpretation(
+                    ...$this->interpretation(
                         outcome: 'execute',
                         acknowledgementText: 'I’ll create that task.',
                         operations: [[
@@ -1107,7 +1173,7 @@ class RealtimeVoiceApplicationEventHandlerTest extends TestCase
                 'name' => 'bean_turn_plan',
                 'arguments' => json_encode([
                     'semantic_input' => 'The task target is ambiguous.',
-                    'interpretation' => $this->interpretation(
+                    ...$this->interpretation(
                         outcome: 'clarify',
                         clarificationQuestion: 'Which task should I change?',
                         responseExpected: true,

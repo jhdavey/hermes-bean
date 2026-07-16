@@ -10,7 +10,28 @@ const sessionId = '11111111-1111-4111-8111-111111111111';
 const capability = 'playback-capability-1';
 const approvedHash = 'a'.repeat(64);
 
-function createTransport() {
+function manualTimerHarness() {
+    let nextId = 1;
+    const callbacks = new Map();
+    return {
+        timers: {
+            setTimeout(callback) {
+                const id = nextId++;
+                callbacks.set(id, callback);
+                return id;
+            },
+            clearTimeout(id) { callbacks.delete(id); },
+        },
+        size: () => callbacks.size,
+        runAll() {
+            const pending = [...callbacks.values()];
+            callbacks.clear();
+            pending.forEach((callback) => callback());
+        },
+    };
+}
+
+function createTransport({ timers = {}, authorizationGraceMs } = {}) {
     const sent = [];
     const events = [];
     const failures = [];
@@ -28,6 +49,8 @@ function createTransport() {
         audioFactory: () => audio,
         onEvent: (event) => events.push(event),
         onFailure: (error, stage) => failures.push({ error, stage }),
+        timers,
+        ...(authorizationGraceMs === undefined ? {} : { authorizationGraceMs }),
     });
     transport.prime();
     transport.dataChannel = {
@@ -101,17 +124,184 @@ test('[BV-PLAYBACK-01] browser cannot create responses or return provider tool o
 });
 
 test('[BV-PLAYBACK-02] unbound or mismatched remote audio is cancelled and stays muted', () => {
-    const { transport, sent, failures, audio } = createTransport();
+    const clock = manualTimerHarness();
+    const { transport, sent, failures, events, audio } = createTransport({
+        timers: clock.timers,
+        authorizationGraceMs: 100,
+    });
     transport.handleProviderEvent(responseCreated());
     assert.equal(audio.muted, true);
     assert.equal(audio.volume, 0);
+    assert.equal(transport.snapshot().authorizationPending, true);
+    assert.deepEqual(sent, []);
+    assert.deepEqual(failures, []);
+    assert.equal(clock.size(), 1);
+
+    clock.runAll();
+    assert.equal(transport.snapshot().authorizationPending, false);
     assert.deepEqual(sent, [
         { type: 'response.cancel', response_id: 'response-1' },
         { type: 'output_audio_buffer.clear' },
     ]);
     assert.equal(failures.length, 1);
     assert.equal(failures[0].stage, 'playback');
-    assert.equal(failures[0].error.code, 'speech_item_not_authorized');
+    assert.equal(failures[0].error.code, 'speech_authorization_timeout');
+    assert.equal(failures[0].error.turnId, 'turn-1');
+
+    assert.equal(transport.authorizeSpeech(authorization()), false, 'late authorization is retired');
+    transport.handleProviderEvent(responseCreated());
+    assert.equal(transport.snapshot().authorizationPending, false);
+    assert.equal(transport.snapshot().activeResponse, null);
+    assert.equal(audio.muted, true);
+    assert.equal(audio.volume, 0);
+    assert.equal(failures.length, 1, 'duplicate response creation cannot repeat failure recovery');
+    assert.deepEqual(sent, [
+        { type: 'response.cancel', response_id: 'response-1' },
+        { type: 'output_audio_buffer.clear' },
+    ]);
+
+    const replacementAuthorization = authorization({
+        authorization_id: 'authorization-2',
+        speech_item_id: 'speech-2',
+    });
+    const replacementResponse = responseCreated({
+        authorization_id: 'authorization-2',
+        speech_item_id: 'speech-2',
+    });
+    replacementResponse.response.id = 'response-2';
+    transport.handleProviderEvent(replacementResponse);
+    assert.equal(transport.snapshot().authorizationPending, true);
+    const sentBeforePendingRetiredStart = sent.length;
+    transport.handleProviderEvent({
+        type: 'output_audio_buffer.started',
+        response_id: 'response-1',
+    });
+    assert.equal(transport.snapshot().authorizationPending, true);
+    assert.deepEqual(sent.slice(sentBeforePendingRetiredStart), [
+        { type: 'response.cancel', response_id: 'response-1' },
+    ]);
+    assert.equal(failures.length, 1, 'retired output cannot fail the pending replacement');
+
+    assert.equal(transport.authorizeSpeech(replacementAuthorization), true);
+    transport.handleProviderEvent(responseCreated());
+    assert.equal(transport.snapshot().activeResponse?.responseId, 'response-2');
+    assert.equal(audio.muted, false, 'an old duplicate cannot mute the replacement response');
+    assert.equal(failures.length, 1);
+    transport.handleProviderEvent({
+        type: 'output_audio_buffer.started',
+        response_id: 'response-2',
+    });
+    const sentBeforeRetiredStart = sent.length;
+    transport.handleProviderEvent({
+        type: 'output_audio_buffer.started',
+        response_id: 'response-1',
+    });
+    assert.equal(transport.snapshot().activeResponse?.responseId, 'response-2');
+    assert.equal(audio.muted, false, 'retired output cannot mute an active replacement');
+    assert.deepEqual(sent.slice(sentBeforeRetiredStart), [
+        { type: 'response.cancel', response_id: 'response-1' },
+    ]);
+    assert.equal(failures.length, 1, 'retired output cannot fail the active replacement');
+    transport.handleProviderEvent({
+        type: 'output_audio_buffer.stopped',
+        response_id: 'response-1',
+    });
+    assert.equal(transport.snapshot().activeResponse?.responseId, 'response-2');
+    assert.equal(audio.muted, false, 'a late stop for the retired response cannot stop its replacement');
+    transport.handleProviderEvent({
+        type: 'output_audio_buffer.stopped',
+        response_id: 'response-2',
+    });
+
+    assert.equal(failures.length, 1);
+    assert.equal(transport.snapshot().activeResponse, null);
+    assert.equal(
+        transport.snapshot().authorizationCount,
+        0,
+        'replacement delivery consumes only its new speech identity',
+    );
+    assert.deepEqual(
+        events.map((event) => event.type),
+        ['response_authorized', 'playback_started', 'playback_finished'],
+    );
+});
+
+test('[BV-PLAYBACK-03][BV2-WAKE-11] response creation may safely precede its projection authorization', () => {
+    const clock = manualTimerHarness();
+    const { transport, sent, failures, events, audio } = createTransport({
+        timers: clock.timers,
+        authorizationGraceMs: 100,
+    });
+
+    transport.handleProviderEvent(responseCreated());
+    assert.equal(transport.snapshot().authorizationPending, true);
+    assert.equal(transport.snapshot().activeResponse, null);
+    assert.equal(audio.muted, true);
+    assert.equal(audio.volume, 0);
+    assert.deepEqual(events, []);
+    assert.deepEqual(sent, []);
+
+    assert.equal(transport.authorizeSpeech(authorization()), true);
+    assert.equal(transport.snapshot().authorizationPending, false);
+    assert.equal(clock.size(), 0);
+    assert.equal(audio.muted, false);
+    assert.equal(audio.volume, 1);
+    assert.equal(events.at(-1).type, 'response_authorized');
+
+    transport.handleProviderEvent({
+        type: 'output_audio_buffer.started',
+        response_id: 'response-1',
+    });
+    transport.handleProviderEvent({
+        type: 'output_audio_buffer.stopped',
+        response_id: 'response-1',
+    });
+    clock.runAll();
+
+    assert.deepEqual(failures, []);
+    assert.deepEqual(sent, []);
+    assert.deepEqual(
+        events.map((event) => event.type),
+        ['response_authorized', 'playback_started', 'playback_finished'],
+    );
+    assert.equal(audio.muted, true);
+    assert.equal(audio.volume, 0);
+    assert.equal(transport.snapshot().activeResponse, null);
+});
+
+test('[BV-PLAYBACK-02][BV2-WAKE-11] provider audio starting before authorization stays inaudible and fails once', () => {
+    const clock = manualTimerHarness();
+    const { transport, sent, failures, events, audio } = createTransport({
+        timers: clock.timers,
+        authorizationGraceMs: 100,
+    });
+
+    transport.handleProviderEvent(responseCreated());
+    transport.handleProviderEvent({
+        type: 'output_audio_buffer.started',
+        response_id: 'response-1',
+    });
+
+    assert.equal(transport.snapshot().authorizationPending, false);
+    assert.equal(transport.snapshot().activeResponse, null);
+    assert.equal(clock.size(), 0);
+    assert.equal(audio.muted, true);
+    assert.equal(audio.volume, 0);
+    assert.deepEqual(events, []);
+    assert.deepEqual(sent, [
+        { type: 'response.cancel', response_id: 'response-1' },
+        { type: 'output_audio_buffer.clear' },
+    ]);
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].stage, 'playback');
+    assert.equal(failures[0].error.code, 'output_started_before_authorization');
+
+    transport.handleProviderEvent({
+        type: 'output_audio_buffer.stopped',
+        response_id: 'response-1',
+    });
+    clock.runAll();
+    assert.equal(failures.length, 1, 'late stop and stale timer cannot duplicate recovery');
 });
 
 test('[BV-PLAYBACK-02A] sideband no-audio semantic responses are observed without cancellation', () => {

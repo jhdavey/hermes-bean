@@ -9,6 +9,7 @@ const BROWSER_SEND_TYPES = new Set([
 const PROVIDER_TOOL_EVENT_PATTERN = /(?:function_call|mcp_call|tool_call)/i;
 const CONTROL_RESPONSE_PURPOSES = new Set(['semantic_plan', 'semantic_composition']);
 const PLAYBACK_RESPONSE_PURPOSES = new Set(['acknowledgement', 'clarification', 'final']);
+const DEFAULT_AUTHORIZATION_GRACE_MS = 1250;
 
 function text(value) {
     return String(value ?? '').trim();
@@ -119,6 +120,40 @@ export function beanVoiceResponseAuthorizationFailure({
     return null;
 }
 
+function pendingResponseBindingFailure({
+    binding,
+    realtimeSessionId,
+    playbackCapability,
+    controllerGeneration,
+    providerConnectionGeneration,
+    consumedSpeechItemIds,
+} = {}) {
+    if (!PLAYBACK_RESPONSE_PURPOSES.has(binding?.purpose)) return 'speech_purpose_mismatch';
+    if (!/^[a-f0-9]{64}$/.test(binding?.approvedTextSha256 || '')) {
+        return 'approved_text_hash_mismatch';
+    }
+    return beanVoiceResponseAuthorizationFailure({
+        binding,
+        authorization: {
+            authorizationId: binding.authorizationId,
+            turnId: binding.turnId,
+            speechItemId: binding.speechItemId,
+            purpose: binding.purpose,
+            realtimeSessionId: binding.realtimeSessionId,
+            controllerGeneration: binding.controllerGeneration,
+            providerConnectionGeneration: binding.providerConnectionGeneration,
+            approvedTextSha256: binding.approvedTextSha256,
+            playbackCapability: binding.playbackCapability,
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+        realtimeSessionId,
+        playbackCapability,
+        controllerGeneration,
+        providerConnectionGeneration,
+        consumedSpeechItemIds,
+    });
+}
+
 /**
  * Browser media/control plane for one Realtime WebRTC call. It never creates a
  * provider response or handles provider tools. Remote media is muted until a
@@ -134,6 +169,7 @@ export class BeanVoiceRealtimeTransport {
         onFailure = () => {},
         timers = {},
         readyTimeoutMs = 10000,
+        authorizationGraceMs = DEFAULT_AUTHORIZATION_GRACE_MS,
     } = {}) {
         if (typeof openSession !== 'function') throw new TypeError('Bean voice Realtime transport requires a session opener.');
         if (!inputTransport || typeof inputTransport.append !== 'function') {
@@ -148,6 +184,10 @@ export class BeanVoiceRealtimeTransport {
         this.setTimeout = timers.setTimeout || globalThis.setTimeout?.bind(globalThis);
         this.clearTimeout = timers.clearTimeout || globalThis.clearTimeout?.bind(globalThis);
         this.readyTimeoutMs = Math.max(1000, Number(readyTimeoutMs) || 10000);
+        this.authorizationGraceMs = Math.max(
+            100,
+            Math.min(3000, Number(authorizationGraceMs) || DEFAULT_AUTHORIZATION_GRACE_MS),
+        );
         this.generation = 0;
         this.controllerGeneration = -1;
         this.providerConnectionGeneration = -1;
@@ -158,7 +198,10 @@ export class BeanVoiceRealtimeTransport {
         this.remoteAudio = null;
         this.authorizations = new Map();
         this.consumedSpeechItemIds = new Set();
+        this.retiredResponseIds = new Set();
         this.activeResponse = null;
+        this.pendingResponse = null;
+        this.pendingResponseTimer = null;
         this.connected = false;
     }
 
@@ -171,6 +214,7 @@ export class BeanVoiceRealtimeTransport {
             providerConnectionGeneration: this.providerConnectionGeneration,
             playbackActive: Boolean(this.activeResponse?.started),
             activeResponse: this.activeResponse ? Object.freeze({ ...this.activeResponse }) : null,
+            authorizationPending: Boolean(this.pendingResponse),
             authorizationCount: this.authorizations.size,
         });
     }
@@ -377,6 +421,19 @@ export class BeanVoiceRealtimeTransport {
             || expiresAt <= Date.now()
             || this.consumedSpeechItemIds.has(authorization.speechItemId)) return false;
         this.authorizations.set(authorization.speechItemId, authorization);
+        if (this.pendingResponse?.speechItemId === authorization.speechItemId) {
+            const failure = beanVoiceResponseAuthorizationFailure({
+                binding: this.pendingResponse,
+                authorization,
+                realtimeSessionId: this.realtimeSessionId,
+                playbackCapability: this.playbackCapability,
+                controllerGeneration: this.controllerGeneration,
+                providerConnectionGeneration: this.providerConnectionGeneration,
+                consumedSpeechItemIds: this.consumedSpeechItemIds,
+            });
+            if (failure) this.#rejectPendingResponse(failure);
+            else this.#activatePendingResponse();
+        }
         return true;
     }
 
@@ -448,12 +505,14 @@ export class BeanVoiceRealtimeTransport {
     }
 
     stopPlayback(reason = 'button_stop') {
-        if (!this.activeResponse) return false;
-        const response = { ...this.activeResponse };
+        const source = this.activeResponse || this.pendingResponse;
+        if (!source) return false;
+        const response = { ...source };
         this.#setAudible(0);
         if (response.responseId) this.#send({ type: 'response.cancel', response_id: response.responseId });
         this.#send({ type: 'output_audio_buffer.clear' });
-        this.#consumeActiveResponse();
+        if (this.activeResponse) this.#consumeActiveResponse();
+        else this.#consumePendingResponse();
         this.onEvent(Object.freeze({ type: 'playback_stopped', reason, ...response }));
         return true;
     }
@@ -468,7 +527,9 @@ export class BeanVoiceRealtimeTransport {
         this.inputTransport.deactivate();
         this.authorizations.clear();
         this.consumedSpeechItemIds.clear();
+        this.retiredResponseIds.clear();
         this.activeResponse = null;
+        this.#clearPendingResponse();
         this.realtimeSessionId = '';
         this.playbackCapability = '';
         try { this.dataChannel?.close?.(); } catch (_) {}
@@ -492,6 +553,16 @@ export class BeanVoiceRealtimeTransport {
             }));
             return true;
         }
+        if (this.retiredResponseIds.has(binding.responseId)) {
+            if (!this.activeResponse) this.#setAudible(0);
+            return true;
+        }
+        if (this.activeResponse?.responseId === binding.responseId
+            || this.pendingResponse?.responseId === binding.responseId) return true;
+        if (this.activeResponse || this.pendingResponse) {
+            this.#rejectResponse(binding, 'overlapping_provider_response');
+            return true;
+        }
         const authorization = this.authorizations.get(binding.speechItemId);
         const failure = beanVoiceResponseAuthorizationFailure({
             binding,
@@ -502,29 +573,52 @@ export class BeanVoiceRealtimeTransport {
             providerConnectionGeneration: this.providerConnectionGeneration,
             consumedSpeechItemIds: this.consumedSpeechItemIds,
         });
-        if (failure || this.activeResponse) {
-            this.#setAudible(0);
-            if (binding.responseId) this.#send({ type: 'response.cancel', response_id: binding.responseId });
-            this.#send({ type: 'output_audio_buffer.clear' });
-            this.onFailure(Object.assign(new Error('Realtime audio response was not authorized.'), {
-                code: failure || 'overlapping_provider_response',
-                responseId: binding.responseId || null,
-                speechItemId: binding.speechItemId || null,
-            }), 'playback');
+        if (!failure) {
+            this.#activateResponse(binding);
             return true;
         }
-        this.activeResponse = {
-            ...binding,
-            started: false,
-            boundAtMs: Date.now(),
-        };
-        this.#setAudible(1);
-        this.onEvent(Object.freeze({ type: 'response_authorized', ...this.activeResponse }));
+        if (failure === 'speech_item_not_authorized') {
+            const pendingFailure = pendingResponseBindingFailure({
+                binding,
+                realtimeSessionId: this.realtimeSessionId,
+                playbackCapability: this.playbackCapability,
+                controllerGeneration: this.controllerGeneration,
+                providerConnectionGeneration: this.providerConnectionGeneration,
+                consumedSpeechItemIds: this.consumedSpeechItemIds,
+            });
+            if (!pendingFailure) {
+                this.#holdResponseForAuthorization(binding);
+                return true;
+            }
+            this.#rejectResponse(binding, pendingFailure);
+            return true;
+        }
+        this.#rejectResponse(binding, failure);
         return true;
     }
 
     #playbackStarted(payload) {
-        const responseId = text(payload.response_id || payload.response?.id || this.activeResponse?.responseId);
+        const responseId = text(
+            payload.response_id
+            || payload.response?.id
+            || this.activeResponse?.responseId
+            || this.pendingResponse?.responseId,
+        );
+        if (this.retiredResponseIds.has(responseId)) {
+            const currentResponse = this.activeResponse || this.pendingResponse;
+            if (currentResponse && currentResponse.responseId !== responseId) {
+                if (responseId) this.#send({ type: 'response.cancel', response_id: responseId });
+                return true;
+            }
+            this.#setAudible(0);
+            if (responseId) this.#send({ type: 'response.cancel', response_id: responseId });
+            this.#send({ type: 'output_audio_buffer.clear' });
+            return true;
+        }
+        if (this.pendingResponse?.responseId === responseId) {
+            this.#rejectPendingResponse('output_started_before_authorization');
+            return true;
+        }
         if (!this.activeResponse || responseId !== this.activeResponse.responseId) {
             this.#setAudible(0);
             if (responseId) this.#send({ type: 'response.cancel', response_id: responseId });
@@ -543,7 +637,20 @@ export class BeanVoiceRealtimeTransport {
     }
 
     #playbackStopped(payload, reason) {
-        const responseId = text(payload.response_id || payload.response?.id || this.activeResponse?.responseId);
+        const responseId = text(
+            payload.response_id
+            || payload.response?.id
+            || this.activeResponse?.responseId
+            || this.pendingResponse?.responseId,
+        );
+        if (this.retiredResponseIds.has(responseId)) {
+            if (!this.activeResponse) this.#setAudible(0);
+            return true;
+        }
+        if (this.pendingResponse?.responseId === responseId) {
+            this.#rejectPendingResponse('output_stopped_before_authorization');
+            return true;
+        }
         if (!this.activeResponse || responseId !== this.activeResponse.responseId) {
             this.#setAudible(0);
             return true;
@@ -553,6 +660,78 @@ export class BeanVoiceRealtimeTransport {
         this.#consumeActiveResponse();
         this.onEvent(Object.freeze({ type: 'playback_finished', reason, ...response }));
         return true;
+    }
+
+    #holdResponseForAuthorization(binding) {
+        this.#setAudible(0);
+        this.pendingResponse = {
+            ...binding,
+            receivedAtMs: Date.now(),
+        };
+        const responseId = binding.responseId;
+        this.pendingResponseTimer = this.setTimeout?.(() => {
+            if (this.pendingResponse?.responseId !== responseId) return;
+            this.#rejectPendingResponse('speech_authorization_timeout');
+        }, this.authorizationGraceMs) ?? null;
+    }
+
+    #activatePendingResponse() {
+        if (!this.pendingResponse || this.activeResponse) return false;
+        const binding = { ...this.pendingResponse };
+        this.#clearPendingResponse();
+        this.#activateResponse(binding);
+        return true;
+    }
+
+    #activateResponse(binding) {
+        this.activeResponse = {
+            ...binding,
+            started: false,
+            boundAtMs: Date.now(),
+        };
+        this.#setAudible(1);
+        this.onEvent(Object.freeze({ type: 'response_authorized', ...this.activeResponse }));
+    }
+
+    #rejectPendingResponse(failure) {
+        if (!this.pendingResponse) return false;
+        const binding = { ...this.pendingResponse };
+        this.#clearPendingResponse();
+        this.#retirePendingResponse(binding);
+        this.#rejectResponse(binding, failure);
+        return true;
+    }
+
+    #rejectResponse(binding, failure) {
+        this.#setAudible(0);
+        if (binding.responseId) this.#send({ type: 'response.cancel', response_id: binding.responseId });
+        this.#send({ type: 'output_audio_buffer.clear' });
+        this.onFailure(Object.assign(new Error('Realtime audio response was not authorized.'), {
+            code: failure,
+            responseId: binding.responseId || null,
+            speechItemId: binding.speechItemId || null,
+            turnId: binding.turnId || null,
+        }), 'playback');
+    }
+
+    #clearPendingResponse() {
+        if (this.pendingResponseTimer !== null) this.clearTimeout?.(this.pendingResponseTimer);
+        this.pendingResponseTimer = null;
+        this.pendingResponse = null;
+    }
+
+    #consumePendingResponse() {
+        if (!this.pendingResponse) return;
+        const response = { ...this.pendingResponse };
+        this.#clearPendingResponse();
+        this.#retirePendingResponse(response);
+    }
+
+    #retirePendingResponse(response) {
+        if (response.responseId) this.retiredResponseIds.add(response.responseId);
+        if (!response.speechItemId) return;
+        this.consumedSpeechItemIds.add(response.speechItemId);
+        this.authorizations.delete(response.speechItemId);
     }
 
     #consumeActiveResponse() {

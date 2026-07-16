@@ -140,7 +140,6 @@ test('[BV-PLAYBACK-03][BV-PROJECTION-01] safe event metadata cannot replace the 
     transport.controllerGeneration = 1;
     transport.providerConnectionGeneration = 1;
 
-    assert.equal(transport.authorizeSpeech(projection.speechAuthorizations[0]), true);
     transport.handleProviderEvent({
         type: 'response.created',
         response: {
@@ -158,6 +157,14 @@ test('[BV-PLAYBACK-03][BV-PROJECTION-01] safe event metadata cannot replace the 
             },
         },
     });
+    assert.equal(transport.snapshot().authorizationPending, true);
+    assert.equal(audio.muted, true);
+    assert.equal(audio.volume, 0);
+    assert.deepEqual(playbackEvents, []);
+    assert.deepEqual(sent, []);
+
+    assert.equal(transport.authorizeSpeech(projection.speechAuthorizations[0]), true);
+    assert.equal(transport.snapshot().authorizationPending, false);
     transport.handleProviderEvent({
         type: 'output_audio_buffer.started',
         response_id: 'response-live-regression',
