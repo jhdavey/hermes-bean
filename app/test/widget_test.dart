@@ -1,0 +1,209 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:heybean_app/bean_api_client.dart';
+import 'package:heybean_app/main.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('login and account setup retain the original forms', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      HeyBeanApp(
+        apiClient: BeanApiClient(
+          baseUrl: Uri.parse('https://example.test/api'),
+        ),
+        tokenStore: _TestTokenStore(),
+        launchExternalUrl: (_) async => true,
+        updateAppIconBadge: (_) async {},
+        stripePaymentHandler: _TestStripePaymentHandler(),
+      ),
+    );
+    await _pumpUntilFound(tester, find.byKey(const Key('login-card')));
+
+    expect(find.byKey(const Key('login-card')), findsOneWidget);
+    expect(find.byKey(const Key('auth-email')), findsOneWidget);
+    expect(find.byKey(const Key('auth-password')), findsOneWidget);
+    expect(find.byKey(const Key('remember-me-checkbox')), findsOneWidget);
+    expect(find.byKey(const Key('forgot-login-action')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('guided-signup-action')));
+    await _pumpUntilFound(tester, find.byKey(const Key('guided-name-input')));
+
+    expect(find.text('Account setup'), findsOneWidget);
+    expect(find.byKey(const Key('guided-name-input')), findsOneWidget);
+    expect(find.text('Step 1 of 6'), findsOneWidget);
+  });
+
+  testWidgets(
+    'signed-in command center and navigation keep their original shell',
+    (tester) async {
+      final api = _DashboardApiClient();
+      await tester.pumpWidget(
+        HeyBeanApp(
+          apiClient: api,
+          tokenStore: _TestTokenStore(token: 'test-token'),
+          launchExternalUrl: (_) async => true,
+          updateAppIconBadge: (_) async {},
+          stripePaymentHandler: _TestStripePaymentHandler(),
+        ),
+      );
+      await _pumpUntilFound(
+        tester,
+        find.byKey(const Key('command-center-home')),
+      );
+
+      expect(find.byKey(const Key('command-center-home')), findsOneWidget);
+      expect(find.byKey(const Key('nav-command-center')), findsOneWidget);
+      expect(find.byKey(const Key('nav-tasks')), findsOneWidget);
+      expect(find.byKey(const Key('nav-reminders')), findsOneWidget);
+      expect(find.byKey(const Key('nav-notes')), findsOneWidget);
+      expect(find.byKey(const Key('nav-more')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('create-item-menu')));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const Key('create-event-action')), findsOneWidget);
+      expect(find.byKey(const Key('create-task-action')), findsOneWidget);
+      expect(find.byKey(const Key('create-reminder-action')), findsOneWidget);
+      expect(find.byKey(const Key('create-note-action')), findsOneWidget);
+    },
+  );
+
+  test('restored screens retain forms, sheets, and modal editors', () {
+    final sources = [
+      File('lib/src/calendar/title_time_editor.dart').readAsStringSync(),
+      File('lib/src/calendar/event_detail.dart').readAsStringSync(),
+      File('lib/src/settings/settings_view.dart').readAsStringSync(),
+      File('lib/src/notes/notes_view.dart').readAsStringSync(),
+      File('lib/src/tasks/task_reminder_views.dart').readAsStringSync(),
+    ].join('\n');
+
+    for (final key in [
+      'title-time-editor-title',
+      'title-time-editor-time',
+      'title-time-editor-notes',
+      'settings-view',
+      'theme-preferences-card',
+      'notification-preferences-card',
+      'preferred-map-selector',
+      'workspace-create-name-field',
+      'tasks-view',
+      'reminders-view',
+      'notes-view',
+    ]) {
+      expect(sources, contains(key));
+    }
+  });
+}
+
+Future<void> _pumpUntilFound(
+  WidgetTester tester,
+  Finder finder, {
+  int attempts = 30,
+}) async {
+  for (var attempt = 0; attempt < attempts; attempt++) {
+    await tester.pump(const Duration(milliseconds: 100));
+    if (finder.evaluate().isNotEmpty) return;
+  }
+  fail('Timed out waiting for $finder.');
+}
+
+class _TestTokenStore implements AuthTokenStore {
+  _TestTokenStore({this.token});
+
+  String? token;
+
+  @override
+  Future<void> clearToken() async => token = null;
+
+  @override
+  Future<bool> loadRememberMe() async => token != null;
+
+  @override
+  Future<String?> loadToken() async => token;
+
+  @override
+  Future<void> saveRememberMe(bool rememberMe) async {}
+
+  @override
+  Future<void> saveToken(String value) async => token = value;
+}
+
+class _TestStripePaymentHandler implements StripePaymentHandler {
+  @override
+  Future<void> preparePaymentSheet(
+    BeanPaymentSheetSetup setup, {
+    required BeanUser user,
+    required String primaryButtonLabel,
+  }) async {}
+
+  @override
+  Future<void> presentPaymentSheet() async {}
+}
+
+class _DashboardApiClient extends BeanApiClient {
+  _DashboardApiClient() : super(baseUrl: Uri.parse('https://example.test/api'));
+
+  static const workspace = BeanWorkspace(
+    id: '1',
+    name: 'Personal',
+    type: 'personal',
+    active: true,
+    isDefault: true,
+  );
+
+  @override
+  Future<BeanUser> me() async => const BeanUser(
+    id: 1,
+    name: 'Taylor',
+    email: 'taylor@example.test',
+    subscriptionStatus: 'active',
+    defaultWorkspaceId: 1,
+    personalWorkspace: workspace,
+    activeWorkspace: workspace,
+    workspaces: [workspace],
+    planLimits: BeanPlanLimits(notesEnabled: true),
+  );
+
+  @override
+  Future<List<BeanTask>> listTasks() async => const [];
+
+  @override
+  Future<List<BeanTask>> listPastTasks() async => const [];
+
+  @override
+  Future<List<BeanReminder>> listReminders() async => const [];
+
+  @override
+  Future<List<BeanCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async => const [];
+
+  @override
+  Future<List<BeanEventCategory>> listEventCategories() async => const [];
+
+  @override
+  Future<List<BeanNoteFolder>> listNoteFolders() async => const [];
+
+  @override
+  Future<List<BeanNote>> listNotes() async => const [];
+
+  @override
+  Future<GoogleCalendarSyncStatus> googleCalendarStatus() async =>
+      const GoogleCalendarSyncStatus(connected: false, status: 'not_connected');
+
+  @override
+  Future<GoogleCalendarSyncStatus> outlookCalendarStatus() async =>
+      const GoogleCalendarSyncStatus(connected: false, status: 'not_connected');
+
+  @override
+  Future<BeanDashboardChangeFeed> dashboardChanges({
+    int after = 0,
+    int waitSeconds = 0,
+    int limit = 100,
+  }) async => const BeanDashboardChangeFeed(changes: [], latestId: 0);
+}

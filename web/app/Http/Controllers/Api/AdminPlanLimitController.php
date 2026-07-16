@@ -94,10 +94,12 @@ class AdminPlanLimitController extends Controller
             "{$prefix}.calendar_connection_limit" => ['nullable', 'integer', 'min:0', 'max:1000000'],
             "{$prefix}.connected_account_limit" => ['nullable', 'integer', 'min:0', 'max:1000000'],
             "{$prefix}.history_days" => ['nullable', 'integer', 'min:0', 'max:1000000'],
+            "{$prefix}.note_limit" => ['nullable', 'integer', 'min:0', 'max:1000000'],
             "{$prefix}.recurring_tasks_enabled" => ['required_with:'.$prefix, 'boolean'],
             "{$prefix}.recurring_reminders_enabled" => ['required_with:'.$prefix, 'boolean'],
             "{$prefix}.recurring_calendar_enabled" => ['required_with:'.$prefix, 'boolean'],
             "{$prefix}.email_reminders_enabled" => ['required_with:'.$prefix, 'boolean'],
+            "{$prefix}.notes_enabled" => ['required_with:'.$prefix, 'boolean'],
         ];
     }
 }

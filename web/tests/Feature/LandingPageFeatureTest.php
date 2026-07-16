@@ -17,7 +17,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Run your day with Bean', false)
             ->assertSee('Easy calendar, task, reminder, note, and workspace management', false)
             ->assertSee('Keep every calendar moving.', false)
-            ->assertSee('Turn loose ends into managed work.', false)
+            ->assertSee('Turn loose ends into managed tasks.', false)
             ->assertSee('Get Early Access', false)
             ->assertSee(route('early-access.store'), false)
             ->assertSee('href="/pricing"', false)
@@ -25,7 +25,7 @@ class LandingPageFeatureTest extends TestCase
 
         $this->get('/pricing')
             ->assertOk()
-            ->assertSee('Organize Your Days With Less Effort', false)
+            ->assertSee('Organized Your Days With Less Effort', false)
             ->assertSee('Most popular', false)
             ->assertSee('Unlimited Notes', false)
             ->assertSee('Start 7 day free trial', false);

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AdminDashboardController;
 use App\Http\Controllers\Api\AdminPlanLimitController;
 use App\Http\Controllers\Api\AppleCalendarController;
 use App\Http\Controllers\Api\AuthController;
@@ -107,6 +108,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::patch('/event-categories/{eventCategory}', [DomainResourceController::class, 'updateEventCategory']);
         Route::delete('/event-categories/{eventCategory}', [DomainResourceController::class, 'destroyEventCategory']);
         Route::middleware('admin')->prefix('admin')->group(function (): void {
+            Route::get('/dashboard/summary', [AdminDashboardController::class, 'summary']);
             Route::get('/issue-reports/summary', [IssueReportController::class, 'summary']);
             Route::get('/plan-limits', [AdminPlanLimitController::class, 'show']);
             Route::patch('/plan-limits/plans', [AdminPlanLimitController::class, 'updatePlans']);
