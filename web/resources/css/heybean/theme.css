@@ -192,6 +192,17 @@
     backdrop-filter: blur(22px) saturate(150%);
 }
 
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-card,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-surface-soft,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-profile-popover,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-create-popover,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-critical-popover,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-modal {
+    border-color: var(--hb-border);
+    background: linear-gradient(180deg, rgba(22, 29, 37, .96), rgba(13, 18, 24, .96));
+    box-shadow: 0 16px 44px rgba(0, 0, 0, .28);
+}
+
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-surface-soft,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-metric,
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-admin-kpi,

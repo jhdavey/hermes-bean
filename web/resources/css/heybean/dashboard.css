@@ -653,6 +653,15 @@
     min-height: 42px;
 }
 
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-card,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-surface-soft,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-day-board-column,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-command-center-card {
+    border-color: var(--hb-border);
+    background: var(--hb-surface);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, .18);
+}
+
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-command-center-row:hover {
     background: rgba(148, 163, 184, .08);
 }
