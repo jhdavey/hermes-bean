@@ -71,7 +71,8 @@ class BeanRuntimeService
                 $results[] = ['action' => $name, 'arguments' => $args, ...$result];
             }
 
-            $assistantText = $this->finalResponse((string) ($proposal['response'] ?? ''), $results);
+            $assistantText = $this->finalResponse($session, $content, (string) ($proposal['response'] ?? ''), $results);
+            $this->rememberResults($session, $results);
             BeanMessage::create([
                 'bean_session_id' => $session->id,
                 'bean_run_id' => $run->id,
@@ -139,7 +140,7 @@ class BeanRuntimeService
         });
     }
 
-    private function finalResponse(string $proposed, array $results): string
+    private function finalResponse(BeanSession $session, string $userMessage, string $proposed, array $results): string
     {
         $needsConfirmation = collect($results)->first(fn ($result): bool => ($result['requires_confirmation'] ?? false) === true);
         if ($needsConfirmation) return (string) ($needsConfirmation['summary'] ?? 'Please confirm before I do that.');
@@ -150,6 +151,12 @@ class BeanRuntimeService
 
             return (string) ($failed['error'] ?? 'I could not complete that.');
         }
+        if ($this->shouldSynthesize($results)) {
+            $synthesized = $this->model->synthesizeAnswer($session, $userMessage, $proposed, $results);
+            if ($synthesized !== null) return $synthesized;
+        }
+        $resourceQueryResponse = $this->resourceQueryResponse($results);
+        if ($resourceQueryResponse !== null) return $resourceQueryResponse;
         $contextResponse = $this->contextResponse($results);
         if ($contextResponse !== null) return $contextResponse;
         $listResponse = $this->listResponse($results);
@@ -157,6 +164,98 @@ class BeanRuntimeService
         $completed = collect($results)->filter(fn ($result): bool => ($result['ok'] ?? false) === true)->count();
         if ($completed > 0) return $proposed !== '' ? $proposed.' Done.' : 'Done.';
         return $proposed !== '' ? $proposed : 'I’m here. Ask me to help with your calendar, tasks, reminders, notes, date/time, or weather.';
+    }
+
+    private function shouldSynthesize(array $results): bool
+    {
+        return collect($results)->contains(fn ($result): bool => ($result['ok'] ?? false) === true
+            && in_array($result['action'] ?? '', ['resource.query', 'resource.relationships', 'task.list', 'task.search', 'task.context', 'reminder.list', 'calendar_event.list', 'note.list'], true));
+    }
+
+    private function resourceQueryResponse(array $results): ?string
+    {
+        $query = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
+            && in_array(($result['action'] ?? null), ['resource.query', 'resource.relationships'], true)
+            && is_array($result['items'] ?? null));
+        if (! $query) return null;
+
+        $items = collect($query['items'] ?? [])->filter(fn ($item): bool => is_array($item))->values();
+        $explanations = collect($query['explanations'] ?? [])
+            ->filter(fn ($item): bool => is_array($item) && trim((string) ($item['reason'] ?? '')) !== '')
+            ->values();
+        if ($explanations->isNotEmpty()) {
+            return $explanations->take(3)->map(fn (array $item): string => (string) $item['reason'])->implode(' ');
+        }
+        $workspaceQuestion = str_contains(strtolower((string) ($query['question'] ?? '')), 'workspace');
+        if ($workspaceQuestion && $items->isNotEmpty()) {
+            $titles = $items->map(fn (array $item): string => trim((string) ($item['title'] ?? '')))->filter()->unique(fn (string $title): string => mb_strtolower($title))->values();
+            if ($titles->count() === 1) {
+                $workspaceNames = $items
+                    ->flatMap(fn (array $item): array => is_array($item['workspace_names'] ?? null) ? $item['workspace_names'] : [])
+                    ->map(fn ($name): string => trim((string) $name))
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->all();
+                if ($workspaceNames !== []) {
+                    $title = $titles->first();
+                    return count($workspaceNames) === 1
+                        ? "{$title} is in the {$workspaceNames[0]} workspace."
+                        : "{$title} is in these workspaces: ".$this->naturalList($workspaceNames).'.';
+                }
+            }
+        }
+        if ($items->isEmpty()) {
+            $resource = str_replace('_', ' ', (string) ($query['resource'] ?? 'items'));
+            $lookup = trim((string) ($query['query'] ?? ''));
+            return $lookup !== '' ? "I couldn’t find any matching {$resource} for {$lookup}." : "I couldn’t find any matching {$resource}.";
+        }
+        if ($items->count() === 1) {
+            $item = $items->first();
+            $title = trim((string) ($item['title'] ?? 'That item')) ?: 'That item';
+            $workspaceNames = collect($item['workspace_names'] ?? [])->map(fn ($name): string => trim((string) $name))->filter()->values()->all();
+            $question = strtolower((string) ($query['question'] ?? ''));
+            if (str_contains($question, 'workspace') && $workspaceNames !== []) {
+                return count($workspaceNames) === 1
+                    ? "{$title} is in the {$workspaceNames[0]} workspace."
+                    : "{$title} is in these workspaces: ".$this->naturalList($workspaceNames).'.';
+            }
+        }
+
+        $resource = str_replace('_', ' ', (string) ($query['resource'] ?? 'items'));
+        $titles = $items->take(5)->map(fn (array $item): string => trim((string) ($item['title'] ?? 'Untitled')) ?: 'Untitled')->all();
+        $more = $items->count() > 5 ? ' and '.($items->count() - 5).' more' : '';
+        return 'I found '.$items->count().' matching '.$resource.': '.$this->naturalList($titles).$more.'.';
+    }
+
+    private function rememberResults(BeanSession $session, array $results): void
+    {
+        $entities = collect($results)
+            ->flatMap(function (array $result): array {
+                if (is_array($result['item'] ?? null)) return [$result['item']];
+                if (is_array($result['items'] ?? null)) return $result['items'];
+                return [];
+            })
+            ->filter(fn ($item): bool => is_array($item) && isset($item['id'], $item['resource_type']))
+            ->map(fn (array $item): array => [
+                'id' => $item['id'],
+                'type' => $item['resource_type'],
+                'title' => $item['title'] ?? null,
+                'workspace_names' => $item['workspace_names'] ?? [],
+            ])
+            ->values()
+            ->all();
+
+        if ($entities === []) return;
+        $metadata = is_array($session->metadata) ? $session->metadata : [];
+        $existing = is_array($metadata['recent_entities'] ?? null) ? $metadata['recent_entities'] : [];
+        $metadata['recent_entities'] = collect($entities)
+            ->merge($existing)
+            ->unique(fn (array $entity): string => ($entity['type'] ?? '').':'.($entity['id'] ?? ''))
+            ->take(20)
+            ->values()
+            ->all();
+        $session->forceFill(['metadata' => $metadata])->save();
     }
 
     private function contextResponse(array $results): ?string

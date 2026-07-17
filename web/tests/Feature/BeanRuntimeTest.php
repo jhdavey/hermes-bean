@@ -57,6 +57,8 @@ class BeanRuntimeTest extends TestCase
             $this->assertSame('bean_action_proposal', data_get($payload, 'response_format.json_schema.name'));
             $actionsEnum = data_get($payload, 'response_format.json_schema.schema.properties.actions.items.properties.action.enum');
             $argumentsSchema = data_get($payload, 'response_format.json_schema.schema.properties.actions.items.properties.arguments');
+            $this->assertContains('resource.query', $actionsEnum);
+            $this->assertContains('resource.relationships', $actionsEnum);
             $this->assertContains('task.create', $actionsEnum);
             $this->assertContains('calendar_event.update', $actionsEnum);
             $this->assertFalse((bool) ($argumentsSchema['additionalProperties'] ?? true));
@@ -228,6 +230,126 @@ class BeanRuntimeTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
             ->assertJsonFragment(['content' => 'Pay the travel card is in these workspaces: '.$personalWorkspace->name.' and Family.']);
+        $this->assertDatabaseHas('bean_tool_calls', [
+            'action' => 'resource.query',
+            'status' => 'completed',
+        ]);
+    }
+
+    public function test_generic_resource_query_explains_why_task_is_on_today_list(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-task-why-today@example.com');
+        $user = User::where('email', 'bean-task-why-today@example.com')->firstOrFail();
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Pay the travel card',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->subDay()->setTime(9, 0),
+        ]);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Why is pay the travel card showing on today list?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => "Pay the travel card is on today's list because it is overdue and still open."]);
+
+        $this->assertDatabaseHas('bean_tool_calls', [
+            'action' => 'resource.query',
+            'status' => 'completed',
+        ]);
+    }
+
+    public function test_final_answer_synthesis_uses_tool_results_for_resource_questions(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.bean_text_model' => 'gpt-4.1-mini',
+        ]);
+        $token = $this->apiToken('bean-resource-synthesis@example.com');
+        $user = User::where('email', 'bean-resource-synthesis@example.com')->firstOrFail();
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Pay the travel card',
+            'type' => 'todo',
+            'status' => 'open',
+        ]);
+
+        Http::fakeSequence()
+            ->push([
+                'choices' => [[
+                    'message' => [
+                        'content' => json_encode([
+                            'response' => 'I’ll check that.',
+                            'actions' => [[
+                                'action' => 'resource.query',
+                                'arguments' => ['resource' => 'tasks', 'query' => 'Pay the travel card', 'include_workspaces' => true],
+                            ]],
+                        ]),
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'choices' => [[
+                    'message' => [
+                        'content' => json_encode([
+                            'answer' => 'Pay the travel card is in your personal workspace.',
+                        ]),
+                    ],
+                ]],
+            ], 200);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'What workspace is Pay the travel card in?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'Pay the travel card is in your personal workspace.']);
+
+        Http::assertSentCount(2);
+    }
+
+    public function test_follow_up_workspace_question_resolves_first_recent_task(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-follow-up-reference@example.com');
+        $user = User::where('email', 'bean-follow-up-reference@example.com')->firstOrFail();
+        $workspace = Workspace::findOrFail($user->default_workspace_id);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Pay the travel card',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->setTime(9, 0),
+        ]);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Clean outdoor grout',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->setTime(10, 0),
+        ]);
+
+        $first = $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'what is on my todo list for today?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed');
+
+        $sessionId = data_get($first->json(), 'data.session.id');
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'session_id' => $sessionId,
+            'content' => 'what workspace is the first one in?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'Pay the travel card is in the '.$workspace->name.' workspace.']);
     }
 
     public function test_today_task_list_response_filters_to_open_tasks_due_today(): void

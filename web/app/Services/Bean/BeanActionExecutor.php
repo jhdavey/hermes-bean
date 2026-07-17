@@ -63,6 +63,8 @@ class BeanActionExecutor
 
             $result = match ($action) {
                 'dashboard.summary' => $this->dashboardSummary($run),
+                'resource.query' => $this->genericResourceQuery($run, $arguments),
+                'resource.relationships' => $this->resourceRelationships($run, $arguments),
                 'time.now' => $this->timeNow(),
                 'weather.lookup' => $this->weatherLookup($arguments),
                 'task.list' => $this->listResources(Task::class, $run, 'due_at', $arguments),
@@ -192,6 +194,132 @@ class BeanActionExecutor
             'resource_type' => $this->resourceType($model),
             'item' => $this->summary($model, $this->workspaceIds($run)),
         ];
+    }
+
+    private function genericResourceQuery(BeanRun $run, array $arguments): array
+    {
+        $resource = strtolower(trim((string) ($arguments['resource'] ?? 'tasks')));
+        [$class, $orderField, $label] = match ($resource) {
+            'task', 'tasks', 'todo', 'todos' => [Task::class, 'due_at', 'tasks'],
+            'reminder', 'reminders' => [Reminder::class, 'remind_at', 'reminders'],
+            'calendar', 'calendar_event', 'calendar_events', 'events' => [CalendarEvent::class, 'starts_at', 'calendar_events'],
+            'note', 'notes' => [Note::class, 'updated_at', 'notes'],
+            default => [Task::class, 'due_at', 'tasks'],
+        };
+
+        $query = $this->baseQuery($class, $run);
+        if (isset($arguments['id'])) {
+            $query->whereKey((int) $arguments['id']);
+        }
+        $text = trim((string) ($arguments['query'] ?? $arguments['title'] ?? ''));
+        if ($text !== '') {
+            $fields = $class === Note::class ? ['title', 'plain_text'] : ['title'];
+            $tokens = collect(preg_split('/\s+/', mb_strtolower($text)) ?: [])
+                ->map(fn ($token): string => trim($token))
+                ->filter(fn (string $token): bool => mb_strlen($token) >= 2)
+                ->unique()
+                ->values();
+            if ($tokens->isNotEmpty()) {
+                $query->where(function (Builder $outer) use ($fields, $tokens): void {
+                    foreach ($tokens as $token) {
+                        $outer->where(function (Builder $inner) use ($fields, $token): void {
+                            foreach ($fields as $field) {
+                                $inner->orWhere($field, 'like', '%'.addcslashes($token, '%_\\').'%');
+                            }
+                        });
+                    }
+                });
+            }
+        }
+
+        if ($class === Task::class && ($arguments['status'] ?? null) === null) {
+            $query->where('status', '!=', 'completed');
+        } elseif ($class === Reminder::class && ($arguments['status'] ?? null) === null) {
+            $query->where('status', 'scheduled');
+        } elseif ($class === CalendarEvent::class && ($arguments['status'] ?? null) === null) {
+            $query->where('status', 'scheduled');
+        }
+        if (($arguments['status'] ?? null) !== null) {
+            $query->where('status', (string) $arguments['status']);
+        }
+
+        $dateScope = strtolower(trim((string) ($arguments['date_scope'] ?? '')));
+        if (in_array($dateScope, ['today', 'overdue'], true)) {
+            $this->applyDateScope($query, $class, $orderField, $dateScope);
+        }
+        if (($arguments['workspace_id'] ?? null) !== null) {
+            $query->where('workspace_id', (int) $arguments['workspace_id']);
+        }
+
+        $items = $query->orderBy($orderField)->orderBy('id')->limit(20)->get();
+        $accessibleWorkspaceIds = $this->workspaceIds($run);
+        $summaries = collect($this->summaries($items, $accessibleWorkspaceIds))
+            ->groupBy(fn (array $item): string => ($item['resource_type'] ?? '').':'.mb_strtolower((string) ($item['title'] ?? '')).':'.implode('|', $item['workspace_names'] ?? []))
+            ->map(fn ($group): array => $group->first())
+            ->values()
+            ->all();
+        $explanations = [];
+        if (($arguments['explain_visibility'] ?? false) || $dateScope !== '') {
+            $explanations = collect($summaries)
+                ->map(fn (array $item): array => [
+                    'id' => $item['id'] ?? null,
+                    'title' => $item['title'] ?? null,
+                    'reason' => $this->visibilityReason($item, $class, $dateScope),
+                ])
+                ->filter(fn (array $explanation): bool => ($explanation['reason'] ?? '') !== '')
+                ->values()
+                ->all();
+        }
+
+        return [
+            'ok' => true,
+            'resource' => $label,
+            'query' => $text,
+            'question' => $arguments['question'] ?? null,
+            'date_scope' => $dateScope ?: null,
+            'items' => $summaries,
+            'explanations' => $explanations,
+        ];
+    }
+
+    private function resourceRelationships(BeanRun $run, array $arguments): array
+    {
+        $result = $this->genericResourceQuery($run, [...$arguments, 'include_workspaces' => true]);
+        $items = collect($result['items'] ?? [])->filter(fn ($item): bool => is_array($item))->values();
+        return [
+            ...$result,
+            'relationship_type' => 'workspaces',
+            'relationships' => $items->map(fn (array $item): array => [
+                'id' => $item['id'] ?? null,
+                'resource_type' => $item['resource_type'] ?? null,
+                'title' => $item['title'] ?? null,
+                'workspaces' => $item['workspace_names'] ?? [],
+            ])->all(),
+        ];
+    }
+
+    private function visibilityReason(array $item, string $class, string $dateScope): string
+    {
+        if ($class === Task::class) {
+            $title = (string) ($item['title'] ?? 'This task');
+            $status = (string) ($item['status'] ?? 'open');
+            $dueAt = isset($item['due_at']) ? Carbon::parse((string) $item['due_at']) : null;
+            if ($dateScope === 'today' && $status !== 'completed' && $dueAt) {
+                return $dueAt->lt(now()->startOfDay())
+                    ? "{$title} is on today's list because it is overdue and still open."
+                    : "{$title} is on today's list because it is due by today and still open.";
+            }
+            if ($dateScope === 'overdue' && $status !== 'completed' && $dueAt) {
+                return "{$title} is overdue because it was due before today and is still open.";
+            }
+        }
+        if ($class === Reminder::class) {
+            $title = (string) ($item['title'] ?? 'This reminder');
+            $remindAt = isset($item['remind_at']) ? Carbon::parse((string) $item['remind_at']) : null;
+            if ($dateScope === 'today' && $remindAt) return "{$title} is included because it is scheduled by today.";
+            if ($dateScope === 'overdue' && $remindAt) return "{$title} is overdue because it was scheduled before today.";
+        }
+        return '';
     }
 
     private function createTask(BeanRun $run, array $args): array

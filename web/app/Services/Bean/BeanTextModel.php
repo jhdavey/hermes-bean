@@ -12,6 +12,8 @@ class BeanTextModel
         'task.list',
         'task.search',
         'task.context',
+        'resource.query',
+        'resource.relationships',
         'task.create',
         'task.update',
         'task.complete',
@@ -41,7 +43,7 @@ class BeanTextModel
     {
         $apiKey = (string) config('services.openai.api_key');
         if ($apiKey === '') {
-            return $this->heuristic($message);
+            return $this->heuristic($message, null, $session);
         }
 
         try {
@@ -53,18 +55,19 @@ class BeanTextModel
                     'response_format' => $this->responseFormat(),
                     'messages' => [
                         ['role' => 'system', 'content' => $this->systemPrompt()],
+                        ['role' => 'system', 'content' => 'Recent Bean session context: '.json_encode($this->plannerContext($session), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)],
                         ['role' => 'user', 'content' => $message],
                     ],
                 ]);
 
             if (! $response->ok()) {
-                return $this->heuristic($message, 'I had trouble reaching my AI model, so I used a basic local parser.');
+                return $this->heuristic($message, 'I had trouble reaching my AI model, so I used a basic local parser.', $session);
             }
 
             $content = (string) data_get($response->json(), 'choices.0.message.content', '');
             $decoded = json_decode($content, true);
             if (! is_array($decoded)) {
-                return $this->heuristic($message);
+                return $this->heuristic($message, null, $session);
             }
 
             return [
@@ -73,8 +76,100 @@ class BeanTextModel
                 'model' => $model,
             ];
         } catch (Throwable) {
-            return $this->heuristic($message, 'I had trouble reaching my AI model, so I used a basic local parser.');
+            return $this->heuristic($message, 'I had trouble reaching my AI model, so I used a basic local parser.', $session);
         }
+    }
+
+    public function synthesizeAnswer(BeanSession $session, string $userMessage, string $proposed, array $results): ?string
+    {
+        $apiKey = (string) config('services.openai.api_key');
+        if ($apiKey === '' || $results === []) {
+            return null;
+        }
+
+        try {
+            $model = (string) config('services.openai.bean_text_model', 'gpt-4.1-mini');
+            $response = Http::withToken($apiKey)
+                ->timeout(20)
+                ->post('https://api.openai.com/v1/chat/completions', [
+                    'model' => $model,
+                    'response_format' => $this->answerResponseFormat(),
+                    'messages' => [
+                        ['role' => 'system', 'content' => $this->answerSystemPrompt()],
+                        ['role' => 'user', 'content' => json_encode([
+                            'user_message' => $userMessage,
+                            'proposed_response' => $proposed,
+                            'recent_context' => $this->recentContext($session),
+                            'tool_results' => $results,
+                        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)],
+                    ],
+                ]);
+
+            if (! $response->ok()) {
+                return null;
+            }
+            $decoded = json_decode((string) data_get($response->json(), 'choices.0.message.content', ''), true);
+            $answer = trim((string) ($decoded['answer'] ?? ''));
+
+            return $answer !== '' ? str($answer)->limit(900, '')->toString() : null;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    private function answerResponseFormat(): array
+    {
+        return [
+            'type' => 'json_schema',
+            'json_schema' => [
+                'name' => 'bean_final_answer',
+                'strict' => true,
+                'schema' => [
+                    'type' => 'object',
+                    'additionalProperties' => false,
+                    'required' => ['answer'],
+                    'properties' => [
+                        'answer' => ['type' => 'string'],
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    private function answerSystemPrompt(): string
+    {
+        return <<<'PROMPT'
+You are Bean, HeyBean's natural productivity assistant. Write the final user-facing answer after Laravel has executed scoped tools/actions.
+Use only the provided tool_results and recent_context as facts. Do not invent private app data.
+If the user asked a factual question, answer it directly with the actual titles, workspace names, dates, counts, or reasons found in tool_results.
+Do not mention internal action names, JSON, tools, or Laravel.
+Do not append generic "Done" to factual answers.
+If a mutation completed, briefly confirm it. If data is missing or ambiguous, say exactly what is missing and ask a concise follow-up.
+Keep the answer conversational and concise. For voice, one or two sentences is best unless listing multiple items.
+PROMPT;
+    }
+
+    private function plannerContext(BeanSession $session): array
+    {
+        $metadata = is_array($session->metadata) ? $session->metadata : [];
+        return [
+            'recent_entities' => array_slice(is_array($metadata['recent_entities'] ?? null) ? $metadata['recent_entities'] : [], 0, 10),
+            'current_workspace_id' => $session->workspace_id,
+        ];
+    }
+
+    private function recentContext(BeanSession $session): array
+    {
+        return [
+            'session_metadata' => $session->metadata ?? [],
+            'recent_messages' => $session->messages()
+                ->latest('id')
+                ->limit(8)
+                ->get(['role', 'content'])
+                ->reverse()
+                ->values()
+                ->all(),
+        ];
     }
 
     private function responseFormat(): array
@@ -124,11 +219,17 @@ class BeanTextModel
             'type' => ['array', 'null'],
             'items' => ['type' => 'integer'],
         ];
+        $nullableStringArray = [
+            'type' => ['array', 'null'],
+            'items' => ['type' => 'string'],
+        ];
         $properties = [
             'id' => $nullableInteger,
             'resource_id' => $nullableInteger,
             'workspace_id' => $nullableInteger,
             'note_folder_id' => $nullableInteger,
+            'resource' => $nullableString,
+            'question' => $nullableString,
             'query' => $nullableString,
             'title' => $nullableString,
             'type' => $nullableString,
@@ -153,7 +254,10 @@ class BeanTextModel
             'is_pinned' => $nullableBoolean,
             'sync_to_workspace_ids' => $nullableIntegerArray,
             'delete_from_workspace_ids' => $nullableIntegerArray,
+            'include' => $nullableStringArray,
             'date_scope' => $nullableString,
+            'include_workspaces' => $nullableBoolean,
+            'explain_visibility' => $nullableBoolean,
         ];
 
         return [
@@ -174,7 +278,7 @@ You are Bean, the HeyBean productivity assistant. Return only JSON matching the 
 Use actions only from this list: {$actions}.
 Laravel is the source of truth: you propose structured actions; Laravel validates, scopes, confirms, and executes them.
 For destructive actions include the delete action, but Laravel will require confirmation before execution.
-Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. Use ISO 8601 dates when the user supplied a date/time. Use date_scope="today" for list requests that say today, this morning, this afternoon, or tonight; task/reminder lists for today include overdue items due before today. Use date_scope="overdue" for overdue or past-due list requests. If an item needs lookup by title, use query rather than inventing an id. If the user asks which workspace(s) a task is in or asks for context about a task, use task.context with a query containing the task title.
+Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. Use ISO 8601 dates when the user supplied a date/time. Use resource.query for flexible factual questions about app data and resource.relationships for relationship/context questions, including workspace/context/why/relationship questions. For resource.query/resource.relationships set resource to tasks, reminders, calendar_events, notes, or workspaces; set query/title for lookup text; set include_workspaces=true when workspace context could matter; set explain_visibility=true for why-is-this-shown questions. Use date_scope="today" for list requests that say today, this morning, this afternoon, or tonight; task/reminder lists for today include overdue items due before today. Use date_scope="overdue" for overdue or past-due list requests. If an item needs lookup by title, use query rather than inventing an id. Use strict mutation actions only when changing app state.
 Do not invent private dashboard data; call list/search/dashboard actions when data is needed.
 Keep response concise and avoid saying an action is complete before Laravel executes it.
 PROMPT;
@@ -211,7 +315,7 @@ PROMPT;
             ->all();
     }
 
-    private function heuristic(string $message, ?string $prefix = null): array
+    private function heuristic(string $message, ?string $prefix = null, ?BeanSession $session = null): array
     {
         $text = trim($message);
         $lower = mb_strtolower($text);
@@ -233,15 +337,18 @@ PROMPT;
                 $actions[] = ['action' => 'reminder.list', 'arguments' => ['date_scope' => 'overdue']];
                 $response = 'I’ll check overdue tasks and reminders.';
             }
+        } elseif ($this->isFactualResourceQuestion($lower)) {
+            $actions[] = ['action' => 'resource.query', 'arguments' => $this->resourceQueryArguments($text, $lower, $session)];
+            $response = 'I’ll check that.';
         } elseif ($this->isTaskWorkspaceQuestion($lower)) {
-            $actions[] = ['action' => 'task.context', 'arguments' => ['query' => $this->taskContextQuery($text)]];
+            $actions[] = ['action' => 'resource.query', 'arguments' => $this->resourceQueryArguments($text, $lower, $session)];
             $response = 'I’ll check the task workspace.';
         } elseif (preg_match('/\b(time|date|today)\b/', $lower) && ! $this->mentionsTask($lower) && ! $this->mentionsReminder($lower) && ! $this->mentionsCalendar($lower)) {
             $actions[] = ['action' => 'time.now', 'arguments' => []];
             $response = 'I’ll check the current date and time.';
         } elseif ($this->mentionsTask($lower) && ! $this->mentionsReminder($lower) && ! $this->mentionsNote($lower) && ! $this->mentionsCalendar($lower)) {
-            if ($this->isTaskWorkspaceQuestion($lower)) {
-                $actions[] = ['action' => 'task.context', 'arguments' => ['query' => $this->taskContextQuery($text)]];
+            if ($this->isTaskWorkspaceQuestion($lower) || $this->isFactualResourceQuestion($lower)) {
+                $actions[] = ['action' => 'resource.query', 'arguments' => $this->resourceQueryArguments($text, $lower, $session)];
                 $response = 'I’ll check the task workspace.';
             } elseif ($this->isDeleteRequest($lower)) {
                 $actions[] = ['action' => 'task.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'task', 'todo', 'to-do'])]];
@@ -353,6 +460,66 @@ PROMPT;
     {
         return preg_match('/\b(workspace|workspaces)\b/', $lower) === 1
             && preg_match('/\b(what|which|where|in|does|do|is|are)\b/', $lower) === 1;
+    }
+
+    private function isFactualResourceQuestion(string $lower): bool
+    {
+        return preg_match('/\b(why|which|where|explain|context|workspace|workspaces)\b/', $lower) === 1
+            && ($this->mentionsTask($lower) || $this->mentionsReminder($lower) || $this->mentionsCalendar($lower) || $this->mentionsNote($lower) || preg_match('/\b(card|grout|grill|item|items)\b/', $lower) === 1);
+    }
+
+    private function resourceQueryArguments(string $text, string $lower, ?BeanSession $session = null): array
+    {
+        $reference = $this->referencedEntity($session, $lower);
+        $resource = match (true) {
+            isset($reference['type']) => match ((string) $reference['type']) {
+                'reminder' => 'reminders',
+                'calendar_event' => 'calendar_events',
+                'note' => 'notes',
+                default => 'tasks',
+            },
+            $this->mentionsReminder($lower) => 'reminders',
+            $this->mentionsCalendar($lower) => 'calendar_events',
+            $this->mentionsNote($lower) => 'notes',
+            default => 'tasks',
+        };
+        $query = $this->queryFromText($text, [
+            'why', 'what', 'which', 'where', 'show', 'tell', 'me', 'explain', 'context',
+            'workspace', 'workspaces', 'is', 'are', 'in', 'does', 'do', 'the', 'a', 'an',
+            'task', 'tasks', 'todo', 'todos', 'to-do', 'to-dos', 'item', 'items', 'one',
+            'first', 'second', 'third', 'that', 'this', 'it', 'on', 'my', 'list', 'for',
+            'today', 'showing', 'appear', 'appearing',
+        ]);
+
+        $arguments = [
+            'resource' => $resource,
+            'query' => $query,
+            'question' => $text,
+            'date_scope' => $this->mentionsOverdue($lower) ? 'overdue' : ($this->mentionsToday($lower) ? 'today' : null),
+            'include_workspaces' => true,
+            'explain_visibility' => preg_match('/\b(why|showing|appear|appearing)\b/', $lower) === 1,
+        ];
+        if (isset($reference['id']) && ($query === '' || preg_match('/\b(that|this|it|first|second|third|one)\b/', $lower) === 1)) {
+            $arguments['id'] = (int) $reference['id'];
+            $arguments['query'] = null;
+        }
+
+        return array_filter($arguments, fn ($value): bool => $value !== null && $value !== '');
+    }
+
+    private function referencedEntity(?BeanSession $session, string $lower): ?array
+    {
+        if (! $session) return null;
+        $metadata = is_array($session->metadata) ? $session->metadata : [];
+        $entities = array_values(array_filter(is_array($metadata['recent_entities'] ?? null) ? $metadata['recent_entities'] : [], 'is_array'));
+        if ($entities === []) return null;
+        $index = match (true) {
+            preg_match('/\b(second|2nd)\b/', $lower) === 1 => 1,
+            preg_match('/\b(third|3rd)\b/', $lower) === 1 => 2,
+            default => 0,
+        };
+
+        return $entities[$index] ?? $entities[0] ?? null;
     }
 
     private function taskContextQuery(string $text): string
