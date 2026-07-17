@@ -6,6 +6,7 @@ use App\Models\BeanRun;
 use App\Models\BeanSession;
 use App\Models\Note;
 use App\Models\NoteFolder;
+use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\Bean\BeanActionExecutor;
@@ -147,6 +148,62 @@ class BeanRuntimeTest extends TestCase
 
         $this->assertSame(1, Note::where('user_id', $user->id)->count());
         $this->assertDatabaseHas('bean_tool_calls', ['action' => 'note.list', 'status' => 'completed']);
+    }
+
+    public function test_local_parser_routes_remind_me_to_reminder_not_task(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-reminder-local@example.com');
+        $user = User::where('email', 'bean-reminder-local@example.com')->firstOrFail();
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Remind me to call mom',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed');
+
+        $this->assertDatabaseHas('reminders', ['user_id' => $user->id, 'title' => 'call mom']);
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'reminder.create', 'status' => 'completed']);
+        $this->assertSame(0, Task::where('user_id', $user->id)->count());
+    }
+
+    public function test_local_parser_routes_schedule_call_to_calendar_not_task(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-calendar-local@example.com');
+        $user = User::where('email', 'bean-calendar-local@example.com')->firstOrFail();
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Schedule call with Bob',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed');
+
+        $this->assertDatabaseHas('calendar_events', ['user_id' => $user->id, 'title' => 'call with Bob']);
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'calendar_event.create', 'status' => 'completed']);
+        $this->assertSame(0, Task::where('user_id', $user->id)->count());
+    }
+
+    public function test_local_parser_completes_reminder_not_task_for_reminder_phrase(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-reminder-complete-local@example.com');
+        $user = User::where('email', 'bean-reminder-complete-local@example.com')->firstOrFail();
+        $reminder = Reminder::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'call mom',
+            'status' => 'open',
+            'remind_at' => now()->addHour(),
+        ]);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Complete reminder to call mom',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed');
+
+        $this->assertDatabaseHas('reminders', ['id' => $reminder->id, 'status' => 'completed']);
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'reminder.complete', 'status' => 'completed']);
+        $this->assertSame(0, Task::where('user_id', $user->id)->count());
     }
 
     public function test_destructive_action_requires_confirmation_then_can_be_approved(): void

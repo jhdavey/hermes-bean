@@ -43,6 +43,12 @@ test('Bean voice MVP mints realtime sessions and opens WebRTC from a tap', () =>
     assert.match(source, /https:\/\/api\.openai\.com\/v1\/realtime\/calls/);
 });
 
+test('Bean local wake mode only uses an explicit local detector hook', () => {
+    assert.match(source, /HeyBeanLocalWakeDetector/);
+    assert.match(source, /handleBeanWakeDetected/);
+    assert.doesNotMatch(source, /webkitSpeechRecognition|SpeechRecognition/);
+});
+
 test('dark mode retains the original menu, modal, card, and command center surfaces', () => {
     const darkThemeSelector = '.heybean-app-body[data-hb-theme-resolved="dark"]';
     const menuRule = cssRuleContaining(themeSource, `${darkThemeSelector} .hb-profile-popover`);

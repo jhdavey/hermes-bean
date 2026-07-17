@@ -222,7 +222,7 @@ PROMPT;
         } elseif (preg_match('/\b(time|date|today)\b/', $lower)) {
             $actions[] = ['action' => 'time.now', 'arguments' => []];
             $response = 'I’ll check the current date and time.';
-        } elseif ($this->mentionsTask($lower)) {
+        } elseif ($this->mentionsTask($lower) && ! $this->mentionsReminder($lower) && ! $this->mentionsNote($lower) && ! $this->mentionsCalendar($lower)) {
             if ($this->isDeleteRequest($lower)) {
                 $actions[] = ['action' => 'task.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'task', 'todo', 'to-do'])]];
                 $response = 'I’ll ask you to confirm before deleting that task.';
@@ -239,12 +239,12 @@ PROMPT;
                 $actions[] = ['action' => 'task.create', 'arguments' => ['title' => $this->titleFromText($text), 'type' => 'todo']];
                 $response = 'I’ll add that task.';
             }
-        } elseif (preg_match('/\b(remind me|reminder)\b/', $lower)) {
+        } elseif ($this->mentionsReminder($lower)) {
             if ($this->isDeleteRequest($lower)) {
                 $actions[] = ['action' => 'reminder.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'reminder'])]];
                 $response = 'I’ll ask you to confirm before deleting that reminder.';
             } elseif ($this->isCompleteRequest($lower)) {
-                $actions[] = ['action' => 'reminder.complete', 'arguments' => ['query' => $this->queryFromText($text, ['complete', 'finish', 'done', 'mark', 'reminder', 'as'])]];
+                $actions[] = ['action' => 'reminder.complete', 'arguments' => ['query' => $this->queryFromText($text, ['complete', 'finish', 'done', 'mark', 'reminder', 'as', 'to'])]];
                 $response = 'I’ll mark that reminder complete.';
             } elseif ($this->isListRequest($lower)) {
                 $actions[] = ['action' => 'reminder.list', 'arguments' => []];
@@ -256,7 +256,7 @@ PROMPT;
                 $actions[] = ['action' => 'reminder.create', 'arguments' => ['title' => $this->titleFromText($text), 'remind_at' => now()->addDay()->setTime(9, 0)->toIso8601String()]];
                 $response = 'I’ll create that reminder.';
             }
-        } elseif (preg_match('/\b(note|notes|write down|jot)\b/', $lower)) {
+        } elseif ($this->mentionsNote($lower)) {
             if ($this->isDeleteRequest($lower)) {
                 $actions[] = ['action' => 'note.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'note'])]];
                 $response = 'I’ll ask you to confirm before deleting that note.';
@@ -270,7 +270,7 @@ PROMPT;
                 $actions[] = ['action' => 'note.create', 'arguments' => ['plain_text' => $text]];
                 $response = 'I’ll add that note.';
             }
-        } elseif (preg_match('/\b(calendar|appointment|event|schedule)\b/', $lower)) {
+        } elseif ($this->mentionsCalendar($lower)) {
             if ($this->isDeleteRequest($lower)) {
                 $actions[] = ['action' => 'calendar_event.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'calendar', 'appointment', 'event'])]];
                 $response = 'I’ll ask you to confirm before deleting that calendar event.';
@@ -292,6 +292,21 @@ PROMPT;
     private function mentionsTask(string $lower): bool
     {
         return preg_match('/\b(task|todo|to-do|call|buy|finish)\b/', $lower) === 1;
+    }
+
+    private function mentionsReminder(string $lower): bool
+    {
+        return preg_match('/\b(remind me|reminder|reminders)\b/', $lower) === 1;
+    }
+
+    private function mentionsNote(string $lower): bool
+    {
+        return preg_match('/\b(note|notes|write down|jot)\b/', $lower) === 1;
+    }
+
+    private function mentionsCalendar(string $lower): bool
+    {
+        return preg_match('/\b(calendar|appointment|event|schedule)\b/', $lower) === 1;
     }
 
     private function isDeleteRequest(string $lower): bool
@@ -327,7 +342,7 @@ PROMPT;
 
     private function titleFromText(string $text): string
     {
-        $title = preg_replace('/^(hey bean,?\s*)?(please\s+)?(add|create|make|set)\s+(a\s+)?(task|todo|to-do|reminder|calendar event|event|note)\s+(to\s+)?/i', '', trim($text)) ?: trim($text);
+        $title = preg_replace('/^(hey bean,?\s*)?(please\s+)?(add|create|make|set|schedule)\s+(a\s+)?(task|todo|to-do|reminder|calendar event|event|note)?\s*(to\s+)?/i', '', trim($text)) ?: trim($text);
         $title = preg_replace('/^(hey bean,?\s*)?(please\s+)?(remind me to|remind me|write down|jot down)\s+/i', '', trim($title)) ?: trim($title);
         return str($title)->limit(120, '')->toString();
     }

@@ -133,7 +133,7 @@ export function mountHeyBeanWebApp(mount) {
             sessionId: '',
             panelOpen: false,
             mode: localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy',
-            statusText: localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'Listening for “Hey Bean”' : 'Privacy mode',
+            statusText: localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'Tap to talk ready — local wake pending' : 'Privacy mode',
             input: '',
             busy: false,
             messages: [],
@@ -231,6 +231,7 @@ export function mountHeyBeanWebApp(mount) {
     let beanMediaStream = null;
     let beanDataChannel = null;
     let beanRemoteAudio = null;
+    let beanWakeDetector = null;
 
     boot();
     bindResponsiveCalendar();
@@ -4361,9 +4362,48 @@ export function mountHeyBeanWebApp(mount) {
 
     function setBeanMode(mode) {
         state.bean.mode = mode === 'privacy' ? 'privacy' : 'wake_listening';
-        state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening locally for “Hey Bean”';
         localStorage.setItem('heybean.bean.privacy', state.bean.mode === 'privacy' ? 'privacy' : 'listening');
+        if (state.bean.mode === 'privacy') {
+            stopBeanWakeListening();
+            state.bean.statusText = 'Privacy mode';
+        } else {
+            startBeanWakeListening();
+        }
         render();
+    }
+
+    async function startBeanWakeListening() {
+        stopBeanWakeListening();
+        const wakeFactory = window.HeyBeanLocalWakeDetector;
+        if (!wakeFactory?.create) {
+            state.bean.statusText = 'Tap to talk ready — local wake pending';
+            return;
+        }
+        try {
+            beanWakeDetector = await wakeFactory.create({
+                phrase: 'Hey Bean',
+                onWake: handleBeanWakeDetected,
+            });
+            await beanWakeDetector?.start?.();
+            state.bean.statusText = 'Listening locally for “Hey Bean”';
+        } catch (error) {
+            beanWakeDetector = null;
+            state.bean.error = friendlyError(error, 'start local wake detection');
+            state.bean.statusText = 'Tap to talk ready — local wake unavailable';
+        }
+    }
+
+    function stopBeanWakeListening() {
+        beanWakeDetector?.stop?.();
+        beanWakeDetector = null;
+    }
+
+    function handleBeanWakeDetected() {
+        if (state.bean.mode === 'privacy' || state.bean.voiceActive || state.bean.voiceConnecting) return;
+        state.bean.panelOpen = true;
+        state.bean.statusText = 'Hey Bean heard — connecting voice…';
+        render();
+        startBeanVoiceSession();
     }
 
     async function toggleBeanVoiceSession() {
@@ -4384,6 +4424,7 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
 
+        stopBeanWakeListening();
         state.bean.panelOpen = true;
         state.bean.voiceConnecting = true;
         state.bean.error = '';
@@ -4460,7 +4501,11 @@ export function mountHeyBeanWebApp(mount) {
         state.bean.voiceTranscript = '';
         if (!options.keepStatus) {
             state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
-            state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening for “Hey Bean”';
+            if (state.bean.mode === 'privacy') {
+                state.bean.statusText = 'Privacy mode';
+            } else {
+                startBeanWakeListening();
+            }
         }
     }
 
@@ -4572,7 +4617,7 @@ export function mountHeyBeanWebApp(mount) {
             state.bean.activity = normalizeList(data.activity);
             state.bean.confirmations = normalizeList(data.confirmations);
             state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
-            state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening for “Hey Bean”';
+            state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Tap to talk ready — local wake pending';
             scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
         } catch (error) {
             state.bean.error = friendlyError(error, 'ask Bean');
@@ -4594,7 +4639,7 @@ export function mountHeyBeanWebApp(mount) {
             await loadBeanActivity();
             scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
             state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
-            state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening for “Hey Bean”';
+            state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Tap to talk ready — local wake pending';
         } catch (error) {
             state.bean.error = friendlyError(error, 'confirm Bean action');
             state.bean.mode = 'error';
@@ -7861,6 +7906,7 @@ export function mountHeyBeanWebApp(mount) {
         try { await api('/auth/logout', { method: 'POST' }); } catch (_) {}
         stopDashboardChangeFeed();
         stopBeanEventFeed();
+        stopBeanWakeListening();
         stopBeanVoiceSession();
         clearToken();
         state.phase = 'signedOut';
@@ -7877,6 +7923,7 @@ export function mountHeyBeanWebApp(mount) {
             await api('/account', { method: 'DELETE' });
             stopDashboardChangeFeed();
             stopBeanEventFeed();
+            stopBeanWakeListening();
             stopBeanVoiceSession();
             clearToken();
             state.phase = 'signedOut';
