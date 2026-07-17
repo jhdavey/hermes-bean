@@ -47,7 +47,17 @@ test('Bean voice starts from wake detection instead of tap-to-talk', () => {
     assert.match(source, /flushBeanRealtimeEventQueue/);
     assert.match(source, /handleBeanWakeDetected/);
     assert.match(source, /extractBeanWakeTail/);
-    assert.match(source, /Hey Bean heard — checking/);
+    assert.match(source, /Hey Bean heard — keep talking/);
+});
+
+test('Bean wake handoff does not submit the first partial wake tail as the command', () => {
+    assert.match(source, /beanPendingWakeTailTimer/);
+    assert.match(source, /scheduleBeanWakeTailStabilization/);
+    assert.match(source, /isLikelyCompleteBeanWakeTail/);
+    assert.match(source, /statusText = 'Hey Bean heard — keep talking…'/);
+    assert.match(source, /state\.bean\.voiceTranscript = wakeTail/);
+    assert.doesNotMatch(source, /sendBeanVoiceTranscript\(wakeTail\)/);
+    assert.match(source, /startBeanVoiceSession\(\{ wakeEvent: event, wakeTail \}\)/);
 });
 
 test('Bean voice handles stale page-load status and stop commands locally', () => {

@@ -235,6 +235,8 @@ export function mountHeyBeanWebApp(mount) {
     let beanRealtimeSessionCache = null;
     let beanRealtimeSessionPromise = null;
     let beanRealtimeEventQueue = [];
+    let beanPendingWakeTailTimer = 0;
+    let beanPendingWakeTail = '';
     let beanEventStatusStartedAt = Date.now();
 
     boot();
@@ -4488,7 +4490,12 @@ export function mountHeyBeanWebApp(mount) {
                         if (!normalizeWakeTranscript(transcript).includes(normalizedPhrase)) return;
                         const tail = extractBeanWakeTail(transcript, phrase);
                         if (tail) {
-                            fireWake();
+                            window.clearTimeout(wakeTimer);
+                            const isFinal = Array.from(event.results || [])
+                                .slice(event.resultIndex || 0)
+                                .some((result) => result?.isFinal);
+                            const delay = isFinal || isLikelyCompleteBeanWakeTail(tail) ? 450 : 950;
+                            wakeTimer = window.setTimeout(fireWake, delay);
                         } else if (!wakeTimer) {
                             wakeTimer = window.setTimeout(fireWake, 700);
                         }
@@ -4545,6 +4552,35 @@ export function mountHeyBeanWebApp(mount) {
         return '';
     }
 
+    function isLikelyCompleteBeanWakeTail(value) {
+        const normalized = String(value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+        if (!normalized) return false;
+        const words = normalized.split(/\s+/).filter(Boolean);
+        if (words.length < 3) return false;
+        if (/\b(what|what s|what is|which|where|when|who|how|can|could|would|will|please|show|list|create|add|complete|delete|remind|schedule|find|search)\b/u.test(normalized)) {
+            return words.length >= 4 || /\b(today|tomorrow|weather|calendar|task|tasks|todo|reminder|note|workspace|recipe|card|date|time)\b/u.test(normalized);
+        }
+        return words.length >= 5;
+    }
+
+    function scheduleBeanWakeTailStabilization(wakeTail) {
+        window.clearTimeout(beanPendingWakeTailTimer);
+        beanPendingWakeTail = String(wakeTail || '').trim();
+        if (!beanPendingWakeTail || !isLikelyCompleteBeanWakeTail(beanPendingWakeTail)) return;
+        beanPendingWakeTailTimer = window.setTimeout(() => {
+            const content = beanPendingWakeTail;
+            clearBeanPendingWakeTail();
+            if (!content || state.bean.busy) return;
+            sendBeanVoiceTranscript(content);
+        }, 1400);
+    }
+
+    function clearBeanPendingWakeTail() {
+        window.clearTimeout(beanPendingWakeTailTimer);
+        beanPendingWakeTailTimer = 0;
+        beanPendingWakeTail = '';
+    }
+
     function stopBeanWakeListening() {
         beanWakeDetector?.stop?.();
         beanWakeDetector = null;
@@ -4554,13 +4590,13 @@ export function mountHeyBeanWebApp(mount) {
         if (state.bean.mode === 'privacy' || state.bean.voiceActive || state.bean.voiceConnecting) return;
         const wakeTail = String(event?.tail || extractBeanWakeTail(event?.transcript || event?.text || event?.utterance || '') || '').trim();
         state.bean.panelOpen = true;
-        state.bean.statusText = wakeTail ? 'Hey Bean heard — checking…' : 'Hey Bean heard — listening…';
-        render();
-        const voiceStart = startBeanVoiceSession();
+        state.bean.statusText = 'Hey Bean heard — keep talking…';
         if (wakeTail) {
             state.bean.voiceTranscript = wakeTail;
-            sendBeanVoiceTranscript(wakeTail);
+            scheduleBeanWakeTailStabilization(wakeTail);
         }
+        render();
+        const voiceStart = startBeanVoiceSession({ wakeEvent: event, wakeTail });
         voiceStart?.catch?.(() => {});
     }
 
@@ -4602,7 +4638,7 @@ export function mountHeyBeanWebApp(mount) {
         return !expiresAt || expiresAt > Math.floor(Date.now() / 1000) + 30;
     }
 
-    async function startBeanVoiceSession() {
+    async function startBeanVoiceSession(options = {}) {
         if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
             state.bean.error = 'Voice requires a browser with microphone and WebRTC support.';
             state.bean.mode = 'error';
@@ -4616,7 +4652,7 @@ export function mountHeyBeanWebApp(mount) {
         state.bean.voiceConnecting = true;
         state.bean.error = '';
         state.bean.mode = 'listening';
-        state.bean.statusText = 'Connecting voice…';
+        state.bean.statusText = options?.wakeEvent ? 'Hey Bean heard — keep talking…' : 'Connecting voice…';
         render();
 
         try {
@@ -4665,8 +4701,10 @@ export function mountHeyBeanWebApp(mount) {
 
             state.bean.voiceActive = true;
             state.bean.voiceConnecting = false;
-            state.bean.mode = 'listening';
-            state.bean.statusText = 'Listening — speak to Bean';
+            if (!state.bean.busy) {
+                state.bean.mode = 'listening';
+                state.bean.statusText = 'Listening — speak to Bean';
+            }
         } catch (error) {
             stopBeanVoiceSession({ keepStatus: true });
             state.bean.error = friendlyError(error, 'start Bean voice');
@@ -4677,6 +4715,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function stopBeanVoiceSession(options = {}) {
+        clearBeanPendingWakeTail();
         beanDataChannel?.close?.();
         beanPeerConnection?.close?.();
         beanMediaStream?.getTracks?.().forEach((track) => track.stop());
@@ -4709,6 +4748,7 @@ export function mountHeyBeanWebApp(mount) {
         const type = String(payload.type || '');
         const transcript = String(payload.transcript || payload.text || payload.delta || '').trim();
         if (transcript && type.includes('transcription') && type.endsWith('completed')) {
+            clearBeanPendingWakeTail();
             if (handleBeanVoiceControl(transcript)) return;
             state.bean.voiceTranscript = transcript;
             render();
