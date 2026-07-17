@@ -150,11 +150,38 @@ class BeanRuntimeService
 
             return (string) ($failed['error'] ?? 'I could not complete that.');
         }
+        $contextResponse = $this->contextResponse($results);
+        if ($contextResponse !== null) return $contextResponse;
         $listResponse = $this->listResponse($results);
         if ($listResponse !== null) return $listResponse;
         $completed = collect($results)->filter(fn ($result): bool => ($result['ok'] ?? false) === true)->count();
         if ($completed > 0) return $proposed !== '' ? $proposed.' Done.' : 'Done.';
         return $proposed !== '' ? $proposed : 'I’m here. Ask me to help with your calendar, tasks, reminders, notes, date/time, or weather.';
+    }
+
+    private function contextResponse(array $results): ?string
+    {
+        $context = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
+            && ($result['context_type'] ?? null) === 'workspace'
+            && is_array($result['item'] ?? null));
+        if (! $context) return null;
+
+        $item = $context['item'];
+        $title = trim((string) ($item['title'] ?? 'That item')) ?: 'That item';
+        $workspaceNames = collect($item['workspace_names'] ?? [])
+            ->map(fn ($name): string => trim((string) $name))
+            ->filter(fn (string $name): bool => $name !== '')
+            ->values()
+            ->all();
+
+        if ($workspaceNames === []) {
+            return "I found {$title}, but I couldn’t determine its workspace.";
+        }
+        if (count($workspaceNames) === 1) {
+            return "{$title} is in the {$workspaceNames[0]} workspace.";
+        }
+
+        return "{$title} is in these workspaces: ".$this->naturalList($workspaceNames).'.';
     }
 
     private function listResponse(array $results): ?string

@@ -11,6 +11,8 @@ use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
+use App\Models\Workspace;
+use App\Models\WorkspaceItemLink;
 use App\Services\Domain\DomainResourceService;
 use App\Services\WorkspaceService;
 use Illuminate\Database\Eloquent\Builder;
@@ -65,6 +67,7 @@ class BeanActionExecutor
                 'weather.lookup' => $this->weatherLookup($arguments),
                 'task.list' => $this->listResources(Task::class, $run, 'due_at', $arguments),
                 'task.search' => $this->searchResources(Task::class, $run, $arguments),
+                'task.context' => $this->resourceContext(Task::class, $run, $arguments),
                 'task.create' => $this->createTask($run, $arguments),
                 'task.update' => $this->updateResource(Task::class, $run, $arguments, ['title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'due_at', 'completed_at', 'metadata']),
                 'task.complete' => $this->completeResource(Task::class, $run, $arguments, 'completed_at'),
@@ -140,8 +143,9 @@ class BeanActionExecutor
         if (in_array($dateScope, ['today', 'overdue'], true)) {
             $this->applyDateScope($query, $class, $orderField, $dateScope);
         }
+        $accessibleWorkspaceIds = $this->workspaceIds($run);
         $items = $query->orderBy($orderField)->orderBy('id')->limit(20)->get();
-        return ['ok' => true, 'items' => $this->summaries($items), 'date_scope' => $dateScope ?: null];
+        return ['ok' => true, 'items' => $this->summaries($items, $accessibleWorkspaceIds), 'date_scope' => $dateScope ?: null];
     }
 
     private function applyDateScope(Builder $query, string $class, string $field, string $scope): void
@@ -173,7 +177,21 @@ class BeanActionExecutor
                 }
             });
         }
-        return ['ok' => true, 'items' => $this->summaries($query->orderByDesc('updated_at')->limit(10)->get())];
+        return ['ok' => true, 'items' => $this->summaries($query->orderByDesc('updated_at')->limit(10)->get(), $this->workspaceIds($run))];
+    }
+
+    private function resourceContext(string $class, BeanRun $run, array $arguments): array
+    {
+        $match = $this->findContextModel($class, $run, $arguments);
+        if (! ($match['ok'] ?? false)) return $match;
+        /** @var Model $model */
+        $model = $match['model'];
+        return [
+            'ok' => true,
+            'context_type' => 'workspace',
+            'resource_type' => $this->resourceType($model),
+            'item' => $this->summary($model, $this->workspaceIds($run)),
+        ];
     }
 
     private function createTask(BeanRun $run, array $args): array
@@ -191,7 +209,7 @@ class BeanActionExecutor
             'completed_at' => $args['completed_at'] ?? null,
             'metadata' => $this->metadata($args),
         ]);
-        return ['ok' => true, 'resource_type' => 'task', 'item' => $this->summary($task)];
+        return ['ok' => true, 'resource_type' => 'task', 'item' => $this->summary($task, $this->workspaceIds($run))];
     }
 
     private function createReminder(BeanRun $run, array $args): array
@@ -207,7 +225,7 @@ class BeanActionExecutor
             'status' => $args['status'] ?? 'scheduled',
             'metadata' => $this->metadata($args),
         ]);
-        return ['ok' => true, 'resource_type' => 'reminder', 'item' => $this->summary($reminder)];
+        return ['ok' => true, 'resource_type' => 'reminder', 'item' => $this->summary($reminder, $this->workspaceIds($run))];
     }
 
     private function createCalendarEvent(BeanRun $run, array $args): array
@@ -228,7 +246,7 @@ class BeanActionExecutor
             'recurrence' => (string) ($args['recurrence'] ?? 'none'),
             'metadata' => $this->metadata($args),
         ]);
-        return ['ok' => true, 'resource_type' => 'calendar_event', 'item' => $this->summary($event)];
+        return ['ok' => true, 'resource_type' => 'calendar_event', 'item' => $this->summary($event, $this->workspaceIds($run))];
     }
 
     private function createNote(BeanRun $run, array $args): array
@@ -245,7 +263,7 @@ class BeanActionExecutor
             'is_pinned' => $args['is_pinned'] ?? null,
             'metadata' => $this->metadata($args),
         ]);
-        return ['ok' => true, 'resource_type' => 'note', 'item' => $this->summary($note)];
+        return ['ok' => true, 'resource_type' => 'note', 'item' => $this->summary($note, $this->workspaceIds($run))];
     }
 
     private function updateResource(string $class, BeanRun $run, array $args, array $allowed): array
@@ -279,7 +297,7 @@ class BeanActionExecutor
             $model instanceof Note => $this->domainResources->updateNote($user, $model, $updates),
             default => throw new \RuntimeException('Unsupported resource type.'),
         };
-        return ['ok' => true, 'resource_type' => $this->resourceType($updated), 'item' => $this->summary($updated)];
+        return ['ok' => true, 'resource_type' => $this->resourceType($updated), 'item' => $this->summary($updated, $this->workspaceIds($run))];
     }
 
     private function completeResource(string $class, BeanRun $run, array $args, ?string $completedAtField): array
@@ -295,7 +313,7 @@ class BeanActionExecutor
             $model instanceof Reminder => $this->domainResources->updateReminder($user, $model, $updates),
             default => throw new \RuntimeException('Unsupported completion resource type.'),
         };
-        return ['ok' => true, 'resource_type' => $this->resourceType($updated), 'item' => $this->summary($updated)];
+        return ['ok' => true, 'resource_type' => $this->resourceType($updated), 'item' => $this->summary($updated, $this->workspaceIds($run))];
     }
 
     private function deleteResource(string $class, BeanRun $run, array $args): array
@@ -316,6 +334,31 @@ class BeanActionExecutor
         return ['ok' => true, 'deleted' => $summary];
     }
 
+    private function findContextModel(string $class, BeanRun $run, array $args): array
+    {
+        $query = $this->baseQuery($class, $run);
+        if (isset($args['id'])) {
+            $model = $query->whereKey($args['id'])->first();
+            return $model ? ['ok' => true, 'model' => $model] : ['ok' => false, 'error' => 'I could not find that item.'];
+        }
+        $text = trim((string) ($args['query'] ?? $args['title'] ?? ''));
+        if ($text === '') return ['ok' => false, 'error' => 'I need a task title to check its workspace.'];
+        $matches = $query->where('title', 'like', '%'.addcslashes($text, '%_\\').'%')->limit(10)->get();
+        if ($matches->count() === 1) return ['ok' => true, 'model' => $matches->first()];
+        if ($matches->count() > 1) {
+            $accessibleWorkspaceIds = $this->workspaceIds($run);
+            $first = $matches->first();
+            $linkedWorkspaceIds = $this->workspaceIdsForModel($first, $accessibleWorkspaceIds);
+            $matchedWorkspaceIds = $matches->pluck('workspace_id')->map(fn ($id): int => (int) $id)->unique()->values()->all();
+            if ($linkedWorkspaceIds !== [] && array_diff($matchedWorkspaceIds, $linkedWorkspaceIds) === []) {
+                return ['ok' => true, 'model' => $first];
+            }
+
+            return ['ok' => false, 'ambiguous' => true, 'error' => 'I found multiple matching items. Please choose one.', 'items' => $this->summaries($matches, $accessibleWorkspaceIds)];
+        }
+        return ['ok' => false, 'error' => 'I could not find a matching task.'];
+    }
+
     private function findOne(string $class, BeanRun $run, array $args): array
     {
         $query = $this->baseQuery($class, $run);
@@ -327,7 +370,7 @@ class BeanActionExecutor
         if ($text === '') return ['ok' => false, 'error' => 'I need an item id or title to find the record.'];
         $matches = $query->where('title', 'like', '%'.addcslashes($text, '%_\\').'%')->limit(3)->get();
         if ($matches->count() === 1) return ['ok' => true, 'model' => $matches->first()];
-        if ($matches->count() > 1) return ['ok' => false, 'ambiguous' => true, 'error' => 'I found multiple matching items. Please choose one.', 'items' => $this->summaries($matches)];
+        if ($matches->count() > 1) return ['ok' => false, 'ambiguous' => true, 'error' => 'I found multiple matching items. Please choose one.', 'items' => $this->summaries($matches, $this->workspaceIds($run))];
         return ['ok' => false, 'error' => 'I could not find a matching item.'];
     }
 
@@ -376,20 +419,88 @@ class BeanActionExecutor
     private function dateOrNull(mixed $value): ?Carbon { return blank($value) ? null : Carbon::parse((string) $value)->utc(); }
     private function metadata(array $args): array { return is_array($args['metadata'] ?? null) ? $args['metadata'] : ['created_by' => 'bean']; }
 
-    private function summaries($items): array { return $items->map(fn ($item): array => $this->summary($item))->values()->all(); }
-    private function summary(Model $model): array
+    private function summaries($items, ?array $accessibleWorkspaceIds = null): array { return $items->map(fn ($item): array => $this->summary($item, $accessibleWorkspaceIds))->values()->all(); }
+    private function summary(Model $model, ?array $accessibleWorkspaceIds = null): array
     {
+        $workspaceNames = $this->workspaceNames($model, $accessibleWorkspaceIds);
         return array_filter([
             'id' => $model->getKey(),
             'title' => $model->getAttribute('title'),
             'status' => $model->getAttribute('status'),
+            'workspace_id' => $model->getAttribute('workspace_id'),
+            'workspace_name' => $workspaceNames[0] ?? null,
+            'workspace_names' => $workspaceNames,
             'due_at' => optional($model->getAttribute('due_at'))->toIso8601String(),
             'remind_at' => optional($model->getAttribute('remind_at'))->toIso8601String(),
             'starts_at' => optional($model->getAttribute('starts_at'))->toIso8601String(),
             'ends_at' => optional($model->getAttribute('ends_at'))->toIso8601String(),
             'plain_text' => str($model->getAttribute('plain_text') ?? '')->limit(160)->toString(),
             'resource_type' => $this->resourceType($model),
-        ], fn ($value) => $value !== null && $value !== '');
+        ], fn ($value) => $value !== null && $value !== '' && $value !== []);
+    }
+
+    private function workspaceNames(Model $model, ?array $accessibleWorkspaceIds = null): array
+    {
+        $workspaceIds = $this->workspaceIdsForModel($model, $accessibleWorkspaceIds);
+        if ($workspaceIds === []) return [];
+        $namesById = Workspace::query()
+            ->whereIn('id', $workspaceIds)
+            ->pluck('name', 'id');
+        return collect($workspaceIds)
+            ->map(fn (int $id): string => trim((string) ($namesById[$id] ?? '')))
+            ->filter(fn (string $name): bool => $name !== '')
+            ->values()
+            ->all();
+    }
+
+    private function workspaceIdsForModel(Model $model, ?array $accessibleWorkspaceIds = null): array
+    {
+        $workspaceIds = collect([(int) $model->getAttribute('workspace_id')])->filter();
+        $type = $this->storageType($model);
+        if ($type !== null) {
+            $links = WorkspaceItemLink::query()
+                ->where('source_type', $type)
+                ->where('target_type', $type)
+                ->where('link_type', 'copy')
+                ->where(function ($query) use ($model): void {
+                    $query->where(fn ($query) => $query->where('source_workspace_id', $model->getAttribute('workspace_id'))->where('source_id', $model->getKey()))
+                        ->orWhere(fn ($query) => $query->where('target_workspace_id', $model->getAttribute('workspace_id'))->where('target_id', $model->getKey()));
+                })->get();
+            $sourcePairs = collect();
+            foreach ($links as $link) {
+                $workspaceIds->push((int) $link->source_workspace_id, (int) $link->target_workspace_id);
+                $sourcePairs->push([(int) $link->source_workspace_id, (int) $link->source_id]);
+            }
+            $sourcePairs = $sourcePairs->unique(fn (array $pair): string => $pair[0].':'.$pair[1])->values();
+            if ($sourcePairs->isNotEmpty()) {
+                WorkspaceItemLink::query()
+                    ->where('source_type', $type)
+                    ->where('target_type', $type)
+                    ->where('link_type', 'copy')
+                    ->where(function ($query) use ($sourcePairs): void {
+                        foreach ($sourcePairs as [$workspaceId, $sourceId]) {
+                            $query->orWhere(fn ($query) => $query->where('source_workspace_id', $workspaceId)->where('source_id', $sourceId));
+                        }
+                    })->get()->each(fn (WorkspaceItemLink $link) => $workspaceIds->push((int) $link->source_workspace_id, (int) $link->target_workspace_id));
+            }
+        }
+        $ids = $workspaceIds->unique()->values();
+        if ($accessibleWorkspaceIds !== null) {
+            $allowed = array_map('intval', $accessibleWorkspaceIds);
+            $ids = $ids->filter(fn (int $id): bool => in_array($id, $allowed, true))->values();
+        }
+        return $ids->all();
+    }
+
+    private function storageType(Model $model): ?string
+    {
+        return match (true) {
+            $model instanceof Task => 'tasks',
+            $model instanceof Reminder => 'reminders',
+            $model instanceof CalendarEvent => 'calendar_events',
+            $model instanceof Note => 'notes',
+            default => null,
+        };
     }
 
     private function resourceType(Model $model): string

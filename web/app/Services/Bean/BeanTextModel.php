@@ -11,6 +11,7 @@ class BeanTextModel
     private const ACTIONS = [
         'task.list',
         'task.search',
+        'task.context',
         'task.create',
         'task.update',
         'task.complete',
@@ -173,7 +174,7 @@ You are Bean, the HeyBean productivity assistant. Return only JSON matching the 
 Use actions only from this list: {$actions}.
 Laravel is the source of truth: you propose structured actions; Laravel validates, scopes, confirms, and executes them.
 For destructive actions include the delete action, but Laravel will require confirmation before execution.
-Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. Use ISO 8601 dates when the user supplied a date/time. Use date_scope="today" for list requests that say today, this morning, this afternoon, or tonight; task/reminder lists for today include overdue items due before today. Use date_scope="overdue" for overdue or past-due list requests. If an item needs lookup by title, use query rather than inventing an id.
+Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. Use ISO 8601 dates when the user supplied a date/time. Use date_scope="today" for list requests that say today, this morning, this afternoon, or tonight; task/reminder lists for today include overdue items due before today. Use date_scope="overdue" for overdue or past-due list requests. If an item needs lookup by title, use query rather than inventing an id. If the user asks which workspace(s) a task is in or asks for context about a task, use task.context with a query containing the task title.
 Do not invent private dashboard data; call list/search/dashboard actions when data is needed.
 Keep response concise and avoid saying an action is complete before Laravel executes it.
 PROMPT;
@@ -232,11 +233,17 @@ PROMPT;
                 $actions[] = ['action' => 'reminder.list', 'arguments' => ['date_scope' => 'overdue']];
                 $response = 'I’ll check overdue tasks and reminders.';
             }
+        } elseif ($this->isTaskWorkspaceQuestion($lower)) {
+            $actions[] = ['action' => 'task.context', 'arguments' => ['query' => $this->taskContextQuery($text)]];
+            $response = 'I’ll check the task workspace.';
         } elseif (preg_match('/\b(time|date|today)\b/', $lower) && ! $this->mentionsTask($lower) && ! $this->mentionsReminder($lower) && ! $this->mentionsCalendar($lower)) {
             $actions[] = ['action' => 'time.now', 'arguments' => []];
             $response = 'I’ll check the current date and time.';
         } elseif ($this->mentionsTask($lower) && ! $this->mentionsReminder($lower) && ! $this->mentionsNote($lower) && ! $this->mentionsCalendar($lower)) {
-            if ($this->isDeleteRequest($lower)) {
+            if ($this->isTaskWorkspaceQuestion($lower)) {
+                $actions[] = ['action' => 'task.context', 'arguments' => ['query' => $this->taskContextQuery($text)]];
+                $response = 'I’ll check the task workspace.';
+            } elseif ($this->isDeleteRequest($lower)) {
                 $actions[] = ['action' => 'task.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'task', 'todo', 'to-do'])]];
                 $response = 'I’ll ask you to confirm before deleting that task.';
             } elseif ($this->isCompleteRequest($lower)) {
@@ -342,6 +349,17 @@ PROMPT;
         return preg_match('/\b(find|search)\b/', $lower) === 1;
     }
 
+    private function isTaskWorkspaceQuestion(string $lower): bool
+    {
+        return preg_match('/\b(workspace|workspaces)\b/', $lower) === 1
+            && preg_match('/\b(what|which|where|in|does|do|is|are)\b/', $lower) === 1;
+    }
+
+    private function taskContextQuery(string $text): string
+    {
+        return $this->queryFromText($text, ['what', 'which', 'where', 'workspace', 'workspaces', 'is', 'are', 'in', 'does', 'do', 'task', 'tasks', 'todo', 'to-do']);
+    }
+
     private function mentionsToday(string $lower): bool
     {
         return preg_match('/\b(today|this morning|this afternoon|tonight)\b/', $lower) === 1;
@@ -365,6 +383,7 @@ PROMPT;
             $query = preg_replace('/\b'.preg_quote($word, '/').'\b/i', ' ', $query) ?: $query;
         }
         $query = preg_replace('/\s+/', ' ', trim($query)) ?: trim($text);
+        $query = trim($query, " \t\n\r\0\x0B?.!,;:'\"");
 
         return str($query)->limit(120, '')->toString();
     }

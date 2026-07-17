@@ -10,8 +10,10 @@ use App\Models\NoteFolder;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
+use App\Models\Workspace;
 use App\Services\Bean\BeanActionExecutor;
 use App\Services\Domain\DomainResourceService;
+use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
@@ -203,6 +205,29 @@ class BeanRuntimeTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
             ->assertJsonFragment(['content' => 'You have 1 open task: Review launch checklist.']);
+    }
+
+    public function test_task_workspace_question_returns_the_actual_workspace_names(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-task-workspace-response@example.com');
+        $user = User::where('email', 'bean-task-workspace-response@example.com')->firstOrFail();
+        $personalWorkspace = Workspace::findOrFail($user->default_workspace_id);
+        $family = app(WorkspaceService::class)->createHousehold($user, 'Family');
+
+        app(DomainResourceService::class)->createTask($user, [
+            'workspace_id' => $personalWorkspace->id,
+            'title' => 'Pay the travel card',
+            'type' => 'todo',
+            'status' => 'open',
+            'sync_to_workspace_ids' => [$family->id],
+        ]);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'What workspaces pay the travel card in?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'Pay the travel card is in these workspaces: '.$personalWorkspace->name.' and Family.']);
     }
 
     public function test_today_task_list_response_filters_to_open_tasks_due_today(): void
