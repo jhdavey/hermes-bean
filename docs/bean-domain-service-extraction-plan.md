@@ -25,9 +25,27 @@ The shared layer must preserve existing behavior from `DomainResourceController`
 - dashboard change observers/notifier behavior;
 - provider/export hooks where direct API edits trigger them.
 
+## Current implementation status
+
+Implemented in this slice:
+
+- Added `App\Services\Domain\DomainResourceService` as the shared resource-control layer.
+- Updated `DomainResourceController` task/reminder/calendar/note/note-folder/event-category mutation endpoints to call the service.
+- Updated Bean task/reminder/calendar/note create/update/complete/delete actions to call the same service instead of direct Eloquent writes.
+- Added Bean regression coverage proving:
+  - recurring-task creation is blocked by the same domain plan limits;
+  - completing a recurring task advances its due date instead of archiving it, matching the normal API behavior.
+- Verified the focused API/Bean/domain suites after extraction.
+
+Future cleanup can split the consolidated service into smaller resource-specific services once the shared boundary is stable. The important constraint is already in place: both adapters call the same application service for domain mutations.
+
 ## Target structure
 
-Create focused services under `web/app/Services/Domain/`, for example:
+The current implementation uses:
+
+- `web/app/Services/Domain/DomainResourceService.php`
+
+Longer-term, this can be split into focused services under `web/app/Services/Domain/`, for example:
 
 - `DomainTaskService`
 - `DomainReminderService`

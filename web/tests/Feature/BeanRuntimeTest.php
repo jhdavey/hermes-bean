@@ -101,4 +101,51 @@ class BeanRuntimeTest extends TestCase
 
         $this->assertSame(10, Note::where('user_id', $user->id)->count());
     }
+
+    public function test_bean_task_creation_uses_domain_plan_limits_for_recurrence(): void
+    {
+        $user = User::factory()->create(['email' => 'bean-task-limit@example.com']);
+        app(\App\Services\WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $workspaceId = $user->default_workspace_id;
+        $session = BeanSession::create(['user_id' => $user->id, 'workspace_id' => $workspaceId, 'title' => 'Test', 'status' => 'active']);
+        $run = BeanRun::create(['bean_session_id' => $session->id, 'user_id' => $user->id, 'workspace_id' => $workspaceId, 'status' => 'running', 'mode' => 'text']);
+
+        $result = app(BeanActionExecutor::class)->execute($session, $run, 'task.create', [
+            'title' => 'Recurring base-plan task',
+            'type' => 'todo',
+            'metadata' => ['recurrence' => 'daily'],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('Recurring tasks', $result['error'] ?? '');
+        $this->assertDatabaseMissing('tasks', ['title' => 'Recurring base-plan task']);
+    }
+
+    public function test_bean_completing_recurring_task_uses_domain_completion_behavior(): void
+    {
+        $user = User::factory()->create(['email' => 'bean-recurring-complete@example.com']);
+        app(\App\Services\WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $workspaceId = $user->default_workspace_id;
+        $task = Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'created_by_user_id' => $user->id,
+            'title' => 'Recurring chore',
+            'type' => 'chore',
+            'status' => 'open',
+            'due_at' => now()->subDay()->startOfHour(),
+            'metadata' => ['recurrence' => 'daily'],
+        ]);
+        $session = BeanSession::create(['user_id' => $user->id, 'workspace_id' => $workspaceId, 'title' => 'Test', 'status' => 'active']);
+        $run = BeanRun::create(['bean_session_id' => $session->id, 'user_id' => $user->id, 'workspace_id' => $workspaceId, 'status' => 'running', 'mode' => 'text']);
+
+        $result = app(BeanActionExecutor::class)->execute($session, $run, 'task.complete', ['id' => $task->id]);
+
+        $this->assertTrue($result['ok']);
+        $task->refresh();
+        $this->assertSame('open', $task->status);
+        $this->assertNull($task->completed_at);
+        $this->assertTrue($task->due_at->isFuture());
+        $this->assertSame(1, $task->metadata['completion_count'] ?? null);
+    }
 }

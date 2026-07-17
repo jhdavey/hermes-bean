@@ -12,6 +12,7 @@ use App\Models\Task;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
 use App\Models\WorkspaceMembership;
+use App\Services\Domain\DomainResourceService;
 use App\Services\GoogleCalendarSyncService;
 use App\Services\OutlookCalendarSyncService;
 use App\Services\PlanHistoryService;
@@ -59,6 +60,7 @@ class DomainResourceController extends Controller
         private readonly RecurringCalendarEventService $recurringCalendarEvents,
         private readonly PlanLimitService $planLimits,
         private readonly PlanHistoryService $history,
+        private readonly DomainResourceService $domainResources,
     ) {}
 
     public function listNoteFolders(Request $request): JsonResponse
@@ -82,32 +84,17 @@ class DomainResourceController extends Controller
             return $response;
         }
 
-        $attributes = $this->owned($request, $request->validate([
+        $attributes = $request->validate([
             'name' => ['required', 'string', 'max:120'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
             'metadata' => ['nullable', 'array'],
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
-        ]));
+        ]);
 
-        if (($attributes['sort_order'] ?? null) === null) {
-            $attributes['sort_order'] = ((int) NoteFolder::query()
-                ->where('user_id', $attributes['user_id'])
-                ->where('workspace_id', $attributes['workspace_id'])
-                ->max('sort_order')) + 1;
-        }
-
-        $existing = NoteFolder::query()
-            ->where('user_id', $attributes['user_id'])
-            ->where('workspace_id', $attributes['workspace_id'])
-            ->whereRaw('LOWER(name) = ?', [mb_strtolower(trim($attributes['name']))])
-            ->first();
-
-        if ($existing) {
-            return response()->json(['data' => $existing]);
-        }
-
-        return $this->created(NoteFolder::create($attributes));
+        $folder = $this->domainResources->createNoteFolder($request->user(), $attributes);
+        return $folder->wasRecentlyCreated ? $this->created($folder) : response()->json(['data' => $folder]);
     }
+
 
     public function updateNoteFolder(Request $request, string $noteFolder): JsonResponse
     {
@@ -115,15 +102,15 @@ class DomainResourceController extends Controller
             return $response;
         }
 
-        $model = $this->scoped(NoteFolder::query(), $request, false)->findOrFail($noteFolder);
-        $model->update($request->validate([
+        $validated = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:120'],
             'sort_order' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'metadata' => ['sometimes', 'nullable', 'array'],
-        ]));
+        ]);
 
-        return response()->json(['data' => $model->refresh()]);
+        return response()->json(['data' => $this->domainResources->updateNoteFolder($request->user(), $noteFolder, $validated)]);
     }
+
 
     public function destroyNoteFolder(Request $request, string $noteFolder): JsonResponse
     {
@@ -131,14 +118,10 @@ class DomainResourceController extends Controller
             return $response;
         }
 
-        $model = $this->scoped(NoteFolder::query(), $request, false)->findOrFail($noteFolder);
-        Note::query()
-            ->where('user_id', $request->user()->id)
-            ->where('note_folder_id', $model->id)
-            ->update(['note_folder_id' => null]);
-
-        return $this->destroyed($model);
+        $this->domainResources->deleteNoteFolder($request->user(), $noteFolder);
+        return response()->json(status: 204);
     }
+
 
     public function listNotes(Request $request): JsonResponse
     {
@@ -192,17 +175,10 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
-        if ($response = $this->planLimits->enforceNoteCreationLimit($request->user(), $this->additionalNotesForSync($workspace->id, $validated['sync_to_workspace_ids'] ?? []))) {
-            return $response;
-        }
-        $validated = $this->normalizedNoteAttributes($validated);
-        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
-        unset($validated['sync_to_workspace_ids']);
-        $note = Note::create($this->owned($request, $validated));
-        $this->syncTo($request, $note, $syncTo);
 
-        return $this->created($note->refresh()->load('folder'));
+        return $this->created($this->domainResources->createNote($request->user(), $validated));
     }
+
 
     public function updateNote(Request $request, string $note): JsonResponse
     {
@@ -223,16 +199,10 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
-        $syncToProvided = array_key_exists('sync_to_workspace_ids', $validated);
-        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
-        unset($validated['sync_to_workspace_ids']);
-        $model->update($this->normalizedNoteAttributes($validated, $model));
-        if ($syncToProvided) {
-            $this->replaceSyncTo($request, $model->refresh(), 'notes', $syncTo);
-        }
 
-        return response()->json(['data' => $model->refresh()->load('folder')]);
+        return response()->json(['data' => $this->domainResources->updateNote($request->user(), $model, $validated)]);
     }
+
 
     public function destroyNote(Request $request, string $note): JsonResponse
     {
@@ -240,10 +210,15 @@ class DomainResourceController extends Controller
             return $response;
         }
 
-        $model = $this->scoped(Note::query(), $request, false)->findOrFail($note);
+        $validated = $request->validate([
+            'delete_from_workspace_ids' => ['nullable', 'array'],
+            'delete_from_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
+        ]);
+        $this->domainResources->deleteNote($request->user(), $note, $validated);
 
-        return $this->destroyLinkedItems($request, $model, 'notes');
+        return response()->json(status: 204);
     }
+
 
     public function listTasks(Request $request): JsonResponse
     {
@@ -364,29 +339,12 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
 
-        $this->assertCanonicalRecurrenceMetadata($validated);
-
-        $this->normalizeDateFields($validated, ['due_at', 'completed_at']);
-        $validated = $this->withDefaultUncategorizedColor($validated, true);
-        if ($this->taskRecurrenceRequested($validated) && ! $this->planLimits->canUseRecurringTasks($request->user())) {
-            return $this->planLimits->limitResponse('Recurring tasks are available on Premium, Pro, and Enterprise plans.');
-        }
-
-        if ($this->taskStatusIsCompleted($validated['status'] ?? null) && empty($validated['completed_at'])) {
-            $validated['completed_at'] = now();
-        }
-
-        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
-        unset($validated['sync_to_workspace_ids']);
-        $task = Task::create($this->owned($request, $validated));
-        $this->syncTo($request, $task, $syncTo);
-
-        return $this->created($task->refresh());
+        return $this->created($this->domainResources->createTask($request->user(), $validated));
     }
+
 
     public function updateTask(Request $request, string $task): JsonResponse
     {
-        $model = $this->scoped(Task::query(), $request, false)->findOrFail($task);
         $validated = $request->validate([
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'type' => ['sometimes', 'required', Rule::in(['todo', 'chore', 'maintenance'])],
@@ -402,50 +360,21 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
 
-        $this->assertCanonicalRecurrenceMetadata($validated);
-
-        $this->normalizeDateFields($validated, ['due_at', 'completed_at']);
-        $validated = $this->withDefaultUncategorizedColor($validated);
-        if ($this->taskRecurrenceRequested($validated) && ! $this->planLimits->canUseRecurringTasks($request->user())) {
-            return $this->planLimits->limitResponse('Recurring tasks are available on Premium, Pro, and Enterprise plans.');
-        }
-
-        $statusProvided = array_key_exists('status', $validated);
-        if ($statusProvided) {
-            $willBeCompleted = $this->taskStatusIsCompleted($validated['status']);
-            if ($willBeCompleted && $this->advanceRecurringTaskCompletion($model, $validated)) {
-                $willBeCompleted = false;
-            } elseif ($willBeCompleted && $model->completed_at === null && ! array_key_exists('completed_at', $validated)) {
-                $validated['completed_at'] = now();
-            }
-            if (! $willBeCompleted && ! array_key_exists('completed_at', $validated)) {
-                $validated['completed_at'] = null;
-            }
-            if (! $willBeCompleted && ! array_key_exists('due_at', $validated) && $model->due_at !== null && $model->due_at->lt(now()->startOfDay())) {
-                $validated['due_at'] = null;
-            }
-        }
-
-        $syncToProvided = array_key_exists('sync_to_workspace_ids', $validated);
-        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
-        unset($validated['sync_to_workspace_ids']);
-        $model->update($validated);
-        if ($statusProvided) {
-            $this->propagateLinkedStatusUpdate($request, $model->refresh(), 'tasks', $validated);
-        }
-        if ($syncToProvided) {
-            $this->replaceSyncTo($request, $model->refresh(), 'tasks', $syncTo);
-        }
-
-        return response()->json(['data' => $model->refresh()]);
+        return response()->json(['data' => $this->domainResources->updateTask($request->user(), $task, $validated)]);
     }
+
 
     public function destroyTask(Request $request, string $task): JsonResponse
     {
-        $model = $this->scoped(Task::query(), $request, false)->findOrFail($task);
+        $validated = $request->validate([
+            'delete_from_workspace_ids' => ['nullable', 'array'],
+            'delete_from_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
+        ]);
+        $this->domainResources->deleteTask($request->user(), $task, $validated);
 
-        return $this->destroyLinkedItems($request, $model, 'tasks');
+        return response()->json(status: 204);
     }
+
 
     public function storeReminder(Request $request): JsonResponse
     {
@@ -463,22 +392,10 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
-        $this->assertCanonicalRecurrenceMetadata($validated);
-        $validated['status'] ??= 'scheduled';
-        $this->normalizeDateFields($validated, ['remind_at']);
-        $validated = $this->withDefaultUncategorizedColor($validated, true);
-        if ($this->reminderRecurrenceRequested($validated) && ! $this->planLimits->canUseRecurringReminders($request->user())) {
-            return $this->planLimits->limitResponse('Recurring reminders are available on Premium, Pro, and Enterprise plans.');
-        }
 
-        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
-        $validated = $this->normalizeReminderNotificationRecipients($request, $validated, null, $syncTo);
-        unset($validated['sync_to_workspace_ids']);
-        $reminder = Reminder::create($this->owned($request, $validated));
-        $this->syncTo($request, $reminder, $syncTo);
-
-        return $this->created($reminder->refresh());
+        return $this->created($this->domainResources->createReminder($request->user(), $validated));
     }
+
 
     public function updateReminder(Request $request, string $reminder): JsonResponse
     {
@@ -496,34 +413,22 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
-        $this->assertCanonicalRecurrenceMetadata($validated);
-        $this->normalizeDateFields($validated, ['remind_at']);
-        $validated = $this->withDefaultUncategorizedColor($validated);
-        if ($this->reminderRecurrenceRequested($validated) && ! $this->planLimits->canUseRecurringReminders($request->user())) {
-            return $this->planLimits->limitResponse('Recurring reminders are available on Premium, Pro, and Enterprise plans.');
-        }
 
-        $syncToProvided = array_key_exists('sync_to_workspace_ids', $validated);
-        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
-        $validated = $this->normalizeReminderNotificationRecipients($request, $validated, $model, $syncTo);
-        unset($validated['sync_to_workspace_ids']);
-        $model->update($validated);
-        if (array_key_exists('status', $validated)) {
-            $this->propagateLinkedStatusUpdate($request, $model->refresh(), 'reminders', $validated);
-        }
-        if ($syncToProvided) {
-            $this->replaceSyncTo($request, $model->refresh(), 'reminders', $syncTo);
-        }
-
-        return response()->json(['data' => $model->refresh()]);
+        return response()->json(['data' => $this->domainResources->updateReminder($request->user(), $model, $validated)]);
     }
+
 
     public function destroyReminder(Request $request, string $reminder): JsonResponse
     {
-        $model = $this->scoped(Reminder::query(), $request, false)->findOrFail($reminder);
+        $validated = $request->validate([
+            'delete_from_workspace_ids' => ['nullable', 'array'],
+            'delete_from_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
+        ]);
+        $this->domainResources->deleteReminder($request->user(), $reminder, $validated);
 
-        return $this->destroyLinkedItems($request, $model, 'reminders');
+        return response()->json(status: 204);
     }
+
 
     public function storeCalendarEvent(Request $request): JsonResponse
     {
@@ -544,24 +449,10 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
-        $validated['status'] ??= 'scheduled';
-        $this->assertCanonicalRecurrenceMetadata($validated, $validated['recurrence'] ?? null, true);
-        $this->rejectCalendarAllDayMetadataFields($validated);
-        $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
-        $this->storeCanonicalCalendarAllDay($validated);
-        $validated = $this->withDefaultUncategorizedColor($validated, true);
-        if ($this->calendarRecurrenceRequested($validated['recurrence'] ?? null) && ! $this->planLimits->canUseRecurringCalendar($request->user())) {
-            return $this->planLimits->limitResponse('Recurring calendar events are available on Premium, Pro, and Enterprise plans.');
-        }
 
-        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
-        unset($validated['sync_to_workspace_ids']);
-        $event = CalendarEvent::create($this->owned($request, $validated));
-        $this->syncTo($request, $event, $syncTo);
-        $this->refreshRecurringCalendarEvents($request, $event->refresh());
-
-        return $this->created($event->refresh());
+        return $this->created($this->domainResources->createCalendarEvent($request->user(), $validated));
     }
+
 
     public function updateCalendarEvent(Request $request, string $calendarEvent): JsonResponse
     {
@@ -582,196 +473,61 @@ class DomainResourceController extends Controller
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
-        $effectiveRecurrence = array_key_exists('recurrence', $validated)
-            ? $validated['recurrence']
-            : $model->recurrence;
-        $effectiveMetadata = array_key_exists('metadata', $validated)
-            ? $validated['metadata']
-            : $model->metadata;
-        $this->assertCanonicalRecurrenceMetadata(
-            ['metadata' => $effectiveMetadata],
-            $effectiveRecurrence,
-            true,
-            array_key_exists('metadata', $validated),
-        );
-        $this->rejectCalendarAllDayMetadataFields($validated);
-        $this->normalizeDateFields($validated, ['starts_at', 'ends_at']);
-        $this->storeCanonicalCalendarAllDay($validated, $model);
-        $validated = $this->withDefaultUncategorizedColor($validated);
-        if ($this->recurringCalendarEvents->isGeneratedOccurrence($model)) {
-            if (isset($validated['recurrence']) && $validated['recurrence'] !== 'none') {
-                throw ValidationException::withMessages([
-                    'recurrence' => 'A generated occurrence cannot define a recurrence.',
-                ]);
-            }
-            $validated['recurrence'] = null;
-            $metadata = (array) ($validated['metadata'] ?? $model->metadata ?? []);
-            unset(
-                $metadata['recurrence'],
-                $metadata['days'],
-                $metadata['interval'],
-                $metadata['unit']
-            );
-            $validated['metadata'] = $metadata;
-        }
-        if (array_key_exists('recurrence', $validated) && $this->calendarRecurrenceRequested($validated['recurrence']) && ! $this->planLimits->canUseRecurringCalendar($request->user())) {
-            return $this->planLimits->limitResponse('Recurring calendar events are available on Premium, Pro, and Enterprise plans.');
-        }
 
-        $syncToProvided = array_key_exists('sync_to_workspace_ids', $validated);
-        $syncTo = $validated['sync_to_workspace_ids'] ?? [];
-        unset($validated['sync_to_workspace_ids']);
-        $model->update($validated);
-        if ($syncToProvided) {
-            $this->replaceSyncTo($request, $model->refresh(), 'calendar_events', $syncTo);
-        }
-        $this->refreshRecurringCalendarEvents($request, $model->refresh());
-
-        return response()->json(['data' => $model->refresh()]);
+        return response()->json(['data' => $this->domainResources->updateCalendarEvent($request->user(), $model, $validated)]);
     }
+
 
     public function destroyCalendarEvent(Request $request, string $calendarEvent): JsonResponse
     {
-        $event = $this->scoped(CalendarEvent::query(), $request, false)->findOrFail($calendarEvent);
         $validated = $request->validate([
             'delete_from_workspace_ids' => ['nullable', 'array'],
             'delete_from_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
             'recurring_delete_mode' => ['nullable', Rule::in(['all', 'single', 'future'])],
             'recurring_occurrence_date' => ['nullable', 'date_format:Y-m-d'],
         ]);
-
-        $workspaceIds = array_values(array_unique(array_map(
-            'intval',
-            $validated['delete_from_workspace_ids'] ?? [$event->workspace_id]
-        )));
-        if ($workspaceIds === []) {
-            $workspaceIds = [(int) $event->workspace_id];
-        }
-
-        $workspaceService = app(WorkspaceService::class);
-        $accessibleWorkspaceIds = $workspaceService->accessibleWorkspaces($request->user())->pluck('id')->map(fn ($id): int => (int) $id)->all();
-        foreach ($workspaceIds as $workspaceId) {
-            if (! in_array($workspaceId, $accessibleWorkspaceIds, true)) {
-                $workspaceService->authorizeMember($request->user(), Workspace::findOrFail($workspaceId));
-            }
-        }
-
-        $eventsByWorkspace = $this->linkedCalendarEventsByWorkspace($event, $accessibleWorkspaceIds);
-        $eventsToDelete = $eventsByWorkspace
-            ->filter(fn (CalendarEvent $event): bool => in_array((int) $event->workspace_id, $workspaceIds, true))
-            ->values();
-        if ($eventsToDelete->isEmpty() && in_array((int) $event->workspace_id, $workspaceIds, true)) {
-            $eventsToDelete = collect([$event]);
-        }
-
-        $recurringDeleteMode = $validated['recurring_delete_mode'] ?? 'all';
-        $recurringOccurrenceDate = $validated['recurring_occurrence_date'] ?? null;
-        if ($this->recurringCalendarEvents->isRecurringSeriesEvent($event)) {
-            $recurringOccurrenceDate ??= $this->recurringCalendarEvents->occurrenceDate($event);
-        }
-        if (
-            $recurringOccurrenceDate
-            && $recurringDeleteMode !== 'all'
-            && $this->recurringCalendarEvents->isRecurringSeriesEvent($event)
-        ) {
-            $eventsToDelete->each(function (CalendarEvent $event) use ($recurringDeleteMode, $recurringOccurrenceDate): void {
-                $sourceEvent = $this->recurringCalendarEvents->sourceEventFor($event);
-                if ($recurringDeleteMode === 'single') {
-                    $this->recurringCalendarEvents->deleteGeneratedOccurrence($sourceEvent, $recurringOccurrenceDate);
-                }
-                if ($recurringDeleteMode === 'future') {
-                    $this->recurringCalendarEvents->deleteGeneratedOccurrencesFrom($sourceEvent, $recurringOccurrenceDate);
-                }
-                $this->applyRecurringCalendarDelete($sourceEvent, $recurringDeleteMode, $recurringOccurrenceDate);
-            });
-
-            return response()->json(status: 204);
-        }
-
-        if ($recurringDeleteMode === 'all' && $this->recurringCalendarEvents->isRecurringSeriesEvent($event)) {
-            $eventsToDelete = $eventsToDelete
-                ->map(fn (CalendarEvent $event): CalendarEvent => $this->recurringCalendarEvents->sourceEventFor($event))
-                ->unique(fn (CalendarEvent $event): int => (int) $event->id)
-                ->values();
-        }
-
-        foreach ($eventsToDelete as $eventToDelete) {
-            $this->recurringCalendarEvents->deleteGeneratedOccurrences($eventToDelete);
-        }
-        $eventIds = $eventsToDelete->pluck('id')->map(fn ($id): int => (int) $id)->all();
-        $eventsToDelete->each(fn (CalendarEvent $event): ?bool => $event->delete());
-        $this->deleteWorkspaceItemLinksFor('calendar_events', $eventIds);
+        $this->domainResources->deleteCalendarEvent($request->user(), $calendarEvent, $validated);
 
         return response()->json(status: 204);
     }
 
+
     public function storeEventCategory(Request $request): JsonResponse
     {
-        return $this->created(EventCategory::create($this->owned($request, $request->validate([
+        $validated = $request->validate([
             'name' => ['required', 'string', 'max:80'],
             'color' => ['required', 'string', 'max:20'],
             'metadata' => ['nullable', 'array'],
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
-        ]))));
+        ]);
+
+        return $this->created($this->domainResources->createEventCategory($request->user(), $validated));
     }
+
 
     public function updateEventCategory(Request $request, string $eventCategory): JsonResponse
     {
-        $model = $this->scoped(EventCategory::query(), $request, false)->findOrFail($eventCategory);
-        $model->update($request->validate([
+        $validated = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:80'],
             'color' => ['sometimes', 'required', 'string', 'max:20'],
             'metadata' => ['sometimes', 'nullable', 'array'],
-        ]));
+        ]);
 
-        return response()->json(['data' => $model->refresh()]);
+        return response()->json(['data' => $this->domainResources->updateEventCategory($request->user(), $eventCategory, $validated)]);
     }
+
 
     public function destroyEventCategory(Request $request, string $eventCategory): JsonResponse
     {
-        $model = $this->scoped(EventCategory::query(), $request, false)->findOrFail($eventCategory);
         $validated = $request->validate([
             'delete_from_workspace_ids' => ['nullable', 'array'],
             'delete_from_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
         ]);
 
-        $workspaceIds = array_values(array_unique(array_map(
-            'intval',
-            $validated['delete_from_workspace_ids'] ?? [$model->workspace_id]
-        )));
-        if ($workspaceIds === []) {
-            $workspaceIds = [(int) $model->workspace_id];
-        }
-
-        $workspaceService = app(WorkspaceService::class);
-        $accessibleWorkspaceIds = $this->accessibleWorkspaceIds($request);
-        foreach ($workspaceIds as $workspaceId) {
-            if (! in_array($workspaceId, $accessibleWorkspaceIds, true)) {
-                $workspaceService->authorizeMember($request->user(), Workspace::findOrFail($workspaceId));
-            }
-        }
-
-        CalendarEvent::whereIn('workspace_id', $workspaceIds)
-            ->where('user_id', $request->user()->id)
-            ->where('category', $model->name)
-            ->update(['category' => null, 'color' => self::DEFAULT_CATEGORY_COLOR]);
-        Task::whereIn('workspace_id', $workspaceIds)
-            ->where('user_id', $request->user()->id)
-            ->where('category', $model->name)
-            ->update(['category' => null, 'color' => self::DEFAULT_CATEGORY_COLOR]);
-        Reminder::whereIn('workspace_id', $workspaceIds)
-            ->where('user_id', $request->user()->id)
-            ->where('category', $model->name)
-            ->update(['category' => null, 'color' => self::DEFAULT_CATEGORY_COLOR]);
-
-        EventCategory::query()
-            ->where('user_id', $request->user()->id)
-            ->where('name', $model->name)
-            ->whereIn('workspace_id', $workspaceIds)
-            ->delete();
-
+        $this->domainResources->deleteEventCategory($request->user(), $eventCategory, $validated);
         return response()->json(status: 204);
     }
+
 
     private function listed(mixed $models): JsonResponse
     {

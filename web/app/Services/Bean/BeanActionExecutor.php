@@ -11,10 +11,11 @@ use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
-use App\Services\PlanLimitService;
+use App\Services\Domain\DomainResourceService;
 use App\Services\WorkspaceService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Throwable;
@@ -23,7 +24,7 @@ class BeanActionExecutor
 {
     public function __construct(
         private readonly BeanActivityLogger $activity,
-        private readonly PlanLimitService $planLimits,
+        private readonly DomainResourceService $domainResources,
     ) {}
 
     public function execute(BeanSession $session, BeanRun $run, string $action, array $arguments = [], bool $confirmed = false): array
@@ -77,7 +78,7 @@ class BeanActionExecutor
                 'calendar_event.list' => $this->listResources(CalendarEvent::class, $run, 'starts_at'),
                 'calendar_event.search' => $this->searchResources(CalendarEvent::class, $run, $arguments),
                 'calendar_event.create' => $this->createCalendarEvent($run, $arguments),
-                'calendar_event.update' => $this->updateResource(CalendarEvent::class, $run, $arguments, ['title', 'description', 'location', 'category', 'color', 'is_critical', 'recurrence', 'starts_at', 'ends_at', 'status', 'metadata']),
+                'calendar_event.update' => $this->updateResource(CalendarEvent::class, $run, $arguments, ['title', 'description', 'location', 'category', 'color', 'is_critical', 'recurrence', 'starts_at', 'ends_at', 'all_day', 'status', 'metadata']),
                 'calendar_event.delete' => $this->deleteResource(CalendarEvent::class, $run, $arguments),
                 'note.list' => $this->listResources(Note::class, $run, 'updated_at'),
                 'note.search' => $this->searchResources(Note::class, $run, $arguments, ['title', 'plain_text']),
@@ -89,6 +90,13 @@ class BeanActionExecutor
 
             $tool->update(['status' => ($result['ok'] ?? false) ? 'completed' : 'failed', 'result' => $result, 'error' => $result['error'] ?? null, 'completed_at' => now()]);
             $this->activity->log($session, $run, ($result['ok'] ?? false) ? 'tool_completed' : 'tool_failed', $this->resultLabel($action, $result), ['action' => $action, 'result' => $result]);
+            return $result;
+        } catch (HttpResponseException $exception) {
+            $payload = json_decode((string) $exception->getResponse()->getContent(), true) ?: [];
+            $message = (string) ($payload['message'] ?? data_get($payload, 'error.message') ?? 'Bean could not complete that action.');
+            $result = ['ok' => false, 'error' => $message, 'response' => $payload];
+            $tool->update(['status' => 'failed', 'result' => $result, 'error' => $message, 'completed_at' => now()]);
+            $this->activity->log($session, $run, 'tool_failed', $message, $result);
             return $result;
         } catch (Throwable $exception) {
             $result = ['ok' => false, 'error' => $exception->getMessage()];
@@ -140,75 +148,74 @@ class BeanActionExecutor
 
     private function createTask(BeanRun $run, array $args): array
     {
-        $task = Task::create([
-            'user_id' => $run->user_id,
+        $task = $this->domainResources->createTask($this->user($run), [
             'workspace_id' => $this->workspaceId($run),
-            'created_by_user_id' => $run->user_id,
             'title' => trim((string) ($args['title'] ?? 'New task')) ?: 'New task',
             'type' => $args['type'] ?? 'todo',
             'status' => $args['status'] ?? 'open',
             'notes' => $args['notes'] ?? null,
-            'due_at' => $this->dateOrNull($args['due_at'] ?? null),
+            'category' => $args['category'] ?? null,
+            'color' => $args['color'] ?? null,
+            'is_critical' => $args['is_critical'] ?? null,
+            'due_at' => $args['due_at'] ?? null,
+            'completed_at' => $args['completed_at'] ?? null,
             'metadata' => $this->metadata($args),
         ]);
-        return ['ok' => true, 'resource_type' => 'task', 'item' => $this->summary($task->refresh())];
+        return ['ok' => true, 'resource_type' => 'task', 'item' => $this->summary($task)];
     }
 
     private function createReminder(BeanRun $run, array $args): array
     {
-        $reminder = Reminder::create([
-            'user_id' => $run->user_id,
+        $reminder = $this->domainResources->createReminder($this->user($run), [
             'workspace_id' => $this->workspaceId($run),
-            'created_by_user_id' => $run->user_id,
             'title' => trim((string) ($args['title'] ?? 'New reminder')) ?: 'New reminder',
             'notes' => $args['notes'] ?? null,
-            'remind_at' => $this->dateOrNull($args['remind_at'] ?? null) ?: now()->addDay(),
+            'category' => $args['category'] ?? null,
+            'color' => $args['color'] ?? null,
+            'is_critical' => $args['is_critical'] ?? null,
+            'remind_at' => $args['remind_at'] ?? now()->addDay()->toIso8601String(),
             'status' => $args['status'] ?? 'scheduled',
             'metadata' => $this->metadata($args),
         ]);
-        return ['ok' => true, 'resource_type' => 'reminder', 'item' => $this->summary($reminder->refresh())];
+        return ['ok' => true, 'resource_type' => 'reminder', 'item' => $this->summary($reminder)];
     }
 
     private function createCalendarEvent(BeanRun $run, array $args): array
     {
-        $recurrence = (string) ($args['recurrence'] ?? 'none');
-        if ($recurrence !== 'none' && ! $this->planLimits->canUseRecurringCalendar($this->user($run))) {
-            return ['ok' => false, 'error' => 'Recurring calendar events require an upgraded plan.'];
-        }
         $startsAt = $this->dateOrNull($args['starts_at'] ?? null) ?: now()->addDay()->setTime(9, 0);
-        $event = CalendarEvent::create([
-            'user_id' => $run->user_id,
+        $event = $this->domainResources->createCalendarEvent($this->user($run), [
             'workspace_id' => $this->workspaceId($run),
-            'created_by_user_id' => $run->user_id,
             'title' => trim((string) ($args['title'] ?? 'New event')) ?: 'New event',
             'description' => $args['description'] ?? null,
             'location' => $args['location'] ?? null,
-            'starts_at' => $startsAt,
-            'ends_at' => $this->dateOrNull($args['ends_at'] ?? null) ?: (clone $startsAt)->addHour(),
+            'category' => $args['category'] ?? null,
+            'color' => $args['color'] ?? null,
+            'is_critical' => $args['is_critical'] ?? null,
+            'starts_at' => $startsAt->toIso8601String(),
+            'ends_at' => ($this->dateOrNull($args['ends_at'] ?? null) ?: (clone $startsAt)->addHour())->toIso8601String(),
+            'all_day' => (bool) ($args['all_day'] ?? false),
             'status' => $args['status'] ?? 'scheduled',
-            'recurrence' => $recurrence,
-            'metadata' => array_merge($this->metadata($args), ['all_day' => (bool) ($args['all_day'] ?? false)]),
+            'recurrence' => (string) ($args['recurrence'] ?? 'none'),
+            'metadata' => $this->metadata($args),
         ]);
-        return ['ok' => true, 'resource_type' => 'calendar_event', 'item' => $this->summary($event->refresh())];
+        return ['ok' => true, 'resource_type' => 'calendar_event', 'item' => $this->summary($event)];
     }
 
     private function createNote(BeanRun $run, array $args): array
     {
-        if ($message = $this->planLimits->noteCreationLimitMessage($this->user($run))) {
-            return ['ok' => false, 'error' => $message];
-        }
         $plain = trim((string) ($args['plain_text'] ?? $args['body'] ?? $args['content'] ?? ''));
         $title = trim((string) ($args['title'] ?? '')) ?: (str($plain ?: 'New Note')->limit(80, '')->toString());
-        $note = Note::create([
-            'user_id' => $run->user_id,
+        $note = $this->domainResources->createNote($this->user($run), [
             'workspace_id' => $this->workspaceId($run),
-            'created_by_user_id' => $run->user_id,
             'title' => $title,
             'plain_text' => $plain,
-            'body_html' => nl2br(e($plain)),
+            'body_html' => $args['body_html'] ?? nl2br(e($plain)),
+            'body_delta' => $args['body_delta'] ?? null,
+            'note_folder_id' => $args['note_folder_id'] ?? null,
+            'is_pinned' => $args['is_pinned'] ?? null,
             'metadata' => $this->metadata($args),
         ]);
-        return ['ok' => true, 'resource_type' => 'note', 'item' => $this->summary($note->refresh())];
+        return ['ok' => true, 'resource_type' => 'note', 'item' => $this->summary($note)];
     }
 
     private function updateResource(string $class, BeanRun $run, array $args, array $allowed): array
@@ -224,15 +231,16 @@ class BeanActionExecutor
         foreach (['due_at', 'completed_at', 'remind_at', 'starts_at', 'ends_at'] as $field) {
             if (array_key_exists($field, $updates)) $updates[$field] = $this->dateOrNull($updates[$field]);
         }
-        if ($model instanceof CalendarEvent && array_key_exists('all_day', $args)) {
-            $updates['metadata'] = array_merge((array) ($model->metadata ?? []), ['all_day' => (bool) $args['all_day']]);
-        }
-        if ($model instanceof CalendarEvent && array_key_exists('recurrence', $updates) && (string) $updates['recurrence'] !== 'none' && ! $this->planLimits->canUseRecurringCalendar($this->user($run))) {
-            return ['ok' => false, 'error' => 'Recurring calendar events require an upgraded plan.'];
-        }
         if ($updates === []) return ['ok' => false, 'error' => 'No update fields were provided.'];
-        $model->update($updates);
-        return ['ok' => true, 'resource_type' => $this->resourceType($model), 'item' => $this->summary($model->refresh())];
+        $user = $this->user($run);
+        $updated = match (true) {
+            $model instanceof Task => $this->domainResources->updateTask($user, $model, $updates),
+            $model instanceof Reminder => $this->domainResources->updateReminder($user, $model, $updates),
+            $model instanceof CalendarEvent => $this->domainResources->updateCalendarEvent($user, $model, $updates),
+            $model instanceof Note => $this->domainResources->updateNote($user, $model, $updates),
+            default => throw new \RuntimeException('Unsupported resource type.'),
+        };
+        return ['ok' => true, 'resource_type' => $this->resourceType($updated), 'item' => $this->summary($updated)];
     }
 
     private function completeResource(string $class, BeanRun $run, array $args, ?string $completedAtField): array
@@ -242,8 +250,13 @@ class BeanActionExecutor
         $model = $match['model'];
         $updates = ['status' => 'completed'];
         if ($completedAtField) $updates[$completedAtField] = now();
-        $model->update($updates);
-        return ['ok' => true, 'resource_type' => $this->resourceType($model), 'item' => $this->summary($model->refresh())];
+        $user = $this->user($run);
+        $updated = match (true) {
+            $model instanceof Task => $this->domainResources->updateTask($user, $model, $updates),
+            $model instanceof Reminder => $this->domainResources->updateReminder($user, $model, $updates),
+            default => throw new \RuntimeException('Unsupported completion resource type.'),
+        };
+        return ['ok' => true, 'resource_type' => $this->resourceType($updated), 'item' => $this->summary($updated)];
     }
 
     private function deleteResource(string $class, BeanRun $run, array $args): array
@@ -252,7 +265,14 @@ class BeanActionExecutor
         if (! ($match['ok'] ?? false)) return $match;
         $model = $match['model'];
         $summary = $this->summary($model);
-        $model->delete();
+        $user = $this->user($run);
+        match (true) {
+            $model instanceof Task => $this->domainResources->deleteTask($user, $model),
+            $model instanceof Reminder => $this->domainResources->deleteReminder($user, $model),
+            $model instanceof CalendarEvent => $this->domainResources->deleteCalendarEvent($user, $model),
+            $model instanceof Note => $this->domainResources->deleteNote($user, $model),
+            default => throw new \RuntimeException('Unsupported resource type.'),
+        };
         return ['ok' => true, 'deleted' => $summary];
     }
 
