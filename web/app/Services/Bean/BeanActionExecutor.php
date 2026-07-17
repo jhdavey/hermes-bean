@@ -11,6 +11,7 @@ use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\PlanLimitService;
 use App\Services\WorkspaceService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -20,7 +21,10 @@ use Throwable;
 
 class BeanActionExecutor
 {
-    public function __construct(private readonly BeanActivityLogger $activity) {}
+    public function __construct(
+        private readonly BeanActivityLogger $activity,
+        private readonly PlanLimitService $planLimits,
+    ) {}
 
     public function execute(BeanSession $session, BeanRun $run, string $action, array $arguments = [], bool $confirmed = false): array
     {
@@ -96,7 +100,12 @@ class BeanActionExecutor
 
     private function workspaceIds(BeanRun $run): array
     {
-        return app(WorkspaceService::class)->accessibleWorkspaces(User::findOrFail($run->user_id))->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        return app(WorkspaceService::class)->accessibleWorkspaces($this->user($run))->pluck('id')->map(fn ($id): int => (int) $id)->all();
+    }
+
+    private function user(BeanRun $run): User
+    {
+        return User::findOrFail($run->user_id);
     }
 
     private function workspaceId(BeanRun $run): ?int
@@ -162,6 +171,10 @@ class BeanActionExecutor
 
     private function createCalendarEvent(BeanRun $run, array $args): array
     {
+        $recurrence = (string) ($args['recurrence'] ?? 'none');
+        if ($recurrence !== 'none' && ! $this->planLimits->canUseRecurringCalendar($this->user($run))) {
+            return ['ok' => false, 'error' => 'Recurring calendar events require an upgraded plan.'];
+        }
         $startsAt = $this->dateOrNull($args['starts_at'] ?? null) ?: now()->addDay()->setTime(9, 0);
         $event = CalendarEvent::create([
             'user_id' => $run->user_id,
@@ -173,7 +186,7 @@ class BeanActionExecutor
             'starts_at' => $startsAt,
             'ends_at' => $this->dateOrNull($args['ends_at'] ?? null) ?: (clone $startsAt)->addHour(),
             'status' => $args['status'] ?? 'scheduled',
-            'recurrence' => $args['recurrence'] ?? 'none',
+            'recurrence' => $recurrence,
             'metadata' => array_merge($this->metadata($args), ['all_day' => (bool) ($args['all_day'] ?? false)]),
         ]);
         return ['ok' => true, 'resource_type' => 'calendar_event', 'item' => $this->summary($event->refresh())];
@@ -181,6 +194,9 @@ class BeanActionExecutor
 
     private function createNote(BeanRun $run, array $args): array
     {
+        if ($message = $this->planLimits->noteCreationLimitMessage($this->user($run))) {
+            return ['ok' => false, 'error' => $message];
+        }
         $plain = trim((string) ($args['plain_text'] ?? $args['body'] ?? $args['content'] ?? ''));
         $title = trim((string) ($args['title'] ?? '')) ?: (str($plain ?: 'New Note')->limit(80, '')->toString());
         $note = Note::create([
@@ -210,6 +226,9 @@ class BeanActionExecutor
         }
         if ($model instanceof CalendarEvent && array_key_exists('all_day', $args)) {
             $updates['metadata'] = array_merge((array) ($model->metadata ?? []), ['all_day' => (bool) $args['all_day']]);
+        }
+        if ($model instanceof CalendarEvent && array_key_exists('recurrence', $updates) && (string) $updates['recurrence'] !== 'none' && ! $this->planLimits->canUseRecurringCalendar($this->user($run))) {
+            return ['ok' => false, 'error' => 'Recurring calendar events require an upgraded plan.'];
         }
         if ($updates === []) return ['ok' => false, 'error' => 'No update fields were provided.'];
         $model->update($updates);

@@ -34,11 +34,17 @@ class DashboardChangeFeedTest extends TestCase
             'ends_at' => now()->addDay()->setHour(10)->toIso8601String(),
         ])->assertCreated()->json('data.id');
 
+        $noteId = $this->withToken($token)->postJson('/api/notes', [
+            'title' => 'Realtime note',
+            'plain_text' => 'Notes should refresh the dashboard too.',
+        ])->assertCreated()->json('data.id');
+
         $this->withToken($token)->getJson('/api/dashboard-changes?after=0&wait=0')
             ->assertOk()
             ->assertJsonFragment(['resource_type' => 'task', 'action' => 'created', 'resource_id' => $taskId])
             ->assertJsonFragment(['resource_type' => 'reminder', 'action' => 'created', 'resource_id' => $reminderId])
-            ->assertJsonFragment(['resource_type' => 'calendar_event', 'action' => 'created', 'resource_id' => $eventId]);
+            ->assertJsonFragment(['resource_type' => 'calendar_event', 'action' => 'created', 'resource_id' => $eventId])
+            ->assertJsonFragment(['resource_type' => 'note', 'action' => 'created', 'resource_id' => $noteId]);
     }
 
     public function test_dashboard_change_feed_is_scoped_to_current_user_access(): void

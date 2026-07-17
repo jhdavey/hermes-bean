@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\BeanRun;
 use App\Models\BeanSession;
+use App\Models\Note;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\Bean\BeanActionExecutor;
@@ -73,5 +74,31 @@ class BeanRuntimeTest extends TestCase
         $response->assertOk();
         $this->assertStringContainsString('event:', $response->streamedContent());
         $this->assertStringContainsString('Thinking', $response->streamedContent());
+    }
+
+    public function test_bean_note_creation_respects_plan_limits(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-note-limit@example.com');
+        $user = User::where('email', 'bean-note-limit@example.com')->firstOrFail();
+        $workspaceId = $user->default_workspace_id;
+
+        for ($i = 1; $i <= 10; $i++) {
+            Note::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspaceId,
+                'created_by_user_id' => $user->id,
+                'title' => "Existing note {$i}",
+                'plain_text' => 'Already at the base plan limit.',
+            ]);
+        }
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Write down one more note',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'Your current plan includes up to 10 notes.']);
+
+        $this->assertSame(10, Note::where('user_id', $user->id)->count());
     }
 }

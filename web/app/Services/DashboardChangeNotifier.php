@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\CalendarEvent;
 use App\Models\DashboardChange;
+use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
 use Illuminate\Database\Eloquent\Model;
@@ -45,6 +46,7 @@ class DashboardChangeNotifier
             $model instanceof Task => 'task',
             $model instanceof Reminder => 'reminder',
             $model instanceof CalendarEvent => 'calendar_event',
+            $model instanceof Note => 'note',
             default => null,
         };
     }
