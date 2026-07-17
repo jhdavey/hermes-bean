@@ -139,6 +139,9 @@ export function mountHeyBeanWebApp(mount) {
             messages: [],
             activity: [],
             confirmations: [],
+            voiceActive: false,
+            voiceConnecting: false,
+            voiceTranscript: '',
             error: '',
         },
     };
@@ -224,6 +227,10 @@ export function mountHeyBeanWebApp(mount) {
     let workspaceSwitchGeneration = 0;
     let beanEventAbort = null;
     let beanEventLastId = 0;
+    let beanPeerConnection = null;
+    let beanMediaStream = null;
+    let beanDataChannel = null;
+    let beanRemoteAudio = null;
 
     boot();
     bindResponsiveCalendar();
@@ -1777,7 +1784,9 @@ export function mountHeyBeanWebApp(mount) {
                 <div class="hb-bean-privacy-row">
                     <button class="hb-chip ${state.bean.mode === 'privacy' ? 'hb-chip-active' : ''}" type="button" data-bean-privacy="privacy">Privacy mode</button>
                     <button class="hb-chip ${state.bean.mode !== 'privacy' ? 'hb-chip-active' : ''}" type="button" data-bean-privacy="wake_listening">Listen for “Hey Bean”</button>
+                    <button class="hb-chip ${state.bean.voiceActive ? 'hb-chip-active' : ''}" type="button" data-bean-voice ${state.bean.voiceConnecting ? 'disabled' : ''}>${state.bean.voiceActive ? 'Stop voice' : state.bean.voiceConnecting ? 'Connecting…' : 'Tap to talk'}</button>
                 </div>
+                ${state.bean.voiceTranscript ? `<div class="hb-bean-voice-draft">${escapeHtml(state.bean.voiceTranscript)}</div>` : ''}
                 ${state.bean.error ? `<div class="hb-error">${escapeHtml(state.bean.error)}</div>` : ''}
                 <div class="hb-bean-chat-log" aria-live="polite">
                     ${messages.length ? messages.map(beanMessageMarkup).join('') : '<div class="hb-empty hb-surface-soft">Ask Bean to manage your calendar, tasks, reminders, or notes.</div>'}
@@ -4337,6 +4346,7 @@ export function mountHeyBeanWebApp(mount) {
             render();
         });
         mount.querySelectorAll('[data-bean-privacy]').forEach((button) => button.addEventListener('click', () => setBeanMode(button.dataset.beanPrivacy || 'privacy')));
+        mount.querySelector('[data-bean-voice]')?.addEventListener('click', toggleBeanVoiceSession);
         mount.querySelector('[data-bean-input]')?.addEventListener('input', (event) => {
             state.bean.input = event.currentTarget.value;
         });
@@ -4353,6 +4363,173 @@ export function mountHeyBeanWebApp(mount) {
         state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening locally for “Hey Bean”';
         localStorage.setItem('heybean.bean.privacy', state.bean.mode === 'privacy' ? 'privacy' : 'listening');
         render();
+    }
+
+    async function toggleBeanVoiceSession() {
+        if (state.bean.voiceActive || state.bean.voiceConnecting) {
+            stopBeanVoiceSession();
+            render();
+            return;
+        }
+        await startBeanVoiceSession();
+    }
+
+    async function startBeanVoiceSession() {
+        if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
+            state.bean.error = 'Voice requires a browser with microphone and WebRTC support.';
+            state.bean.mode = 'error';
+            state.bean.statusText = 'Voice is unavailable';
+            render();
+            return;
+        }
+
+        state.bean.panelOpen = true;
+        state.bean.voiceConnecting = true;
+        state.bean.error = '';
+        state.bean.mode = 'listening';
+        state.bean.statusText = 'Connecting voice…';
+        render();
+
+        try {
+            const realtime = await api('/bean/realtime/session', { method: 'POST', body: {} });
+            const clientSecret = realtime?.client_secret?.value || realtime?.client_secret;
+            if (!clientSecret) throw new Error('Realtime session did not return a client secret.');
+
+            beanMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            beanPeerConnection = new RTCPeerConnection();
+            beanRemoteAudio = new Audio();
+            beanRemoteAudio.autoplay = true;
+            beanPeerConnection.ontrack = (event) => {
+                const [remoteStream] = event.streams;
+                if (remoteStream) {
+                    beanRemoteAudio.srcObject = remoteStream;
+                    beanRemoteAudio.play?.().catch(() => {});
+                }
+            };
+            for (const track of beanMediaStream.getAudioTracks()) {
+                beanPeerConnection.addTrack(track, beanMediaStream);
+            }
+
+            beanDataChannel = beanPeerConnection.createDataChannel('oai-events');
+            beanDataChannel.addEventListener('message', handleBeanRealtimeEvent);
+            beanDataChannel.addEventListener('open', () => {
+                sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
+            });
+
+            const offer = await beanPeerConnection.createOffer();
+            await beanPeerConnection.setLocalDescription(offer);
+            const model = encodeURIComponent(realtime?.model || 'gpt-realtime');
+            const response = await fetch(`https://api.openai.com/v1/realtime/calls?model=${model}`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${clientSecret}`,
+                    'Content-Type': 'application/sdp',
+                    Accept: 'application/sdp',
+                },
+                body: offer.sdp,
+            });
+            if (!response.ok) throw new Error('Could not connect Bean voice.');
+            const answer = await response.text();
+            await beanPeerConnection.setRemoteDescription({ type: 'answer', sdp: answer });
+
+            state.bean.voiceActive = true;
+            state.bean.voiceConnecting = false;
+            state.bean.mode = 'listening';
+            state.bean.statusText = 'Listening — speak to Bean';
+        } catch (error) {
+            stopBeanVoiceSession({ keepStatus: true });
+            state.bean.error = friendlyError(error, 'start Bean voice');
+            state.bean.mode = 'error';
+            state.bean.statusText = 'Voice hit a problem';
+        }
+        render();
+    }
+
+    function stopBeanVoiceSession(options = {}) {
+        beanDataChannel?.close?.();
+        beanPeerConnection?.close?.();
+        beanMediaStream?.getTracks?.().forEach((track) => track.stop());
+        if (beanRemoteAudio) beanRemoteAudio.srcObject = null;
+        beanDataChannel = null;
+        beanPeerConnection = null;
+        beanMediaStream = null;
+        beanRemoteAudio = null;
+        state.bean.voiceActive = false;
+        state.bean.voiceConnecting = false;
+        state.bean.voiceTranscript = '';
+        if (!options.keepStatus) {
+            state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
+            state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening for “Hey Bean”';
+        }
+    }
+
+    function handleBeanRealtimeEvent(event) {
+        let payload = null;
+        try {
+            payload = JSON.parse(event.data || '{}');
+        } catch (_) {
+            return;
+        }
+        const type = String(payload.type || '');
+        const transcript = String(payload.transcript || payload.text || payload.delta || '').trim();
+        if (transcript && type.includes('transcription') && type.endsWith('completed')) {
+            state.bean.voiceTranscript = transcript;
+            render();
+            sendBeanVoiceTranscript(transcript);
+        }
+        if (type === 'response.audio_transcript.done' || type === 'response.done') {
+            state.bean.mode = state.bean.voiceActive ? 'listening' : state.bean.mode;
+            state.bean.statusText = state.bean.voiceActive ? 'Listening — speak to Bean' : state.bean.statusText;
+            render();
+        }
+    }
+
+    async function sendBeanVoiceTranscript(content) {
+        if (!content || state.bean.busy) return;
+        state.bean.busy = true;
+        state.bean.panelOpen = true;
+        state.bean.mode = 'thinking';
+        state.bean.statusText = 'Thinking…';
+        state.bean.messages = [...normalizeList(state.bean.messages), { role: 'user', content }];
+        render();
+        try {
+            const sessionId = await ensureBeanSession();
+            const data = await api('/bean/messages', { method: 'POST', body: { session_id: sessionId, content } });
+            state.bean.sessionId = data.session?.id || sessionId;
+            state.bean.messages = normalizeList(data.messages);
+            state.bean.activity = normalizeList(data.activity);
+            state.bean.confirmations = normalizeList(data.confirmations);
+            state.bean.voiceTranscript = '';
+            scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
+            const answer = latestBeanAssistantMessage();
+            if (answer) speakBeanRealtimeAnswer(answer);
+            state.bean.mode = answer ? 'speaking' : 'listening';
+            state.bean.statusText = answer ? 'Speaking…' : 'Listening — speak to Bean';
+        } catch (error) {
+            state.bean.error = friendlyError(error, 'ask Bean by voice');
+            state.bean.mode = 'error';
+            state.bean.statusText = 'Bean hit a problem';
+        }
+        state.bean.busy = false;
+        render();
+    }
+
+    function latestBeanAssistantMessage() {
+        return normalizeList(state.bean.messages).slice().reverse().find((message) => String(message.role || '').toLowerCase() === 'assistant')?.content || '';
+    }
+
+    function speakBeanRealtimeAnswer(answer) {
+        sendBeanRealtimeEvent({
+            type: 'response.create',
+            response: {
+                instructions: `Say exactly this to the user, conversationally and without adding new information: ${answer}`,
+            },
+        });
+    }
+
+    function sendBeanRealtimeEvent(payload) {
+        if (!beanDataChannel || beanDataChannel.readyState !== 'open') return;
+        beanDataChannel.send(JSON.stringify(payload));
     }
 
     async function ensureBeanSession() {
@@ -7683,6 +7860,7 @@ export function mountHeyBeanWebApp(mount) {
         try { await api('/auth/logout', { method: 'POST' }); } catch (_) {}
         stopDashboardChangeFeed();
         stopBeanEventFeed();
+        stopBeanVoiceSession();
         clearToken();
         state.phase = 'signedOut';
         state.authMode = 'login';
@@ -7698,6 +7876,7 @@ export function mountHeyBeanWebApp(mount) {
             await api('/account', { method: 'DELETE' });
             stopDashboardChangeFeed();
             stopBeanEventFeed();
+            stopBeanVoiceSession();
             clearToken();
             state.phase = 'signedOut';
             state.authMode = 'login';

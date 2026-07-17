@@ -178,6 +178,50 @@ class BeanRuntimeTest extends TestCase
         $this->assertDatabaseMissing('tasks', ['id' => $task->id]);
     }
 
+    public function test_realtime_session_requires_openai_configuration(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-realtime-missing-key@example.com');
+        Http::fake();
+
+        $this->withToken($token)->postJson('/api/bean/realtime/session')
+            ->assertStatus(503)
+            ->assertJsonPath('message', 'OpenAI realtime is not configured.');
+
+        Http::assertNothingSent();
+    }
+
+    public function test_realtime_session_mints_ga_client_secret_for_active_voice_turns(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.realtime_model' => 'gpt-realtime',
+            'services.openai.realtime_voice' => 'alloy',
+        ]);
+        $token = $this->apiToken('bean-realtime-client-secret@example.com');
+
+        Http::fake(function (HttpRequest $request) {
+            $this->assertSame('https://api.openai.com/v1/realtime/client_secrets', $request->url());
+            $payload = $request->data();
+            $this->assertSame('realtime', data_get($payload, 'session.type'));
+            $this->assertSame('gpt-realtime', data_get($payload, 'session.model'));
+            $this->assertSame('alloy', data_get($payload, 'session.audio.output.voice'));
+            $this->assertSame('gpt-4o-mini-transcribe', data_get($payload, 'session.audio.input.transcription.model'));
+            $this->assertFalse((bool) data_get($payload, 'session.audio.input.turn_detection.create_response'));
+            $this->assertStringContainsString('Laravel is the source of truth', data_get($payload, 'session.instructions'));
+
+            return Http::response([
+                'client_secret' => ['value' => 'ek_test_voice_secret', 'expires_at' => 1234567890],
+            ], 200);
+        });
+
+        $this->withToken($token)->postJson('/api/bean/realtime/session')
+            ->assertOk()
+            ->assertJsonPath('client_secret.value', 'ek_test_voice_secret');
+
+        Http::assertSentCount(1);
+    }
+
     public function test_bean_events_stream_activity(): void
     {
         config(['services.openai.api_key' => null]);

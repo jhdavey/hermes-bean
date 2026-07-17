@@ -35,6 +35,14 @@ test('Bean assistant presence is web-first and uses the Laravel Bean runtime', (
     assert.match(dashboardSource, /hb-bean-pulse/);
 });
 
+test('Bean voice MVP mints realtime sessions and opens WebRTC from a tap', () => {
+    assert.match(source, /data-bean-voice/);
+    assert.match(source, /\/bean\/realtime\/session/);
+    assert.match(source, /navigator\.mediaDevices\.getUserMedia/);
+    assert.match(source, /new RTCPeerConnection/);
+    assert.match(source, /https:\/\/api\.openai\.com\/v1\/realtime\/calls/);
+});
+
 test('dark mode retains the original menu, modal, card, and command center surfaces', () => {
     const darkThemeSelector = '.heybean-app-body[data-hb-theme-resolved="dark"]';
     const menuRule = cssRuleContaining(themeSource, `${darkThemeSelector} .hb-profile-popover`);

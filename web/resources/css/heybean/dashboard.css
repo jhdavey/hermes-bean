@@ -823,6 +823,7 @@
 }
 
 .hb-bean-panel-head { justify-content: space-between; }
+.hb-bean-privacy-row { flex-wrap: wrap; }
 .hb-bean-panel-head div { display: grid; gap: 2px; }
 .hb-bean-panel-head strong { font-size: 16px; font-weight: 950; }
 .hb-bean-panel-head span { color: var(--hb-muted); font-size: 12px; font-weight: 750; }
@@ -854,6 +855,22 @@
 .hb-bean-message-assistant { margin-right: 30px; }
 .hb-bean-message strong { font-size: 11px; font-weight: 950; color: var(--hb-muted); text-transform: uppercase; letter-spacing: .04em; }
 .hb-bean-message span { font-size: 13px; font-weight: 700; line-height: 1.45; }
+
+.hb-bean-voice-draft {
+    border: 1px dashed rgba(var(--hb-accent-rgb), .32);
+    border-radius: 14px;
+    background: rgba(var(--hb-accent-rgb), .08);
+    color: var(--hb-muted);
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.hb-bean-voice-draft::before {
+    content: 'Voice heard: ';
+    color: var(--hb-text);
+    font-weight: 950;
+}
 
 .hb-bean-chat-form input {
     min-width: 0;

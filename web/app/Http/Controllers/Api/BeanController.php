@@ -10,6 +10,7 @@ use App\Models\BeanSession;
 use App\Services\Bean\BeanRuntimeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class BeanController extends Controller
@@ -66,14 +67,42 @@ class BeanController extends Controller
         if ($apiKey === '') {
             return response()->json(['message' => 'OpenAI realtime is not configured.'], 503);
         }
-        // The client must perform local wake detection first. This endpoint only exists for active turns.
+
+        // The client must perform local wake detection or explicit tap-to-talk first.
+        // This endpoint mints a short-lived client secret for an active voice turn only.
         $payload = [
-            'model' => config('services.openai.realtime_model', 'gpt-realtime'),
-            'voice' => config('services.openai.realtime_voice', 'alloy'),
-            'instructions' => 'You are Bean. Use Laravel tools for HeyBean data. Never mutate data outside allowed tools.',
+            'session' => [
+                'type' => 'realtime',
+                'model' => (string) config('services.openai.realtime_model', 'gpt-realtime'),
+                'instructions' => 'You are Bean, the HeyBean voice assistant. Laravel is the source of truth for HeyBean data, private app state, tools, and mutations. Acknowledge quickly, but app data/actions must go through Laravel and should not be invented or mutated directly.',
+                'audio' => [
+                    'input' => [
+                        'transcription' => [
+                            'model' => 'gpt-4o-mini-transcribe',
+                        ],
+                        'turn_detection' => [
+                            'type' => 'server_vad',
+                            'create_response' => false,
+                        ],
+                    ],
+                    'output' => [
+                        'voice' => (string) config('services.openai.realtime_voice', 'alloy'),
+                    ],
+                ],
+            ],
         ];
-        $response = \Illuminate\Support\Facades\Http::withToken($apiKey)->timeout(10)->post('https://api.openai.com/v1/realtime/sessions', $payload);
-        return response()->json($response->json() ?: ['message' => 'Realtime session error'], $response->status());
+
+        $response = Http::withToken($apiKey)
+            ->timeout(10)
+            ->post('https://api.openai.com/v1/realtime/client_secrets', $payload);
+
+        $body = $response->json() ?: ['message' => 'Realtime session error'];
+        if ($response->successful()) {
+            $body['model'] = $payload['session']['model'];
+            $body['voice'] = $payload['session']['audio']['output']['voice'];
+        }
+
+        return response()->json($body, $response->status());
     }
 
     public function events(Request $request): StreamedResponse
