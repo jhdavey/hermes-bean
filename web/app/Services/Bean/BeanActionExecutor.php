@@ -137,19 +137,28 @@ class BeanActionExecutor
             $query->where('status', 'scheduled');
         }
         $dateScope = strtolower(trim((string) ($arguments['date_scope'] ?? $arguments['scope'] ?? '')));
-        if ($dateScope === 'today') {
-            $this->applyTodayScope($query, $class, $orderField);
+        if (in_array($dateScope, ['today', 'overdue'], true)) {
+            $this->applyDateScope($query, $class, $orderField, $dateScope);
         }
         $items = $query->orderBy($orderField)->orderBy('id')->limit(20)->get();
         return ['ok' => true, 'items' => $this->summaries($items), 'date_scope' => $dateScope ?: null];
     }
 
-    private function applyTodayScope(Builder $query, string $class, string $field): void
+    private function applyDateScope(Builder $query, string $class, string $field, string $scope): void
     {
         $start = now()->startOfDay()->utc();
         $end = now()->endOfDay()->utc();
-        if (in_array($class, [Task::class, Reminder::class, CalendarEvent::class], true)) {
+        $query->whereNotNull($field);
+        if ($scope === 'overdue') {
+            $query->where($field, '<', $start);
+            return;
+        }
+        if ($class === CalendarEvent::class) {
             $query->whereBetween($field, [$start, $end]);
+            return;
+        }
+        if (in_array($class, [Task::class, Reminder::class], true)) {
+            $query->where($field, '<=', $end);
         }
     }
 

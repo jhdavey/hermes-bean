@@ -173,7 +173,7 @@ You are Bean, the HeyBean productivity assistant. Return only JSON matching the 
 Use actions only from this list: {$actions}.
 Laravel is the source of truth: you propose structured actions; Laravel validates, scopes, confirms, and executes them.
 For destructive actions include the delete action, but Laravel will require confirmation before execution.
-Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. Use ISO 8601 dates when the user supplied a date/time. Use date_scope="today" for list requests that say today, this morning, this afternoon, or tonight. If an item needs lookup by title, use query rather than inventing an id.
+Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. Use ISO 8601 dates when the user supplied a date/time. Use date_scope="today" for list requests that say today, this morning, this afternoon, or tonight; task/reminder lists for today include overdue items due before today. Use date_scope="overdue" for overdue or past-due list requests. If an item needs lookup by title, use query rather than inventing an id.
 Do not invent private dashboard data; call list/search/dashboard actions when data is needed.
 Keep response concise and avoid saying an action is complete before Laravel executes it.
 PROMPT;
@@ -220,6 +220,18 @@ PROMPT;
         if (str_contains($lower, 'weather')) {
             $actions[] = ['action' => 'weather.lookup', 'arguments' => ['query' => $text]];
             $response = 'I’ll check the weather.';
+        } elseif ($this->mentionsOverdue($lower) && ! $this->mentionsNote($lower) && ! $this->mentionsCalendar($lower)) {
+            if ($this->mentionsReminder($lower) && ! $this->mentionsTask($lower)) {
+                $actions[] = ['action' => 'reminder.list', 'arguments' => ['date_scope' => 'overdue']];
+                $response = 'I’ll check overdue reminders.';
+            } elseif ($this->mentionsTask($lower) && ! $this->mentionsReminder($lower)) {
+                $actions[] = ['action' => 'task.list', 'arguments' => ['date_scope' => 'overdue']];
+                $response = 'I’ll check overdue tasks.';
+            } else {
+                $actions[] = ['action' => 'task.list', 'arguments' => ['date_scope' => 'overdue']];
+                $actions[] = ['action' => 'reminder.list', 'arguments' => ['date_scope' => 'overdue']];
+                $response = 'I’ll check overdue tasks and reminders.';
+            }
         } elseif (preg_match('/\b(time|date|today)\b/', $lower) && ! $this->mentionsTask($lower) && ! $this->mentionsReminder($lower) && ! $this->mentionsCalendar($lower)) {
             $actions[] = ['action' => 'time.now', 'arguments' => []];
             $response = 'I’ll check the current date and time.';
@@ -335,8 +347,14 @@ PROMPT;
         return preg_match('/\b(today|this morning|this afternoon|tonight)\b/', $lower) === 1;
     }
 
+    private function mentionsOverdue(string $lower): bool
+    {
+        return preg_match('/\b(overdue|past due|late)\b/', $lower) === 1;
+    }
+
     private function listArguments(string $lower): array
     {
+        if ($this->mentionsOverdue($lower)) return ['date_scope' => 'overdue'];
         return $this->mentionsToday($lower) ? ['date_scope' => 'today'] : [];
     }
 

@@ -159,14 +159,44 @@ class BeanRuntimeService
 
     private function listResponse(array $results): ?string
     {
-        $list = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
+        $lists = collect($results)->filter(fn ($result): bool => ($result['ok'] ?? false) === true
             && is_array($result['items'] ?? null)
-            && str_ends_with((string) ($result['action'] ?? ''), '.list'));
-        if (! $list) return null;
+            && str_ends_with((string) ($result['action'] ?? ''), '.list'))
+            ->values();
+        if ($lists->isEmpty()) return null;
+        if ($lists->count() === 1) return $this->singleListResponse($lists->first());
 
+        $sentences = $lists
+            ->map(fn (array $list): string => $this->singleListResponse($list))
+            ->filter(fn (string $sentence): bool => $sentence !== '')
+            ->values();
+
+        return $sentences->isEmpty() ? null : $sentences->implode(' ');
+    }
+
+    private function singleListResponse(array $list): string
+    {
+        $label = $this->listLabel($list);
+        $items = collect($list['items'] ?? [])->filter(fn ($item): bool => is_array($item));
+        $count = $items->count();
+        if ($count === 0) {
+            return "You don’t have any {$label}.";
+        }
+
+        $label = $this->listLabel($list, $count !== 1);
+        $titles = $items
+            ->take(5)
+            ->map(fn (array $item): string => trim((string) ($item['title'] ?? 'Untitled')) ?: 'Untitled')
+            ->values();
+        $listText = $this->naturalList($titles->all());
+        $more = $count > 5 ? ' and '.($count - 5).' more' : '';
+        return 'You have '.$count.' '.$label.': '.$listText.$more.'.';
+    }
+
+    private function listLabel(array $list, bool $plural = true): string
+    {
         $action = (string) ($list['action'] ?? '');
         $dateScope = strtolower(trim((string) ($list['date_scope'] ?? data_get($list, 'arguments.date_scope') ?? '')));
-        $items = collect($list['items'] ?? [])->filter(fn ($item): bool => is_array($item));
         $noun = match ($action) {
             'task.list' => 'task',
             'reminder.list' => 'reminder',
@@ -180,20 +210,16 @@ class BeanRuntimeService
             'calendar_event.list' => 'upcoming',
             default => '',
         };
-        $resourceLabel = trim($kindQualifier.' '.$noun);
-        $timeQualifier = $dateScope === 'today' ? ' for today' : '';
-        $count = $items->count();
-        if ($count === 0) {
-            return "You don’t have any {$resourceLabel}s{$timeQualifier}.";
+        if ($plural && ! str_ends_with($noun, 's')) {
+            $noun .= 's';
         }
+        $resourceLabel = trim($kindQualifier.' '.$noun);
 
-        $titles = $items
-            ->take(5)
-            ->map(fn (array $item): string => trim((string) ($item['title'] ?? 'Untitled')) ?: 'Untitled')
-            ->values();
-        $listText = $this->naturalList($titles->all());
-        $more = $count > 5 ? ' and '.($count - 5).' more' : '';
-        return 'You have '.$count.' '.$resourceLabel.($count === 1 ? '' : 's').$timeQualifier.': '.$listText.$more.'.';
+        return match ($dateScope) {
+            'today' => in_array($action, ['task.list', 'reminder.list'], true) ? $resourceLabel.' due by today' : $resourceLabel.' for today',
+            'overdue' => 'overdue '.$resourceLabel,
+            default => $resourceLabel,
+        };
     }
 
     private function ambiguousResponse(array $result): ?string

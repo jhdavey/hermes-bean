@@ -4433,6 +4433,17 @@ export function mountHeyBeanWebApp(mount) {
                 let recognition = null;
                 let stopped = true;
                 let restartTimer = 0;
+                let wakeTriggered = false;
+                let wakeTimer = 0;
+                let lastWakeTranscript = '';
+
+                const fireWake = () => {
+                    if (wakeTriggered) return;
+                    wakeTriggered = true;
+                    window.clearTimeout(wakeTimer);
+                    const tail = extractBeanWakeTail(lastWakeTranscript, phrase);
+                    onWake?.({ source: 'local-speech-recognition', transcript: lastWakeTranscript, tail });
+                };
 
                 const startRecognition = () => {
                     if (stopped) return;
@@ -4447,8 +4458,14 @@ export function mountHeyBeanWebApp(mount) {
                             .slice(event.resultIndex || 0)
                             .map((result) => result?.[0]?.transcript || '')
                             .join(' ');
+                        lastWakeTranscript = transcript;
                         if (!normalizeWakeTranscript(transcript).includes(normalizedPhrase)) return;
-                        onWake?.({ source: 'local-speech-recognition' });
+                        const tail = extractBeanWakeTail(transcript, phrase);
+                        if (tail) {
+                            fireWake();
+                        } else if (!wakeTimer) {
+                            wakeTimer = window.setTimeout(fireWake, 700);
+                        }
                     };
                     recognition.onerror = (event) => {
                         if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
@@ -4476,6 +4493,7 @@ export function mountHeyBeanWebApp(mount) {
                     stop() {
                         stopped = true;
                         window.clearTimeout(restartTimer);
+                        window.clearTimeout(wakeTimer);
                         recognition?.stop?.();
                         recognition = null;
                     },
@@ -4488,17 +4506,36 @@ export function mountHeyBeanWebApp(mount) {
         return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
     }
 
+    function extractBeanWakeTail(transcript, phrase = 'Hey Bean') {
+        const raw = String(transcript || '').trim();
+        if (!raw) return '';
+        const normalizedPhrase = normalizeWakeTranscript(phrase);
+        const words = raw.split(/\s+/);
+        for (let index = 0; index < words.length; index += 1) {
+            const candidate = normalizeWakeTranscript(words.slice(index).join(' '));
+            if (!candidate.startsWith(normalizedPhrase)) continue;
+            return words.slice(index + normalizedPhrase.split(' ').length).join(' ').trim();
+        }
+        return '';
+    }
+
     function stopBeanWakeListening() {
         beanWakeDetector?.stop?.();
         beanWakeDetector = null;
     }
 
-    function handleBeanWakeDetected() {
+    function handleBeanWakeDetected(event = {}) {
         if (state.bean.mode === 'privacy' || state.bean.voiceActive || state.bean.voiceConnecting) return;
+        const wakeTail = String(event?.tail || extractBeanWakeTail(event?.transcript || event?.text || event?.utterance || '') || '').trim();
         state.bean.panelOpen = true;
-        state.bean.statusText = 'Hey Bean heard — connecting voice…';
+        state.bean.statusText = wakeTail ? 'Hey Bean heard — checking…' : 'Hey Bean heard — listening…';
         render();
-        startBeanVoiceSession();
+        const voiceStart = startBeanVoiceSession();
+        if (wakeTail) {
+            state.bean.voiceTranscript = wakeTail;
+            sendBeanVoiceTranscript(wakeTail);
+        }
+        voiceStart?.catch?.(() => {});
     }
 
     async function toggleBeanVoiceSession() {

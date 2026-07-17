@@ -215,6 +215,15 @@ class BeanRuntimeTest extends TestCase
             'user_id' => $user->id,
             'workspace_id' => $user->default_workspace_id,
             'created_by_user_id' => $user->id,
+            'title' => 'Overdue grout cleanup',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->subDay()->setTime(10, 0),
+        ]);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
             'title' => 'Today launch call',
             'type' => 'todo',
             'status' => 'open',
@@ -253,7 +262,7 @@ class BeanRuntimeTest extends TestCase
             'content' => 'what is on my todo list for today?',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
-            ->assertJsonFragment(['content' => 'You have 1 open task for today: Today launch call.']);
+            ->assertJsonFragment(['content' => 'You have 2 open tasks due by today: Overdue grout cleanup and Today launch call.']);
 
         $this->assertStringNotContainsString('Tomorrow prep', $response->getContent());
         $this->assertStringNotContainsString('No date task', $response->getContent());
@@ -284,7 +293,48 @@ class BeanRuntimeTest extends TestCase
             'content' => 'what is on my todo list for today?',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
-            ->assertJsonFragment(['content' => 'You don’t have any open tasks for today.']);
+            ->assertJsonFragment(['content' => 'You don’t have any open tasks due by today.']);
+    }
+
+    public function test_overdue_items_response_lists_overdue_tasks_and_reminders(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-overdue-items-response@example.com');
+        $user = User::where('email', 'bean-overdue-items-response@example.com')->firstOrFail();
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Clean outdoor grout',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->subDay()->setTime(10, 45),
+        ]);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Tomorrow task',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->addDay()->setTime(10, 0),
+        ]);
+        Reminder::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Fix leak above grill',
+            'status' => 'scheduled',
+            'remind_at' => now()->subDay()->setTime(17, 45),
+        ]);
+
+        $response = $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Do I have any overdue items?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'You have 1 overdue open task: Clean outdoor grout. You have 1 overdue scheduled reminder: Fix leak above grill.']);
+
+        $this->assertStringNotContainsString('Tomorrow task', $response->getContent());
     }
 
     public function test_ambiguous_task_completion_names_the_possible_matches_without_completing_any(): void
