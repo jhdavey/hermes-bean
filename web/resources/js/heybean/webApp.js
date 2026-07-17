@@ -4339,6 +4339,7 @@ export function mountHeyBeanWebApp(mount) {
         mount.querySelector('[data-bean-toggle]')?.addEventListener('click', toggleBeanPrivacyMode);
         mount.querySelector('[data-bean-panel]')?.addEventListener('click', () => {
             state.bean.panelOpen = true;
+            render();
             loadBeanActivity().finally(render);
         });
         mount.querySelector('[data-bean-panel-close]')?.addEventListener('click', () => {
