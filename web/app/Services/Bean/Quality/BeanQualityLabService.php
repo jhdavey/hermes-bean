@@ -337,7 +337,7 @@ class BeanQualityLabService
 
     private function seedWorld(int $number): array
     {
-        $user = User::factory()->create([
+        $user = User::create([
             'name' => 'Bean Quality Harley '.$number,
             'email' => 'bean-quality-'.$number.'-'.Str::random(8).'@example.com',
             'password' => Hash::make('password'),
