@@ -2164,6 +2164,7 @@ export function mountHeyBeanWebApp(mount) {
                 ${adminBusinessHealthMarkup(summary.business || {})}
                 ${adminTrafficHealthMarkup(summary.traffic || {})}
                 ${adminActivationHealthMarkup(summary.activation || {})}
+                ${adminBeanQualityHealthMarkup(summary.bean_quality || summary.beanQuality || {})}
                 ${adminAppUsageHealthMarkup(summary.app_usage || summary.appUsage || {})}
                 ${adminServerHealthMarkup(summary.server || {})}
             </div>`;
@@ -2224,6 +2225,31 @@ export function mountHeyBeanWebApp(mount) {
                     ${adminHealthMetricMarkup('Verified', activation.verified_users || activation.verifiedUsers || 0)}
                     ${adminHealthMetricMarkup('Onboarded', activation.onboarded_users || activation.onboardedUsers || 0)}
                 </div>
+            </section>`;
+    }
+
+    function adminBeanQualityHealthMarkup(beanQuality) {
+        const flags = normalizeList(beanQuality.top_quality_flags || beanQuality.topQualityFlags);
+        const recent = normalizeList(beanQuality.recent_flagged_runs || beanQuality.recentFlaggedRuns);
+        const status = beanQuality.status || 'healthy';
+        const score = beanQuality.score_24h ?? beanQuality.score24h;
+        return `
+            <section class="hb-admin-health-card">
+                <div class="hb-admin-health-head">
+                    <strong>Bean Quality</strong>
+                    <mark class="hb-admin-status ${status === 'watch' ? 'hb-admin-status-warning' : 'hb-admin-status-ok'}">${escapeHtml(status === 'watch' ? 'Watch' : 'Healthy')}</mark>
+                </div>
+                <div class="hb-admin-health-metrics">
+                    ${adminHealthMetricMarkup('24h score', score == null ? 'n/a' : `${score}%`)}
+                    ${adminHealthMetricMarkup('Traces', beanQuality.traces_24h || beanQuality.traces24h || 0)}
+                    ${adminHealthMetricMarkup('Flagged', beanQuality.flagged_24h || beanQuality.flagged24h || 0)}
+                    ${adminHealthMetricMarkup('Voice', beanQuality.voice_traces_24h || beanQuality.voiceTraces24h || 0)}
+                    ${adminHealthMetricMarkup('Avg latency', beanQuality.average_latency_ms_24h || beanQuality.averageLatencyMs24h ? `${beanQuality.average_latency_ms_24h || beanQuality.averageLatencyMs24h}ms` : 'n/a')}
+                </div>
+                <div class="hb-admin-mini-list">
+                    ${(flags.length ? flags : ['No quality flags in the last 24h']).slice(0, 4).map((flag) => `<span><strong>${escapeHtml(String(flag).replaceAll('_', ' '))}</strong><small>${escapeHtml(flag === 'No quality flags in the last 24h' ? 'clean' : 'flag')}</small></span>`).join('')}
+                </div>
+                ${recent.length ? `<div class="hb-admin-signal-list">${recent.slice(0, 3).map((run) => `<span class="hb-admin-signal hb-admin-signal-warning">#${escapeHtml(run.bean_run_id || '?')} ${escapeHtml(normalizeList(run.quality_flags || run.qualityFlags).join(', '))}</span>`).join('')}</div>` : ''}
             </section>`;
     }
 

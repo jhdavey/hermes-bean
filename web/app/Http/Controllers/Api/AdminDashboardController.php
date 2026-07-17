@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\BeanQualityTrace;
 use App\Models\CalendarEvent;
 use App\Models\EarlyAccessSignup;
 use App\Models\IssueReport;
@@ -41,6 +42,7 @@ class AdminDashboardController extends Controller
             'traffic' => $this->trafficMetrics($today, $week, $month),
             'activation' => $this->activationMetrics(),
             'app_usage' => $this->appUsageMetrics($today, $week, $month),
+            'bean_quality' => $this->beanQualityMetrics($today),
             'server' => $this->serverHealth(),
             'user_growth_range' => $growthRange,
             'user_growth' => $this->userGrowth($growthRange),
@@ -295,6 +297,42 @@ class AdminDashboardController extends Controller
             'created_today' => $this->domainCreatedCounts($today),
             'created_week' => $this->domainCreatedCounts($week),
             'created_month' => $this->domainCreatedCounts($month),
+        ];
+    }
+
+    private function beanQualityMetrics(Carbon $today): array
+    {
+        $since = now()->subDay();
+        $traces = BeanQualityTrace::query()
+            ->where('created_at', '>=', $since)
+            ->latest()
+            ->limit(500)
+            ->get();
+        $flagged = $traces->filter(fn (BeanQualityTrace $trace): bool => count($trace->quality_flags ?? []) > 0)->values();
+        $flagCounts = $traces
+            ->flatMap(fn (BeanQualityTrace $trace): array => $trace->quality_flags ?? [])
+            ->countBy()
+            ->sortDesc();
+        $total = $traces->count();
+        $clean = max(0, $total - $flagged->count());
+        $score = $total > 0 ? round(($clean / $total) * 100, 1) : null;
+
+        return [
+            'status' => $flagged->isNotEmpty() ? 'watch' : 'healthy',
+            'score_24h' => $score,
+            'traces_24h' => $total,
+            'flagged_24h' => $flagged->count(),
+            'voice_traces_24h' => $traces->where('voice', true)->count(),
+            'average_latency_ms_24h' => $total > 0 ? (int) round($traces->avg('latency_ms')) : null,
+            'top_quality_flags' => $flagCounts->keys()->take(5)->values()->all(),
+            'quality_flag_counts' => $flagCounts->take(8)->all(),
+            'recent_flagged_runs' => $flagged->take(5)->map(fn (BeanQualityTrace $trace): array => [
+                'bean_run_id' => $trace->bean_run_id,
+                'intent' => $trace->intent,
+                'quality_flags' => $trace->quality_flags ?? [],
+                'assistant_answer' => $trace->assistant_answer,
+                'created_at' => $trace->created_at?->toIso8601String(),
+            ])->values()->all(),
         ];
     }
 
