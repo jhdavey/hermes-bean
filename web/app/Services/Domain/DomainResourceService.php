@@ -361,6 +361,7 @@ class DomainResourceService
             $this->throwLimit('Notes are available on this plan after upgrading.');
         }
         $workspace = $this->workspace($user, $attributes['workspace_id'] ?? null);
+        $this->validateNoteFolderForWorkspace($user, (int) $workspace->id, $attributes);
         if ($response = $this->planLimits->enforceNoteCreationLimit($user, $this->additionalNotesForSync($workspace->id, $attributes['sync_to_workspace_ids'] ?? []))) {
             throw new HttpResponseException($response);
         }
@@ -380,6 +381,7 @@ class DomainResourceService
             $this->throwLimit('Notes are available on this plan after upgrading.');
         }
         $model = $note instanceof Note ? $note : $this->scoped(Note::query(), $user, null, false)->findOrFail($note);
+        $this->validateNoteFolderForWorkspace($user, (int) $model->workspace_id, $attributes);
         $syncToProvided = array_key_exists('sync_to_workspace_ids', $attributes);
         $syncTo = $attributes['sync_to_workspace_ids'] ?? [];
         unset($attributes['sync_to_workspace_ids']);
@@ -454,6 +456,26 @@ class DomainResourceService
             }
         }
         return $attributes;
+    }
+
+    private function validateNoteFolderForWorkspace(User $user, int $workspaceId, array $attributes): void
+    {
+        if (! array_key_exists('note_folder_id', $attributes) || $attributes['note_folder_id'] === null || $attributes['note_folder_id'] === '') {
+            return;
+        }
+
+        $folderId = (int) $attributes['note_folder_id'];
+        $valid = $folderId > 0 && NoteFolder::query()
+            ->where('id', $folderId)
+            ->where('user_id', $user->id)
+            ->where('workspace_id', $workspaceId)
+            ->exists();
+
+        if (! $valid) {
+            throw ValidationException::withMessages([
+                'note_folder_id' => 'The selected note folder is invalid for this workspace.',
+            ]);
+        }
     }
 
     private function syncTo(User $user, Model $model, array $workspaceIds): void

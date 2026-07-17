@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\BeanRun;
 use App\Models\BeanSession;
 use App\Models\Note;
+use App\Models\NoteFolder;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\Bean\BeanActionExecutor;
@@ -100,6 +101,38 @@ class BeanRuntimeTest extends TestCase
             ->assertJsonFragment(['content' => 'Your current plan includes up to 10 notes.']);
 
         $this->assertSame(10, Note::where('user_id', $user->id)->count());
+    }
+
+    public function test_bean_note_creation_rejects_note_folder_outside_current_workspace(): void
+    {
+        $owner = User::factory()->create(['email' => 'folder-owner@example.com']);
+        app(\App\Services\WorkspaceService::class)->ensurePersonalWorkspaceForUser($owner);
+        $ownerWorkspaceId = $owner->default_workspace_id;
+        $foreignFolder = NoteFolder::create([
+            'user_id' => $owner->id,
+            'workspace_id' => $ownerWorkspaceId,
+            'created_by_user_id' => $owner->id,
+            'name' => 'Private folder',
+        ]);
+
+        $user = User::factory()->create(['email' => 'bean-folder-scope@example.com']);
+        app(\App\Services\WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $workspaceId = $user->default_workspace_id;
+        $session = BeanSession::create(['user_id' => $user->id, 'workspace_id' => $workspaceId, 'title' => 'Test', 'status' => 'active']);
+        $run = BeanRun::create(['bean_session_id' => $session->id, 'user_id' => $user->id, 'workspace_id' => $workspaceId, 'status' => 'running', 'mode' => 'text']);
+
+        $result = app(BeanActionExecutor::class)->execute($session, $run, 'note.create', [
+            'title' => 'Scoped note',
+            'plain_text' => 'Should not attach to a foreign folder.',
+            'note_folder_id' => $foreignFolder->id,
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('note folder', strtolower($result['error'] ?? ''));
+        $this->assertDatabaseMissing('notes', [
+            'title' => 'Scoped note',
+            'note_folder_id' => $foreignFolder->id,
+        ]);
     }
 
     public function test_bean_task_creation_uses_domain_plan_limits_for_recurrence(): void
