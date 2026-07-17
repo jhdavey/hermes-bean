@@ -65,7 +65,7 @@ class BeanController extends Controller
     {
         $apiKey = (string) config('services.openai.api_key');
         if ($apiKey === '') {
-            return response()->json(['message' => 'OpenAI realtime is not configured.'], 503);
+            return response()->json(['message' => 'Voice requires OPENAI_API_KEY before Bean can mint a realtime session.'], 503);
         }
 
         // The client must perform local wake detection or explicit tap-to-talk first.

@@ -1793,6 +1793,10 @@ export function mountHeyBeanWebApp(mount) {
                     <button class="hb-chip ${state.bean.mode === 'privacy' ? 'hb-chip-active' : ''}" type="button" data-bean-privacy="privacy">Off — privacy mode</button>
                     <button class="hb-chip ${state.bean.mode !== 'privacy' ? 'hb-chip-active' : ''}" type="button" data-bean-privacy="wake_listening">On — listen for “Hey Bean”</button>
                 </div>
+                <div class="hb-bean-voice-row">
+                    <button class="hb-button-secondary hb-bean-voice-button" type="button" data-bean-voice aria-pressed="${state.bean.voiceActive || state.bean.voiceConnecting ? 'true' : 'false'}" ${state.bean.busy ? 'disabled' : ''}>${state.bean.voiceActive || state.bean.voiceConnecting ? 'Stop voice' : 'Tap to talk'}</button>
+                    <span>Web voice uses OpenAI Realtime for the live audio turn. Voice requires OPENAI_API_KEY on the server; text chat still works without it.</span>
+                </div>
                 ${state.bean.voiceTranscript ? `<div class="hb-bean-voice-draft">${escapeHtml(state.bean.voiceTranscript)}</div>` : ''}
                 ${state.bean.error ? `<div class="hb-error">${escapeHtml(state.bean.error)}</div>` : ''}
                 <div class="hb-bean-chat-log" aria-live="polite">
@@ -4354,6 +4358,7 @@ export function mountHeyBeanWebApp(mount) {
             render();
         });
         mount.querySelectorAll('[data-bean-privacy]').forEach((button) => button.addEventListener('click', () => setBeanMode(button.dataset.beanPrivacy || 'privacy')));
+        mount.querySelector('[data-bean-voice]')?.addEventListener('click', toggleBeanVoiceSession);
         mount.querySelector('[data-bean-input]')?.addEventListener('input', (event) => {
             state.bean.input = event.currentTarget.value;
         });
