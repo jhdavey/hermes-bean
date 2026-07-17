@@ -1054,6 +1054,28 @@ class BeanApiClient {
     return BeanReminder.fromJson(_expectMap(data['data']));
   }
 
+  Future<BeanAssistantTurn> sendBeanMessage({
+    required String content,
+    int? sessionId,
+    int? workspaceId,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/bean/messages',
+      body: {
+        'content': content,
+        if (sessionId != null) 'session_id': sessionId,
+        if (workspaceId != null) 'workspace_id': workspaceId,
+      },
+    );
+    return BeanAssistantTurn.fromJson(_expectMap(data['data']));
+  }
+
+  Future<BeanRealtimeSession> createBeanRealtimeSession() async {
+    final data = await _sendJson('POST', '/bean/realtime/session');
+    return BeanRealtimeSession.fromJson(data);
+  }
+
   BeanAuthResult _rememberAuth(BeanAuthResult result) {
     bearerToken = result.token;
     return result;
@@ -1177,6 +1199,123 @@ class BeanApiException implements Exception {
 
   @override
   String toString() => 'BeanApiException(statusCode: $statusCode)';
+}
+
+class BeanAssistantTurn {
+  const BeanAssistantTurn({
+    required this.session,
+    required this.run,
+    this.messages = const [],
+    this.confirmations = const [],
+  });
+
+  final BeanAssistantSession session;
+  final BeanAssistantRun run;
+  final List<BeanAssistantMessage> messages;
+  final List<BeanAssistantConfirmation> confirmations;
+
+  factory BeanAssistantTurn.fromJson(Map<String, Object?> json) =>
+      BeanAssistantTurn(
+        session: BeanAssistantSession.fromJson(_expectMap(json['session'])),
+        run: BeanAssistantRun.fromJson(_expectMap(json['run'])),
+        messages: _expectList(json['messages'] ?? const [])
+            .map((value) => BeanAssistantMessage.fromJson(_expectMap(value)))
+            .toList(),
+        confirmations: _expectList(json['confirmations'] ?? const [])
+            .map(
+              (value) => BeanAssistantConfirmation.fromJson(_expectMap(value)),
+            )
+            .toList(),
+      );
+}
+
+class BeanAssistantSession {
+  const BeanAssistantSession({required this.id});
+
+  final int id;
+
+  factory BeanAssistantSession.fromJson(Map<String, Object?> json) =>
+      BeanAssistantSession(id: _expectInt(json['id']));
+}
+
+class BeanAssistantRun {
+  const BeanAssistantRun({required this.id, required this.status, this.model});
+
+  final int id;
+  final String status;
+  final String? model;
+
+  factory BeanAssistantRun.fromJson(Map<String, Object?> json) =>
+      BeanAssistantRun(
+        id: _expectInt(json['id']),
+        status: _expectString(json['status']),
+        model: _readString(json['model']),
+      );
+}
+
+class BeanAssistantMessage {
+  const BeanAssistantMessage({
+    this.id,
+    required this.role,
+    required this.content,
+  });
+
+  final int? id;
+  final String role;
+  final String content;
+
+  factory BeanAssistantMessage.fromJson(Map<String, Object?> json) =>
+      BeanAssistantMessage(
+        id: _readIntOrNull(json['id']),
+        role: _expectString(json['role']),
+        content: _expectString(json['content']),
+      );
+}
+
+class BeanAssistantConfirmation {
+  const BeanAssistantConfirmation({
+    required this.id,
+    required this.action,
+    required this.status,
+    this.summary,
+  });
+
+  final int id;
+  final String action;
+  final String status;
+  final String? summary;
+
+  factory BeanAssistantConfirmation.fromJson(Map<String, Object?> json) =>
+      BeanAssistantConfirmation(
+        id: _expectInt(json['id']),
+        action: _expectString(json['action']),
+        status: _expectString(json['status']),
+        summary: _readString(json['summary']),
+      );
+}
+
+class BeanRealtimeSession {
+  const BeanRealtimeSession({
+    this.clientSecret,
+    this.expiresAt,
+    this.model,
+    this.voice,
+  });
+
+  final String? clientSecret;
+  final int? expiresAt;
+  final String? model;
+  final String? voice;
+
+  factory BeanRealtimeSession.fromJson(Map<String, Object?> json) {
+    final secret = _expectMapOrNull(json['client_secret']);
+    return BeanRealtimeSession(
+      clientSecret: _readString(secret?['value']),
+      expiresAt: _readIntOrNull(secret?['expires_at']),
+      model: _readString(json['model']),
+      voice: _readString(json['voice']),
+    );
+  }
 }
 
 class BeanEmailAvailability {

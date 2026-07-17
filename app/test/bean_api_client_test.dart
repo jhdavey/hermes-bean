@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:heybean_app/bean_api_client.dart';
 
@@ -44,5 +46,53 @@ void main() {
     expect(task.isCritical, isTrue);
     expect(reminder.title, 'Call home');
     expect(event.title, 'Planning');
+  });
+  test('Flutter Bean API client posts messages to Laravel runtime', () async {
+    final requests = <BeanApiRequest>[];
+    final client = BeanApiClient(
+      baseUrl: Uri.parse('https://example.test/api'),
+      bearerToken: 'test-token',
+      transport: (request) async {
+        requests.add(request);
+        return BeanApiResponse(
+          200,
+          jsonEncode({
+            'data': {
+              'session': {'id': 42},
+              'run': {
+                'id': 7,
+                'status': 'completed',
+                'model': 'local-heuristic',
+              },
+              'messages': [
+                {'id': 1, 'role': 'user', 'content': 'Create task call mom'},
+                {
+                  'id': 2,
+                  'role': 'assistant',
+                  'content': 'I’ll add that task. Done.',
+                },
+              ],
+              'confirmations': [],
+            },
+          }),
+        );
+      },
+    );
+
+    final turn = await client.sendBeanMessage(
+      content: 'Create task call mom',
+      sessionId: 42,
+    );
+
+    expect(requests.single.method, 'POST');
+    expect(requests.single.path, '/bean/messages');
+    expect(requests.single.headers['Authorization'], 'Bearer test-token');
+    expect(requests.single.body, {
+      'content': 'Create task call mom',
+      'session_id': 42,
+    });
+    expect(turn.session.id, 42);
+    expect(turn.run.status, 'completed');
+    expect(turn.messages.last.content, 'I’ll add that task. Done.');
   });
 }

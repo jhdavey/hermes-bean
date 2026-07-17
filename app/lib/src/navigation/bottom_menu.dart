@@ -14,11 +14,13 @@ class _HeyBeanBottomMenu extends StatelessWidget {
   const _HeyBeanBottomMenu({
     required this.selected,
     required this.onSelected,
+    required this.onBeanPressed,
     required this.onMorePressed,
   });
 
   final _HomeDestination selected;
   final ValueChanged<_HomeDestination> onSelected;
+  final VoidCallback onBeanPressed;
   final VoidCallback onMorePressed;
 
   @override
@@ -104,7 +106,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             top: 12,
             child: _CommandCenterFab(
               selected: selected == _HomeDestination.commandCenter,
-              onPressed: () => onSelected(_HomeDestination.commandCenter),
+              onPressed: onBeanPressed,
             ),
           ),
         ],
@@ -179,6 +181,7 @@ class _CommandCenterFab extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onPressed,
       child: SizedBox(
+        key: const Key('bean-assistant-button'),
         width: 88,
         height: 88,
         child: Center(
@@ -205,10 +208,10 @@ class _CommandCenterFab extends StatelessWidget {
                 ],
               ),
               child: Icon(
-                Icons.dashboard_customize_rounded,
+                Icons.spa_rounded,
                 size: 30,
                 color: selected ? activeColor : HeyBeanTheme.muted,
-                semanticLabel: 'Command Center',
+                semanticLabel: 'Bean assistant',
               ),
             ),
           ),

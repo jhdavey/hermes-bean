@@ -41,4 +41,5 @@ part 'src/helpers/collection_and_format_helpers.dart';
 part 'src/account/account_widgets.dart';
 part 'src/widgets/form_widgets.dart';
 part 'src/widgets/banners_and_tour.dart';
+part 'src/bean/bean_assistant_panel.dart';
 part 'src/navigation/bottom_menu.dart';

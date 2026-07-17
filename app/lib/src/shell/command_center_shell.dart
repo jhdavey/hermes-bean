@@ -87,6 +87,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   final Map<int, Timer> _pendingNoteSaveTimers = {};
   final Set<int> _noteSavesInFlight = <int>{};
   int _noteSaveVersion = 0;
+  bool _beanAssistantOpen = false;
+  bool _beanAssistantSending = false;
+  int? _beanAssistantSessionId;
+  String? _beanAssistantError;
+  List<BeanAssistantMessage> _beanAssistantMessages = const [];
 
   void _applyUserTheme(BeanUser? user) {
     widget.onThemeChanged(user?.theme ?? 'green');
@@ -148,6 +153,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _onboardingTourStep = 0;
     _onboardingTourPendingPlanSelection = false;
     _onboardingTourFinishWithImport = false;
+    _beanAssistantOpen = false;
+    _beanAssistantSending = false;
+    _beanAssistantSessionId = null;
+    _beanAssistantError = null;
+    _beanAssistantMessages = const [];
   }
 
   void _rememberPendingTaskWrite(BeanTask task, int mutationVersion) {
@@ -1205,6 +1215,53 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _showCalendarMonth = false;
       }
     });
+  }
+
+  void _openBeanAssistant() {
+    if (_phase != _AuthPhase.signedIn) return;
+    setState(() {
+      _beanAssistantOpen = true;
+      _beanAssistantError = null;
+    });
+  }
+
+  void _closeBeanAssistant() {
+    setState(() => _beanAssistantOpen = false);
+  }
+
+  Future<void> _sendBeanAssistantMessage(String content) async {
+    if (_beanAssistantSending || content.trim().isEmpty) return;
+    setState(() {
+      _beanAssistantSending = true;
+      _beanAssistantError = null;
+      _beanAssistantMessages = [
+        ..._beanAssistantMessages,
+        BeanAssistantMessage(role: 'user', content: content.trim()),
+      ];
+    });
+    try {
+      final turn = await widget.apiClient.sendBeanMessage(
+        content: content.trim(),
+        sessionId: _beanAssistantSessionId,
+        workspaceId: _activeWorkspaceId(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _beanAssistantSessionId = turn.session.id;
+        _beanAssistantMessages = turn.messages;
+        _beanAssistantSending = false;
+      });
+      unawaited(_refreshSignedInViews(showLoading: false));
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _beanAssistantSending = false;
+        _beanAssistantError = beanFriendlyErrorMessage(
+          error,
+          action: 'message Bean',
+        );
+      });
+    }
   }
 
   void _returnToToday() {
@@ -3748,11 +3805,29 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                       menu: _HeyBeanBottomMenu(
                         selected: _selectedDestination,
                         onSelected: _selectDestination,
+                        onBeanPressed: _openBeanAssistant,
                         onMorePressed: _openMoreMenu,
                       ),
                     )
                   : null,
             ),
+            if (_beanAssistantOpen) ...[
+              Positioned.fill(
+                child: GestureDetector(
+                  key: const Key('bean-assistant-backdrop'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _closeBeanAssistant,
+                  child: Container(color: Colors.black.withValues(alpha: .22)),
+                ),
+              ),
+              _BeanAssistantPanel(
+                messages: _beanAssistantMessages,
+                sending: _beanAssistantSending,
+                error: _beanAssistantError,
+                onSend: _sendBeanAssistantMessage,
+                onClose: _closeBeanAssistant,
+              ),
+            ],
             if (_onboardingTourVisible)
               _OnboardingTourOverlay(
                 stepIndex: _onboardingTourStep,

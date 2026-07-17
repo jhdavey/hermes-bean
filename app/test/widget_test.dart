@@ -73,6 +73,42 @@ void main() {
     },
   );
 
+  testWidgets(
+    'signed-in Bean center action opens assistant panel and sends messages',
+    (tester) async {
+      final api = _DashboardApiClient();
+      await tester.pumpWidget(
+        HeyBeanApp(
+          apiClient: api,
+          tokenStore: _TestTokenStore(token: 'test-token'),
+          launchExternalUrl: (_) async => true,
+          updateAppIconBadge: (_) async {},
+          stripePaymentHandler: _TestStripePaymentHandler(),
+        ),
+      );
+      await _pumpUntilFound(
+        tester,
+        find.byKey(const Key('command-center-home')),
+      );
+
+      expect(find.byKey(const Key('bean-assistant-button')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('bean-assistant-button')));
+      await _pumpUntilFound(
+        tester,
+        find.byKey(const Key('bean-assistant-panel')),
+      );
+
+      await tester.enterText(
+        find.byKey(const Key('bean-assistant-input')),
+        'Create task call mom',
+      );
+      await tester.tap(find.byKey(const Key('bean-assistant-send')));
+      await _pumpUntilFound(tester, find.text('I’ll add that task. Done.'));
+
+      expect(api.sentBeanMessages, ['Create task call mom']);
+    },
+  );
+
   test('restored screens retain forms, sheets, and modal editors', () {
     final sources = [
       File('lib/src/calendar/title_time_editor.dart').readAsStringSync(),
@@ -148,6 +184,8 @@ class _TestStripePaymentHandler implements StripePaymentHandler {
 class _DashboardApiClient extends BeanApiClient {
   _DashboardApiClient() : super(baseUrl: Uri.parse('https://example.test/api'));
 
+  final List<String> sentBeanMessages = [];
+
   static const workspace = BeanWorkspace(
     id: '1',
     name: 'Personal',
@@ -206,4 +244,28 @@ class _DashboardApiClient extends BeanApiClient {
     int waitSeconds = 0,
     int limit = 100,
   }) async => const BeanDashboardChangeFeed(changes: [], latestId: 0);
+
+  @override
+  Future<BeanAssistantTurn> sendBeanMessage({
+    required String content,
+    int? sessionId,
+    int? workspaceId,
+  }) async {
+    sentBeanMessages.add(content);
+    return BeanAssistantTurn(
+      session: const BeanAssistantSession(id: 42),
+      run: const BeanAssistantRun(
+        id: 7,
+        status: 'completed',
+        model: 'local-heuristic',
+      ),
+      messages: [
+        BeanAssistantMessage(role: 'user', content: content),
+        const BeanAssistantMessage(
+          role: 'assistant',
+          content: 'I’ll add that task. Done.',
+        ),
+      ],
+    );
+  }
 }
