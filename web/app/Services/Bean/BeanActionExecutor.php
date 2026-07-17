@@ -147,7 +147,7 @@ class BeanActionExecutor
         }
         $accessibleWorkspaceIds = $this->workspaceIds($run);
         $items = $query->orderBy($orderField)->orderBy('id')->limit(20)->get();
-        return ['ok' => true, 'items' => $this->summaries($items, $accessibleWorkspaceIds), 'date_scope' => $dateScope ?: null];
+        return ['ok' => true, 'items' => $this->collapseLinkedSummaries($this->summaries($items, $accessibleWorkspaceIds)), 'date_scope' => $dateScope ?: null];
     }
 
     private function applyDateScope(Builder $query, string $class, string $field, string $scope): void
@@ -253,11 +253,7 @@ class BeanActionExecutor
 
         $items = $query->orderBy($orderField)->orderBy('id')->limit(20)->get();
         $accessibleWorkspaceIds = $this->workspaceIds($run);
-        $summaries = collect($this->summaries($items, $accessibleWorkspaceIds))
-            ->groupBy(fn (array $item): string => ($item['resource_type'] ?? '').':'.mb_strtolower((string) ($item['title'] ?? '')).':'.implode('|', $item['workspace_names'] ?? []))
-            ->map(fn ($group): array => $group->first())
-            ->values()
-            ->all();
+        $summaries = $this->collapseLinkedSummaries($this->summaries($items, $accessibleWorkspaceIds));
         $explanations = [];
         if (($arguments['explain_visibility'] ?? false) || $dateScope !== '') {
             $explanations = collect($summaries)
@@ -548,6 +544,42 @@ class BeanActionExecutor
     private function metadata(array $args): array { return is_array($args['metadata'] ?? null) ? $args['metadata'] : ['created_by' => 'bean']; }
 
     private function summaries($items, ?array $accessibleWorkspaceIds = null): array { return $items->map(fn ($item): array => $this->summary($item, $accessibleWorkspaceIds))->values()->all(); }
+
+    private function collapseLinkedSummaries(array $summaries): array
+    {
+        $collapsed = [];
+        foreach ($summaries as $item) {
+            if (! is_array($item)) continue;
+            $workspaceNames = collect($item['workspace_names'] ?? [])
+                ->map(fn ($name): string => trim((string) $name))
+                ->filter()
+                ->unique()
+                ->sort()
+                ->values()
+                ->all();
+            $key = implode('|', [
+                (string) ($item['resource_type'] ?? 'resource'),
+                mb_strtolower(trim((string) ($item['title'] ?? ''))),
+                count($workspaceNames) > 1 ? implode(',', $workspaceNames) : 'id:'.(string) ($item['id'] ?? ''),
+            ]);
+            if (isset($collapsed[$key])) {
+                $collapsed[$key]['workspace_names'] = collect($collapsed[$key]['workspace_names'] ?? [])
+                    ->merge($workspaceNames)
+                    ->unique()
+                    ->values()
+                    ->all();
+                continue;
+            }
+            if ($workspaceNames !== []) {
+                $item['workspace_names'] = $workspaceNames;
+                $item['workspace_name'] = $workspaceNames[0];
+            }
+            $collapsed[$key] = $item;
+        }
+
+        return array_values($collapsed);
+    }
+
     private function summary(Model $model, ?array $accessibleWorkspaceIds = null): array
     {
         $workspaceNames = $this->workspaceNames($model, $accessibleWorkspaceIds);

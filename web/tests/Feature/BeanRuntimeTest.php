@@ -420,6 +420,35 @@ class BeanRuntimeTest extends TestCase
         ]);
     }
 
+    public function test_today_task_list_collapses_linked_workspace_copies(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-linked-today-list@example.com');
+        $user = User::where('email', 'bean-linked-today-list@example.com')->firstOrFail();
+        $personal = Workspace::findOrFail($user->default_workspace_id);
+        $family = app(WorkspaceService::class)->createHousehold($user, 'Family');
+        app(DomainResourceService::class)->createTask($user, [
+            'workspace_id' => $personal->id,
+            'title' => 'Pay the travel card',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->setTime(9, 0)->toIso8601String(),
+            'sync_to_workspace_ids' => [$family->id],
+        ]);
+
+        $response = $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'what is on my todo list for today?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'You have 1 open task due by today: Pay the travel card.']);
+
+        $assistantContents = collect(data_get($response->json(), 'data.messages', []))
+            ->where('role', 'assistant')
+            ->pluck('content')
+            ->implode(' ');
+        $this->assertSame(1, substr_count($assistantContents, 'Pay the travel card'));
+    }
+
     public function test_empty_today_task_list_response_uses_natural_for_today_copy(): void
     {
         config(['services.openai.api_key' => null]);
