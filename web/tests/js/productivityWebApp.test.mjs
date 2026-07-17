@@ -42,6 +42,9 @@ test('Bean voice starts from wake detection instead of tap-to-talk', () => {
     assert.match(source, /navigator\.mediaDevices\.getUserMedia/);
     assert.match(source, /new RTCPeerConnection/);
     assert.match(source, /https:\/\/api\.openai\.com\/v1\/realtime\/calls/);
+    assert.match(source, /prewarmBeanRealtimeSession/);
+    assert.match(source, /beanRealtimeEventQueue/);
+    assert.match(source, /flushBeanRealtimeEventQueue/);
     assert.match(source, /handleBeanWakeDetected/);
 });
 

@@ -232,6 +232,9 @@ export function mountHeyBeanWebApp(mount) {
     let beanDataChannel = null;
     let beanRemoteAudio = null;
     let beanWakeDetector = null;
+    let beanRealtimeSessionCache = null;
+    let beanRealtimeSessionPromise = null;
+    let beanRealtimeEventQueue = [];
 
     boot();
     bindResponsiveCalendar();
@@ -4366,6 +4369,8 @@ export function mountHeyBeanWebApp(mount) {
         localStorage.setItem('heybean.bean.privacy', state.bean.mode === 'privacy' ? 'privacy' : 'listening');
         if (state.bean.mode === 'privacy') {
             stopBeanWakeListening();
+            beanRealtimeSessionCache = null;
+            beanRealtimeSessionPromise = null;
             if (state.bean.voiceActive || state.bean.voiceConnecting) stopBeanVoiceSession({ keepStatus: true });
             state.bean.statusText = 'Privacy mode';
         } else {
@@ -4392,6 +4397,7 @@ export function mountHeyBeanWebApp(mount) {
             });
             await beanWakeDetector?.start?.();
             state.bean.statusText = 'Listening locally for “Hey Bean”';
+            prewarmBeanRealtimeSession();
             render();
         } catch (error) {
             beanWakeDetector = null;
@@ -4503,6 +4509,35 @@ export function mountHeyBeanWebApp(mount) {
         await startBeanVoiceSession();
     }
 
+    function prewarmBeanRealtimeSession() {
+        fetchBeanRealtimeSession().catch(() => {
+            beanRealtimeSessionCache = null;
+            beanRealtimeSessionPromise = null;
+        });
+    }
+
+    async function fetchBeanRealtimeSession() {
+        if (beanRealtimeSessionUsable(beanRealtimeSessionCache)) return beanRealtimeSessionCache;
+        if (beanRealtimeSessionPromise) return beanRealtimeSessionPromise;
+        beanRealtimeSessionPromise = api('/bean/realtime/session', { method: 'POST', body: {} })
+            .then((session) => {
+                beanRealtimeSessionCache = session;
+                return session;
+            })
+            .finally(() => {
+                beanRealtimeSessionPromise = null;
+            });
+        return beanRealtimeSessionPromise;
+    }
+
+    function beanRealtimeSessionUsable(session) {
+        if (!session) return false;
+        const clientSecret = session?.client_secret?.value || session?.client_secret || session?.value;
+        if (!clientSecret) return false;
+        const expiresAt = Number(session?.client_secret?.expires_at || session?.expires_at || 0);
+        return !expiresAt || expiresAt > Math.floor(Date.now() / 1000) + 30;
+    }
+
     async function startBeanVoiceSession() {
         if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
             state.bean.error = 'Voice requires a browser with microphone and WebRTC support.';
@@ -4521,7 +4556,8 @@ export function mountHeyBeanWebApp(mount) {
         render();
 
         try {
-            const realtime = await api('/bean/realtime/session', { method: 'POST', body: {} });
+            const realtime = await fetchBeanRealtimeSession();
+            beanRealtimeSessionCache = null;
             const clientSecret = realtime?.client_secret?.value || realtime?.client_secret || realtime?.value;
             if (!clientSecret) throw new Error('Realtime session did not return a client secret.');
 
@@ -4544,6 +4580,7 @@ export function mountHeyBeanWebApp(mount) {
             beanDataChannel.addEventListener('message', handleBeanRealtimeEvent);
             beanDataChannel.addEventListener('open', () => {
                 sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
+                flushBeanRealtimeEventQueue();
             });
 
             const offer = await beanPeerConnection.createOffer();
@@ -4584,6 +4621,7 @@ export function mountHeyBeanWebApp(mount) {
         beanPeerConnection = null;
         beanMediaStream = null;
         beanRemoteAudio = null;
+        beanRealtimeEventQueue = [];
         state.bean.voiceActive = false;
         state.bean.voiceConnecting = false;
         state.bean.voiceTranscript = '';
@@ -4662,8 +4700,19 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function sendBeanRealtimeEvent(payload) {
-        if (!beanDataChannel || beanDataChannel.readyState !== 'open') return;
+        if (!beanDataChannel || beanDataChannel.readyState === 'connecting') {
+            beanRealtimeEventQueue.push(payload);
+            return false;
+        }
+        if (beanDataChannel.readyState !== 'open') return false;
         beanDataChannel.send(JSON.stringify(payload));
+        return true;
+    }
+
+    function flushBeanRealtimeEventQueue() {
+        if (!beanDataChannel || beanDataChannel.readyState !== 'open') return;
+        const queued = beanRealtimeEventQueue.splice(0);
+        queued.forEach((payload) => sendBeanRealtimeEvent(payload));
     }
 
     async function ensureBeanSession() {

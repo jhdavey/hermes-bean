@@ -67,7 +67,8 @@ class BeanRuntimeService
                 $name = (string) ($action['action'] ?? '');
                 if ($name === '') continue;
                 $args = is_array($action['arguments'] ?? null) ? $action['arguments'] : [];
-                $results[] = $this->executor->execute($session, $run, $name, $args);
+                $result = $this->executor->execute($session, $run, $name, $args);
+                $results[] = ['action' => $name, ...$result];
             }
 
             $assistantText = $this->finalResponse((string) ($proposal['response'] ?? ''), $results);
@@ -144,8 +145,55 @@ class BeanRuntimeService
         if ($needsConfirmation) return (string) ($needsConfirmation['summary'] ?? 'Please confirm before I do that.');
         $failed = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === false);
         if ($failed) return (string) ($failed['error'] ?? 'I could not complete that.');
+        $listResponse = $this->listResponse($results);
+        if ($listResponse !== null) return $listResponse;
         $completed = collect($results)->filter(fn ($result): bool => ($result['ok'] ?? false) === true)->count();
         if ($completed > 0) return $proposed !== '' ? $proposed.' Done.' : 'Done.';
         return $proposed !== '' ? $proposed : 'I’m here. Ask me to help with your calendar, tasks, reminders, notes, date/time, or weather.';
+    }
+
+    private function listResponse(array $results): ?string
+    {
+        $list = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
+            && is_array($result['items'] ?? null)
+            && str_ends_with((string) ($result['action'] ?? ''), '.list'));
+        if (! $list) return null;
+
+        $action = (string) ($list['action'] ?? '');
+        $items = collect($list['items'] ?? [])->filter(fn ($item): bool => is_array($item));
+        $noun = match ($action) {
+            'task.list' => 'task',
+            'reminder.list' => 'reminder',
+            'calendar_event.list' => 'calendar event',
+            'note.list' => 'note',
+            default => 'item',
+        };
+        $qualifier = match ($action) {
+            'task.list' => 'open ',
+            'reminder.list' => 'scheduled ',
+            'calendar_event.list' => 'upcoming ',
+            default => '',
+        };
+        $count = $items->count();
+        if ($count === 0) {
+            return "You don’t have any {$qualifier}{$noun}s right now.";
+        }
+
+        $titles = $items
+            ->take(5)
+            ->map(fn (array $item): string => trim((string) ($item['title'] ?? 'Untitled')) ?: 'Untitled')
+            ->values();
+        $listText = $this->naturalList($titles->all());
+        $more = $count > 5 ? ' and '.($count - 5).' more' : '';
+        return 'You have '.$count.' '.$qualifier.$noun.($count === 1 ? '' : 's').': '.$listText.$more.'.';
+    }
+
+    private function naturalList(array $items): string
+    {
+        $items = array_values(array_filter(array_map(fn ($item): string => trim((string) $item), $items), fn ($item): bool => $item !== ''));
+        if (count($items) <= 1) return $items[0] ?? '';
+        if (count($items) === 2) return $items[0].' and '.$items[1];
+        $last = array_pop($items);
+        return implode(', ', $items).', and '.$last;
     }
 }

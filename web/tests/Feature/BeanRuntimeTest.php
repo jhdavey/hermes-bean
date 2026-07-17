@@ -184,6 +184,27 @@ class BeanRuntimeTest extends TestCase
         $this->assertSame(0, Task::where('user_id', $user->id)->count());
     }
 
+    public function test_task_list_response_says_the_actual_tasks(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-task-list-response@example.com');
+        $user = User::where('email', 'bean-task-list-response@example.com')->firstOrFail();
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Review launch checklist',
+            'type' => 'todo',
+            'status' => 'open',
+        ]);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'check my to do list',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'You have 1 open task: Review launch checklist.']);
+    }
+
     public function test_local_parser_completes_reminder_not_task_for_reminder_phrase(): void
     {
         config(['services.openai.api_key' => null]);

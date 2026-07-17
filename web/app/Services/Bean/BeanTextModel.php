@@ -291,7 +291,7 @@ PROMPT;
 
     private function mentionsTask(string $lower): bool
     {
-        return preg_match('/\b(task|todo|to-do|call|buy|finish)\b/', $lower) === 1;
+        return preg_match('/\b(task|todo|to-do|to do|call|buy|finish)\b/', $lower) === 1;
     }
 
     private function mentionsReminder(string $lower): bool
