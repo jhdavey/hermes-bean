@@ -253,7 +253,7 @@ class BeanRuntimeTest extends TestCase
             'content' => 'what is on my todo list for today?',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
-            ->assertJsonFragment(['content' => 'You have 1 today’s open task: Today launch call.']);
+            ->assertJsonFragment(['content' => 'You have 1 open task for today: Today launch call.']);
 
         $this->assertStringNotContainsString('Tomorrow prep', $response->getContent());
         $this->assertStringNotContainsString('No date task', $response->getContent());
@@ -284,7 +284,7 @@ class BeanRuntimeTest extends TestCase
             'content' => 'what is on my todo list for today?',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
-            ->assertJsonFragment(['content' => 'You don’t have any open tasks for today right now.']);
+            ->assertJsonFragment(['content' => 'You don’t have any open tasks for today.']);
     }
 
     public function test_ambiguous_task_completion_names_the_possible_matches_without_completing_any(): void

@@ -174,20 +174,17 @@ class BeanRuntimeService
             'note.list' => 'note',
             default => 'item',
         };
-        $baseQualifier = match ($action) {
-            'task.list' => 'open ',
-            'reminder.list' => 'scheduled ',
-            'calendar_event.list' => 'upcoming ',
+        $kindQualifier = match ($action) {
+            'task.list' => 'open',
+            'reminder.list' => 'scheduled',
+            'calendar_event.list' => 'upcoming',
             default => '',
         };
-        $qualifier = $dateScope === 'today' ? "today’s {$baseQualifier}" : $baseQualifier;
+        $resourceLabel = trim($kindQualifier.' '.$noun);
+        $timeQualifier = $dateScope === 'today' ? ' for today' : '';
         $count = $items->count();
         if ($count === 0) {
-            if ($dateScope === 'today') {
-                return "You don’t have any {$baseQualifier}{$noun}s for today right now.";
-            }
-
-            return "You don’t have any {$qualifier}{$noun}s right now.";
+            return "You don’t have any {$resourceLabel}s{$timeQualifier}.";
         }
 
         $titles = $items
@@ -196,7 +193,7 @@ class BeanRuntimeService
             ->values();
         $listText = $this->naturalList($titles->all());
         $more = $count > 5 ? ' and '.($count - 5).' more' : '';
-        return 'You have '.$count.' '.$qualifier.$noun.($count === 1 ? '' : 's').': '.$listText.$more.'.';
+        return 'You have '.$count.' '.$resourceLabel.($count === 1 ? '' : 's').$timeQualifier.': '.$listText.$more.'.';
     }
 
     private function ambiguousResponse(array $result): ?string
