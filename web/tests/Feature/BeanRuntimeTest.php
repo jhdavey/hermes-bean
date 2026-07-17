@@ -81,6 +81,74 @@ class BeanRuntimeTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_local_parser_completes_unambiguous_task_without_creating_duplicate(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-complete-local@example.com');
+        $user = User::where('email', 'bean-complete-local@example.com')->firstOrFail();
+        $task = Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'call mom',
+            'type' => 'todo',
+            'status' => 'open',
+        ]);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Complete task call mom',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed');
+
+        $this->assertDatabaseHas('tasks', ['id' => $task->id, 'status' => 'completed']);
+        $this->assertSame(1, Task::where('user_id', $user->id)->count());
+    }
+
+    public function test_local_parser_routes_delete_task_to_confirmation(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-delete-local@example.com');
+        $user = User::where('email', 'bean-delete-local@example.com')->firstOrFail();
+        $task = Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'old invoice',
+            'type' => 'todo',
+            'status' => 'open',
+        ]);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Delete task old invoice',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'waiting_confirmation');
+
+        $this->assertDatabaseHas('tasks', ['id' => $task->id]);
+        $this->assertDatabaseHas('bean_confirmation_requests', ['action' => 'task.delete', 'status' => 'pending']);
+    }
+
+    public function test_local_parser_lists_notes_instead_of_creating_note_for_show_request(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-list-notes-local@example.com');
+        $user = User::where('email', 'bean-list-notes-local@example.com')->firstOrFail();
+        Note::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Existing note',
+            'plain_text' => 'Do not duplicate me.',
+        ]);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Show my notes',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed');
+
+        $this->assertSame(1, Note::where('user_id', $user->id)->count());
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'note.list', 'status' => 'completed']);
+    }
+
     public function test_destructive_action_requires_confirmation_then_can_be_approved(): void
     {
         $token = $this->apiToken('bean-delete@example.com');

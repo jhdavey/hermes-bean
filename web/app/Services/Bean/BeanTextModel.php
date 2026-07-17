@@ -222,31 +222,107 @@ PROMPT;
         } elseif (preg_match('/\b(time|date|today)\b/', $lower)) {
             $actions[] = ['action' => 'time.now', 'arguments' => []];
             $response = 'I’ll check the current date and time.';
-        } elseif (preg_match('/\b(remind me|reminder)\b/', $lower)) {
-            $actions[] = ['action' => 'reminder.create', 'arguments' => ['title' => $this->titleFromText($text), 'remind_at' => now()->addDay()->setTime(9, 0)->toIso8601String()]];
-            $response = 'I’ll create that reminder.';
-        } elseif (preg_match('/\b(note|write down|jot)\b/', $lower)) {
-            $actions[] = ['action' => 'note.create', 'arguments' => ['plain_text' => $text]];
-            $response = 'I’ll add that note.';
-        } elseif (preg_match('/\b(calendar|appointment|event|schedule)\b/', $lower)) {
-            if (preg_match('/\b(what|show|list)\b/', $lower)) {
-                $actions[] = ['action' => 'calendar_event.list', 'arguments' => []];
-                $response = 'I’ll check your calendar.';
-            } else {
-                $actions[] = ['action' => 'calendar_event.create', 'arguments' => ['title' => $this->titleFromText($text), 'starts_at' => now()->addDay()->setTime(9, 0)->toIso8601String(), 'ends_at' => now()->addDay()->setTime(10, 0)->toIso8601String(), 'all_day' => false]];
-                $response = 'I’ll add that calendar event.';
-            }
-        } elseif (preg_match('/\b(task|todo|to-do|call|buy|finish)\b/', $lower)) {
-            if (preg_match('/\b(what|show|list)\b/', $lower)) {
+        } elseif ($this->mentionsTask($lower)) {
+            if ($this->isDeleteRequest($lower)) {
+                $actions[] = ['action' => 'task.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'task', 'todo', 'to-do'])]];
+                $response = 'I’ll ask you to confirm before deleting that task.';
+            } elseif ($this->isCompleteRequest($lower)) {
+                $actions[] = ['action' => 'task.complete', 'arguments' => ['query' => $this->queryFromText($text, ['complete', 'finish', 'done', 'mark', 'task', 'todo', 'to-do', 'as'])]];
+                $response = 'I’ll mark that task complete.';
+            } elseif ($this->isListRequest($lower)) {
                 $actions[] = ['action' => 'task.list', 'arguments' => []];
                 $response = 'I’ll check your tasks.';
+            } elseif ($this->isSearchRequest($lower)) {
+                $actions[] = ['action' => 'task.search', 'arguments' => ['query' => $this->queryFromText($text, ['find', 'search', 'for', 'task', 'todo', 'to-do'])]];
+                $response = 'I’ll search your tasks.';
             } else {
                 $actions[] = ['action' => 'task.create', 'arguments' => ['title' => $this->titleFromText($text), 'type' => 'todo']];
                 $response = 'I’ll add that task.';
             }
+        } elseif (preg_match('/\b(remind me|reminder)\b/', $lower)) {
+            if ($this->isDeleteRequest($lower)) {
+                $actions[] = ['action' => 'reminder.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'reminder'])]];
+                $response = 'I’ll ask you to confirm before deleting that reminder.';
+            } elseif ($this->isCompleteRequest($lower)) {
+                $actions[] = ['action' => 'reminder.complete', 'arguments' => ['query' => $this->queryFromText($text, ['complete', 'finish', 'done', 'mark', 'reminder', 'as'])]];
+                $response = 'I’ll mark that reminder complete.';
+            } elseif ($this->isListRequest($lower)) {
+                $actions[] = ['action' => 'reminder.list', 'arguments' => []];
+                $response = 'I’ll check your reminders.';
+            } elseif ($this->isSearchRequest($lower)) {
+                $actions[] = ['action' => 'reminder.search', 'arguments' => ['query' => $this->queryFromText($text, ['find', 'search', 'for', 'reminder'])]];
+                $response = 'I’ll search your reminders.';
+            } else {
+                $actions[] = ['action' => 'reminder.create', 'arguments' => ['title' => $this->titleFromText($text), 'remind_at' => now()->addDay()->setTime(9, 0)->toIso8601String()]];
+                $response = 'I’ll create that reminder.';
+            }
+        } elseif (preg_match('/\b(note|notes|write down|jot)\b/', $lower)) {
+            if ($this->isDeleteRequest($lower)) {
+                $actions[] = ['action' => 'note.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'note'])]];
+                $response = 'I’ll ask you to confirm before deleting that note.';
+            } elseif ($this->isListRequest($lower)) {
+                $actions[] = ['action' => 'note.list', 'arguments' => []];
+                $response = 'I’ll check your notes.';
+            } elseif ($this->isSearchRequest($lower)) {
+                $actions[] = ['action' => 'note.search', 'arguments' => ['query' => $this->queryFromText($text, ['find', 'search', 'for', 'note', 'notes'])]];
+                $response = 'I’ll search your notes.';
+            } else {
+                $actions[] = ['action' => 'note.create', 'arguments' => ['plain_text' => $text]];
+                $response = 'I’ll add that note.';
+            }
+        } elseif (preg_match('/\b(calendar|appointment|event|schedule)\b/', $lower)) {
+            if ($this->isDeleteRequest($lower)) {
+                $actions[] = ['action' => 'calendar_event.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'calendar', 'appointment', 'event'])]];
+                $response = 'I’ll ask you to confirm before deleting that calendar event.';
+            } elseif ($this->isListRequest($lower)) {
+                $actions[] = ['action' => 'calendar_event.list', 'arguments' => []];
+                $response = 'I’ll check your calendar.';
+            } elseif ($this->isSearchRequest($lower)) {
+                $actions[] = ['action' => 'calendar_event.search', 'arguments' => ['query' => $this->queryFromText($text, ['find', 'search', 'for', 'calendar', 'appointment', 'event'])]];
+                $response = 'I’ll search your calendar.';
+            } else {
+                $actions[] = ['action' => 'calendar_event.create', 'arguments' => ['title' => $this->titleFromText($text), 'starts_at' => now()->addDay()->setTime(9, 0)->toIso8601String(), 'ends_at' => now()->addDay()->setTime(10, 0)->toIso8601String(), 'all_day' => false]];
+                $response = 'I’ll add that calendar event.';
+            }
         }
 
         return ['response' => $response, 'actions' => $actions, 'model' => 'local-heuristic'];
+    }
+
+    private function mentionsTask(string $lower): bool
+    {
+        return preg_match('/\b(task|todo|to-do|call|buy|finish)\b/', $lower) === 1;
+    }
+
+    private function isDeleteRequest(string $lower): bool
+    {
+        return preg_match('/\b(delete|remove|trash)\b/', $lower) === 1;
+    }
+
+    private function isCompleteRequest(string $lower): bool
+    {
+        return preg_match('/\b(complete|completed|finish|finished|done|mark)\b/', $lower) === 1;
+    }
+
+    private function isListRequest(string $lower): bool
+    {
+        return preg_match('/\b(what|show|list|check)\b/', $lower) === 1;
+    }
+
+    private function isSearchRequest(string $lower): bool
+    {
+        return preg_match('/\b(find|search)\b/', $lower) === 1;
+    }
+
+    private function queryFromText(string $text, array $words): string
+    {
+        $query = preg_replace('/^(hey bean,?\s*)?(please\s+)?/i', '', trim($text)) ?: trim($text);
+        foreach ($words as $word) {
+            $query = preg_replace('/\b'.preg_quote($word, '/').'\b/i', ' ', $query) ?: $query;
+        }
+        $query = preg_replace('/\s+/', ' ', trim($query)) ?: trim($text);
+
+        return str($query)->limit(120, '')->toString();
     }
 
     private function titleFromText(string $text): string
