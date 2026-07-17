@@ -385,7 +385,14 @@ class BeanQualityLabService
         }
         $timeExpected = ['must_include_regex' => ['The current time is'], 'must_not_include' => ['checking', 'Done', 'I’ll check'], 'required_tool_actions' => ['time.now']];
         foreach ($this->timePrompts() as $i => $prompt) {
-            $scenarios[] = ['name' => $i === 0 ? 'current time answers directly' : 'time prompt sweep '.($i + 1), 'category' => 'factual', 'turns' => [$prompt], 'expected' => $timeExpected, 'latency_target_ms' => 1500];
+            $lowerPrompt = mb_strtolower($prompt);
+            $expected = $timeExpected;
+            if (str_contains($lowerPrompt, 'date') && ! str_contains($lowerPrompt, 'time')) {
+                $expected = ['must_include' => [now()->format('F j, Y')], 'must_not_include' => ['Done', 'I’ll check'], 'required_tool_actions' => ['time.now']];
+            } elseif (str_contains($lowerPrompt, 'date') && str_contains($lowerPrompt, 'time')) {
+                $expected = ['must_include' => [now()->format('F j, Y'), 'current time'], 'must_not_include' => ['Done', 'I’ll check'], 'required_tool_actions' => ['time.now']];
+            }
+            $scenarios[] = ['name' => $i === 0 ? 'current time answers directly' : 'time prompt sweep '.($i + 1), 'category' => 'factual', 'turns' => [$prompt], 'expected' => $expected, 'latency_target_ms' => 1500];
         }
         foreach ($this->workspacePrompts() as $i => $prompt) {
             $scenarios[] = ['name' => $i === 0 ? 'workspace relationship answer' : 'workspace prompt sweep '.($i + 1), 'category' => 'factual', 'turns' => [$prompt], 'expected' => ['must_include' => ['Personal', 'Family'], 'must_not_include' => ['Done', 'I’ll retrieve'], 'required_tool_actions' => ['resource.query']]];

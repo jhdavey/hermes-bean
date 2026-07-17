@@ -125,8 +125,11 @@ class BeanQualityAuditService
         if ($this->looksLikeCorrection($lowerUser) && $toolCalls->where('status', 'completed')->isEmpty()) {
             $flags[] = 'correction_turn_without_recovery_action';
         }
-        if (in_array('time.now', $actions, true) && ! preg_match('/\b\d{1,2}:\d{2}\s?(am|pm|utc|est|edt|cst|cdt|mst|mdt|pst|pdt)?\b/i', $answer)) {
+        if (in_array('time.now', $actions, true) && $this->asksTime($lowerUser) && ! preg_match('/\b\d{1,2}:\d{2}\s?(am|pm|utc|est|edt|cst|cdt|mst|mdt|pst|pdt)?\b/i', $answer)) {
             $flags[] = 'missing_time_after_time_tool';
+        }
+        if (in_array('time.now', $actions, true) && $this->asksDate($lowerUser) && ! $this->answerContainsDate($answer)) {
+            $flags[] = 'missing_date_after_time_tool';
         }
         if (in_array('task.list', $actions, true) && $dateScope === 'today' && $this->todayTaskResultHasOverdue($toolCalls) && ! str_contains($lowerAnswer, 'overdue')) {
             $flags[] = 'today_task_list_missing_overdue_label';
@@ -214,6 +217,23 @@ class BeanQualityAuditService
     private function looksLikeCorrection(string $lowerUser): bool
     {
         return preg_match('/\b(that[’\']?s not what i said|not what i said|i said|i meant)\b/u', $lowerUser) === 1;
+    }
+
+    private function asksDate(string $lowerUser): bool
+    {
+        return preg_match('/\b(date|today[’\']?s date|what day)\b/u', $lowerUser) === 1;
+    }
+
+    private function asksTime(string $lowerUser): bool
+    {
+        return preg_match('/\b(time|current time|now)\b/u', $lowerUser) === 1;
+    }
+
+    private function answerContainsDate(string $answer): bool
+    {
+        return preg_match('/\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s+\d{4}\b/i', $answer) === 1
+            || preg_match('/\b\d{4}-\d{2}-\d{2}\b/', $answer) === 1
+            || preg_match('/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/', $answer) === 1;
     }
 
     private function todayTaskResultHasOverdue(Collection $toolCalls): bool

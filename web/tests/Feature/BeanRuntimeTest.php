@@ -633,6 +633,21 @@ class BeanRuntimeTest extends TestCase
         Carbon::setTestNow();
     }
 
+    public function test_date_question_answers_with_date_not_only_time(): void
+    {
+        config(['services.openai.api_key' => null]);
+        Carbon::setTestNow(Carbon::parse('2026-07-17 18:42:00', config('app.timezone')));
+        $token = $this->apiToken('bean-date-answer@example.com');
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => "What is today's date?",
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => "Today's date is July 17, 2026."]);
+
+        Carbon::setTestNow();
+    }
+
     public function test_weather_question_answers_with_forecast_facts_not_generic_done(): void
     {
         config(['services.openai.api_key' => null]);

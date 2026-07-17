@@ -91,6 +91,32 @@ class BeanQualityLabTest extends TestCase
             'bean_run_id' => $run->id,
             'intent' => 'time.now',
         ]);
+
+        $dateRun = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'status' => 'completed',
+            'mode' => 'text',
+            'input' => "What is today's date?",
+            'output' => 'The current time is 10:44 PM UTC.',
+            'started_at' => now()->subSecond(),
+            'completed_at' => now(),
+        ]);
+        BeanToolCall::create([
+            'bean_run_id' => $dateRun->id,
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'action' => 'time.now',
+            'arguments' => [],
+            'status' => 'completed',
+            'result' => ['ok' => true, 'now' => now()->toIso8601String(), 'timezone' => 'UTC'],
+            'started_at' => now()->subSecond(),
+            'completed_at' => now(),
+        ]);
+
+        $dateTrace = app(BeanQualityAuditService::class)->traceRun($dateRun->fresh());
+        $this->assertContains('missing_date_after_time_tool', $dateTrace->quality_flags);
     }
 
     public function test_quality_audit_flags_missing_tool_recipe_and_correction_failures(): void

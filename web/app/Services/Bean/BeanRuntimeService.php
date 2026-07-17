@@ -153,7 +153,7 @@ class BeanRuntimeService
 
             return (string) ($failed['error'] ?? 'I could not complete that.');
         }
-        $timeResponse = $this->timeResponse($results);
+        $timeResponse = $this->timeResponse($results, $userMessage);
         if ($timeResponse !== null) return $timeResponse;
         $weatherResponse = $this->weatherResponse($results);
         if ($weatherResponse !== null) return $weatherResponse;
@@ -176,7 +176,7 @@ class BeanRuntimeService
         return $proposed !== '' ? $proposed : 'I’m here. Ask me to help with your calendar, tasks, reminders, notes, date/time, or weather.';
     }
 
-    private function timeResponse(array $results): ?string
+    private function timeResponse(array $results, string $userMessage): ?string
     {
         $time = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
             && ($result['action'] ?? null) === 'time.now'
@@ -185,6 +185,17 @@ class BeanRuntimeService
 
         $timezone = (string) ($time['timezone'] ?? config('app.timezone', 'UTC'));
         $now = \Illuminate\Support\Carbon::parse((string) $time['now'])->timezone($timezone);
+        $lower = mb_strtolower($userMessage);
+        $asksDate = preg_match('/\b(date|today[’\']?s date|what day)\b/u', $lower) === 1;
+        $asksTime = preg_match('/\b(time|current time|now)\b/u', $lower) === 1;
+
+        if ($asksDate && ! $asksTime) {
+            return "Today's date is ".$now->format('F j, Y').'.';
+        }
+        if ($asksDate && $asksTime) {
+            return "Today's date is ".$now->format('F j, Y').', and the current time is '.$now->format('g:i A T').'.';
+        }
+
         return 'The current time is '.$now->format('g:i A T').'.';
     }
 
