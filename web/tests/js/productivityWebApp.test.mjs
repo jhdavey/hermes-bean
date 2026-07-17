@@ -35,11 +35,9 @@ test('Bean assistant presence is web-first and uses the Laravel Bean runtime', (
     assert.match(dashboardSource, /hb-bean-pulse/);
 });
 
-test('Bean voice exposes a tap-to-talk WebRTC MVP before wake detection', () => {
-    assert.match(source, /data-bean-voice/);
-    assert.match(source, /Tap to talk/);
-    assert.match(source, /Voice requires OPENAI_API_KEY/);
-    assert.match(source, /toggleBeanVoiceSession/);
+test('Bean voice starts from wake detection instead of tap-to-talk', () => {
+    assert.doesNotMatch(source, /data-bean-voice/);
+    assert.doesNotMatch(source, /Tap to talk/);
     assert.match(source, /\/bean\/realtime\/session/);
     assert.match(source, /navigator\.mediaDevices\.getUserMedia/);
     assert.match(source, /new RTCPeerConnection/);

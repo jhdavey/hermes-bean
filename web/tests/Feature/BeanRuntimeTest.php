@@ -607,7 +607,7 @@ class BeanRuntimeTest extends TestCase
 
         $this->withToken($token)->postJson('/api/bean/realtime/session')
             ->assertStatus(503)
-            ->assertJsonPath('message', 'Voice requires OPENAI_API_KEY before Bean can mint a realtime session.');
+            ->assertJsonPath('message', 'OpenAI realtime is not configured.');
 
         Http::assertNothingSent();
     }
