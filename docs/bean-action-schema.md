@@ -21,6 +21,7 @@ Bean actions are JSON objects:
 
 ## Required executor behavior
 
+- Domain-resource actions must call the same shared domain services used by the normal API controller; Bean must not keep a separate Eloquent CRUD implementation.
 - Scope all reads/writes to authenticated user accessible workspaces.
 - Return structured success/error/confirmation payloads.
 - Emit activity entries for tool started/completed/failed/confirmation requested.

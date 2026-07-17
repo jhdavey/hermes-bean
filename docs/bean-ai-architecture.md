@@ -29,3 +29,9 @@ Bean is a Laravel-owned assistant runtime for HeyBean. Web ships first; Flutter 
 - CRUD tool coverage for tasks, reminders, calendar events, and notes.
 - Date/time and Open-Meteo weather tools.
 - Realtime voice endpoint and UI affordance only after local wake; actual always-on streaming is forbidden.
+
+## Required next refactor: shared domain services
+
+Bean must not use a separate resource control layer. The current runtime foundation has enough structure for text/chat testing, but before expanding Bean actions further, extract the existing `DomainResourceController` CRUD behavior into shared domain services and make both the normal API controller and `BeanActionExecutor` call those services.
+
+See `docs/bean-domain-service-extraction-plan.md` for the implementation plan. This refactor is required before Bean should be considered production-complete for CRUD because the shared service layer must preserve plan limits, workspace scoping, linked-workspace sync, recurrence/all-day behavior, note normalization, dashboard changes, and provider/export hooks identically across direct API edits and Bean actions.
