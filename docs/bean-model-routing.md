@@ -2,7 +2,12 @@
 
 ## Text
 
-Use `OPENAI_BEAN_TEXT_MODEL` (default `gpt-4.1-mini`) for normal text chat and structured action proposals.
+Use `OPENAI_BEAN_TEXT_MODEL` (default `gpt-4.1-mini`) for normal text chat and structured action proposals. Bean requests a strict JSON-schema response named `bean_action_proposal` with:
+
+- `response`: short user-facing text
+- `actions`: zero or more allowlisted action objects with `action` and `arguments`
+
+When `OPENAI_API_KEY` is not configured, or the provider request fails, Laravel falls back to the deterministic local parser so tests and local development remain credential-free.
 
 ## Voice
 

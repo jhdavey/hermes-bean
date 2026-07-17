@@ -10,6 +10,8 @@ use App\Models\Task;
 use App\Models\User;
 use App\Services\Bean\BeanActionExecutor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request as HttpRequest;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class BeanRuntimeTest extends TestCase
@@ -31,6 +33,52 @@ class BeanRuntimeTest extends TestCase
         $this->assertDatabaseHas('tasks', ['title' => 'call mom']);
         $this->assertDatabaseHas('bean_activity_events', ['type' => 'tool_completed']);
         $this->assertDatabaseHas('dashboard_changes', ['resource_type' => 'task', 'action' => 'created']);
+    }
+
+    public function test_openai_text_model_uses_strict_structured_action_schema(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.bean_text_model' => 'gpt-4.1-mini',
+        ]);
+        $token = $this->apiToken('bean-openai@example.com');
+
+        Http::fake(function (HttpRequest $request) {
+            $this->assertSame('https://api.openai.com/v1/chat/completions', $request->url());
+            $payload = $request->data();
+            $this->assertSame('gpt-4.1-mini', $payload['model'] ?? null);
+            $this->assertSame('json_schema', data_get($payload, 'response_format.type'));
+            $this->assertTrue((bool) data_get($payload, 'response_format.json_schema.strict'));
+            $this->assertSame('bean_action_proposal', data_get($payload, 'response_format.json_schema.name'));
+            $actionsEnum = data_get($payload, 'response_format.json_schema.schema.properties.actions.items.properties.action.enum');
+            $argumentsSchema = data_get($payload, 'response_format.json_schema.schema.properties.actions.items.properties.arguments');
+            $this->assertContains('task.create', $actionsEnum);
+            $this->assertContains('calendar_event.update', $actionsEnum);
+            $this->assertFalse((bool) ($argumentsSchema['additionalProperties'] ?? true));
+            $this->assertContains('title', $argumentsSchema['required'] ?? []);
+
+            return Http::response([
+                'choices' => [[
+                    'message' => [
+                        'content' => json_encode([
+                            'response' => 'I’ll add that task.',
+                            'actions' => [[
+                                'action' => 'task.create',
+                                'arguments' => ['title' => 'from structured model', 'type' => 'todo'],
+                            ]],
+                        ]),
+                    ],
+                ]],
+            ], 200);
+        });
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Add a task from the real model',
+        ])->assertOk()
+            ->assertJsonPath('data.run.model', 'gpt-4.1-mini');
+
+        $this->assertDatabaseHas('tasks', ['title' => 'from structured model']);
+        Http::assertSentCount(1);
     }
 
     public function test_destructive_action_requires_confirmation_then_can_be_approved(): void

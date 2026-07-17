@@ -8,6 +8,34 @@ use Throwable;
 
 class BeanTextModel
 {
+    private const ACTIONS = [
+        'task.list',
+        'task.search',
+        'task.create',
+        'task.update',
+        'task.complete',
+        'task.delete',
+        'reminder.list',
+        'reminder.search',
+        'reminder.create',
+        'reminder.update',
+        'reminder.complete',
+        'reminder.delete',
+        'calendar_event.list',
+        'calendar_event.search',
+        'calendar_event.create',
+        'calendar_event.update',
+        'calendar_event.delete',
+        'note.list',
+        'note.search',
+        'note.create',
+        'note.update',
+        'note.delete',
+        'time.now',
+        'weather.lookup',
+        'dashboard.summary',
+    ];
+
     public function propose(BeanSession $session, string $message): array
     {
         $apiKey = (string) config('services.openai.api_key');
@@ -21,7 +49,7 @@ class BeanTextModel
                 ->timeout(20)
                 ->post('https://api.openai.com/v1/chat/completions', [
                     'model' => $model,
-                    'response_format' => ['type' => 'json_object'],
+                    'response_format' => $this->responseFormat(),
                     'messages' => [
                         ['role' => 'system', 'content' => $this->systemPrompt()],
                         ['role' => 'user', 'content' => $message],
@@ -39,8 +67,8 @@ class BeanTextModel
             }
 
             return [
-                'response' => (string) ($decoded['response'] ?? 'I can help with that.'),
-                'actions' => is_array($decoded['actions'] ?? null) ? $decoded['actions'] : [],
+                'response' => $this->cleanResponse($decoded['response'] ?? null),
+                'actions' => $this->cleanActions($decoded['actions'] ?? []),
                 'model' => $model,
             ];
         } catch (Throwable) {
@@ -48,11 +76,137 @@ class BeanTextModel
         }
     }
 
+    private function responseFormat(): array
+    {
+        return [
+            'type' => 'json_schema',
+            'json_schema' => [
+                'name' => 'bean_action_proposal',
+                'strict' => true,
+                'schema' => [
+                    'type' => 'object',
+                    'additionalProperties' => false,
+                    'required' => ['response', 'actions'],
+                    'properties' => [
+                        'response' => [
+                            'type' => 'string',
+                            'description' => 'Short user-facing Bean response. Do not claim an action is done unless an action is included for Laravel to execute.',
+                        ],
+                        'actions' => [
+                            'type' => 'array',
+                            'description' => 'Zero or more allowlisted structured actions for Laravel to validate and execute.',
+                            'items' => [
+                                'type' => 'object',
+                                'additionalProperties' => false,
+                                'required' => ['action', 'arguments'],
+                                'properties' => [
+                                    'action' => [
+                                        'type' => 'string',
+                                        'enum' => self::ACTIONS,
+                                    ],
+                                    'arguments' => $this->argumentsSchema(),
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    private function argumentsSchema(): array
+    {
+        $nullableString = ['type' => ['string', 'null']];
+        $nullableInteger = ['type' => ['integer', 'null']];
+        $nullableBoolean = ['type' => ['boolean', 'null']];
+        $nullableIntegerArray = [
+            'type' => ['array', 'null'],
+            'items' => ['type' => 'integer'],
+        ];
+        $properties = [
+            'id' => $nullableInteger,
+            'resource_id' => $nullableInteger,
+            'workspace_id' => $nullableInteger,
+            'note_folder_id' => $nullableInteger,
+            'query' => $nullableString,
+            'title' => $nullableString,
+            'type' => $nullableString,
+            'status' => $nullableString,
+            'notes' => $nullableString,
+            'category' => $nullableString,
+            'color' => $nullableString,
+            'description' => $nullableString,
+            'location' => $nullableString,
+            'recurrence' => $nullableString,
+            'due_at' => $nullableString,
+            'completed_at' => $nullableString,
+            'remind_at' => $nullableString,
+            'starts_at' => $nullableString,
+            'ends_at' => $nullableString,
+            'plain_text' => $nullableString,
+            'body' => $nullableString,
+            'body_html' => $nullableString,
+            'content' => $nullableString,
+            'all_day' => $nullableBoolean,
+            'is_critical' => $nullableBoolean,
+            'is_pinned' => $nullableBoolean,
+            'sync_to_workspace_ids' => $nullableIntegerArray,
+            'delete_from_workspace_ids' => $nullableIntegerArray,
+        ];
+
+        return [
+            'type' => 'object',
+            'description' => 'Simple JSON arguments for the action. Use ids only when known from context. Use query when lookup is needed. Use null for fields that do not apply.',
+            'additionalProperties' => false,
+            'required' => array_keys($properties),
+            'properties' => $properties,
+        ];
+    }
+
     private function systemPrompt(): string
     {
-        return <<<'PROMPT'
-You are Bean, the HeyBean productivity assistant. Return only JSON with keys: response (string) and actions (array). Use actions only from this list: task.list, task.search, task.create, task.update, task.complete, task.delete, reminder.list, reminder.search, reminder.create, reminder.update, reminder.complete, reminder.delete, calendar_event.list, calendar_event.search, calendar_event.create, calendar_event.update, calendar_event.delete, note.list, note.search, note.create, note.update, note.delete, time.now, weather.lookup, dashboard.summary. For destructive actions include the delete action, but Laravel will require confirmation. Arguments should be simple JSON. Use ISO 8601 dates when the user supplied a date/time. If an item needs lookup by title, use query. Do not invent private dashboard data; call list/search actions.
+        $actions = implode(', ', self::ACTIONS);
+
+        return <<<PROMPT
+You are Bean, the HeyBean productivity assistant. Return only JSON matching the provided schema.
+Use actions only from this list: {$actions}.
+Laravel is the source of truth: you propose structured actions; Laravel validates, scopes, confirms, and executes them.
+For destructive actions include the delete action, but Laravel will require confirmation before execution.
+Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. Use ISO 8601 dates when the user supplied a date/time. If an item needs lookup by title, use query rather than inventing an id.
+Do not invent private dashboard data; call list/search/dashboard actions when data is needed.
+Keep response concise and avoid saying an action is complete before Laravel executes it.
 PROMPT;
+    }
+
+    private function cleanResponse(mixed $response): string
+    {
+        $text = trim(is_string($response) ? $response : '');
+
+        return $text !== '' ? str($text)->limit(500, '')->toString() : 'I can help with that.';
+    }
+
+    private function cleanActions(mixed $actions): array
+    {
+        if (! is_array($actions)) {
+            return [];
+        }
+
+        return collect($actions)
+            ->filter(fn ($action) => is_array($action) && in_array($action['action'] ?? null, self::ACTIONS, true))
+            ->map(fn (array $action) => [
+                'action' => $action['action'],
+                'arguments' => $this->withoutNulls(is_array($action['arguments'] ?? null) ? $action['arguments'] : []),
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function withoutNulls(array $values): array
+    {
+        return collect($values)
+            ->reject(fn ($value): bool => $value === null)
+            ->map(fn ($value) => is_array($value) ? $this->withoutNulls($value) : $value)
+            ->all();
     }
 
     private function heuristic(string $message, ?string $prefix = null): array
