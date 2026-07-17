@@ -155,6 +155,8 @@ class BeanRuntimeService
         }
         $timeResponse = $this->timeResponse($results);
         if ($timeResponse !== null) return $timeResponse;
+        $weatherResponse = $this->weatherResponse($results);
+        if ($weatherResponse !== null) return $weatherResponse;
         $listResponse = $this->listResponse($results);
         if ($listResponse !== null) return $listResponse;
         if ($this->shouldSynthesize($results)) {
@@ -180,6 +182,49 @@ class BeanRuntimeService
         $timezone = (string) ($time['timezone'] ?? config('app.timezone', 'UTC'));
         $now = \Illuminate\Support\Carbon::parse((string) $time['now'])->timezone($timezone);
         return 'The current time is '.$now->format('g:i A T').'.';
+    }
+
+    private function weatherResponse(array $results): ?string
+    {
+        $weather = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
+            && ($result['action'] ?? null) === 'weather.lookup');
+        if (! $weather) return null;
+
+        $location = trim((string) ($weather['location'] ?? '')) ?: 'that location';
+        $current = is_array($weather['current'] ?? null) ? $weather['current'] : [];
+        $currentUnits = is_array($weather['current_units'] ?? null) ? $weather['current_units'] : [];
+        $forecast = is_array($weather['forecast'] ?? null) ? $weather['forecast'] : [];
+        $dailyUnits = is_array($weather['daily_units'] ?? null) ? $weather['daily_units'] : [];
+
+        $temperature = $this->weatherValue($current['temperature_2m'] ?? null, $currentUnits['temperature_2m'] ?? '°F');
+        $feelsLike = $this->weatherValue($current['apparent_temperature'] ?? null, $currentUnits['apparent_temperature'] ?? '°F');
+        $high = $this->weatherValue(data_get($forecast, 'temperature_2m_max.0'), $dailyUnits['temperature_2m_max'] ?? '°F');
+        $low = $this->weatherValue(data_get($forecast, 'temperature_2m_min.0'), $dailyUnits['temperature_2m_min'] ?? '°F');
+        $precipChance = $this->weatherValue(data_get($forecast, 'precipitation_probability_max.0'), $dailyUnits['precipitation_probability_max'] ?? '%');
+
+        if ($temperature !== null && $feelsLike !== null && $high !== null && $low !== null && $precipChance !== null) {
+            return "Right now in {$location}, it’s {$temperature} and feels like {$feelsLike}. Today’s forecast is {$high} high / {$low} low with a {$precipChance} precipitation chance.";
+        }
+
+        if ($high !== null && $low !== null) {
+            $precip = $precipChance !== null ? " with a {$precipChance} precipitation chance" : '';
+            return "Today’s forecast for {$location} is {$high} high / {$low} low{$precip}.";
+        }
+
+        if ($temperature !== null) {
+            $feels = $feelsLike !== null ? " and feels like {$feelsLike}" : '';
+            return "Right now in {$location}, it’s {$temperature}{$feels}.";
+        }
+
+        return null;
+    }
+
+    private function weatherValue(mixed $value, mixed $unit): ?string
+    {
+        if ($value === null || $value === '') return null;
+        $number = is_numeric($value) ? (float) $value : null;
+        $formatted = $number !== null && floor($number) === $number ? (string) (int) $number : (string) $value;
+        return $formatted.(string) $unit;
     }
 
     private function shouldSynthesize(array $results): bool

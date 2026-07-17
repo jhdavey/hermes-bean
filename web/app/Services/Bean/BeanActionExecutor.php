@@ -518,22 +518,36 @@ class BeanActionExecutor
     {
         $lat = $args['latitude'] ?? $args['lat'] ?? null;
         $lon = $args['longitude'] ?? $args['lon'] ?? null;
+        $locationLabel = null;
         if ($lat === null || $lon === null) {
             $location = trim((string) ($args['location'] ?? $args['query'] ?? ''));
-            $location = trim(preg_replace('/\b(weather|forecast|temperature|in|for|at|near)\b/i', ' ', $location) ?: $location);
+            $location = trim(preg_replace('/\b(weather|forecast|temperature|like|right now|current|currently|what|is|the|in|for|at|near|can|you|tell|me)\b/i', ' ', $location) ?: $location);
             if ($location === '') return ['ok' => false, 'error' => 'I need a location for weather.'];
             $geo = Http::timeout(8)->get('https://geocoding-api.open-meteo.com/v1/search', ['name' => $location, 'count' => 1, 'language' => 'en', 'format' => 'json'])->json('results.0');
             if (! is_array($geo)) return ['ok' => false, 'error' => 'I could not find that weather location.'];
             $lat = $geo['latitude']; $lon = $geo['longitude'];
+            $locationLabel = trim((string) ($geo['name'] ?? $location));
         }
         $data = Http::timeout(8)->get('https://api.open-meteo.com/v1/forecast', [
             'latitude' => $lat,
             'longitude' => $lon,
+            'current' => 'temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m',
             'daily' => 'temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code',
+            'temperature_unit' => 'fahrenheit',
+            'wind_speed_unit' => 'mph',
+            'precipitation_unit' => 'inch',
             'timezone' => 'auto',
             'forecast_days' => 3,
         ])->json();
-        return ['ok' => true, 'provider' => 'open-meteo', 'forecast' => $data['daily'] ?? $data];
+        return [
+            'ok' => true,
+            'provider' => 'open-meteo',
+            'location' => $locationLabel,
+            'current' => $data['current'] ?? null,
+            'current_units' => $data['current_units'] ?? null,
+            'forecast' => $data['daily'] ?? $data,
+            'daily_units' => $data['daily_units'] ?? null,
+        ];
     }
 
     private function isDestructive(string $action): bool { return str_ends_with($action, '.delete'); }

@@ -486,6 +486,52 @@ class BeanRuntimeTest extends TestCase
         Carbon::setTestNow();
     }
 
+    public function test_weather_question_answers_with_forecast_facts_not_generic_done(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-weather-answer@example.com');
+
+        Http::fakeSequence()
+            ->push(['results' => [[
+                'name' => 'Orlando',
+                'admin1' => 'Florida',
+                'country' => 'United States',
+                'latitude' => 28.5383,
+                'longitude' => -81.3792,
+            ]]], 200)
+            ->push([
+                'current' => [
+                    'temperature_2m' => 82,
+                    'apparent_temperature' => 86,
+                    'wind_speed_10m' => 5,
+                    'precipitation' => 0,
+                    'weather_code' => 1,
+                ],
+                'current_units' => [
+                    'temperature_2m' => '°F',
+                    'apparent_temperature' => '°F',
+                    'wind_speed_10m' => 'mph',
+                    'precipitation' => 'inch',
+                ],
+                'daily' => [
+                    'temperature_2m_max' => [91],
+                    'temperature_2m_min' => [75],
+                    'precipitation_probability_max' => [20],
+                ],
+                'daily_units' => [
+                    'temperature_2m_max' => '°F',
+                    'temperature_2m_min' => '°F',
+                    'precipitation_probability_max' => '%',
+                ],
+            ], 200);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Can you tell me what the weather is like in Orlando right now?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'Right now in Orlando, it’s 82°F and feels like 86°F. Today’s forecast is 91°F high / 75°F low with a 20% precipitation chance.']);
+    }
+
     public function test_today_task_list_collapses_linked_workspace_copies(): void
     {
         config(['services.openai.api_key' => null]);
