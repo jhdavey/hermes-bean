@@ -91,11 +91,13 @@ class BeanRuntimeService
                 'metadata' => ['results' => $results],
                 'completed_at' => now(),
             ]);
+            app(\App\Services\Bean\Quality\BeanQualityAuditService::class)->traceRun($run->refresh());
         } catch (Throwable $exception) {
             $assistantText = 'I ran into a problem trying to do that.';
             $run->update(['status' => 'failed', 'error' => $exception->getMessage(), 'output' => $assistantText, 'completed_at' => now()]);
             BeanMessage::create(['bean_session_id' => $session->id, 'bean_run_id' => $run->id, 'user_id' => $user->id, 'role' => 'assistant', 'content' => $assistantText]);
             $this->activity->log($session, $run, 'error', $assistantText, ['error' => $exception->getMessage()]);
+            app(\App\Services\Bean\Quality\BeanQualityAuditService::class)->traceRun($run->refresh());
         }
 
         $session->touch();
@@ -200,7 +202,11 @@ class BeanRuntimeService
         if ($explanations->isNotEmpty()) {
             return $explanations->take(3)->map(fn (array $item): string => (string) $item['reason'])->implode(' ');
         }
-        $workspaceQuestion = str_contains(strtolower((string) ($query['question'] ?? '')), 'workspace');
+        $workspaceQuestion = str_contains(strtolower((string) ($query['question'] ?? '')), 'workspace')
+            || str_contains(strtolower((string) ($query['question'] ?? '')), 'where')
+            || str_contains(strtolower((string) ($query['question'] ?? '')), 'live')
+            || str_contains(strtolower((string) ($query['question'] ?? '')), 'belong')
+            || (($query['include_workspaces'] ?? false) === true && collect($items)->flatMap(fn (array $item): array => $item['workspace_names'] ?? [])->isNotEmpty());
         if ($workspaceQuestion && $items->isNotEmpty()) {
             $titles = $items->map(fn (array $item): string => trim((string) ($item['title'] ?? '')))->filter()->unique(fn (string $title): string => mb_strtolower($title))->values();
             if ($titles->count() === 1) {
@@ -301,7 +307,7 @@ class BeanRuntimeService
     {
         $lists = collect($results)->filter(fn ($result): bool => ($result['ok'] ?? false) === true
             && is_array($result['items'] ?? null)
-            && str_ends_with((string) ($result['action'] ?? ''), '.list'))
+            && (str_ends_with((string) ($result['action'] ?? ''), '.list') || str_ends_with((string) ($result['action'] ?? ''), '.search')))
             ->values();
         if ($lists->isEmpty()) return null;
         if ($lists->count() === 1) return $this->singleListResponse($lists->first());
@@ -373,16 +379,16 @@ class BeanRuntimeService
         $action = (string) ($list['action'] ?? '');
         $dateScope = strtolower(trim((string) ($list['date_scope'] ?? data_get($list, 'arguments.date_scope') ?? '')));
         $noun = match ($action) {
-            'task.list' => 'task',
-            'reminder.list' => 'reminder',
-            'calendar_event.list' => 'calendar event',
-            'note.list' => 'note',
+            'task.list', 'task.search' => 'task',
+            'reminder.list', 'reminder.search' => 'reminder',
+            'calendar_event.list', 'calendar_event.search' => 'calendar event',
+            'note.list', 'note.search' => 'note',
             default => 'item',
         };
         $kindQualifier = match ($action) {
-            'task.list' => 'open',
-            'reminder.list' => 'scheduled',
-            'calendar_event.list' => 'upcoming',
+            'task.list', 'task.search' => 'open',
+            'reminder.list', 'reminder.search' => 'scheduled',
+            'calendar_event.list', 'calendar_event.search' => 'upcoming',
             default => '',
         };
         if ($plural && ! str_ends_with($noun, 's')) {

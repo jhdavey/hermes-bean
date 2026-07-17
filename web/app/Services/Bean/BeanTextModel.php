@@ -337,6 +337,15 @@ PROMPT;
                 $actions[] = ['action' => 'reminder.list', 'arguments' => ['date_scope' => 'overdue']];
                 $response = 'I’ll check overdue tasks and reminders.';
             }
+        } elseif ($this->isTodayTaskListQuestion($lower)) {
+            $actions[] = ['action' => 'task.list', 'arguments' => ['date_scope' => 'today']];
+            $response = 'I’ll check today’s tasks.';
+        } elseif ($this->isTodayCalendarListQuestion($lower)) {
+            $actions[] = ['action' => 'calendar_event.list', 'arguments' => ['date_scope' => 'today']];
+            $response = 'I’ll check today’s calendar.';
+        } elseif ($this->isNoteCreationRequest($lower)) {
+            $actions[] = ['action' => 'note.create', 'arguments' => ['plain_text' => $text]];
+            $response = 'I’ll add that note.';
         } elseif ($this->isFactualResourceQuestion($lower)) {
             $actions[] = ['action' => 'resource.query', 'arguments' => $this->resourceQueryArguments($text, $lower, $session)];
             $response = 'I’ll check that.';
@@ -350,15 +359,15 @@ PROMPT;
             if ($this->isTaskWorkspaceQuestion($lower) || $this->isFactualResourceQuestion($lower)) {
                 $actions[] = ['action' => 'resource.query', 'arguments' => $this->resourceQueryArguments($text, $lower, $session)];
                 $response = 'I’ll check the task workspace.';
+            } elseif ($this->isListRequest($lower)) {
+                $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower)];
+                $response = $this->mentionsToday($lower) ? 'I’ll check today’s tasks.' : 'I’ll check your tasks.';
             } elseif ($this->isDeleteRequest($lower)) {
                 $actions[] = ['action' => 'task.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'task', 'todo', 'to-do'])]];
                 $response = 'I’ll ask you to confirm before deleting that task.';
             } elseif ($this->isCompleteRequest($lower)) {
                 $actions[] = ['action' => 'task.complete', 'arguments' => ['query' => $this->queryFromText($text, ['complete', 'finish', 'done', 'mark', 'task', 'todo', 'to-do', 'as'])]];
                 $response = 'I’ll mark that task complete.';
-            } elseif ($this->isListRequest($lower)) {
-                $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower)];
-                $response = $this->mentionsToday($lower) ? 'I’ll check today’s tasks.' : 'I’ll check your tasks.';
             } elseif ($this->isSearchRequest($lower)) {
                 $actions[] = ['action' => 'task.search', 'arguments' => ['query' => $this->queryFromText($text, ['find', 'search', 'for', 'task', 'todo', 'to-do'])]];
                 $response = 'I’ll search your tasks.';
@@ -418,7 +427,7 @@ PROMPT;
 
     private function mentionsTask(string $lower): bool
     {
-        return preg_match('/\b(task|tasks|todo|todos|to-do|to-dos|to do|call|buy|finish)\b/', $lower) === 1;
+        return preg_match('/\b(task|tasks|todo|todos|to-do|to-dos|to do|call|buy|finish|chore|chores|work)\b/', $lower) === 1;
     }
 
     private function mentionsReminder(string $lower): bool
@@ -433,7 +442,7 @@ PROMPT;
 
     private function mentionsCalendar(string $lower): bool
     {
-        return preg_match('/\b(calendar|appointment|event|schedule)\b/', $lower) === 1;
+        return preg_match('/\b(calendar|appointment|appointments|event|events|meeting|meetings|schedule)\b/', $lower) === 1;
     }
 
     private function isDeleteRequest(string $lower): bool
@@ -448,7 +457,7 @@ PROMPT;
 
     private function isListRequest(string $lower): bool
     {
-        return preg_match('/\b(what|show|list|check)\b/', $lower) === 1;
+        return preg_match('/\b(what|show|list|check|tell|any|anything|have|has|due|need|on deck)\b/', $lower) === 1;
     }
 
     private function isSearchRequest(string $lower): bool
@@ -464,7 +473,7 @@ PROMPT;
 
     private function isFactualResourceQuestion(string $lower): bool
     {
-        return preg_match('/\b(why|which|where|explain|context|workspace|workspaces)\b/', $lower) === 1
+        return preg_match('/\b(why|which|where|is|explain|context|workspace|workspaces)\b/', $lower) === 1
             && ($this->mentionsTask($lower) || $this->mentionsReminder($lower) || $this->mentionsCalendar($lower) || $this->mentionsNote($lower) || preg_match('/\b(card|grout|grill|item|items)\b/', $lower) === 1);
     }
 
@@ -488,7 +497,8 @@ PROMPT;
             'workspace', 'workspaces', 'is', 'are', 'in', 'does', 'do', 'the', 'a', 'an',
             'task', 'tasks', 'todo', 'todos', 'to-do', 'to-dos', 'item', 'items', 'one',
             'first', 'second', 'third', 'that', 'this', 'it', 'on', 'my', 'list', 'for',
-            'today', 'showing', 'appear', 'appearing',
+            'today', 'showing', 'appear', 'appearing', 'has', 'contains', 'contain', 'live',
+            'lives', 'belong', 'belongs', 'to', 'family', 'personal',
         ]);
 
         $arguments = [
@@ -534,7 +544,29 @@ PROMPT;
 
     private function mentionsOverdue(string $lower): bool
     {
-        return preg_match('/\b(overdue|past due|late)\b/', $lower) === 1;
+        return preg_match('/\b(overdue|past due|late|miss|missed|before today)\b/', $lower) === 1;
+    }
+
+    private function isTodayTaskListQuestion(string $lower): bool
+    {
+        $implicitTodayTodoList = preg_match('/\bwhat(?:’|\'| i)?s on my (?:to do|todo|to-do) list\b/u', $lower) === 1;
+        if (! $this->mentionsToday($lower) && ! $implicitTodayTodoList) return false;
+        if ($this->mentionsReminder($lower) || $this->mentionsCalendar($lower) || $this->mentionsNote($lower)) return false;
+        if (preg_match('/\b(why|showing|appear|appearing)\b/', $lower) === 1) return false;
+
+        return $implicitTodayTodoList
+            || $this->mentionsTask($lower)
+            || preg_match('/\b(list|to do list|todo list|to-do list|due|need|on deck|get done|show my list)\b/', $lower) === 1;
+    }
+
+    private function isTodayCalendarListQuestion(string $lower): bool
+    {
+        return $this->mentionsToday($lower) && $this->mentionsCalendar($lower) && $this->isListRequest($lower);
+    }
+
+    private function isNoteCreationRequest(string $lower): bool
+    {
+        return preg_match('/\b(write down|jot down|take a note|add a note|create a note)\b/', $lower) === 1;
     }
 
     private function listArguments(string $lower): array

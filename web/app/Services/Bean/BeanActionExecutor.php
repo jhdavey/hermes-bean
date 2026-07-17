@@ -273,6 +273,7 @@ class BeanActionExecutor
             'query' => $text,
             'question' => $arguments['question'] ?? null,
             'date_scope' => $dateScope ?: null,
+            'include_workspaces' => (bool) ($arguments['include_workspaces'] ?? false),
             'items' => $summaries,
             'explanations' => $explanations,
         ];
