@@ -89,6 +89,37 @@ class BeanRuntimeTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_openai_planner_does_not_execute_actions_for_vague_fragments(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.bean_text_model' => 'gpt-4.1-mini',
+        ]);
+        $token = $this->apiToken('bean-vague-openai@example.com');
+
+        Http::fake(fn () => Http::response([
+            'choices' => [[
+                'message' => [
+                    'content' => json_encode([
+                        'response' => 'Here is your dashboard summary. Done.',
+                        'actions' => [[
+                            'action' => 'dashboard.summary',
+                            'arguments' => ['workspace_id' => null],
+                        ]],
+                    ]),
+                ],
+            ]],
+        ], 200));
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'First request every time.',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'I’m not sure what you mean yet — can you clarify?']);
+
+        $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'dashboard.summary']);
+    }
+
     public function test_local_parser_completes_unambiguous_task_without_creating_duplicate(): void
     {
         config(['services.openai.api_key' => null]);

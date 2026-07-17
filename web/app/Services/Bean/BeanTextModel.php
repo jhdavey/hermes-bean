@@ -72,6 +72,13 @@ class BeanTextModel
             }
 
             $actions = $this->cleanActions($decoded['actions'] ?? []);
+            if ($this->isVagueFragment($message)) {
+                return [
+                    'response' => 'I’m not sure what you mean yet — can you clarify?',
+                    'actions' => [],
+                    'model' => $model,
+                ];
+            }
             if ($actions === [] && ($this->isFactualResourceQuestion(mb_strtolower($message)) || $this->isTaskWorkspaceQuestion(mb_strtolower($message)))) {
                 $actions[] = ['action' => 'resource.query', 'arguments' => [...$this->resourceQueryArguments($message, mb_strtolower($message), $session), 'skip_synthesis' => true]];
             }
@@ -327,6 +334,10 @@ PROMPT;
         $lower = mb_strtolower($text);
         $actions = [];
         $response = $prefix ?: 'I can help with that.';
+
+        if ($this->isVagueFragment($text)) {
+            return ['response' => 'I’m not sure what you mean yet — can you clarify?', 'actions' => [], 'model' => 'local-heuristic'];
+        }
 
         if ($this->isCorrectionRequest($lower, $session)) {
             $actions[] = ['action' => 'resource.query', 'arguments' => $this->resourceQueryArguments($text, $lower, $session)];
@@ -639,6 +650,22 @@ PROMPT;
     private function isOnlineRecipeRequest(string $lower): bool
     {
         return str_contains($lower, 'recipe') && preg_match('/\b(go online|online|find|look up|lookup|search|internet|web)\b/u', $lower) === 1;
+    }
+
+    private function isVagueFragment(string $text): bool
+    {
+        $lower = mb_strtolower(trim(preg_replace('/[^\pL\pN\s]/u', ' ', $text) ?: $text));
+        if (str_contains($lower, 'every time') && preg_match('/\b(what|current|tell|give)\b.*\btime\b|\btime\b.*\b(now|please|is)\b/u', $lower) !== 1) {
+            return true;
+        }
+        $words = array_values(array_filter(preg_split('/\s+/', $lower) ?: []));
+        if (count($words) === 0 || count($words) > 5) return false;
+        $specific = ['task', 'tasks', 'todo', 'todos', 'to', 'do', 'reminder', 'reminders', 'calendar', 'event', 'events', 'appointment', 'appointments', 'note', 'notes', 'workspace', 'workspaces', 'weather', 'time', 'date', 'recipe', 'recipes', 'meal', 'meals', 'list', 'show', 'add', 'create', 'complete', 'delete', 'schedule', 'remind', 'find', 'search', 'pay', 'card', 'work', 'due', 'late', 'past', 'miss', 'missed', 'overdue'];
+        foreach ($specific as $word) {
+            if (in_array($word, $words, true)) return false;
+        }
+
+        return true;
     }
 
     private function isCorrectionRequest(string $lower, ?BeanSession $session): bool
