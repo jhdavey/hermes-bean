@@ -16,6 +16,7 @@ use App\Services\Domain\DomainResourceService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -409,7 +410,7 @@ class BeanRuntimeTest extends TestCase
             'content' => 'what is on my todo list for today?',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
-            ->assertJsonFragment(['content' => 'You have 2 open tasks due by today: Overdue grout cleanup and Today launch call.']);
+            ->assertJsonFragment(['content' => 'You have 2 open tasks due by today: 1 overdue — Overdue grout cleanup; 1 due today — Today launch call.']);
 
         $this->assertStringNotContainsString('Tomorrow prep', $response->getContent());
         $this->assertStringNotContainsString('No date task', $response->getContent());
@@ -418,6 +419,71 @@ class BeanRuntimeTest extends TestCase
             'action' => 'task.list',
             'status' => 'completed',
         ]);
+    }
+
+    public function test_today_task_list_response_labels_overdue_and_due_today_items_even_with_openai_planner(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.bean_text_model' => 'gpt-4.1-mini',
+        ]);
+        $token = $this->apiToken('bean-openai-today-overdue-labels@example.com');
+        $user = User::where('email', 'bean-openai-today-overdue-labels@example.com')->firstOrFail();
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Overdue personal item',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->subDay()->setTime(10, 0),
+        ]);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Today personal item',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->setTime(10, 0),
+        ]);
+
+        Http::fakeSequence()->push([
+            'choices' => [[
+                'message' => [
+                    'content' => json_encode([
+                        'response' => 'I’ll check today’s tasks.',
+                        'actions' => [[
+                            'action' => 'task.list',
+                            'arguments' => ['date_scope' => 'today'],
+                        ]],
+                    ]),
+                ],
+            ]],
+        ], 200);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'what tasks do I have on my to do list for today?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'You have 2 open tasks due by today: 1 overdue — Overdue personal item; 1 due today — Today personal item.']);
+
+        Http::assertSentCount(1);
+    }
+
+    public function test_time_question_answers_with_current_time_not_generic_done(): void
+    {
+        config(['services.openai.api_key' => null]);
+        Carbon::setTestNow(Carbon::parse('2026-07-17 18:42:00', config('app.timezone')));
+        $token = $this->apiToken('bean-time-answer@example.com');
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'what time is it?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'The current time is 6:42 PM UTC.']);
+
+        Carbon::setTestNow();
     }
 
     public function test_today_task_list_collapses_linked_workspace_copies(): void

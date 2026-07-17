@@ -151,6 +151,10 @@ class BeanRuntimeService
 
             return (string) ($failed['error'] ?? 'I could not complete that.');
         }
+        $timeResponse = $this->timeResponse($results);
+        if ($timeResponse !== null) return $timeResponse;
+        $listResponse = $this->listResponse($results);
+        if ($listResponse !== null) return $listResponse;
         if ($this->shouldSynthesize($results)) {
             $synthesized = $this->model->synthesizeAnswer($session, $userMessage, $proposed, $results);
             if ($synthesized !== null) return $synthesized;
@@ -159,11 +163,21 @@ class BeanRuntimeService
         if ($resourceQueryResponse !== null) return $resourceQueryResponse;
         $contextResponse = $this->contextResponse($results);
         if ($contextResponse !== null) return $contextResponse;
-        $listResponse = $this->listResponse($results);
-        if ($listResponse !== null) return $listResponse;
         $completed = collect($results)->filter(fn ($result): bool => ($result['ok'] ?? false) === true)->count();
         if ($completed > 0) return $proposed !== '' ? $proposed.' Done.' : 'Done.';
         return $proposed !== '' ? $proposed : 'I’m here. Ask me to help with your calendar, tasks, reminders, notes, date/time, or weather.';
+    }
+
+    private function timeResponse(array $results): ?string
+    {
+        $time = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
+            && ($result['action'] ?? null) === 'time.now'
+            && isset($result['now']));
+        if (! $time) return null;
+
+        $timezone = (string) ($time['timezone'] ?? config('app.timezone', 'UTC'));
+        $now = \Illuminate\Support\Carbon::parse((string) $time['now'])->timezone($timezone);
+        return 'The current time is '.$now->format('g:i A T').'.';
     }
 
     private function shouldSynthesize(array $results): bool
@@ -310,6 +324,11 @@ class BeanRuntimeService
         }
 
         $label = $this->listLabel($list, $count !== 1);
+        $dateScope = strtolower(trim((string) ($list['date_scope'] ?? data_get($list, 'arguments.date_scope') ?? '')));
+        if ($dateScope === 'today' && in_array((string) ($list['action'] ?? ''), ['task.list', 'reminder.list'], true)) {
+            $grouped = $this->todayListBreakdown($list, $items);
+            if ($grouped !== null) return $grouped;
+        }
         $titles = $items
             ->take(5)
             ->map(fn (array $item): string => trim((string) ($item['title'] ?? 'Untitled')) ?: 'Untitled')
@@ -317,6 +336,36 @@ class BeanRuntimeService
         $listText = $this->naturalList($titles->all());
         $more = $count > 5 ? ' and '.($count - 5).' more' : '';
         return 'You have '.$count.' '.$label.': '.$listText.$more.'.';
+    }
+
+    private function todayListBreakdown(array $list, \Illuminate\Support\Collection $items): ?string
+    {
+        $action = (string) ($list['action'] ?? '');
+        $dateField = $action === 'reminder.list' ? 'remind_at' : 'due_at';
+        $start = now()->startOfDay();
+        $overdue = $items->filter(function (array $item) use ($dateField, $start): bool {
+            if (! isset($item[$dateField])) return false;
+            return \Illuminate\Support\Carbon::parse((string) $item[$dateField])->lt($start);
+        })->values();
+        $today = $items->reject(function (array $item) use ($dateField, $start): bool {
+            if (! isset($item[$dateField])) return false;
+            return \Illuminate\Support\Carbon::parse((string) $item[$dateField])->lt($start);
+        })->values();
+
+        if ($overdue->isEmpty()) return null;
+
+        $total = $items->count();
+        $label = $this->listLabel($list, $total !== 1);
+        $segments = [];
+        if ($overdue->isNotEmpty()) {
+            $segments[] = $overdue->count().' overdue — '.$this->naturalList($overdue->take(5)->map(fn (array $item): string => trim((string) ($item['title'] ?? 'Untitled')) ?: 'Untitled')->all());
+        }
+        if ($today->isNotEmpty()) {
+            $segments[] = $today->count().' due today — '.$this->naturalList($today->take(5)->map(fn (array $item): string => trim((string) ($item['title'] ?? 'Untitled')) ?: 'Untitled')->all());
+        }
+        $more = $total > 10 ? ' and '.($total - 10).' more' : '';
+
+        return 'You have '.$total.' '.$label.': '.implode('; ', $segments).$more.'.';
     }
 
     private function listLabel(array $list, bool $plural = true): string
