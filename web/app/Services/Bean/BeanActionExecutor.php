@@ -63,19 +63,19 @@ class BeanActionExecutor
                 'dashboard.summary' => $this->dashboardSummary($run),
                 'time.now' => $this->timeNow(),
                 'weather.lookup' => $this->weatherLookup($arguments),
-                'task.list' => $this->listResources(Task::class, $run, 'due_at'),
+                'task.list' => $this->listResources(Task::class, $run, 'due_at', $arguments),
                 'task.search' => $this->searchResources(Task::class, $run, $arguments),
                 'task.create' => $this->createTask($run, $arguments),
                 'task.update' => $this->updateResource(Task::class, $run, $arguments, ['title', 'type', 'status', 'notes', 'category', 'color', 'is_critical', 'due_at', 'completed_at', 'metadata']),
                 'task.complete' => $this->completeResource(Task::class, $run, $arguments, 'completed_at'),
                 'task.delete' => $this->deleteResource(Task::class, $run, $arguments),
-                'reminder.list' => $this->listResources(Reminder::class, $run, 'remind_at'),
+                'reminder.list' => $this->listResources(Reminder::class, $run, 'remind_at', $arguments),
                 'reminder.search' => $this->searchResources(Reminder::class, $run, $arguments),
                 'reminder.create' => $this->createReminder($run, $arguments),
                 'reminder.update' => $this->updateResource(Reminder::class, $run, $arguments, ['title', 'notes', 'category', 'color', 'is_critical', 'remind_at', 'status', 'metadata']),
                 'reminder.complete' => $this->completeResource(Reminder::class, $run, $arguments, null),
                 'reminder.delete' => $this->deleteResource(Reminder::class, $run, $arguments),
-                'calendar_event.list' => $this->listResources(CalendarEvent::class, $run, 'starts_at'),
+                'calendar_event.list' => $this->listResources(CalendarEvent::class, $run, 'starts_at', $arguments),
                 'calendar_event.search' => $this->searchResources(CalendarEvent::class, $run, $arguments),
                 'calendar_event.create' => $this->createCalendarEvent($run, $arguments),
                 'calendar_event.update' => $this->updateResource(CalendarEvent::class, $run, $arguments, ['title', 'description', 'location', 'category', 'color', 'is_critical', 'recurrence', 'starts_at', 'ends_at', 'all_day', 'status', 'metadata']),
@@ -126,10 +126,31 @@ class BeanActionExecutor
         return $class::query()->whereIn('workspace_id', $this->workspaceIds($run));
     }
 
-    private function listResources(string $class, BeanRun $run, string $orderField): array
+    private function listResources(string $class, BeanRun $run, string $orderField, array $arguments = []): array
     {
-        $items = $this->baseQuery($class, $run)->orderBy($orderField)->orderBy('id')->limit(20)->get();
-        return ['ok' => true, 'items' => $this->summaries($items)];
+        $query = $this->baseQuery($class, $run);
+        if ($class === Task::class) {
+            $query->where('status', '!=', 'completed');
+        } elseif ($class === Reminder::class) {
+            $query->where('status', 'scheduled');
+        } elseif ($class === CalendarEvent::class) {
+            $query->where('status', 'scheduled');
+        }
+        $dateScope = strtolower(trim((string) ($arguments['date_scope'] ?? $arguments['scope'] ?? '')));
+        if ($dateScope === 'today') {
+            $this->applyTodayScope($query, $class, $orderField);
+        }
+        $items = $query->orderBy($orderField)->orderBy('id')->limit(20)->get();
+        return ['ok' => true, 'items' => $this->summaries($items), 'date_scope' => $dateScope ?: null];
+    }
+
+    private function applyTodayScope(Builder $query, string $class, string $field): void
+    {
+        $start = now()->startOfDay()->utc();
+        $end = now()->endOfDay()->utc();
+        if (in_array($class, [Task::class, Reminder::class, CalendarEvent::class], true)) {
+            $query->whereBetween($field, [$start, $end]);
+        }
     }
 
     private function searchResources(string $class, BeanRun $run, array $arguments, array $fields = ['title']): array

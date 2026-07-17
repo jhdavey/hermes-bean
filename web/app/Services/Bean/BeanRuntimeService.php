@@ -68,7 +68,7 @@ class BeanRuntimeService
                 if ($name === '') continue;
                 $args = is_array($action['arguments'] ?? null) ? $action['arguments'] : [];
                 $result = $this->executor->execute($session, $run, $name, $args);
-                $results[] = ['action' => $name, ...$result];
+                $results[] = ['action' => $name, 'arguments' => $args, ...$result];
             }
 
             $assistantText = $this->finalResponse((string) ($proposal['response'] ?? ''), $results);
@@ -144,7 +144,12 @@ class BeanRuntimeService
         $needsConfirmation = collect($results)->first(fn ($result): bool => ($result['requires_confirmation'] ?? false) === true);
         if ($needsConfirmation) return (string) ($needsConfirmation['summary'] ?? 'Please confirm before I do that.');
         $failed = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === false);
-        if ($failed) return (string) ($failed['error'] ?? 'I could not complete that.');
+        if ($failed) {
+            $ambiguousResponse = $this->ambiguousResponse($failed);
+            if ($ambiguousResponse !== null) return $ambiguousResponse;
+
+            return (string) ($failed['error'] ?? 'I could not complete that.');
+        }
         $listResponse = $this->listResponse($results);
         if ($listResponse !== null) return $listResponse;
         $completed = collect($results)->filter(fn ($result): bool => ($result['ok'] ?? false) === true)->count();
@@ -160,6 +165,7 @@ class BeanRuntimeService
         if (! $list) return null;
 
         $action = (string) ($list['action'] ?? '');
+        $dateScope = strtolower(trim((string) ($list['date_scope'] ?? data_get($list, 'arguments.date_scope') ?? '')));
         $items = collect($list['items'] ?? [])->filter(fn ($item): bool => is_array($item));
         $noun = match ($action) {
             'task.list' => 'task',
@@ -168,14 +174,19 @@ class BeanRuntimeService
             'note.list' => 'note',
             default => 'item',
         };
-        $qualifier = match ($action) {
+        $baseQualifier = match ($action) {
             'task.list' => 'open ',
             'reminder.list' => 'scheduled ',
             'calendar_event.list' => 'upcoming ',
             default => '',
         };
+        $qualifier = $dateScope === 'today' ? "today’s {$baseQualifier}" : $baseQualifier;
         $count = $items->count();
         if ($count === 0) {
+            if ($dateScope === 'today') {
+                return "You don’t have any {$baseQualifier}{$noun}s for today right now.";
+            }
+
             return "You don’t have any {$qualifier}{$noun}s right now.";
         }
 
@@ -186,6 +197,34 @@ class BeanRuntimeService
         $listText = $this->naturalList($titles->all());
         $more = $count > 5 ? ' and '.($count - 5).' more' : '';
         return 'You have '.$count.' '.$qualifier.$noun.($count === 1 ? '' : 's').': '.$listText.$more.'.';
+    }
+
+    private function ambiguousResponse(array $result): ?string
+    {
+        if (($result['ambiguous'] ?? false) !== true || ! is_array($result['items'] ?? null)) {
+            return null;
+        }
+
+        $action = (string) ($result['action'] ?? '');
+        $noun = match (true) {
+            str_starts_with($action, 'task.') => 'task',
+            str_starts_with($action, 'reminder.') => 'reminder',
+            str_starts_with($action, 'calendar_event.') => 'calendar event',
+            str_starts_with($action, 'note.') => 'note',
+            default => 'item',
+        };
+        $titles = collect($result['items'])
+            ->filter(fn ($item): bool => is_array($item))
+            ->take(5)
+            ->map(fn (array $item): string => trim((string) ($item['title'] ?? 'Untitled')) ?: 'Untitled')
+            ->values()
+            ->all();
+
+        if ($titles === []) {
+            return null;
+        }
+
+        return 'I found multiple matching '.$noun.'s: '.$this->naturalList($titles).'. Which one should I use?';
     }
 
     private function naturalList(array $items): string

@@ -235,6 +235,7 @@ export function mountHeyBeanWebApp(mount) {
     let beanRealtimeSessionCache = null;
     let beanRealtimeSessionPromise = null;
     let beanRealtimeEventQueue = [];
+    let beanEventStatusStartedAt = Date.now();
 
     boot();
     bindResponsiveCalendar();
@@ -4645,6 +4646,7 @@ export function mountHeyBeanWebApp(mount) {
         const type = String(payload.type || '');
         const transcript = String(payload.transcript || payload.text || payload.delta || '').trim();
         if (transcript && type.includes('transcription') && type.endsWith('completed')) {
+            if (handleBeanVoiceControl(transcript)) return;
             state.bean.voiceTranscript = transcript;
             render();
             sendBeanVoiceTranscript(transcript);
@@ -4654,6 +4656,30 @@ export function mountHeyBeanWebApp(mount) {
             state.bean.statusText = state.bean.voiceActive ? 'Listening — speak to Bean' : state.bean.statusText;
             render();
         }
+    }
+
+    function handleBeanVoiceControl(transcript) {
+        if (!isBeanStopCommand(transcript)) return false;
+        sendBeanRealtimeEvent({ type: 'response.cancel' });
+        state.bean.voiceTranscript = '';
+        state.bean.error = '';
+        state.bean.statusText = 'Stopped — listening for “Hey Bean”';
+        stopBeanVoiceSession();
+        render();
+        return true;
+    }
+
+    function isBeanStopCommand(value) {
+        const raw = String(value || '').trim();
+        const normalized = raw.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+        if (!normalized) return false;
+        const englishStops = [
+            'stop', 'stop bean', 'hey bean stop', 'stop talking', 'stop listening',
+            'cancel', 'cancel that', 'nevermind', 'never mind', 'that is all', 'that s all',
+            'thanks', 'thank you', 'no thanks', 'done', 'all done',
+        ];
+        if (englishStops.includes(normalized)) return true;
+        return /^(停止|停|ストップ|止めて|やめて|終了|キャンセル|取消|别说了|不要说了|结束)$/.test(raw);
     }
 
     async function sendBeanVoiceTranscript(content) {
@@ -7346,6 +7372,9 @@ export function mountHeyBeanWebApp(mount) {
 
     function startBeanEventFeed() {
         if (!state.token || state.phase !== 'signedIn' || beanEventAbort) return;
+        beanEventStatusStartedAt = Date.now();
+        state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
+        state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening locally for “Hey Bean”';
         beanEventAbort = new AbortController();
         pollBeanEvents(beanEventAbort.signal);
     }
@@ -7398,18 +7427,24 @@ export function mountHeyBeanWebApp(mount) {
             state.bean.activity = [...normalizeList(state.bean.activity), event].slice(-100);
         }
         const payloadMode = event.payload?.mode || '';
-        if (event.type === 'status' && payloadMode) {
+        const liveStatusEvent = isLiveBeanStatusEvent(event);
+        if (event.type === 'status' && payloadMode && liveStatusEvent) {
             state.bean.mode = payloadMode;
             state.bean.statusText = event.label || state.bean.statusText;
-        } else if (event.type === 'tool_started') {
+        } else if (event.type === 'tool_started' && liveStatusEvent) {
             state.bean.mode = 'working';
             state.bean.statusText = event.label || 'Working…';
-        } else if (event.type === 'assistant_message') {
+        } else if (event.type === 'assistant_message' && liveStatusEvent) {
             state.bean.statusText = event.label || 'Done';
         }
         if (state.bean.panelOpen || ['status', 'tool_started', 'tool_completed', 'tool_failed', 'assistant_message'].includes(event.type)) {
             render();
         }
+    }
+
+    function isLiveBeanStatusEvent(event) {
+        const createdAt = Date.parse(String(event?.created_at || ''));
+        return !createdAt || createdAt >= beanEventStatusStartedAt;
     }
 
     async function pollDashboardChanges() {

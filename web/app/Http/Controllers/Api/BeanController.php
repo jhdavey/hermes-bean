@@ -74,11 +74,12 @@ class BeanController extends Controller
             'session' => [
                 'type' => 'realtime',
                 'model' => (string) config('services.openai.realtime_model', 'gpt-realtime'),
-                'instructions' => 'You are Bean, the HeyBean voice assistant. Laravel is the source of truth for HeyBean data, private app state, tools, and mutations. Acknowledge quickly, but app data/actions must go through Laravel and should not be invented or mutated directly.',
+                'instructions' => 'You are Bean, the HeyBean voice assistant. Always speak English. Keep acknowledgements under five words. Laravel is the source of truth for HeyBean data, private app state, tools, and mutations. Acknowledge quickly, but app data/actions must go through Laravel and should not be invented or mutated directly.',
                 'audio' => [
                     'input' => [
                         'transcription' => [
                             'model' => 'gpt-4o-mini-transcribe',
+                            'language' => 'en',
                         ],
                         'turn_detection' => [
                             'type' => 'server_vad',

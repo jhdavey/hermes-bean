@@ -152,6 +152,7 @@ class BeanTextModel
             'is_pinned' => $nullableBoolean,
             'sync_to_workspace_ids' => $nullableIntegerArray,
             'delete_from_workspace_ids' => $nullableIntegerArray,
+            'date_scope' => $nullableString,
         ];
 
         return [
@@ -172,7 +173,7 @@ You are Bean, the HeyBean productivity assistant. Return only JSON matching the 
 Use actions only from this list: {$actions}.
 Laravel is the source of truth: you propose structured actions; Laravel validates, scopes, confirms, and executes them.
 For destructive actions include the delete action, but Laravel will require confirmation before execution.
-Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. Use ISO 8601 dates when the user supplied a date/time. If an item needs lookup by title, use query rather than inventing an id.
+Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. Use ISO 8601 dates when the user supplied a date/time. Use date_scope="today" for list requests that say today, this morning, this afternoon, or tonight. If an item needs lookup by title, use query rather than inventing an id.
 Do not invent private dashboard data; call list/search/dashboard actions when data is needed.
 Keep response concise and avoid saying an action is complete before Laravel executes it.
 PROMPT;
@@ -219,7 +220,7 @@ PROMPT;
         if (str_contains($lower, 'weather')) {
             $actions[] = ['action' => 'weather.lookup', 'arguments' => ['query' => $text]];
             $response = 'I’ll check the weather.';
-        } elseif (preg_match('/\b(time|date|today)\b/', $lower)) {
+        } elseif (preg_match('/\b(time|date|today)\b/', $lower) && ! $this->mentionsTask($lower) && ! $this->mentionsReminder($lower) && ! $this->mentionsCalendar($lower)) {
             $actions[] = ['action' => 'time.now', 'arguments' => []];
             $response = 'I’ll check the current date and time.';
         } elseif ($this->mentionsTask($lower) && ! $this->mentionsReminder($lower) && ! $this->mentionsNote($lower) && ! $this->mentionsCalendar($lower)) {
@@ -230,8 +231,8 @@ PROMPT;
                 $actions[] = ['action' => 'task.complete', 'arguments' => ['query' => $this->queryFromText($text, ['complete', 'finish', 'done', 'mark', 'task', 'todo', 'to-do', 'as'])]];
                 $response = 'I’ll mark that task complete.';
             } elseif ($this->isListRequest($lower)) {
-                $actions[] = ['action' => 'task.list', 'arguments' => []];
-                $response = 'I’ll check your tasks.';
+                $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower)];
+                $response = $this->mentionsToday($lower) ? 'I’ll check today’s tasks.' : 'I’ll check your tasks.';
             } elseif ($this->isSearchRequest($lower)) {
                 $actions[] = ['action' => 'task.search', 'arguments' => ['query' => $this->queryFromText($text, ['find', 'search', 'for', 'task', 'todo', 'to-do'])]];
                 $response = 'I’ll search your tasks.';
@@ -247,8 +248,8 @@ PROMPT;
                 $actions[] = ['action' => 'reminder.complete', 'arguments' => ['query' => $this->queryFromText($text, ['complete', 'finish', 'done', 'mark', 'reminder', 'as', 'to'])]];
                 $response = 'I’ll mark that reminder complete.';
             } elseif ($this->isListRequest($lower)) {
-                $actions[] = ['action' => 'reminder.list', 'arguments' => []];
-                $response = 'I’ll check your reminders.';
+                $actions[] = ['action' => 'reminder.list', 'arguments' => $this->listArguments($lower)];
+                $response = $this->mentionsToday($lower) ? 'I’ll check today’s reminders.' : 'I’ll check your reminders.';
             } elseif ($this->isSearchRequest($lower)) {
                 $actions[] = ['action' => 'reminder.search', 'arguments' => ['query' => $this->queryFromText($text, ['find', 'search', 'for', 'reminder'])]];
                 $response = 'I’ll search your reminders.';
@@ -275,8 +276,8 @@ PROMPT;
                 $actions[] = ['action' => 'calendar_event.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'calendar', 'appointment', 'event'])]];
                 $response = 'I’ll ask you to confirm before deleting that calendar event.';
             } elseif ($this->isListRequest($lower)) {
-                $actions[] = ['action' => 'calendar_event.list', 'arguments' => []];
-                $response = 'I’ll check your calendar.';
+                $actions[] = ['action' => 'calendar_event.list', 'arguments' => $this->listArguments($lower)];
+                $response = $this->mentionsToday($lower) ? 'I’ll check today’s calendar.' : 'I’ll check your calendar.';
             } elseif ($this->isSearchRequest($lower)) {
                 $actions[] = ['action' => 'calendar_event.search', 'arguments' => ['query' => $this->queryFromText($text, ['find', 'search', 'for', 'calendar', 'appointment', 'event'])]];
                 $response = 'I’ll search your calendar.';
@@ -291,7 +292,7 @@ PROMPT;
 
     private function mentionsTask(string $lower): bool
     {
-        return preg_match('/\b(task|todo|to-do|to do|call|buy|finish)\b/', $lower) === 1;
+        return preg_match('/\b(task|tasks|todo|todos|to-do|to-dos|to do|call|buy|finish)\b/', $lower) === 1;
     }
 
     private function mentionsReminder(string $lower): bool
@@ -327,6 +328,16 @@ PROMPT;
     private function isSearchRequest(string $lower): bool
     {
         return preg_match('/\b(find|search)\b/', $lower) === 1;
+    }
+
+    private function mentionsToday(string $lower): bool
+    {
+        return preg_match('/\b(today|this morning|this afternoon|tonight)\b/', $lower) === 1;
+    }
+
+    private function listArguments(string $lower): array
+    {
+        return $this->mentionsToday($lower) ? ['date_scope' => 'today'] : [];
     }
 
     private function queryFromText(string $text, array $words): string

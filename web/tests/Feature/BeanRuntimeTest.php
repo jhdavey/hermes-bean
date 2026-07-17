@@ -205,6 +205,121 @@ class BeanRuntimeTest extends TestCase
             ->assertJsonFragment(['content' => 'You have 1 open task: Review launch checklist.']);
     }
 
+    public function test_today_task_list_response_filters_to_open_tasks_due_today(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-today-task-list-response@example.com');
+        $user = User::where('email', 'bean-today-task-list-response@example.com')->firstOrFail();
+
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Today launch call',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->setTime(10, 0),
+        ]);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Tomorrow prep',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->addDay()->setTime(10, 0),
+        ]);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Completed today task',
+            'type' => 'todo',
+            'status' => 'completed',
+            'due_at' => now()->setTime(11, 0),
+        ]);
+
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'No date task',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => null,
+        ]);
+
+        $response = $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'what is on my todo list for today?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'You have 1 today’s open task: Today launch call.']);
+
+        $this->assertStringNotContainsString('Tomorrow prep', $response->getContent());
+        $this->assertStringNotContainsString('No date task', $response->getContent());
+
+        $this->assertDatabaseHas('bean_tool_calls', [
+            'action' => 'task.list',
+            'status' => 'completed',
+        ]);
+    }
+
+    public function test_empty_today_task_list_response_uses_natural_for_today_copy(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-empty-today-task-list-response@example.com');
+        $user = User::where('email', 'bean-empty-today-task-list-response@example.com')->firstOrFail();
+
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Tomorrow prep',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->addDay()->setTime(10, 0),
+        ]);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'what is on my todo list for today?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'You don’t have any open tasks for today right now.']);
+    }
+
+    public function test_ambiguous_task_completion_names_the_possible_matches_without_completing_any(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-ambiguous-task-response@example.com');
+        $user = User::where('email', 'bean-ambiguous-task-response@example.com')->firstOrFail();
+
+        $first = Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Call mom',
+            'type' => 'todo',
+            'status' => 'open',
+        ]);
+        $second = Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Call dentist',
+            'type' => 'todo',
+            'status' => 'open',
+        ]);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'complete task call',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'I found multiple matching tasks: Call mom and Call dentist. Which one should I use?']);
+
+        $this->assertDatabaseHas('tasks', ['id' => $first->id, 'status' => 'open']);
+        $this->assertDatabaseHas('tasks', ['id' => $second->id, 'status' => 'open']);
+    }
+
     public function test_local_parser_completes_reminder_not_task_for_reminder_phrase(): void
     {
         config(['services.openai.api_key' => null]);
@@ -287,7 +402,9 @@ class BeanRuntimeTest extends TestCase
             $this->assertSame('gpt-realtime', data_get($payload, 'session.model'));
             $this->assertSame('alloy', data_get($payload, 'session.audio.output.voice'));
             $this->assertSame('gpt-4o-mini-transcribe', data_get($payload, 'session.audio.input.transcription.model'));
+            $this->assertSame('en', data_get($payload, 'session.audio.input.transcription.language'));
             $this->assertFalse((bool) data_get($payload, 'session.audio.input.turn_detection.create_response'));
+            $this->assertStringContainsString('Always speak English', data_get($payload, 'session.instructions'));
             $this->assertStringContainsString('Laravel is the source of truth', data_get($payload, 'session.instructions'));
 
             return Http::response([
