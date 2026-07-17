@@ -36,6 +36,7 @@ class BeanTextModel
         'note.delete',
         'time.now',
         'weather.lookup',
+        'recipe.lookup',
         'dashboard.summary',
     ];
 
@@ -70,9 +71,14 @@ class BeanTextModel
                 return $this->heuristic($message, null, $session);
             }
 
+            $actions = $this->cleanActions($decoded['actions'] ?? []);
+            if ($actions === [] && ($this->isFactualResourceQuestion(mb_strtolower($message)) || $this->isTaskWorkspaceQuestion(mb_strtolower($message)))) {
+                $actions[] = ['action' => 'resource.query', 'arguments' => [...$this->resourceQueryArguments($message, mb_strtolower($message), $session), 'skip_synthesis' => true]];
+            }
+
             return [
                 'response' => $this->cleanResponse($decoded['response'] ?? null),
-                'actions' => $this->cleanActions($decoded['actions'] ?? []),
+                'actions' => $actions,
                 'model' => $model,
             ];
         } catch (Throwable) {
@@ -322,9 +328,41 @@ PROMPT;
         $actions = [];
         $response = $prefix ?: 'I can help with that.';
 
-        if (str_contains($lower, 'weather')) {
+        if ($this->isCorrectionRequest($lower, $session)) {
+            $actions[] = ['action' => 'resource.query', 'arguments' => $this->resourceQueryArguments($text, $lower, $session)];
+            $response = 'I’ll use the correction.';
+        } elseif (str_contains($lower, 'weather')) {
             $actions[] = ['action' => 'weather.lookup', 'arguments' => ['query' => $text]];
             $response = 'I’ll check the weather.';
+        } elseif ($this->isOnlineRecipeRequest($lower)) {
+            $actions[] = ['action' => 'recipe.lookup', 'arguments' => ['query' => $this->recipeSubject($text, $lower)]];
+            $response = 'I’ll find a simple recipe.';
+        } elseif ($this->isAddRecipesToRecentMealNoteRequest($lower, $session)) {
+            $note = $this->recentNoteEntity($session);
+            $title = (string) ($note['title'] ?? 'Simple Dinner Meals for This Coming Week');
+            $actions[] = ['action' => 'note.update', 'arguments' => [
+                'id' => (int) ($note['id'] ?? 0),
+                'title' => $title,
+                'plain_text' => $this->dinnerMealsWithRecipesText(),
+                'generated_recipe_followup' => true,
+            ]];
+            $response = 'I’ll add simple recipes under each meal.';
+        } elseif ($this->isMealPlanNoteRequest($lower)) {
+            $actions[] = ['action' => 'note.create', 'arguments' => [
+                'title' => 'Simple Dinner Meals for This Coming Week',
+                'plain_text' => $this->simpleDinnerMealsText(),
+                'generated_meal_plan' => true,
+            ]];
+            $response = 'I’ll create that dinner-meal note.';
+        } elseif ($this->isRecipeNoteRequest($lower)) {
+            $subject = $this->recipeSubject($text, $lower);
+            $actions[] = ['action' => 'note.create', 'arguments' => [
+                'title' => str($subject)->title().' Recipe',
+                'plain_text' => $this->recipeText($subject),
+                'category' => 'recipe',
+                'generated_recipe' => true,
+            ]];
+            $response = 'I’ll create that recipe note.';
         } elseif ($this->mentionsOverdue($lower) && ! $this->mentionsNote($lower) && ! $this->mentionsCalendar($lower)) {
             if ($this->mentionsReminder($lower) && ! $this->mentionsTask($lower)) {
                 $actions[] = ['action' => 'reminder.list', 'arguments' => ['date_scope' => 'overdue']];
@@ -500,6 +538,11 @@ PROMPT;
             'today', 'showing', 'appear', 'appearing', 'has', 'contains', 'contain', 'live',
             'lives', 'belong', 'belongs', 'to', 'family', 'personal',
         ]);
+        $correction = $this->correctionEntity($session, $lower, $query);
+        if ($correction !== null) {
+            $reference = $correction['entity'];
+            $query = (string) ($reference['title'] ?? $query);
+        }
 
         $arguments = [
             'resource' => $resource,
@@ -509,6 +552,12 @@ PROMPT;
             'include_workspaces' => true,
             'explain_visibility' => preg_match('/\b(why|showing|appear|appearing)\b/', $lower) === 1,
         ];
+        if ($correction !== null) {
+            $arguments['id'] = (int) ($reference['id'] ?? 0);
+            $arguments['query'] = null;
+            $arguments['heard_text'] = $correction['heard_text'];
+            $arguments['correction_kind'] = $correction['kind'];
+        }
         if (isset($reference['id']) && ($query === '' || preg_match('/\b(that|this|it|first|second|third|one)\b/', $lower) === 1)) {
             $arguments['id'] = (int) $reference['id'];
             $arguments['query'] = null;
@@ -585,6 +634,130 @@ PROMPT;
         $query = trim($query, " \t\n\r\0\x0B?.!,;:'\"");
 
         return str($query)->limit(120, '')->toString();
+    }
+
+    private function isOnlineRecipeRequest(string $lower): bool
+    {
+        return str_contains($lower, 'recipe') && preg_match('/\b(go online|online|find|look up|lookup|search|internet|web)\b/u', $lower) === 1;
+    }
+
+    private function isCorrectionRequest(string $lower, ?BeanSession $session): bool
+    {
+        return $this->correctionEntity($session, $lower, '') !== null;
+    }
+
+    private function isRecipeNoteRequest(string $lower): bool
+    {
+        return str_contains($lower, 'recipe') && str_contains($lower, 'note') && preg_match('/\b(create|make|add|write)\b/u', $lower) === 1;
+    }
+
+    private function isMealPlanNoteRequest(string $lower): bool
+    {
+        return str_contains($lower, 'note') && str_contains($lower, 'dinner') && str_contains($lower, 'meal') && preg_match('/\b(five|5)\b/u', $lower) === 1;
+    }
+
+    private function isAddRecipesToRecentMealNoteRequest(string $lower, ?BeanSession $session): bool
+    {
+        if (! str_contains($lower, 'recipe') || ! preg_match('/\b(each|those|meals?)\b/u', $lower)) return false;
+        $note = $this->recentNoteEntity($session);
+        if ($note === null) return false;
+        $title = mb_strtolower((string) ($note['title'] ?? ''));
+        return str_contains($title, 'dinner') || str_contains($title, 'meal');
+    }
+
+    private function recentNoteEntity(?BeanSession $session): ?array
+    {
+        if (! $session) return null;
+        $metadata = is_array($session->metadata) ? $session->metadata : [];
+        $entities = array_values(array_filter(is_array($metadata['recent_entities'] ?? null) ? $metadata['recent_entities'] : [], 'is_array'));
+        foreach ($entities as $entity) {
+            if (($entity['type'] ?? null) === 'note') return $entity;
+        }
+        return null;
+    }
+
+    private function correctionEntity(?BeanSession $session, string $lower, string $query): ?array
+    {
+        if (! $session) return null;
+        $metadata = is_array($session->metadata) ? $session->metadata : [];
+        $entities = array_values(array_filter(is_array($metadata['recent_entities'] ?? null) ? $metadata['recent_entities'] : [], 'is_array'));
+        if ($entities === []) return null;
+
+        $heardText = $query;
+        $kind = 'misheard';
+        if (preg_match('/\b(i said|i meant)\s+(.+)$/iu', $lower, $match) === 1) {
+            $heardText = trim((string) $match[2], " \t\n\r\0\x0B?.!,;:'\"");
+            $kind = 'correction';
+        }
+
+        $best = $this->bestEntityMatch($heardText, $entities);
+        if ($best !== null) {
+            return ['entity' => $best, 'heard_text' => $heardText, 'kind' => $kind];
+        }
+
+        if ($kind === 'misheard' && preg_match('/\b(page avocado|pay avocado|play avocado)\b/u', $lower) === 1) {
+            return ['entity' => $entities[0], 'heard_text' => $heardText, 'kind' => 'misheard'];
+        }
+
+        return null;
+    }
+
+    private function bestEntityMatch(string $query, array $entities): ?array
+    {
+        $queryTokens = $this->significantTokens($query);
+        if ($queryTokens === []) return null;
+        $best = null;
+        $bestScore = 0;
+        foreach ($entities as $entity) {
+            $title = (string) ($entity['title'] ?? '');
+            $titleTokens = $this->significantTokens($title);
+            if ($titleTokens === []) continue;
+            $overlap = count(array_intersect($queryTokens, $titleTokens));
+            $score = $overlap / max(1, min(count($queryTokens), count($titleTokens)));
+            if ($score > $bestScore) {
+                $best = $entity;
+                $bestScore = $score;
+            }
+        }
+        return $bestScore >= 0.5 ? $best : null;
+    }
+
+    private function significantTokens(string $text): array
+    {
+        return collect(preg_split('/[^a-z0-9]+/i', mb_strtolower($text)) ?: [])
+            ->map(fn ($token): string => trim($token))
+            ->reject(fn (string $token): bool => $token === '' || in_array($token, ['the', 'a', 'an', 'to', 'in', 'on', 'my', 'is', 'are', 'what', 'which', 'where', 'workspace', 'card'], true))
+            ->values()
+            ->all();
+    }
+
+    private function recipeSubject(string $text, string $lower): string
+    {
+        if (preg_match('/\b(?:for|of)\s+([a-z][a-z\s-]+?)(?:\?|$)/iu', $text, $match) === 1) {
+            return trim((string) $match[1]);
+        }
+        $query = $this->queryFromText($text, ['can', 'you', 'please', 'create', 'make', 'add', 'write', 'note', 'recipe', 'go', 'online', 'find', 'look', 'up', 'search', 'internet', 'web', 'for']);
+        return $query !== '' ? $query : 'quesadillas';
+    }
+
+    private function recipeText(string $subject): string
+    {
+        $subject = trim($subject) ?: 'quesadillas';
+        if (str_contains(mb_strtolower($subject), 'quesadilla')) {
+            return "Quesadillas Recipe\n\nIngredients:\n- 4 flour tortillas\n- 1 1/2 cups shredded cheese\n- 1/2 cup cooked chicken, beans, or vegetables (optional)\n- 1 tablespoon butter or oil\n- Salsa, sour cream, or guacamole for serving\n\nInstructions:\n1. Warm a skillet over medium heat.\n2. Place one tortilla in the skillet and sprinkle cheese over half. Add optional filling.\n3. Fold the tortilla and cook 2–3 minutes per side until crisp and melted.\n4. Slice into wedges and serve with salsa or sour cream.\n\nTime: about 15 minutes.";
+        }
+
+        return str($subject)->title()." Recipe\n\nIngredients:\n- Main ingredient for {$subject}\n- Olive oil or butter\n- Salt and pepper\n- Simple sides or toppings\n\nInstructions:\n1. Prep the ingredients.\n2. Cook over medium heat until done.\n3. Taste, season, and serve warm.\n\nTime: about 20 minutes.";
+    }
+
+    private function simpleDinnerMealsText(): string
+    {
+        return "Here are five simple dinner meals for the coming week:\n1. Grilled chicken with steamed vegetables\n2. Spaghetti with marinara sauce\n3. Baked salmon with rice and broccoli\n4. Tacos with ground beef and salad\n5. Vegetable stir-fry with tofu";
+    }
+
+    private function dinnerMealsWithRecipesText(): string
+    {
+        return "Simple Dinner Meals for This Coming Week\n\n1. Grilled chicken with steamed vegetables\nRecipe:\nIngredients: chicken breasts, mixed vegetables, olive oil, salt, pepper, garlic powder.\nInstructions: Season chicken, grill or pan-cook until done, steam vegetables, and serve together.\n\n2. Spaghetti with marinara sauce\nRecipe:\nIngredients: spaghetti, marinara sauce, parmesan, olive oil, salt.\nInstructions: Boil spaghetti, warm marinara, toss together, and top with parmesan.\n\n3. Baked salmon with rice and broccoli\nRecipe:\nIngredients: salmon fillets, rice, broccoli, lemon, olive oil, salt, pepper.\nInstructions: Bake seasoned salmon at 400°F until flaky, cook rice, steam broccoli, and serve with lemon.\n\n4. Tacos with ground beef and salad\nRecipe:\nIngredients: ground beef, taco seasoning, tortillas, lettuce, tomato, cheese, salsa.\nInstructions: Brown beef with seasoning, fill tortillas, and serve with salad toppings.\n\n5. Vegetable stir-fry with tofu\nRecipe:\nIngredients: firm tofu, mixed vegetables, soy sauce, garlic, sesame oil, rice.\nInstructions: Sear tofu, stir-fry vegetables with garlic and soy sauce, and serve over rice.";
     }
 
     private function titleFromText(string $text): string

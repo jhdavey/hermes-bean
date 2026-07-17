@@ -116,6 +116,15 @@ class BeanQualityAuditService
         if ($toolCalls->where('status', 'completed')->isNotEmpty() && $factual && $this->isGenericNoFactAnswer($lowerAnswer)) {
             $flags[] = 'tool_completed_but_no_factual_answer';
         }
+        if ($toolCalls->where('status', 'completed')->isEmpty() && $this->isAppDataFactualQuestion($lowerUser) && ! $this->isClarifyingAnswer($lowerAnswer)) {
+            $flags[] = 'factual_app_data_answer_without_tool_call';
+        }
+        if (str_contains($lowerUser, 'recipe') && $this->isRecipePlaceholderAnswer($lowerAnswer, $actions)) {
+            $flags[] = 'recipe_request_missing_generated_content';
+        }
+        if ($this->looksLikeCorrection($lowerUser) && $toolCalls->where('status', 'completed')->isEmpty()) {
+            $flags[] = 'correction_turn_without_recovery_action';
+        }
         if (in_array('time.now', $actions, true) && ! preg_match('/\b\d{1,2}:\d{2}\s?(am|pm|utc|est|edt|cst|cdt|mst|mdt|pst|pdt)?\b/i', $answer)) {
             $flags[] = 'missing_time_after_time_tool';
         }
@@ -182,6 +191,29 @@ class BeanQualityAuditService
         if (in_array($normalized, ['done.', 'done', 'all done.', 'i’ll check. done.', 'i will check. done.'], true)) return true;
 
         return preg_match('/\b(i[’\']?ll|i will|checking|check|retrieve|look)\b.*\bdone\.?$/u', $normalized) === 1;
+    }
+
+    private function isAppDataFactualQuestion(string $lowerUser): bool
+    {
+        return preg_match('/\b(what|which|where|why|show|list|find|workspace|workspaces)\b/u', $lowerUser) === 1
+            && preg_match('/\b(task|tasks|todo|reminder|reminders|calendar|event|events|note|notes|workspace|workspaces|card|grout|grill)\b/u', $lowerUser) === 1;
+    }
+
+    private function isClarifyingAnswer(string $lowerAnswer): bool
+    {
+        return preg_match('/\b(which one|can you clarify|please clarify|did you mean|i heard)\b/u', $lowerAnswer) === 1;
+    }
+
+    private function isRecipePlaceholderAnswer(string $lowerAnswer, array $actions): bool
+    {
+        if (in_array('recipe.lookup', $actions, true)) return false;
+        if (preg_match('/\b(ingredients|instructions|steps|flour tortillas|cook until|recipe:)\b/u', $lowerAnswer) === 1) return false;
+        return preg_match('/\b(provide the recipe|provide the details|can\'t browse|cannot browse|don\'t have the recipe|need the recipe text)\b/u', $lowerAnswer) === 1;
+    }
+
+    private function looksLikeCorrection(string $lowerUser): bool
+    {
+        return preg_match('/\b(that[’\']?s not what i said|not what i said|i said|i meant)\b/u', $lowerUser) === 1;
     }
 
     private function todayTaskResultHasOverdue(Collection $toolCalls): bool

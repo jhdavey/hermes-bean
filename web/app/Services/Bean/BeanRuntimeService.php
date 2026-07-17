@@ -157,6 +157,10 @@ class BeanRuntimeService
         if ($timeResponse !== null) return $timeResponse;
         $weatherResponse = $this->weatherResponse($results);
         if ($weatherResponse !== null) return $weatherResponse;
+        $recipeResponse = $this->recipeResponse($results);
+        if ($recipeResponse !== null) return $recipeResponse;
+        $noteMutationResponse = $this->noteMutationResponse($results);
+        if ($noteMutationResponse !== null) return $noteMutationResponse;
         $listResponse = $this->listResponse($results);
         if ($listResponse !== null) return $listResponse;
         if ($this->shouldSynthesize($results)) {
@@ -227,8 +231,43 @@ class BeanRuntimeService
         return $formatted.(string) $unit;
     }
 
+    private function recipeResponse(array $results): ?string
+    {
+        $recipe = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
+            && ($result['action'] ?? null) === 'recipe.lookup');
+        if (! $recipe) return null;
+        $title = trim((string) ($recipe['title'] ?? $recipe['query'] ?? 'recipe'));
+        $summary = trim((string) ($recipe['summary'] ?? ''));
+        if ($summary !== '') return "I found a simple {$title} recipe: {$summary}";
+        return null;
+    }
+
+    private function noteMutationResponse(array $results): ?string
+    {
+        $note = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
+            && in_array(($result['action'] ?? null), ['note.create', 'note.update'], true)
+            && is_array($result['item'] ?? null));
+        if (! $note) return null;
+        $arguments = is_array($note['arguments'] ?? null) ? $note['arguments'] : [];
+        $item = $note['item'];
+        $title = trim((string) ($item['title'] ?? $arguments['title'] ?? 'that note'));
+        if (($arguments['generated_recipe'] ?? false) === true) {
+            $subject = preg_replace('/\s+recipe$/i', '', $title) ?: $title;
+            return 'I created a recipe note for '.mb_strtolower($subject).' with ingredients and quick steps.';
+        }
+        if (($arguments['generated_meal_plan'] ?? false) === true) {
+            return 'I created a note with five simple dinner meals for this coming week.';
+        }
+        if (($arguments['generated_recipe_followup'] ?? false) === true) {
+            return "I added simple recipes under each of the five meals in {$title}.";
+        }
+        return null;
+    }
+
     private function shouldSynthesize(array $results): bool
     {
+        if (collect($results)->contains(fn ($result): bool => (bool) data_get($result, 'arguments.skip_synthesis'))) return false;
+
         return collect($results)->contains(fn ($result): bool => ($result['ok'] ?? false) === true
             && in_array($result['action'] ?? '', ['resource.query', 'resource.relationships', 'task.list', 'task.search', 'task.context', 'reminder.list', 'calendar_event.list', 'note.list'], true));
     }
@@ -264,9 +303,14 @@ class BeanRuntimeService
                     ->all();
                 if ($workspaceNames !== []) {
                     $title = $titles->first();
-                    return count($workspaceNames) === 1
+                    $answer = count($workspaceNames) === 1
                         ? "{$title} is in the {$workspaceNames[0]} workspace."
                         : "{$title} is in these workspaces: ".$this->naturalList($workspaceNames).'.';
+                    $kind = (string) data_get($query, 'arguments.correction_kind', '');
+                    $heard = trim((string) data_get($query, 'arguments.heard_text', ''));
+                    if ($kind === 'correction') return "Got it — you meant {$title}. {$answer}";
+                    if ($kind === 'misheard' && $heard !== '') return "I heard “{$heard},” but I think you may mean {$title}. {$answer}";
+                    return $answer;
                 }
             }
         }

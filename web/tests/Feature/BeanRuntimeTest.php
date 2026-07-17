@@ -353,6 +353,153 @@ class BeanRuntimeTest extends TestCase
             ->assertJsonFragment(['content' => 'Pay the travel card is in the '.$workspace->name.' workspace.']);
     }
 
+    public function test_correction_after_misheard_workspace_query_recovers_recent_task_entity(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-correction-recovery@example.com');
+        $user = User::where('email', 'bean-correction-recovery@example.com')->firstOrFail();
+        $workspace = Workspace::findOrFail($user->default_workspace_id);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Pay the travel card',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->setTime(9, 0),
+        ]);
+
+        $first = $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'what is on my todo list for today?',
+        ])->assertOk();
+        $sessionId = data_get($first->json(), 'data.session.id');
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'session_id' => $sessionId,
+            'content' => 'Which workspace is the page avocado in?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'I heard “page avocado,” but I think you may mean Pay the travel card. Pay the travel card is in the '.$workspace->name.' workspace.']);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'session_id' => $sessionId,
+            'content' => "That's not what I said. I said pay the card.",
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'Got it — you meant Pay the travel card. Pay the travel card is in the '.$workspace->name.' workspace.']);
+    }
+
+    public function test_openai_planner_cannot_answer_app_data_facts_without_a_tool_call(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.bean_text_model' => 'gpt-4.1-mini',
+        ]);
+        $token = $this->apiToken('bean-tool-required-facts@example.com');
+        $user = User::where('email', 'bean-tool-required-facts@example.com')->firstOrFail();
+        $workspace = Workspace::findOrFail($user->default_workspace_id);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspace->id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Pay the travel card',
+            'type' => 'todo',
+            'status' => 'open',
+        ]);
+
+        Http::fakeSequence()->push([
+            'choices' => [[
+                'message' => [
+                    'content' => json_encode([
+                        'response' => 'Pay the travel card is in your personal workspace.',
+                        'actions' => [],
+                    ]),
+                ],
+            ]],
+        ], 200);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Which workspace is Pay the travel card in?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'Pay the travel card is in the '.$workspace->name.' workspace.']);
+
+        $this->assertDatabaseHas('bean_tool_calls', [
+            'action' => 'resource.query',
+            'status' => 'completed',
+        ]);
+        Http::assertSentCount(1);
+    }
+
+    public function test_recipe_note_request_generates_useful_recipe_content(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-recipe-note@example.com');
+        $user = User::where('email', 'bean-recipe-note@example.com')->firstOrFail();
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Can you create a recipe note for quesadillas?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'I created a recipe note for quesadillas with ingredients and quick steps.']);
+
+        $note = Note::where('user_id', $user->id)->where('title', 'Quesadillas Recipe')->firstOrFail();
+        $this->assertStringContainsString('Ingredients', $note->plain_text);
+        $this->assertStringContainsString('Instructions', $note->plain_text);
+        $this->assertStringContainsString('tortillas', strtolower($note->plain_text));
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'note.create', 'status' => 'completed']);
+    }
+
+    public function test_online_recipe_request_uses_lookup_instead_of_existing_notes_as_fake_web(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-recipe-lookup@example.com');
+        $user = User::where('email', 'bean-recipe-lookup@example.com')->firstOrFail();
+        Note::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Quesadillas Recipe',
+            'plain_text' => 'Old private note should not be treated as a web result.',
+        ]);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Can you go online and find a recipe for quesadillas?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'I found a simple quesadillas recipe: fill flour tortillas with cheese, cook until crisp and melted, then serve with salsa or sour cream.']);
+
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'recipe.lookup', 'status' => 'completed']);
+        $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'note.search']);
+    }
+
+    public function test_follow_up_add_recipes_to_recent_meal_note_preserves_existing_meals(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-meal-recipes@example.com');
+        $user = User::where('email', 'bean-meal-recipes@example.com')->firstOrFail();
+
+        $first = $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Okay, now, can you create a note with five simple dinner meals for this coming week?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed');
+        $sessionId = data_get($first->json(), 'data.session.id');
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'session_id' => $sessionId,
+            'content' => 'For each of those meals, can you add a recipe?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'I added simple recipes under each of the five meals in Simple Dinner Meals for This Coming Week.']);
+
+        $note = Note::where('user_id', $user->id)->where('title', 'Simple Dinner Meals for This Coming Week')->firstOrFail();
+        foreach (['Grilled chicken with steamed vegetables', 'Spaghetti with marinara sauce', 'Baked salmon with rice and broccoli', 'Tacos with ground beef and salad', 'Vegetable stir-fry with tofu'] as $meal) {
+            $this->assertStringContainsString($meal, $note->plain_text);
+        }
+        $this->assertStringContainsString('Recipe:', $note->plain_text);
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'note.update', 'status' => 'completed']);
+    }
+
     public function test_today_task_list_response_filters_to_open_tasks_due_today(): void
     {
         config(['services.openai.api_key' => null]);

@@ -42,6 +42,8 @@ class BeanQualityLabTest extends TestCase
         $this->assertArrayHasKey('safety', $report['categories']);
         $this->assertContains('today task list separates overdue and due today', array_column($report['results'], 'name'));
         $this->assertContains('current time answers directly', array_column($report['results'], 'name'));
+        $this->assertContains('misheard transcript recovers recent task entity', array_column($report['results'], 'name'));
+        $this->assertContains('online recipe request uses external lookup path', array_column($report['results'], 'name'));
         $this->assertStringContainsString('Bean Quality Report', (string) file_get_contents($markdownPath));
         $this->assertStringContainsString('CI gate', (string) file_get_contents($markdownPath));
 
@@ -89,6 +91,60 @@ class BeanQualityLabTest extends TestCase
             'bean_run_id' => $run->id,
             'intent' => 'time.now',
         ]);
+    }
+
+    public function test_quality_audit_flags_missing_tool_recipe_and_correction_failures(): void
+    {
+        $user = User::factory()->create(['email' => 'bean-quality-new-flags@example.com']);
+        app(\App\Services\WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $session = BeanSession::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'title' => 'Trace test',
+            'status' => 'active',
+        ]);
+
+        $workspaceRun = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'status' => 'completed',
+            'mode' => 'text',
+            'input' => 'Which workspace is Pay the travel card in?',
+            'output' => 'Pay the travel card is in Personal.',
+            'started_at' => now()->subSecond(),
+            'completed_at' => now(),
+        ]);
+        $recipeRun = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'status' => 'completed',
+            'mode' => 'text',
+            'input' => 'Can you create a recipe note for quesadillas?',
+            'output' => 'Please provide the recipe details if you want them included.',
+            'started_at' => now()->subSecond(),
+            'completed_at' => now(),
+        ]);
+        $correctionRun = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'status' => 'completed',
+            'mode' => 'voice',
+            'input' => "That's not what I said. I said pay the card.",
+            'output' => 'I can help with that.',
+            'started_at' => now()->subSecond(),
+            'completed_at' => now(),
+        ]);
+
+        $workspaceTrace = app(BeanQualityAuditService::class)->traceRun($workspaceRun->fresh());
+        $recipeTrace = app(BeanQualityAuditService::class)->traceRun($recipeRun->fresh());
+        $correctionTrace = app(BeanQualityAuditService::class)->traceRun($correctionRun->fresh());
+
+        $this->assertContains('factual_app_data_answer_without_tool_call', $workspaceTrace->quality_flags);
+        $this->assertContains('recipe_request_missing_generated_content', $recipeTrace->quality_flags);
+        $this->assertContains('correction_turn_without_recovery_action', $correctionTrace->quality_flags);
     }
 
     public function test_production_smoke_mode_audits_recent_traces_without_seeding_or_mutating_resources(): void
