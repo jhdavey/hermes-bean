@@ -270,7 +270,9 @@ class BeanRuntimeTest extends TestCase
             $this->assertStringContainsString('Laravel is the source of truth', data_get($payload, 'session.instructions'));
 
             return Http::response([
-                'client_secret' => ['value' => 'ek_test_voice_secret', 'expires_at' => 1234567890],
+                'value' => 'ek_test_voice_secret',
+                'expires_at' => 1234567890,
+                'session' => ['id' => 'sess_test'],
             ], 200);
         });
 

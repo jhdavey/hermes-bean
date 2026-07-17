@@ -35,18 +35,21 @@ test('Bean assistant presence is web-first and uses the Laravel Bean runtime', (
     assert.match(dashboardSource, /hb-bean-pulse/);
 });
 
-test('Bean voice MVP mints realtime sessions and opens WebRTC from a tap', () => {
-    assert.match(source, /data-bean-voice/);
+test('Bean voice starts from wake detection instead of tap-to-talk', () => {
+    assert.doesNotMatch(source, /data-bean-voice/);
+    assert.doesNotMatch(source, /Tap to talk/);
     assert.match(source, /\/bean\/realtime\/session/);
     assert.match(source, /navigator\.mediaDevices\.getUserMedia/);
     assert.match(source, /new RTCPeerConnection/);
     assert.match(source, /https:\/\/api\.openai\.com\/v1\/realtime\/calls/);
+    assert.match(source, /handleBeanWakeDetected/);
 });
 
-test('Bean local wake mode only uses an explicit local detector hook', () => {
+test('Bean local wake mode only uses local wake detectors', () => {
     assert.match(source, /HeyBeanLocalWakeDetector/);
-    assert.match(source, /handleBeanWakeDetected/);
-    assert.doesNotMatch(source, /webkitSpeechRecognition|SpeechRecognition/);
+    assert.match(source, /processLocally/);
+    assert.match(source, /Listening locally for “Hey Bean”/);
+    assert.doesNotMatch(source, /webkitSpeechRecognition/);
 });
 
 test('dark mode retains the original menu, modal, card, and command center surfaces', () => {

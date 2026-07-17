@@ -98,6 +98,12 @@ class BeanController extends Controller
 
         $body = $response->json() ?: ['message' => 'Realtime session error'];
         if ($response->successful()) {
+            if (($body['value'] ?? null) && ! isset($body['client_secret'])) {
+                $body['client_secret'] = [
+                    'value' => $body['value'],
+                    'expires_at' => $body['expires_at'] ?? null,
+                ];
+            }
             $body['model'] = $payload['session']['model'];
             $body['voice'] = $payload['session']['audio']['output']['voice'];
         }

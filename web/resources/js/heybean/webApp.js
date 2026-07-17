@@ -133,7 +133,7 @@ export function mountHeyBeanWebApp(mount) {
             sessionId: '',
             panelOpen: false,
             mode: localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy',
-            statusText: localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'Tap to talk ready — local wake pending' : 'Privacy mode',
+            statusText: localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'Listening locally for “Hey Bean”' : 'Privacy mode',
             input: '',
             busy: false,
             messages: [],
@@ -601,6 +601,9 @@ export function mountHeyBeanWebApp(mount) {
             state.outlookStatus = outlookStatus;
             state.phase = 'signedIn';
             startBeanEventFeed();
+            if (localStorage.getItem('heybean.bean.privacy') === 'listening') {
+                startBeanWakeListening();
+            }
             state.dashboardDataLoading = false;
             // A partial background refresh should never become a global red
             // error when the cached/remaining resources can render normally.
@@ -1782,10 +1785,9 @@ export function mountHeyBeanWebApp(mount) {
                     <div><strong>Bean</strong><span>Your HeyBean assistant</span></div>
                     <button class="hb-icon-button" type="button" data-bean-panel-close aria-label="Close Bean">×</button>
                 </div>
-                <div class="hb-bean-privacy-row">
-                    <button class="hb-chip ${state.bean.mode === 'privacy' ? 'hb-chip-active' : ''}" type="button" data-bean-privacy="privacy">Privacy mode</button>
-                    <button class="hb-chip ${state.bean.mode !== 'privacy' ? 'hb-chip-active' : ''}" type="button" data-bean-privacy="wake_listening">Listen for “Hey Bean”</button>
-                    <button class="hb-chip ${state.bean.voiceActive ? 'hb-chip-active' : ''}" type="button" data-bean-voice ${state.bean.voiceConnecting ? 'disabled' : ''}>${state.bean.voiceActive ? 'Stop voice' : state.bean.voiceConnecting ? 'Connecting…' : 'Tap to talk'}</button>
+                <div class="hb-bean-privacy-row" role="group" aria-label="Bean listening mode">
+                    <button class="hb-chip ${state.bean.mode === 'privacy' ? 'hb-chip-active' : ''}" type="button" data-bean-privacy="privacy">Off — privacy mode</button>
+                    <button class="hb-chip ${state.bean.mode !== 'privacy' ? 'hb-chip-active' : ''}" type="button" data-bean-privacy="wake_listening">On — listen for “Hey Bean”</button>
                 </div>
                 ${state.bean.voiceTranscript ? `<div class="hb-bean-voice-draft">${escapeHtml(state.bean.voiceTranscript)}</div>` : ''}
                 ${state.bean.error ? `<div class="hb-error">${escapeHtml(state.bean.error)}</div>` : ''}
@@ -4348,7 +4350,6 @@ export function mountHeyBeanWebApp(mount) {
             render();
         });
         mount.querySelectorAll('[data-bean-privacy]').forEach((button) => button.addEventListener('click', () => setBeanMode(button.dataset.beanPrivacy || 'privacy')));
-        mount.querySelector('[data-bean-voice]')?.addEventListener('click', toggleBeanVoiceSession);
         mount.querySelector('[data-bean-input]')?.addEventListener('input', (event) => {
             state.bean.input = event.currentTarget.value;
         });
@@ -4365,6 +4366,7 @@ export function mountHeyBeanWebApp(mount) {
         localStorage.setItem('heybean.bean.privacy', state.bean.mode === 'privacy' ? 'privacy' : 'listening');
         if (state.bean.mode === 'privacy') {
             stopBeanWakeListening();
+            if (state.bean.voiceActive || state.bean.voiceConnecting) stopBeanVoiceSession({ keepStatus: true });
             state.bean.statusText = 'Privacy mode';
         } else {
             startBeanWakeListening();
@@ -4374,23 +4376,109 @@ export function mountHeyBeanWebApp(mount) {
 
     async function startBeanWakeListening() {
         stopBeanWakeListening();
-        const wakeFactory = window.HeyBeanLocalWakeDetector;
+        const wakeFactory = resolveBeanWakeFactory();
         if (!wakeFactory?.create) {
-            state.bean.statusText = 'Tap to talk ready — local wake pending';
+            state.bean.statusText = 'On — local wake is unavailable in this browser';
+            state.bean.error = 'This browser does not expose a verified local wake-word detector. Privacy mode is still off, but Bean cannot start from “Hey Bean” until a local detector is available.';
+            render();
             return;
         }
         try {
+            state.bean.error = '';
+            state.bean.statusText = 'Starting local wake listening…';
             beanWakeDetector = await wakeFactory.create({
                 phrase: 'Hey Bean',
                 onWake: handleBeanWakeDetected,
             });
             await beanWakeDetector?.start?.();
             state.bean.statusText = 'Listening locally for “Hey Bean”';
+            render();
         } catch (error) {
             beanWakeDetector = null;
             state.bean.error = friendlyError(error, 'start local wake detection');
-            state.bean.statusText = 'Tap to talk ready — local wake unavailable';
+            state.bean.statusText = 'On — local wake unavailable';
+            render();
         }
+    }
+
+    function resolveBeanWakeFactory() {
+        if (window.HeyBeanLocalWakeDetector?.create) return window.HeyBeanLocalWakeDetector;
+        return browserLocalSpeechWakeFactory();
+    }
+
+    function browserLocalSpeechWakeFactory() {
+        const Recognition = window.SpeechRecognition;
+        if (!Recognition || typeof Recognition.available !== 'function') return null;
+        return {
+            async create({ phrase, onWake }) {
+                const language = 'en-US';
+                const options = { langs: [language], processLocally: true };
+                let availability = await Recognition.available(options).catch(() => 'unavailable');
+                if (availability === 'downloadable' && typeof Recognition.install === 'function') {
+                    await Recognition.install(options).catch(() => false);
+                    availability = await Recognition.available(options).catch(() => 'unavailable');
+                }
+                if (availability !== 'available') {
+                    throw new Error('Local wake-word recognition is not available in this browser.');
+                }
+
+                const normalizedPhrase = normalizeWakeTranscript(phrase);
+                let recognition = null;
+                let stopped = true;
+                let restartTimer = 0;
+
+                const startRecognition = () => {
+                    if (stopped) return;
+                    window.clearTimeout(restartTimer);
+                    recognition = new Recognition();
+                    recognition.lang = language;
+                    recognition.continuous = true;
+                    recognition.interimResults = true;
+                    recognition.processLocally = true;
+                    recognition.onresult = (event) => {
+                        const transcript = Array.from(event.results || [])
+                            .slice(event.resultIndex || 0)
+                            .map((result) => result?.[0]?.transcript || '')
+                            .join(' ');
+                        if (!normalizeWakeTranscript(transcript).includes(normalizedPhrase)) return;
+                        onWake?.({ source: 'local-speech-recognition' });
+                    };
+                    recognition.onerror = (event) => {
+                        if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
+                            state.bean.error = 'Microphone access is required for local “Hey Bean” wake listening.';
+                            state.bean.statusText = 'On — microphone permission needed';
+                            render();
+                        }
+                    };
+                    recognition.onend = () => {
+                        if (stopped) return;
+                        restartTimer = window.setTimeout(startRecognition, 250);
+                    };
+                    try {
+                        recognition.start();
+                    } catch (_) {
+                        restartTimer = window.setTimeout(startRecognition, 500);
+                    }
+                };
+
+                return {
+                    async start() {
+                        stopped = false;
+                        startRecognition();
+                    },
+                    stop() {
+                        stopped = true;
+                        window.clearTimeout(restartTimer);
+                        recognition?.stop?.();
+                        recognition = null;
+                    },
+                };
+            },
+        };
+    }
+
+    function normalizeWakeTranscript(value) {
+        return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
     }
 
     function stopBeanWakeListening() {
@@ -4434,7 +4522,7 @@ export function mountHeyBeanWebApp(mount) {
 
         try {
             const realtime = await api('/bean/realtime/session', { method: 'POST', body: {} });
-            const clientSecret = realtime?.client_secret?.value || realtime?.client_secret;
+            const clientSecret = realtime?.client_secret?.value || realtime?.client_secret || realtime?.value;
             if (!clientSecret) throw new Error('Realtime session did not return a client secret.');
 
             beanMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -4617,7 +4705,7 @@ export function mountHeyBeanWebApp(mount) {
             state.bean.activity = normalizeList(data.activity);
             state.bean.confirmations = normalizeList(data.confirmations);
             state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
-            state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Tap to talk ready — local wake pending';
+            state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening locally for “Hey Bean”';
             scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
         } catch (error) {
             state.bean.error = friendlyError(error, 'ask Bean');
@@ -4639,7 +4727,7 @@ export function mountHeyBeanWebApp(mount) {
             await loadBeanActivity();
             scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
             state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
-            state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Tap to talk ready — local wake pending';
+            state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening locally for “Hey Bean”';
         } catch (error) {
             state.bean.error = friendlyError(error, 'confirm Bean action');
             state.bean.mode = 'error';
