@@ -231,6 +231,15 @@ class BeanActionExecutor
         foreach (['due_at', 'completed_at', 'remind_at', 'starts_at', 'ends_at'] as $field) {
             if (array_key_exists($field, $updates)) $updates[$field] = $this->dateOrNull($updates[$field]);
         }
+        if ($model instanceof CalendarEvent
+            && array_key_exists('starts_at', $updates)
+            && ! array_key_exists('ends_at', $updates)
+            && $updates['starts_at'] instanceof Carbon
+            && $model->starts_at
+            && $model->ends_at
+        ) {
+            $updates['ends_at'] = (clone $updates['starts_at'])->addSeconds($model->starts_at->diffInSeconds($model->ends_at, false));
+        }
         if ($updates === []) return ['ok' => false, 'error' => 'No update fields were provided.'];
         $user = $this->user($run);
         $updated = match (true) {
@@ -266,11 +275,12 @@ class BeanActionExecutor
         $model = $match['model'];
         $summary = $this->summary($model);
         $user = $this->user($run);
+        $options = array_intersect_key($args, array_flip(['delete_from_workspace_ids']));
         match (true) {
-            $model instanceof Task => $this->domainResources->deleteTask($user, $model),
-            $model instanceof Reminder => $this->domainResources->deleteReminder($user, $model),
-            $model instanceof CalendarEvent => $this->domainResources->deleteCalendarEvent($user, $model),
-            $model instanceof Note => $this->domainResources->deleteNote($user, $model),
+            $model instanceof Task => $this->domainResources->deleteTask($user, $model, $options),
+            $model instanceof Reminder => $this->domainResources->deleteReminder($user, $model, $options),
+            $model instanceof CalendarEvent => $this->domainResources->deleteCalendarEvent($user, $model, $options),
+            $model instanceof Note => $this->domainResources->deleteNote($user, $model, $options),
             default => throw new \RuntimeException('Unsupported resource type.'),
         };
         return ['ok' => true, 'deleted' => $summary];

@@ -4,12 +4,14 @@ namespace Tests\Feature;
 
 use App\Models\BeanRun;
 use App\Models\BeanSession;
+use App\Models\CalendarEvent;
 use App\Models\Note;
 use App\Models\NoteFolder;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\Bean\BeanActionExecutor;
+use App\Services\Domain\DomainResourceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
@@ -369,6 +371,62 @@ class BeanRuntimeTest extends TestCase
         $this->assertFalse($result['ok']);
         $this->assertStringContainsString('Recurring tasks', $result['error'] ?? '');
         $this->assertDatabaseMissing('tasks', ['title' => 'Recurring base-plan task']);
+    }
+
+    public function test_bean_calendar_move_preserves_duration_when_only_start_changes(): void
+    {
+        $user = User::factory()->create(['email' => 'bean-calendar-move@example.com']);
+        app(\App\Services\WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $workspaceId = $user->default_workspace_id;
+        $startsAt = now()->addDay()->setTime(12, 0, 0);
+        $event = CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $workspaceId,
+            'created_by_user_id' => $user->id,
+            'title' => 'Lunch with Sam',
+            'starts_at' => $startsAt,
+            'ends_at' => (clone $startsAt)->addHour(),
+            'status' => 'scheduled',
+            'recurrence' => 'none',
+        ]);
+        $session = BeanSession::create(['user_id' => $user->id, 'workspace_id' => $workspaceId, 'title' => 'Test', 'status' => 'active']);
+        $run = BeanRun::create(['bean_session_id' => $session->id, 'user_id' => $user->id, 'workspace_id' => $workspaceId, 'status' => 'running', 'mode' => 'text']);
+
+        $newStart = now()->addDays(2)->setTime(15, 30, 0);
+        $result = app(BeanActionExecutor::class)->execute($session, $run, 'calendar_event.update', [
+            'id' => $event->id,
+            'starts_at' => $newStart->toIso8601String(),
+        ]);
+
+        $this->assertTrue($result['ok']);
+        $event->refresh();
+        $this->assertTrue($event->starts_at->equalTo($newStart));
+        $this->assertTrue($event->ends_at->equalTo((clone $newStart)->addHour()));
+    }
+
+    public function test_bean_delete_honors_selected_linked_workspace_scope(): void
+    {
+        $user = User::factory()->create(['email' => 'bean-linked-delete@example.com']);
+        $personalWorkspaceId = app(\App\Services\WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        $family = app(\App\Services\WorkspaceService::class)->createHousehold($user, 'Family');
+        $task = app(DomainResourceService::class)->createTask($user, [
+            'workspace_id' => $personalWorkspaceId,
+            'title' => 'Shared grocery run',
+            'type' => 'todo',
+            'sync_to_workspace_ids' => [$family->id],
+        ]);
+        $familyCopyId = Task::where('workspace_id', $family->id)->value('id');
+        $session = BeanSession::create(['user_id' => $user->id, 'workspace_id' => $personalWorkspaceId, 'title' => 'Test', 'status' => 'active']);
+        $run = BeanRun::create(['bean_session_id' => $session->id, 'user_id' => $user->id, 'workspace_id' => $personalWorkspaceId, 'status' => 'running', 'mode' => 'confirmation']);
+
+        $result = app(BeanActionExecutor::class)->execute($session, $run, 'task.delete', [
+            'id' => $task->id,
+            'delete_from_workspace_ids' => [$family->id],
+        ], true);
+
+        $this->assertTrue($result['ok']);
+        $this->assertDatabaseHas('tasks', ['id' => $task->id, 'workspace_id' => $personalWorkspaceId]);
+        $this->assertDatabaseMissing('tasks', ['id' => $familyCopyId]);
     }
 
     public function test_bean_completing_recurring_task_uses_domain_completion_behavior(): void
