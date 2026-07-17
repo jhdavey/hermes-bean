@@ -25,6 +25,16 @@ test('browser app retains direct productivity resources and command center', () 
     assert.match(source, /\/admin\/dashboard\/summary/);
 });
 
+test('Bean assistant presence is web-first and uses the Laravel Bean runtime', () => {
+    assert.match(source, /function beanPresenceMarkup/);
+    assert.match(source, /data-bean-toggle/);
+    assert.match(source, /Listening locally for “Hey Bean”/);
+    assert.match(source, /\/bean\/messages/);
+    assert.match(source, /\/bean\/events\?after=/);
+    assert.match(dashboardSource, /\.hb-bean-button/);
+    assert.match(dashboardSource, /hb-bean-pulse/);
+});
+
 test('dark mode retains the original menu, modal, card, and command center surfaces', () => {
     const darkThemeSelector = '.heybean-app-body[data-hb-theme-resolved="dark"]';
     const menuRule = cssRuleContaining(themeSource, `${darkThemeSelector} .hb-profile-popover`);

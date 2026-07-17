@@ -94,6 +94,14 @@ return [
         'enabled' => (bool) env('BETA_SIGNUPS_ENABLED', true),
     ],
 
+    'openai' => [
+        'api_key' => env('OPENAI_API_KEY'),
+        'bean_text_model' => env('OPENAI_BEAN_TEXT_MODEL', 'gpt-4.1-mini'),
+        'bean_reasoning_model' => env('OPENAI_BEAN_REASONING_MODEL', 'gpt-4.1'),
+        'realtime_model' => env('OPENAI_REALTIME_MODEL', 'gpt-realtime'),
+        'realtime_voice' => env('OPENAI_REALTIME_VOICE', 'alloy'),
+    ],
+
     'google_calendar' => [
         'client_id' => env('GOOGLE_CALENDAR_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CALENDAR_CLIENT_SECRET'),

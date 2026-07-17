@@ -1,0 +1,107 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Models\BeanActivityEvent;
+use App\Models\BeanConfirmationRequest;
+use App\Models\BeanRun;
+use App\Models\BeanSession;
+use App\Services\Bean\BeanRuntimeService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
+class BeanController extends Controller
+{
+    public function __construct(private readonly BeanRuntimeService $runtime) {}
+
+    public function storeSession(Request $request): JsonResponse
+    {
+        $data = $request->validate(['workspace_id' => ['nullable', 'integer', 'exists:workspaces,id']]);
+        return response()->json(['data' => $this->runtime->createSession($request->user(), $data['workspace_id'] ?? null)], 201);
+    }
+
+    public function sessions(Request $request): JsonResponse
+    {
+        $sessions = BeanSession::query()->where('user_id', $request->user()->id)->latest('updated_at')->limit(20)->get();
+        return response()->json(['data' => $sessions]);
+    }
+
+    public function activity(Request $request, BeanSession $session): JsonResponse
+    {
+        abort_unless((int) $session->user_id === (int) $request->user()->id, 404);
+        return response()->json(['data' => [
+            'messages' => $session->messages()->orderBy('id')->limit(100)->get(),
+            'activity' => $session->activityEvents()->orderBy('id')->limit(200)->get(),
+            'confirmations' => BeanConfirmationRequest::query()->where('bean_session_id', $session->id)->where('status', 'pending')->latest('id')->get(),
+        ]]);
+    }
+
+    public function message(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'session_id' => ['nullable', 'integer', 'exists:bean_sessions,id'],
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
+            'content' => ['required', 'string', 'max:8000'],
+        ]);
+        return response()->json(['data' => $this->runtime->handleMessage($request->user(), $data['content'], $data['session_id'] ?? null, $data['workspace_id'] ?? null)]);
+    }
+
+    public function run(Request $request, BeanRun $run): JsonResponse
+    {
+        abort_unless((int) $run->user_id === (int) $request->user()->id, 404);
+        return response()->json(['data' => $run->load(['toolCalls', 'activityEvents'])]);
+    }
+
+    public function approve(Request $request, BeanConfirmationRequest $confirmation): JsonResponse
+    {
+        abort_unless((int) $confirmation->user_id === (int) $request->user()->id, 404);
+        return response()->json(['data' => $this->runtime->approveConfirmation($request->user(), $confirmation->id)]);
+    }
+
+    public function realtimeSession(Request $request): JsonResponse
+    {
+        $apiKey = (string) config('services.openai.api_key');
+        if ($apiKey === '') {
+            return response()->json(['message' => 'OpenAI realtime is not configured.'], 503);
+        }
+        // The client must perform local wake detection first. This endpoint only exists for active turns.
+        $payload = [
+            'model' => config('services.openai.realtime_model', 'gpt-realtime'),
+            'voice' => config('services.openai.realtime_voice', 'alloy'),
+            'instructions' => 'You are Bean. Use Laravel tools for HeyBean data. Never mutate data outside allowed tools.',
+        ];
+        $response = \Illuminate\Support\Facades\Http::withToken($apiKey)->timeout(10)->post('https://api.openai.com/v1/realtime/sessions', $payload);
+        return response()->json($response->json() ?: ['message' => 'Realtime session error'], $response->status());
+    }
+
+    public function events(Request $request): StreamedResponse
+    {
+        $data = $request->validate(['after' => ['nullable', 'integer', 'min:0'], 'wait' => ['nullable', 'integer', 'min:0', 'max:30']]);
+        $after = (int) ($data['after'] ?? 0);
+        $wait = (int) ($data['wait'] ?? 25);
+        $userId = (int) $request->user()->id;
+
+        return response()->stream(function () use ($after, $wait, $userId): void {
+            $deadline = microtime(true) + $wait;
+            $last = $after;
+            do {
+                $events = BeanActivityEvent::query()->where('user_id', $userId)->where('id', '>', $last)->orderBy('id')->limit(50)->get();
+                foreach ($events as $event) {
+                    $last = (int) $event->id;
+                    echo "id: {$event->id}\n";
+                    echo 'event: '.str_replace('_', '.', $event->type)."\n";
+                    echo 'data: '.json_encode(['id' => $event->id, 'type' => $event->type, 'label' => $event->label, 'payload' => $event->payload, 'created_at' => optional($event->created_at)->toIso8601String()])."\n\n";
+                    @ob_flush(); @flush();
+                }
+                if ($events->isNotEmpty() || $wait <= 0) break;
+                usleep(700_000);
+            } while (microtime(true) < $deadline);
+        }, 200, [
+            'Content-Type' => 'text/event-stream',
+            'Cache-Control' => 'no-cache, no-transform',
+            'X-Accel-Buffering' => 'no',
+        ]);
+    }
+}

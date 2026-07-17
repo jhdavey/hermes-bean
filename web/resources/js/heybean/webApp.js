@@ -129,6 +129,18 @@ export function mountHeyBeanWebApp(mount) {
         error: '',
         notice: '',
         modal: null,
+        bean: {
+            sessionId: '',
+            panelOpen: false,
+            mode: localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy',
+            statusText: localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'Listening for “Hey Bean”' : 'Privacy mode',
+            input: '',
+            busy: false,
+            messages: [],
+            activity: [],
+            confirmations: [],
+            error: '',
+        },
     };
     const externalCalendarImportPresets = [
         {
@@ -210,6 +222,8 @@ export function mountHeyBeanWebApp(mount) {
     const pendingNoteFolderNames = new Set();
     const noteAutosaveDelay = 300;
     let workspaceSwitchGeneration = 0;
+    let beanEventAbort = null;
+    let beanEventLastId = 0;
 
     boot();
     bindResponsiveCalendar();
@@ -578,6 +592,7 @@ export function mountHeyBeanWebApp(mount) {
             state.googleStatus = googleStatus;
             state.outlookStatus = outlookStatus;
             state.phase = 'signedIn';
+            startBeanEventFeed();
             state.dashboardDataLoading = false;
             // A partial background refresh should never become a global red
             // error when the cached/remaining resources can render normally.
@@ -588,6 +603,7 @@ export function mountHeyBeanWebApp(mount) {
             refreshCalendarInBackground();
         } catch (error) {
             stopDashboardChangeFeed();
+            stopBeanEventFeed();
             state.dashboardDataLoading = false;
             if (isUnauthenticatedError(error)) {
                 clearToken();
@@ -1704,13 +1720,14 @@ export function mountHeyBeanWebApp(mount) {
             <div class="hb-app">
                 ${betaBannerMarkup()}
                 <header class="hb-topbar">
+                    ${beanPresenceMarkup()}
+                    <span class="hb-spacer"></span>
                     <div class="hb-topbar-date-line" data-tour-target="calendar-controls">
                         <time class="hb-topbar-current-time" data-current-time datetime="${escapeAttr(now.toISOString())}">${escapeHtml(formatTopbarTime(now))}</time>
                         <button class="hb-header-pill" data-today type="button"><span>${escapeHtml(topbarTodayLabel(now))}</span></button>
                         <button class="hb-header-pill hb-month-pill" data-calendar-month type="button"><span>${escapeHtml(monthLabel(now))}</span></button>
                     </div>
                     ${state.selected === 'today' && state.showMonth ? `<div class="hb-topbar-month-cluster">${monthSwitcherMarkup(parseLocalDate(state.selectedDay))}</div>` : ''}
-                    <span class="hb-spacer"></span>
                     ${topNavMarkup()}
                     ${showAdd ? topCreateMenuMarkup() : ''}
                     ${criticalMenuMarkup(criticalTasks, criticalReminders, criticalEvents)}
@@ -1720,6 +1737,7 @@ export function mountHeyBeanWebApp(mount) {
                     ${appPanelMarkup()}
                 </main>
                 ${bottomMenuMarkup()}
+                ${state.bean.panelOpen ? beanPanelMarkup() : ''}
                 ${onboardingTourMarkup()}
             </div>`;
     }
@@ -1728,6 +1746,71 @@ export function mountHeyBeanWebApp(mount) {
         if (!userIsEarlyAccess()) return '';
 
         return `<button class="hb-beta-banner" type="button" data-open-issue-report>You are in our Beta testing phase. If you have any issues, please report them here.</button>`;
+    }
+
+    function beanPresenceMarkup() {
+        const mode = state.bean.mode || 'privacy';
+        const label = state.bean.statusText || (mode === 'privacy' ? 'Privacy mode' : 'Listening for “Hey Bean”');
+        const pressed = mode !== 'privacy';
+        return `
+            <div class="hb-bean-presence hb-bean-${escapeAttr(mode)}">
+                <button class="hb-bean-button" type="button" data-bean-toggle aria-pressed="${pressed}" aria-label="${pressed ? 'Turn Bean privacy mode on' : 'Listen for Hey Bean'}" title="${pressed ? 'Bean is listening locally for Hey Bean' : 'Privacy mode'}">
+                    <span class="hb-bean-ring" aria-hidden="true"></span>
+                    <img src="${escapeAttr(logoUrl)}" alt="Bean">
+                </button>
+                <button class="hb-bean-status-pill" type="button" data-bean-panel aria-label="Open Bean activity">
+                    <span>${escapeHtml(label)}</span>
+                </button>
+            </div>`;
+    }
+
+    function beanPanelMarkup() {
+        const messages = normalizeList(state.bean.messages);
+        const activity = normalizeList(state.bean.activity).slice(-40);
+        const confirmations = normalizeList(state.bean.confirmations);
+        return `
+            <aside class="hb-bean-panel" aria-label="Bean assistant">
+                <div class="hb-bean-panel-head">
+                    <div><strong>Bean</strong><span>Your HeyBean assistant</span></div>
+                    <button class="hb-icon-button" type="button" data-bean-panel-close aria-label="Close Bean">×</button>
+                </div>
+                <div class="hb-bean-privacy-row">
+                    <button class="hb-chip ${state.bean.mode === 'privacy' ? 'hb-chip-active' : ''}" type="button" data-bean-privacy="privacy">Privacy mode</button>
+                    <button class="hb-chip ${state.bean.mode !== 'privacy' ? 'hb-chip-active' : ''}" type="button" data-bean-privacy="wake_listening">Listen for “Hey Bean”</button>
+                </div>
+                ${state.bean.error ? `<div class="hb-error">${escapeHtml(state.bean.error)}</div>` : ''}
+                <div class="hb-bean-chat-log" aria-live="polite">
+                    ${messages.length ? messages.map(beanMessageMarkup).join('') : '<div class="hb-empty hb-surface-soft">Ask Bean to manage your calendar, tasks, reminders, or notes.</div>'}
+                </div>
+                ${confirmations.length ? `<div class="hb-bean-confirmations">${confirmations.map(beanConfirmationMarkup).join('')}</div>` : ''}
+                <form class="hb-bean-chat-form" data-bean-chat-form>
+                    <input type="text" data-bean-input placeholder="Ask Bean anything…" value="${escapeAttr(state.bean.input)}" ${state.bean.busy ? 'disabled' : ''}>
+                    <button class="hb-button" type="submit" ${state.bean.busy ? 'disabled' : ''}>${state.bean.busy ? 'Working…' : 'Send'}</button>
+                </form>
+                <details class="hb-bean-activity" open>
+                    <summary>Activity log</summary>
+                    <div>${activity.length ? activity.map(beanActivityMarkup).join('') : '<span>No Bean activity yet.</span>'}</div>
+                </details>
+            </aside>`;
+    }
+
+    function beanMessageMarkup(message) {
+        const role = String(message.role || '').toLowerCase() === 'user' ? 'user' : 'assistant';
+        return `<div class="hb-bean-message hb-bean-message-${role}"><strong>${role === 'user' ? 'You' : 'Bean'}</strong><span>${escapeHtml(message.content || '')}</span></div>`;
+    }
+
+    function beanActivityMarkup(event) {
+        return `<div class="hb-bean-activity-row"><small>${escapeHtml(formatActivityTime(event.created_at || event.createdAt))}</small><span>${escapeHtml(event.label || event.type || 'Bean activity')}</span></div>`;
+    }
+
+    function beanConfirmationMarkup(confirmation) {
+        return `<div class="hb-bean-confirmation"><span>${escapeHtml(confirmation.summary || 'Please confirm this action.')}</span><button class="hb-button-secondary" type="button" data-bean-confirm="${escapeAttr(confirmation.id)}">Confirm</button></div>`;
+    }
+
+    function formatActivityTime(value) {
+        if (!value) return '';
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     }
 
     function appPanelMarkup() {
@@ -4243,6 +4326,106 @@ export function mountHeyBeanWebApp(mount) {
         mount.querySelectorAll('[data-subscribe-logout]').forEach((button) => button.addEventListener('click', logout));
     }
 
+    function bindBeanActions() {
+        mount.querySelector('[data-bean-toggle]')?.addEventListener('click', toggleBeanPrivacyMode);
+        mount.querySelector('[data-bean-panel]')?.addEventListener('click', () => {
+            state.bean.panelOpen = true;
+            loadBeanActivity().finally(render);
+        });
+        mount.querySelector('[data-bean-panel-close]')?.addEventListener('click', () => {
+            state.bean.panelOpen = false;
+            render();
+        });
+        mount.querySelectorAll('[data-bean-privacy]').forEach((button) => button.addEventListener('click', () => setBeanMode(button.dataset.beanPrivacy || 'privacy')));
+        mount.querySelector('[data-bean-input]')?.addEventListener('input', (event) => {
+            state.bean.input = event.currentTarget.value;
+        });
+        mount.querySelector('[data-bean-chat-form]')?.addEventListener('submit', sendBeanMessage);
+        mount.querySelectorAll('[data-bean-confirm]').forEach((button) => button.addEventListener('click', () => approveBeanConfirmation(button.dataset.beanConfirm)));
+    }
+
+    function toggleBeanPrivacyMode() {
+        setBeanMode(state.bean.mode === 'privacy' ? 'wake_listening' : 'privacy');
+    }
+
+    function setBeanMode(mode) {
+        state.bean.mode = mode === 'privacy' ? 'privacy' : 'wake_listening';
+        state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening locally for “Hey Bean”';
+        localStorage.setItem('heybean.bean.privacy', state.bean.mode === 'privacy' ? 'privacy' : 'listening');
+        render();
+    }
+
+    async function ensureBeanSession() {
+        if (state.bean.sessionId) return state.bean.sessionId;
+        const session = await api('/bean/sessions', { method: 'POST', body: { workspace_id: currentWorkspaceId() } });
+        state.bean.sessionId = session.id;
+        return state.bean.sessionId;
+    }
+
+    async function loadBeanActivity() {
+        try {
+            const sessionId = await ensureBeanSession();
+            const data = await api(`/bean/sessions/${encodeURIComponent(sessionId)}/activity`);
+            state.bean.messages = normalizeList(data.messages);
+            state.bean.activity = normalizeList(data.activity);
+            state.bean.confirmations = normalizeList(data.confirmations);
+            state.bean.error = '';
+        } catch (error) {
+            state.bean.error = friendlyError(error, 'load Bean activity');
+        }
+    }
+
+    async function sendBeanMessage(event) {
+        event.preventDefault();
+        const content = String(state.bean.input || mount.querySelector('[data-bean-input]')?.value || '').trim();
+        if (!content || state.bean.busy) return;
+        state.bean.busy = true;
+        state.bean.input = '';
+        state.bean.panelOpen = true;
+        state.bean.mode = 'thinking';
+        state.bean.statusText = 'Thinking…';
+        state.bean.messages = [...normalizeList(state.bean.messages), { role: 'user', content }];
+        render();
+        try {
+            const sessionId = await ensureBeanSession();
+            const data = await api('/bean/messages', { method: 'POST', body: { session_id: sessionId, content } });
+            state.bean.sessionId = data.session?.id || sessionId;
+            state.bean.messages = normalizeList(data.messages);
+            state.bean.activity = normalizeList(data.activity);
+            state.bean.confirmations = normalizeList(data.confirmations);
+            state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
+            state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening for “Hey Bean”';
+            scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
+        } catch (error) {
+            state.bean.error = friendlyError(error, 'ask Bean');
+            state.bean.mode = 'error';
+            state.bean.statusText = 'Bean hit a problem';
+        }
+        state.bean.busy = false;
+        render();
+    }
+
+    async function approveBeanConfirmation(id) {
+        if (!id || state.bean.busy) return;
+        state.bean.busy = true;
+        state.bean.mode = 'working';
+        state.bean.statusText = 'Working…';
+        render();
+        try {
+            await api(`/bean/confirmations/${encodeURIComponent(id)}/approve`, { method: 'POST', body: {} });
+            await loadBeanActivity();
+            scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
+            state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
+            state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening for “Hey Bean”';
+        } catch (error) {
+            state.bean.error = friendlyError(error, 'confirm Bean action');
+            state.bean.mode = 'error';
+            state.bean.statusText = 'Bean hit a problem';
+        }
+        state.bean.busy = false;
+        render();
+    }
+
     async function submitAuth(event) {
         event.preventDefault();
         const form = event.currentTarget;
@@ -4345,6 +4528,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function bindSignedInActions() {
+        bindBeanActions();
         mount.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => {
             state.selected = button.dataset.nav;
             state.error = '';
@@ -4374,6 +4558,7 @@ export function mountHeyBeanWebApp(mount) {
         });
         mount.querySelector('[data-admin-login]')?.addEventListener('click', () => {
             stopDashboardChangeFeed();
+            stopBeanEventFeed();
             clearToken();
             state.phase = 'signedOut';
             state.authMode = 'login';
@@ -6799,6 +6984,74 @@ export function mountHeyBeanWebApp(mount) {
         }
     }
 
+    function startBeanEventFeed() {
+        if (!state.token || state.phase !== 'signedIn' || beanEventAbort) return;
+        beanEventAbort = new AbortController();
+        pollBeanEvents(beanEventAbort.signal);
+    }
+
+    function stopBeanEventFeed() {
+        if (beanEventAbort) {
+            beanEventAbort.abort();
+            beanEventAbort = null;
+        }
+    }
+
+    async function pollBeanEvents(signal) {
+        while (!signal.aborted && state.token && state.phase === 'signedIn') {
+            try {
+                const response = await fetch(`/api/bean/events?after=${encodeURIComponent(beanEventLastId)}&wait=25`, {
+                    headers: { Accept: 'text/event-stream', Authorization: `Bearer ${state.token}` },
+                    signal,
+                });
+                if (response.status === 401) return;
+                if (!response.ok || !response.body) throw new Error('Bean event stream failed.');
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                while (!signal.aborted) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const parts = buffer.split('\n\n');
+                    buffer = parts.pop() || '';
+                    parts.forEach(handleBeanEventBlock);
+                }
+            } catch (error) {
+                if (signal.aborted) return;
+                await sleep(2500);
+            }
+        }
+        if (beanEventAbort?.signal === signal) beanEventAbort = null;
+    }
+
+    function handleBeanEventBlock(block) {
+        const lines = String(block || '').split('\n');
+        const idLine = lines.find((line) => line.startsWith('id:'));
+        const dataLine = lines.find((line) => line.startsWith('data:'));
+        if (idLine) beanEventLastId = Math.max(beanEventLastId, Number(idLine.slice(3).trim()) || 0);
+        if (!dataLine) return;
+        let event;
+        try { event = JSON.parse(dataLine.slice(5).trim()); } catch (_) { return; }
+        if (!event?.id) return;
+        if (!normalizeList(state.bean.activity).some((item) => Number(item.id) === Number(event.id))) {
+            state.bean.activity = [...normalizeList(state.bean.activity), event].slice(-100);
+        }
+        const payloadMode = event.payload?.mode || '';
+        if (event.type === 'status' && payloadMode) {
+            state.bean.mode = payloadMode;
+            state.bean.statusText = event.label || state.bean.statusText;
+        } else if (event.type === 'tool_started') {
+            state.bean.mode = 'working';
+            state.bean.statusText = event.label || 'Working…';
+        } else if (event.type === 'assistant_message') {
+            state.bean.statusText = event.label || 'Done';
+        }
+        if (state.bean.panelOpen || ['status', 'tool_started', 'tool_completed', 'tool_failed', 'assistant_message'].includes(event.type)) {
+            render();
+        }
+    }
+
     async function pollDashboardChanges() {
         if (!dashboardChangeLoopActive || !state.token) return;
         dashboardChangeAbort = new AbortController();
@@ -7429,6 +7682,7 @@ export function mountHeyBeanWebApp(mount) {
     async function logout() {
         try { await api('/auth/logout', { method: 'POST' }); } catch (_) {}
         stopDashboardChangeFeed();
+        stopBeanEventFeed();
         clearToken();
         state.phase = 'signedOut';
         state.authMode = 'login';
@@ -7443,6 +7697,7 @@ export function mountHeyBeanWebApp(mount) {
         try {
             await api('/account', { method: 'DELETE' });
             stopDashboardChangeFeed();
+            stopBeanEventFeed();
             clearToken();
             state.phase = 'signedOut';
             state.authMode = 'login';
