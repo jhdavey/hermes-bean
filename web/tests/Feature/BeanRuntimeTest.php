@@ -125,6 +125,36 @@ class BeanRuntimeTest extends TestCase
         $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'dashboard.summary']);
     }
 
+    public function test_openai_planner_answers_voice_check_without_clarifying(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.bean_text_model' => 'gpt-4.1-mini',
+        ]);
+        Http::fake();
+
+        $response = $this->withToken($this->apiToken('bean-voice-check-openai@example.com'))->postJson('/api/bean/messages', [
+            'content' => 'can you hear me',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'Yes — I can hear you.']);
+        $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'time.now']);
+        Http::assertNothingSent();
+    }
+
+    public function test_local_parser_answers_voice_check_without_clarifying(): void
+    {
+        config(['services.openai.api_key' => null]);
+
+        $this->withToken($this->apiToken('bean-voice-check-local@example.com'))->postJson('/api/bean/messages', [
+            'content' => 'can you hear me',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'Yes — I can hear you.']);
+    }
+
     public function test_local_parser_completes_unambiguous_task_without_creating_duplicate(): void
     {
         config(['services.openai.api_key' => null]);

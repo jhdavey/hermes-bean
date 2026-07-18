@@ -42,6 +42,10 @@ class BeanTextModel
 
     public function propose(BeanSession $session, string $message): array
     {
+        if ($this->isVoiceHealthCheck($message)) {
+            return ['response' => 'Yes — I can hear you.', 'actions' => [], 'model' => 'local-heuristic'];
+        }
+
         $apiKey = (string) config('services.openai.api_key');
         if ($apiKey === '') {
             return $this->heuristic($message, null, $session);
@@ -828,6 +832,14 @@ PROMPT;
     private function isOnlineRecipeRequest(string $lower): bool
     {
         return str_contains($lower, 'recipe') && preg_match('/\b(go online|online|find|look up|lookup|search|internet|web)\b/u', $lower) === 1;
+    }
+
+    private function isVoiceHealthCheck(string $text): bool
+    {
+        $lower = mb_strtolower(trim(preg_replace('/[^\pL\pN\s]/u', ' ', $text) ?: $text));
+        $lower = trim(preg_replace('/\s+/', ' ', $lower) ?: $lower);
+
+        return preg_match('/\b(can you hear me|do you hear me|are you there|you there|can you hear|testing testing|mic check)\b/u', $lower) === 1;
     }
 
     private function isVagueFragment(string $text): bool
