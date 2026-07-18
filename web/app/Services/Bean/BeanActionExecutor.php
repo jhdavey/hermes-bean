@@ -139,11 +139,14 @@ class BeanActionExecutor
         $class = $this->classForReadAction($action, $arguments);
         if ($class === null) return $arguments;
 
-        $timeLabel = $this->timeLabel($arguments);
-        if ($timeLabel === null) return $arguments;
+        $arguments = $this->normalizeStatusArgument($class, $arguments);
 
         $field = $this->temporalField($class);
         if ($field === null) return $arguments;
+
+        $timeLabel = $this->timeLabel($arguments) ?? $this->inferTemporalLabelFromFilters($class, $field, $arguments);
+        if ($timeLabel === null) return $arguments;
+        $arguments['time_label'] = $timeLabel;
 
         $temporalFilters = $this->temporalFilters($class, $field, $timeLabel);
         if ($temporalFilters === []) return $arguments;
@@ -158,6 +161,39 @@ class BeanActionExecutor
         }
 
         return $arguments;
+    }
+
+    private function normalizeStatusArgument(string $class, array $arguments): array
+    {
+        $status = strtolower(trim((string) ($arguments['status'] ?? '')));
+        if ($status === '') return $arguments;
+
+        if ($class === Task::class && in_array($status, ['active', 'incomplete', 'not_completed', 'not completed', 'not complete', 'pending', 'overdue'], true)) {
+            $arguments['status'] = 'open';
+            if ($status === 'overdue' && $this->timeLabel($arguments) === null) {
+                $arguments['time_label'] = 'overdue';
+            }
+        } elseif ($class === Reminder::class && in_array($status, ['active', 'pending', 'incomplete', 'not_completed', 'not completed', 'not complete', 'overdue'], true)) {
+            $arguments['status'] = 'scheduled';
+            if ($status === 'overdue' && $this->timeLabel($arguments) === null) {
+                $arguments['time_label'] = 'overdue';
+            }
+        }
+
+        return $arguments;
+    }
+
+    private function inferTemporalLabelFromFilters(string $class, string $field, array $arguments): ?string
+    {
+        if (! in_array($class, [Task::class, Reminder::class], true)) return null;
+        foreach (is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [] as $filter) {
+            if (! is_array($filter) || ($filter['field'] ?? null) !== $field) continue;
+            if (in_array(strtolower((string) ($filter['operator'] ?? '=')), ['<', '<='], true)) {
+                return 'overdue';
+            }
+        }
+
+        return null;
     }
 
     private function classForReadAction(string $action, array $arguments): ?string
@@ -216,6 +252,9 @@ class BeanActionExecutor
     {
         $query = $this->baseQuery($class, $run);
         $this->applyDefaultReadConstraints($query, $class, $arguments);
+        if (($arguments['status'] ?? null) !== null) {
+            $query->where('status', (string) $arguments['status']);
+        }
         $this->applyStructuredFilters($query, $class, $arguments['filters'] ?? []);
         $accessibleWorkspaceIds = $this->workspaceIds($run);
         $order = $this->primarySort($class, $arguments, $orderField);

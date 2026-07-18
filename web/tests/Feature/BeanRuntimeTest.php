@@ -94,35 +94,32 @@ class BeanRuntimeTest extends TestCase
         Http::assertSentCount(1);
     }
 
-    public function test_openai_planner_does_not_execute_actions_for_vague_fragments(): void
+    public function test_openai_planner_no_longer_uses_fragment_guard(): void
     {
         config([
             'services.openai.api_key' => 'test-openai-key',
             'services.openai.bean_text_model' => 'gpt-4.1-mini',
         ]);
-        $token = $this->apiToken('bean-vague-openai@example.com');
+        $token = $this->apiToken('bean-fragment-guard-removed@example.com');
 
         Http::fake(fn () => Http::response([
             'choices' => [[
                 'message' => [
                     'content' => json_encode([
-                        'response' => 'Here is your dashboard summary. Done.',
-                        'actions' => [[
-                            'action' => 'dashboard.summary',
-                            'arguments' => ['workspace_id' => null],
-                        ]],
+                        'response' => 'I heard you.',
+                        'actions' => [],
                     ]),
                 ],
             ]],
         ], 200));
 
         $this->withToken($token)->postJson('/api/bean/messages', [
-            'content' => 'First request every time.',
+            'content' => 'spec',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
-            ->assertJsonFragment(['content' => 'I’m not sure what you mean yet — can you clarify?']);
+            ->assertJsonFragment(['content' => 'I heard you.']);
 
-        $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'dashboard.summary']);
+        Http::assertSentCount(1);
     }
 
     public function test_openai_planner_answers_voice_check_without_clarifying(): void
@@ -1068,6 +1065,80 @@ class BeanRuntimeTest extends TestCase
             ->assertJsonFragment(['content' => 'You have 1 overdue open task: Clean outdoor grout. You have 1 overdue scheduled reminder: Fix leak above grill.']);
 
         $this->assertStringNotContainsString('Tomorrow task', $response->getContent());
+    }
+
+    public function test_openai_overdue_task_query_ignores_invalid_status_alias_and_excludes_completed_tasks(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.bean_text_model' => 'gpt-4.1-mini',
+        ]);
+        Carbon::setTestNow(Carbon::parse('2026-07-18 14:17:24', config('app.timezone')));
+        $token = $this->apiToken('bean-openai-overdue-invalid-status@example.com');
+        $user = User::where('email', 'bean-openai-overdue-invalid-status@example.com')->firstOrFail();
+
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Clean outdoor grout',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->subDays(7)->setTime(14, 45),
+        ]);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Fix leak above grill',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->subDays(3)->setTime(21, 45),
+        ]);
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Completed old payroll',
+            'type' => 'todo',
+            'status' => 'completed',
+            'due_at' => now()->subMonth()->setTime(13, 0),
+        ]);
+
+        Http::fake(fn () => Http::response([
+            'choices' => [[
+                'message' => [
+                    'content' => json_encode([
+                        'response' => 'I’ll check overdue tasks.',
+                        'actions' => [[
+                            'action' => 'task.list',
+                            'arguments' => [
+                                'status' => 'incomplete',
+                                'filters' => [[
+                                    'field' => 'due_at',
+                                    'operator' => '<',
+                                    'value' => '2026-07-18T14:17:24+00:00',
+                                ]],
+                                'workspace_id' => $user->default_workspace_id,
+                                'include_workspaces' => true,
+                            ],
+                        ]],
+                    ]),
+                ],
+            ]],
+        ], 200));
+
+        $response = $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Do I have any overdue tasks?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'You have 2 overdue open tasks: Clean outdoor grout and Fix leak above grill.']);
+
+        $this->assertStringNotContainsString('Completed old payroll', $response->getContent());
+        $toolCall = BeanToolCall::query()->where('action', 'task.list')->latest('id')->firstOrFail();
+        $this->assertSame('overdue', $toolCall->arguments['time_label'] ?? null);
+        $this->assertSame('open', $toolCall->arguments['status'] ?? null);
+        Carbon::setTestNow();
     }
 
     public function test_ambiguous_task_completion_names_the_possible_matches_without_completing_any(): void

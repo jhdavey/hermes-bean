@@ -77,20 +77,6 @@ class BeanTextModel
 
             $actions = $this->dropIrrelevantTimeActions($this->cleanActions($decoded['actions'] ?? []), $message);
             $followUp = $this->temporalFollowUpAction($message, mb_strtolower($message), $session);
-            if ($this->isVagueFragment($message)) {
-                if ($actions === [] && $followUp !== null) {
-                    return [
-                        'response' => 'I’ll check that for '.($followUp['arguments']['time_label'] ?? 'then').'.',
-                        'actions' => [$followUp],
-                        'model' => $model,
-                    ];
-                }
-                return [
-                    'response' => 'I’m not sure what you mean yet — can you clarify?',
-                    'actions' => [],
-                    'model' => $model,
-                ];
-            }
             if ($actions === [] && $followUp !== null) {
                 $actions[] = $followUp;
             }
@@ -401,14 +387,10 @@ PROMPT;
         $response = $prefix ?: 'I can help with that.';
 
         $followUp = $this->temporalFollowUpAction($text, $lower, $session);
-        if ($this->isVagueFragment($text)) {
-            if ($followUp !== null) {
-                return ['response' => 'I’ll check that for '.($followUp['arguments']['time_label'] ?? 'then').'.', 'actions' => [$followUp], 'model' => 'local-heuristic'];
-            }
-            return ['response' => 'I’m not sure what you mean yet — can you clarify?', 'actions' => [], 'model' => 'local-heuristic'];
-        }
-
-        if ($this->isCorrectionRequest($lower, $session)) {
+        if ($followUp !== null) {
+            $actions[] = $followUp;
+            $response = 'I’ll check that for '.($followUp['arguments']['time_label'] ?? 'then').'.';
+        } elseif ($this->isCorrectionRequest($lower, $session)) {
             $actions[] = ['action' => 'resource.query', 'arguments' => $this->resourceQueryArguments($text, $lower, $session)];
             $response = 'I’ll use the correction.';
         } elseif (str_contains($lower, 'weather')) {
@@ -840,22 +822,6 @@ PROMPT;
         $lower = trim(preg_replace('/\s+/', ' ', $lower) ?: $lower);
 
         return preg_match('/\b(can you hear me|do you hear me|are you there|you there|can you hear|testing testing|mic check)\b/u', $lower) === 1;
-    }
-
-    private function isVagueFragment(string $text): bool
-    {
-        $lower = mb_strtolower(trim(preg_replace('/[^\pL\pN\s]/u', ' ', $text) ?: $text));
-        if (str_contains($lower, 'every time') && preg_match('/\b(what|current|tell|give)\b.*\btime\b|\btime\b.*\b(now|please|is)\b/u', $lower) !== 1) {
-            return true;
-        }
-        $words = array_values(array_filter(preg_split('/\s+/', $lower) ?: []));
-        if (count($words) === 0 || count($words) > 5) return false;
-        $specific = ['task', 'tasks', 'todo', 'todos', 'to', 'do', 'reminder', 'reminders', 'calendar', 'event', 'events', 'appointment', 'appointments', 'note', 'notes', 'workspace', 'workspaces', 'weather', 'time', 'date', 'recipe', 'recipes', 'meal', 'meals', 'list', 'show', 'add', 'create', 'complete', 'delete', 'schedule', 'remind', 'find', 'search', 'pay', 'card', 'work', 'due', 'late', 'past', 'miss', 'missed', 'overdue'];
-        foreach ($specific as $word) {
-            if (in_array($word, $words, true)) return false;
-        }
-
-        return true;
     }
 
     private function isCorrectionRequest(string $lower, ?BeanSession $session): bool
