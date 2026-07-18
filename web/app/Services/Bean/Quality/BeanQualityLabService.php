@@ -222,13 +222,13 @@ class BeanQualityLabService
                 $failures[] = 'missing required action: '.$action;
             }
         }
-        if (isset($expected['required_date_scope'])) {
+        if (isset($expected['required_time_label'])) {
             $scopeFound = collect($runs)->flatMap(fn (BeanRun $run) => $run->toolCalls)->contains(function ($tool) use ($expected): bool {
                 $arguments = is_array($tool->arguments) ? $tool->arguments : [];
                 $result = is_array($tool->result) ? $tool->result : [];
-                return ($arguments['date_scope'] ?? $result['date_scope'] ?? null) === $expected['required_date_scope'];
+                return ($arguments['time_label'] ?? $result['time_label'] ?? null) === $expected['required_time_label'];
             });
-            if (! $scopeFound) $failures[] = 'missing date scope: '.$expected['required_date_scope'];
+            if (! $scopeFound) $failures[] = 'missing time label: '.$expected['required_time_label'];
         }
         if (isset($expected['run_status'])) {
             $status = optional(collect($runs)->last())->status;
@@ -379,7 +379,7 @@ class BeanQualityLabService
     private function scenarios(): array
     {
         $scenarios = [];
-        $todayExpected = ['must_include' => ['Pay the travel card', 'Clean outdoor grout', 'overdue', 'due today'], 'must_not_include' => ['Prep launch deck', 'Completed groceries', 'not specifically due today'], 'required_tool_actions' => ['task.list'], 'required_date_scope' => 'today'];
+        $todayExpected = ['must_include' => ['Pay the travel card', 'Clean outdoor grout', 'overdue', 'due today'], 'must_not_include' => ['Prep launch deck', 'Completed groceries', 'not specifically due today'], 'required_tool_actions' => ['task.list'], 'required_time_label' => 'today'];
         foreach ($this->todayTaskPrompts() as $i => $prompt) {
             $scenarios[] = ['name' => $i === 0 ? 'today task list separates overdue and due today' : 'today task prompt sweep '.($i + 1), 'category' => 'factual', 'turns' => [$prompt], 'expected' => $todayExpected];
         }
@@ -399,7 +399,7 @@ class BeanQualityLabService
         }
         foreach ($this->overduePrompts() as $i => $prompt) {
             $lowerPrompt = mb_strtolower($prompt);
-            $expected = ['must_include' => ['overdue'], 'must_not_include' => ['Prep launch deck'], 'required_date_scope' => 'overdue'];
+            $expected = ['must_include' => ['overdue'], 'must_not_include' => ['Prep launch deck'], 'required_time_label' => 'overdue'];
             if (str_contains($lowerPrompt, 'reminder') && ! str_contains($lowerPrompt, 'task')) {
                 $expected['must_include'][] = 'Fix leak above grill';
             } elseif (str_contains($lowerPrompt, 'task') && ! str_contains($lowerPrompt, 'reminder') && ! str_contains($lowerPrompt, 'item')) {
@@ -411,12 +411,12 @@ class BeanQualityLabService
             $scenarios[] = ['name' => 'overdue prompt sweep '.($i + 1), 'category' => 'factual', 'turns' => [$prompt], 'expected' => $expected];
         }
         foreach ($this->reminderPrompts() as $i => $prompt) {
-            $scenarios[] = ['name' => 'today reminder prompt sweep '.($i + 1), 'category' => 'factual', 'turns' => [$prompt], 'expected' => ['must_include' => ['Fix leak above grill', 'Buy dog food'], 'required_tool_actions' => ['reminder.list'], 'required_date_scope' => 'today']];
+            $scenarios[] = ['name' => 'today reminder prompt sweep '.($i + 1), 'category' => 'factual', 'turns' => [$prompt], 'expected' => ['must_include' => ['Fix leak above grill', 'Buy dog food'], 'required_tool_actions' => ['reminder.list'], 'required_time_label' => 'today']];
         }
         foreach ($this->calendarPrompts() as $i => $prompt) {
-            $scenarios[] = ['name' => 'calendar prompt sweep '.($i + 1), 'category' => 'factual', 'turns' => [$prompt], 'expected' => ['must_include' => ['Lunch with Bob'], 'must_not_include' => ['Team call'], 'required_tool_actions' => ['calendar_event.list'], 'required_date_scope' => 'today']];
+            $scenarios[] = ['name' => 'calendar prompt sweep '.($i + 1), 'category' => 'factual', 'turns' => [$prompt], 'expected' => ['must_include' => ['Lunch with Bob'], 'must_not_include' => ['Team call'], 'required_tool_actions' => ['calendar_event.list'], 'required_time_label' => 'today']];
         }
-        $scenarios[] = ['name' => 'tomorrow calendar filters tomorrow only', 'category' => 'factual', 'turns' => ['Do I have anything on my calendar for tomorrow?'], 'expected' => ['must_include' => ['Team call'], 'must_not_include' => ['Lunch with Bob'], 'required_tool_actions' => ['calendar_event.list'], 'required_date_scope' => 'tomorrow']];
+        $scenarios[] = ['name' => 'tomorrow calendar filters tomorrow only', 'category' => 'factual', 'turns' => ['Do I have anything on my calendar for tomorrow?'], 'expected' => ['must_include' => ['Team call'], 'must_not_include' => ['Lunch with Bob'], 'required_tool_actions' => ['calendar_event.list'], 'required_time_label' => 'tomorrow']];
         foreach ($this->notePrompts() as $i => $prompt) {
             $scenarios[] = ['name' => 'note prompt sweep '.($i + 1), 'category' => 'factual', 'turns' => [$prompt], 'expected' => ['must_include' => ['Grill repair notes']]];
         }

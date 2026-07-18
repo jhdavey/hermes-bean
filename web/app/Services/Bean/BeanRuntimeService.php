@@ -430,8 +430,8 @@ class BeanRuntimeService
         }
 
         $label = $this->listLabel($list, $count !== 1);
-        $dateScope = strtolower(trim((string) ($list['date_scope'] ?? data_get($list, 'arguments.date_scope') ?? '')));
-        if ($dateScope === 'today' && in_array((string) ($list['action'] ?? ''), ['task.list', 'reminder.list'], true)) {
+        $timeLabel = strtolower(trim((string) ($list['time_label'] ?? data_get($list, 'arguments.time_label') ?? '')));
+        if ($timeLabel === 'today' && in_array((string) ($list['action'] ?? ''), ['task.list', 'reminder.list'], true)) {
             $grouped = $this->todayListBreakdown($list, $items);
             if ($grouped !== null) return $grouped;
         }
@@ -477,7 +477,7 @@ class BeanRuntimeService
     private function listLabel(array $list, bool $plural = true): string
     {
         $action = (string) ($list['action'] ?? '');
-        $dateScope = strtolower(trim((string) ($list['date_scope'] ?? data_get($list, 'arguments.date_scope') ?? '')));
+        $timeLabel = strtolower(trim((string) ($list['time_label'] ?? data_get($list, 'arguments.time_label') ?? '')));
         $noun = match ($action) {
             'task.list', 'task.search' => 'task',
             'reminder.list', 'reminder.search' => 'reminder',
@@ -488,7 +488,7 @@ class BeanRuntimeService
         $kindQualifier = match ($action) {
             'task.list', 'task.search' => 'open',
             'reminder.list', 'reminder.search' => 'scheduled',
-            'calendar_event.list', 'calendar_event.search' => in_array($dateScope, ['today', 'tomorrow'], true) ? '' : 'upcoming',
+            'calendar_event.list', 'calendar_event.search' => in_array($timeLabel, ['today', 'tomorrow'], true) ? '' : 'upcoming',
             default => '',
         };
         if ($plural && ! str_ends_with($noun, 's')) {
@@ -496,7 +496,7 @@ class BeanRuntimeService
         }
         $resourceLabel = trim($kindQualifier.' '.$noun);
 
-        return match ($dateScope) {
+        return match ($timeLabel) {
             'today' => in_array($action, ['task.list', 'reminder.list'], true) ? $resourceLabel.' due by today' : $resourceLabel.' for today',
             'tomorrow' => $resourceLabel.' tomorrow',
             'overdue' => 'overdue '.$resourceLabel,

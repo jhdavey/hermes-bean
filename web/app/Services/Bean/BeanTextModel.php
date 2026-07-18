@@ -236,6 +236,31 @@ PROMPT;
             'type' => ['array', 'null'],
             'items' => ['type' => 'string'],
         ];
+        $nullableFilterArray = [
+            'type' => ['array', 'null'],
+            'items' => [
+                'type' => 'object',
+                'additionalProperties' => false,
+                'required' => ['field', 'operator', 'value'],
+                'properties' => [
+                    'field' => ['type' => 'string'],
+                    'operator' => ['type' => 'string', 'enum' => ['=', '!=', '<', '<=', '>', '>=', 'between', 'in', 'like']],
+                    'value' => ['type' => ['string', 'number', 'integer', 'boolean', 'array', 'null'], 'items' => ['type' => ['string', 'number', 'integer', 'boolean', 'null']]],
+                ],
+            ],
+        ];
+        $nullableSortArray = [
+            'type' => ['array', 'null'],
+            'items' => [
+                'type' => 'object',
+                'additionalProperties' => false,
+                'required' => ['field', 'direction'],
+                'properties' => [
+                    'field' => ['type' => 'string'],
+                    'direction' => ['type' => 'string', 'enum' => ['asc', 'desc']],
+                ],
+            ],
+        ];
         $properties = [
             'id' => $nullableInteger,
             'resource_id' => $nullableInteger,
@@ -268,7 +293,11 @@ PROMPT;
             'sync_to_workspace_ids' => $nullableIntegerArray,
             'delete_from_workspace_ids' => $nullableIntegerArray,
             'include' => $nullableStringArray,
-            'date_scope' => $nullableString,
+            'filters' => $nullableFilterArray,
+            'sort' => $nullableSortArray,
+            'limit' => $nullableInteger,
+            'time_label' => $nullableString,
+            'workspace_scope' => $nullableString,
             'include_workspaces' => $nullableBoolean,
             'explain_visibility' => $nullableBoolean,
         ];
@@ -291,7 +320,7 @@ You are Bean, the HeyBean productivity assistant. Return only JSON matching the 
 Use actions only from this list: {$actions}.
 Laravel is the source of truth: you propose structured actions; Laravel validates, scopes, confirms, and executes them.
 For destructive actions include the delete action, but Laravel will require confirmation before execution.
-Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. Use ISO 8601 dates when the user supplied a date/time. Use resource.query for flexible factual questions about app data and resource.relationships for relationship/context questions, including workspace/context/why/relationship questions. For resource.query/resource.relationships set resource to tasks, reminders, calendar_events, notes, or workspaces; set query/title for lookup text; set include_workspaces=true when workspace context could matter; set explain_visibility=true for why-is-this-shown questions. Use date_scope="today" for list requests that say today, this morning, this afternoon, or tonight; task/reminder lists for today include overdue items due before today. Use date_scope="overdue" for overdue or past-due list requests. If an item needs lookup by title, use query rather than inventing an id. Use strict mutation actions only when changing app state.
+Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. Use ISO 8601 dates when the user supplied a date/time. Use resource.query for flexible factual questions about app data and resource.relationships for relationship/context questions, including workspace/context/why/relationship questions. For resource.query/resource.relationships set resource to tasks, reminders, calendar_events, notes, or workspaces; set query/title for lookup text; set include_workspaces=true when workspace context could matter; set explain_visibility=true for why-is-this-shown questions. For list/query reads, express exact data constraints in filters: use field/operator/value triples, e.g. starts_at between [tomorrowStart, tomorrowEnd], due_at <= todayEnd, remind_at < todayStart, or status in [scheduled]. Use time_label only as user-facing answer context such as today, tomorrow, or overdue; do not rely on time_label for filtering. If an item needs lookup by title, use query rather than inventing an id. Use strict mutation actions only when changing app state.
 Do not invent private dashboard data; call list/search/dashboard actions when data is needed.
 Keep response concise and avoid saying an action is complete before Laravel executes it.
 PROMPT;
@@ -376,21 +405,21 @@ PROMPT;
             $response = 'I’ll create that recipe note.';
         } elseif ($this->mentionsOverdue($lower) && ! $this->mentionsNote($lower) && ! $this->mentionsCalendar($lower)) {
             if ($this->mentionsReminder($lower) && ! $this->mentionsTask($lower)) {
-                $actions[] = ['action' => 'reminder.list', 'arguments' => ['date_scope' => 'overdue']];
+                $actions[] = ['action' => 'reminder.list', 'arguments' => $this->listArguments($lower, 'reminders')];
                 $response = 'I’ll check overdue reminders.';
             } elseif ($this->mentionsTask($lower) && ! $this->mentionsReminder($lower)) {
-                $actions[] = ['action' => 'task.list', 'arguments' => ['date_scope' => 'overdue']];
+                $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower, 'tasks')];
                 $response = 'I’ll check overdue tasks.';
             } else {
-                $actions[] = ['action' => 'task.list', 'arguments' => ['date_scope' => 'overdue']];
-                $actions[] = ['action' => 'reminder.list', 'arguments' => ['date_scope' => 'overdue']];
+                $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower, 'tasks')];
+                $actions[] = ['action' => 'reminder.list', 'arguments' => $this->listArguments($lower, 'reminders')];
                 $response = 'I’ll check overdue tasks and reminders.';
             }
         } elseif ($this->isTodayTaskListQuestion($lower)) {
-            $actions[] = ['action' => 'task.list', 'arguments' => ['date_scope' => 'today']];
+            $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower, 'tasks', 'today')];
             $response = 'I’ll check today’s tasks.';
         } elseif ($this->isTodayCalendarListQuestion($lower)) {
-            $actions[] = ['action' => 'calendar_event.list', 'arguments' => ['date_scope' => 'today']];
+            $actions[] = ['action' => 'calendar_event.list', 'arguments' => $this->listArguments($lower, 'calendar_events')];
             $response = 'I’ll check today’s calendar.';
         } elseif ($this->isNoteCreationRequest($lower)) {
             $actions[] = ['action' => 'note.create', 'arguments' => ['plain_text' => $text]];
@@ -409,7 +438,7 @@ PROMPT;
                 $actions[] = ['action' => 'resource.query', 'arguments' => $this->resourceQueryArguments($text, $lower, $session)];
                 $response = 'I’ll check the task workspace.';
             } elseif ($this->isListRequest($lower)) {
-                $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower)];
+                $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower, 'tasks')];
                 $response = $this->mentionsToday($lower) ? 'I’ll check today’s tasks.' : 'I’ll check your tasks.';
             } elseif ($this->isDeleteRequest($lower)) {
                 $actions[] = ['action' => 'task.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'task', 'todo', 'to-do'])]];
@@ -432,7 +461,7 @@ PROMPT;
                 $actions[] = ['action' => 'reminder.complete', 'arguments' => ['query' => $this->queryFromText($text, ['complete', 'finish', 'done', 'mark', 'reminder', 'as', 'to'])]];
                 $response = 'I’ll mark that reminder complete.';
             } elseif ($this->isListRequest($lower)) {
-                $actions[] = ['action' => 'reminder.list', 'arguments' => $this->listArguments($lower)];
+                $actions[] = ['action' => 'reminder.list', 'arguments' => $this->listArguments($lower, 'reminders')];
                 $response = $this->mentionsToday($lower) ? 'I’ll check today’s reminders.' : 'I’ll check your reminders.';
             } elseif ($this->isSearchRequest($lower)) {
                 $actions[] = ['action' => 'reminder.search', 'arguments' => ['query' => $this->queryFromText($text, ['find', 'search', 'for', 'reminder'])]];
@@ -460,7 +489,7 @@ PROMPT;
                 $actions[] = ['action' => 'calendar_event.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'calendar', 'appointment', 'event'])]];
                 $response = 'I’ll ask you to confirm before deleting that calendar event.';
             } elseif ($this->isListRequest($lower)) {
-                $actions[] = ['action' => 'calendar_event.list', 'arguments' => $this->listArguments($lower)];
+                $actions[] = ['action' => 'calendar_event.list', 'arguments' => $this->listArguments($lower, 'calendar_events')];
                 $response = $this->mentionsToday($lower) ? 'I’ll check today’s calendar.' : 'I’ll check your calendar.';
             } elseif ($this->isSearchRequest($lower)) {
                 $actions[] = ['action' => 'calendar_event.search', 'arguments' => ['query' => $this->queryFromText($text, ['find', 'search', 'for', 'calendar', 'appointment', 'event'])]];
@@ -546,7 +575,7 @@ PROMPT;
             'workspace', 'workspaces', 'is', 'are', 'in', 'does', 'do', 'the', 'a', 'an',
             'task', 'tasks', 'todo', 'todos', 'to-do', 'to-dos', 'item', 'items', 'one',
             'first', 'second', 'third', 'that', 'this', 'it', 'on', 'my', 'list', 'for',
-            'today', 'showing', 'appear', 'appearing', 'has', 'contains', 'contain', 'live',
+            'today', 'tomorrow', 'showing', 'appear', 'appearing', 'has', 'contains', 'contain', 'live',
             'lives', 'belong', 'belongs', 'to', 'family', 'personal',
         ]);
         $correction = $this->correctionEntity($session, $lower, $query);
@@ -559,10 +588,13 @@ PROMPT;
             'resource' => $resource,
             'query' => $query,
             'question' => $text,
-            'date_scope' => $this->mentionsOverdue($lower) ? 'overdue' : ($this->mentionsToday($lower) ? 'today' : null),
             'include_workspaces' => true,
             'explain_visibility' => preg_match('/\b(why|showing|appear|appearing)\b/', $lower) === 1,
         ];
+        $listArguments = $this->listArguments($lower, $resource);
+        if ($listArguments !== []) {
+            $arguments = [...$arguments, ...$listArguments];
+        }
         if ($correction !== null) {
             $arguments['id'] = (int) ($reference['id'] ?? 0);
             $arguments['query'] = null;
@@ -634,11 +666,43 @@ PROMPT;
         return preg_match('/\b(write down|jot down|take a note|add a note|create a note)\b/', $lower) === 1;
     }
 
-    private function listArguments(string $lower): array
+    private function listArguments(string $lower, string $resource, ?string $defaultTimeLabel = null): array
     {
-        if ($this->mentionsOverdue($lower)) return ['date_scope' => 'overdue'];
-        if ($this->mentionsTomorrow($lower)) return ['date_scope' => 'tomorrow'];
-        return $this->mentionsToday($lower) ? ['date_scope' => 'today'] : [];
+        $scope = match (true) {
+            $this->mentionsOverdue($lower) => 'overdue',
+            $this->mentionsTomorrow($lower) => 'tomorrow',
+            $this->mentionsToday($lower) => 'today',
+            default => $defaultTimeLabel,
+        };
+        if ($scope === null) return [];
+        return [
+            'filters' => $this->temporalFilters($resource, $scope),
+            'time_label' => $scope,
+            'workspace_scope' => 'accessible',
+        ];
+    }
+
+    private function temporalFilters(string $resource, string $scope): array
+    {
+        $field = match ($resource) {
+            'tasks' => 'due_at',
+            'reminders' => 'remind_at',
+            'calendar_events' => 'starts_at',
+            default => 'updated_at',
+        };
+        $todayStart = now()->startOfDay()->toIso8601String();
+        $todayEnd = now()->endOfDay()->toIso8601String();
+        $tomorrowStart = now()->addDay()->startOfDay()->toIso8601String();
+        $tomorrowEnd = now()->addDay()->endOfDay()->toIso8601String();
+
+        return match ($scope) {
+            'overdue' => [['field' => $field, 'operator' => '<', 'value' => $todayStart]],
+            'today' => $resource === 'calendar_events'
+                ? [['field' => $field, 'operator' => 'between', 'value' => [$todayStart, $todayEnd]]]
+                : [['field' => $field, 'operator' => '<=', 'value' => $todayEnd]],
+            'tomorrow' => [['field' => $field, 'operator' => 'between', 'value' => [$tomorrowStart, $tomorrowEnd]]],
+            default => [],
+        };
     }
 
     private function queryFromText(string $text, array $words): string

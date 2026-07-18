@@ -135,46 +135,109 @@ class BeanActionExecutor
     private function listResources(string $class, BeanRun $run, string $orderField, array $arguments = []): array
     {
         $query = $this->baseQuery($class, $run);
-        if ($class === Task::class) {
-            $query->where('status', '!=', 'completed');
-        } elseif ($class === Reminder::class) {
-            $query->where('status', 'scheduled');
-        } elseif ($class === CalendarEvent::class) {
-            $query->where('status', 'scheduled');
-        }
-        $dateScope = strtolower(trim((string) ($arguments['date_scope'] ?? $arguments['scope'] ?? '')));
-        if (in_array($dateScope, ['today', 'tomorrow', 'overdue'], true)) {
-            $this->applyDateScope($query, $class, $orderField, $dateScope);
-        }
+        $this->applyDefaultReadConstraints($query, $class, $arguments);
+        $this->applyStructuredFilters($query, $class, $arguments['filters'] ?? []);
         $accessibleWorkspaceIds = $this->workspaceIds($run);
-        $items = $query->orderBy($orderField)->orderBy('id')->limit(20)->get();
-        return ['ok' => true, 'items' => $this->collapseLinkedSummaries($this->summaries($items, $accessibleWorkspaceIds)), 'date_scope' => $dateScope ?: null];
+        $order = $this->primarySort($class, $arguments, $orderField);
+        $items = $query->orderBy($order['field'], $order['direction'])->orderBy('id')->limit($this->limit($arguments))->get();
+
+        return [
+            'ok' => true,
+            'items' => $this->collapseLinkedSummaries($this->summaries($items, $accessibleWorkspaceIds)),
+            'filters' => array_values(array_filter(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [], 'is_array')),
+            'time_label' => $this->timeLabel($arguments),
+        ];
     }
 
-    private function applyDateScope(Builder $query, string $class, string $field, string $scope): void
+    private function applyDefaultReadConstraints(Builder $query, string $class, array $arguments): void
     {
-        $start = now()->startOfDay()->utc();
-        $end = now()->endOfDay()->utc();
-        if ($scope === 'tomorrow') {
-            $start = now()->addDay()->startOfDay()->utc();
-            $end = now()->addDay()->endOfDay()->utc();
+        if ($this->hasFilter($arguments, 'status')) return;
+
+        if ($class === Task::class) {
+            $query->where('status', '!=', 'completed');
+        } elseif ($class === Reminder::class || $class === CalendarEvent::class) {
+            $query->where('status', 'scheduled');
         }
-        $query->whereNotNull($field);
-        if ($scope === 'overdue') {
-            $query->where($field, '<', $start);
-            return;
-        }
-        if ($class === CalendarEvent::class) {
-            $query->whereBetween($field, [$start, $end]);
-            return;
-        }
-        if (in_array($class, [Task::class, Reminder::class], true)) {
-            if ($scope === 'tomorrow') {
-                $query->whereBetween($field, [$start, $end]);
-                return;
+    }
+
+    private function applyStructuredFilters(Builder $query, string $class, mixed $filters): void
+    {
+        if (! is_array($filters)) return;
+
+        $allowed = $this->filterableFields($class);
+        foreach ($filters as $filter) {
+            if (! is_array($filter)) continue;
+            $field = (string) ($filter['field'] ?? '');
+            $operator = strtolower((string) ($filter['operator'] ?? '='));
+            $value = $filter['value'] ?? null;
+            if (! in_array($field, $allowed, true)) continue;
+
+            if ($operator === 'between' && is_array($value) && count($value) >= 2) {
+                $query->whereNotNull($field)->whereBetween($field, [$this->filterValue($field, $value[0]), $this->filterValue($field, $value[1])]);
+                continue;
             }
-            $query->where($field, '<=', $end);
+            if ($operator === 'in' && is_array($value)) {
+                $query->whereIn($field, array_values($value));
+                continue;
+            }
+            if ($operator === 'like' && is_scalar($value)) {
+                $query->where($field, 'like', '%'.addcslashes((string) $value, '%_\\').'%');
+                continue;
+            }
+            if (in_array($operator, ['=', '!=', '<', '<=', '>', '>='], true)) {
+                $query->whereNotNull($field)->where($field, $operator, $this->filterValue($field, $value));
+            }
         }
+    }
+
+    private function filterValue(string $field, mixed $value): mixed
+    {
+        if (in_array($field, ['due_at', 'completed_at', 'remind_at', 'starts_at', 'ends_at', 'updated_at', 'created_at'], true)) {
+            return $this->dateOrNull($value) ?: $value;
+        }
+
+        return $value;
+    }
+
+    private function filterableFields(string $class): array
+    {
+        return match ($class) {
+            Task::class => ['id', 'title', 'type', 'status', 'category', 'due_at', 'completed_at', 'created_at', 'updated_at'],
+            Reminder::class => ['id', 'title', 'status', 'category', 'remind_at', 'created_at', 'updated_at'],
+            CalendarEvent::class => ['id', 'title', 'status', 'category', 'starts_at', 'ends_at', 'created_at', 'updated_at'],
+            Note::class => ['id', 'title', 'plain_text', 'is_pinned', 'created_at', 'updated_at'],
+            default => ['id', 'title', 'created_at', 'updated_at'],
+        };
+    }
+
+    private function hasFilter(array $arguments, string $field): bool
+    {
+        foreach (is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [] as $filter) {
+            if (is_array($filter) && ($filter['field'] ?? null) === $field) return true;
+        }
+        return array_key_exists($field, $arguments) && $arguments[$field] !== null;
+    }
+
+    private function primarySort(string $class, array $arguments, string $fallback): array
+    {
+        $sort = is_array($arguments['sort'] ?? null) ? ($arguments['sort'][0] ?? null) : null;
+        $field = is_array($sort) ? (string) ($sort['field'] ?? '') : '';
+        $direction = is_array($sort) && strtolower((string) ($sort['direction'] ?? 'asc')) === 'desc' ? 'desc' : 'asc';
+        if (! in_array($field, $this->filterableFields($class), true)) $field = $fallback;
+
+        return ['field' => $field, 'direction' => $direction];
+    }
+
+    private function limit(array $arguments): int
+    {
+        $limit = (int) ($arguments['limit'] ?? 20);
+        return max(1, min(50, $limit));
+    }
+
+    private function timeLabel(array $arguments): ?string
+    {
+        $label = strtolower(trim((string) ($arguments['time_label'] ?? '')));
+        return $label !== '' ? $label : null;
     }
 
     private function searchResources(string $class, BeanRun $run, array $arguments, array $fields = ['title']): array
@@ -241,35 +304,27 @@ class BeanActionExecutor
             }
         }
 
-        if ($class === Task::class && ($arguments['status'] ?? null) === null) {
-            $query->where('status', '!=', 'completed');
-        } elseif ($class === Reminder::class && ($arguments['status'] ?? null) === null) {
-            $query->where('status', 'scheduled');
-        } elseif ($class === CalendarEvent::class && ($arguments['status'] ?? null) === null) {
-            $query->where('status', 'scheduled');
-        }
+        $this->applyDefaultReadConstraints($query, $class, $arguments);
         if (($arguments['status'] ?? null) !== null) {
             $query->where('status', (string) $arguments['status']);
         }
-
-        $dateScope = strtolower(trim((string) ($arguments['date_scope'] ?? '')));
-        if (in_array($dateScope, ['today', 'tomorrow', 'overdue'], true)) {
-            $this->applyDateScope($query, $class, $orderField, $dateScope);
-        }
+        $this->applyStructuredFilters($query, $class, $arguments['filters'] ?? []);
         if (($arguments['workspace_id'] ?? null) !== null) {
             $query->where('workspace_id', (int) $arguments['workspace_id']);
         }
 
-        $items = $query->orderBy($orderField)->orderBy('id')->limit(20)->get();
+        $order = $this->primarySort($class, $arguments, $orderField);
+        $items = $query->orderBy($order['field'], $order['direction'])->orderBy('id')->limit($this->limit($arguments))->get();
         $accessibleWorkspaceIds = $this->workspaceIds($run);
         $summaries = $this->collapseLinkedSummaries($this->summaries($items, $accessibleWorkspaceIds));
+        $timeLabel = $this->timeLabel($arguments);
         $explanations = [];
-        if (($arguments['explain_visibility'] ?? false) || $dateScope !== '') {
+        if (($arguments['explain_visibility'] ?? false) || $timeLabel !== null) {
             $explanations = collect($summaries)
                 ->map(fn (array $item): array => [
                     'id' => $item['id'] ?? null,
                     'title' => $item['title'] ?? null,
-                    'reason' => $this->visibilityReason($item, $class, $dateScope),
+                    'reason' => $this->visibilityReason($item, $class, $timeLabel ?? ''),
                 ])
                 ->filter(fn (array $explanation): bool => ($explanation['reason'] ?? '') !== '')
                 ->values()
@@ -281,7 +336,8 @@ class BeanActionExecutor
             'resource' => $label,
             'query' => $text,
             'question' => $arguments['question'] ?? null,
-            'date_scope' => $dateScope ?: null,
+            'filters' => array_values(array_filter(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [], 'is_array')),
+            'time_label' => $timeLabel,
             'include_workspaces' => (bool) ($arguments['include_workspaces'] ?? false),
             'items' => $summaries,
             'explanations' => $explanations,
@@ -304,26 +360,25 @@ class BeanActionExecutor
         ];
     }
 
-    private function visibilityReason(array $item, string $class, string $dateScope): string
+    private function visibilityReason(array $item, string $class, string $timeLabel): string
     {
         if ($class === Task::class) {
             $title = (string) ($item['title'] ?? 'This task');
             $status = (string) ($item['status'] ?? 'open');
             $dueAt = isset($item['due_at']) ? Carbon::parse((string) $item['due_at']) : null;
-            if ($dateScope === 'today' && $status !== 'completed' && $dueAt) {
+            if ($timeLabel === 'today' && $status !== 'completed' && $dueAt) {
                 return $dueAt->lt(now()->startOfDay())
                     ? "{$title} is on today's list because it is overdue and still open."
                     : "{$title} is on today's list because it is due by today and still open.";
             }
-            if ($dateScope === 'overdue' && $status !== 'completed' && $dueAt) {
+            if ($timeLabel === 'overdue' && $status !== 'completed' && $dueAt) {
                 return "{$title} is overdue because it was due before today and is still open.";
             }
-        }
-        if ($class === Reminder::class) {
+        } elseif ($class === Reminder::class) {
             $title = (string) ($item['title'] ?? 'This reminder');
             $remindAt = isset($item['remind_at']) ? Carbon::parse((string) $item['remind_at']) : null;
-            if ($dateScope === 'today' && $remindAt) return "{$title} is included because it is scheduled by today.";
-            if ($dateScope === 'overdue' && $remindAt) return "{$title} is overdue because it was scheduled before today.";
+            if ($timeLabel === 'today' && $remindAt) return "{$title} is included because it is scheduled by today.";
+            if ($timeLabel === 'overdue' && $remindAt) return "{$title} is overdue because it was scheduled before today.";
         }
         return '';
     }

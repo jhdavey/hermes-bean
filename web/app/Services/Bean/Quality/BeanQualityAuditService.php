@@ -15,15 +15,15 @@ class BeanQualityAuditService
         $run->loadMissing('toolCalls');
         $toolCalls = $run->toolCalls instanceof Collection ? $run->toolCalls : collect();
         $actions = $toolCalls->pluck('action')->filter()->values()->all();
-        $dateScope = $this->dateScope($toolCalls);
-        $intent = $this->intent($run, $actions, $dateScope);
+        $timeLabel = $this->timeLabel($toolCalls);
+        $intent = $this->intent($run, $actions, $timeLabel);
         $latencyMs = $this->latencyMs($run);
         $flags = $this->qualityFlags(
             (string) ($run->input ?? ''),
             (string) ($run->output ?? ''),
             $toolCalls,
             $intent,
-            $dateScope,
+            $timeLabel,
         );
 
         $trace = BeanQualityTrace::updateOrCreate(
@@ -34,7 +34,7 @@ class BeanQualityAuditService
                 'mode' => (string) ($run->mode ?: 'text'),
                 'intent' => $intent,
                 'actions' => $actions,
-                'date_scope' => $dateScope,
+                'time_label' => $timeLabel,
                 'tool_results_count' => $toolCalls->where('status', 'completed')->count(),
                 'user_message' => $run->input,
                 'assistant_answer' => $run->output,
@@ -87,7 +87,7 @@ class BeanQualityAuditService
                 'bean_run_id' => $trace->bean_run_id,
                 'intent' => $trace->intent,
                 'actions' => $trace->actions ?? [],
-                'date_scope' => $trace->date_scope,
+                'time_label' => $trace->time_label,
                 'quality_flags' => $trace->quality_flags ?? [],
                 'latency_ms' => $trace->latency_ms,
                 'voice' => $trace->voice,
@@ -98,7 +98,7 @@ class BeanQualityAuditService
         ];
     }
 
-    public function qualityFlags(string $userMessage, string $assistantAnswer, Collection $toolCalls, ?string $intent = null, ?string $dateScope = null): array
+    public function qualityFlags(string $userMessage, string $assistantAnswer, Collection $toolCalls, ?string $intent = null, ?string $timeLabel = null): array
     {
         $flags = [];
         $answer = trim($assistantAnswer);
@@ -131,7 +131,7 @@ class BeanQualityAuditService
         if (in_array('time.now', $actions, true) && $this->asksDate($lowerUser) && ! $this->answerContainsDate($answer)) {
             $flags[] = 'missing_date_after_time_tool';
         }
-        if (in_array('task.list', $actions, true) && $dateScope === 'today' && $this->todayTaskResultHasOverdue($toolCalls) && ! str_contains($lowerAnswer, 'overdue')) {
+        if (in_array('task.list', $actions, true) && $timeLabel === 'today' && $this->todayTaskResultHasOverdue($toolCalls) && ! str_contains($lowerAnswer, 'overdue')) {
             $flags[] = 'today_task_list_missing_overdue_label';
         }
         if ($this->looksLikeWorkspaceQuestion($lowerUser) && $this->workspaceNamesFromResults($toolCalls) !== []) {
@@ -145,24 +145,24 @@ class BeanQualityAuditService
         return array_values(array_unique($flags));
     }
 
-    private function dateScope(Collection $toolCalls): ?string
+    private function timeLabel(Collection $toolCalls): ?string
     {
         foreach ($toolCalls as $toolCall) {
             if (! $toolCall instanceof BeanToolCall) continue;
             $arguments = is_array($toolCall->arguments) ? $toolCall->arguments : [];
             $result = is_array($toolCall->result) ? $toolCall->result : [];
-            $scope = strtolower(trim((string) ($arguments['date_scope'] ?? $result['date_scope'] ?? '')));
-            if ($scope !== '') return $scope;
+            $label = strtolower(trim((string) ($arguments['time_label'] ?? $result['time_label'] ?? '')));
+            if ($label !== '') return $label;
         }
 
         return null;
     }
 
-    private function intent(BeanRun $run, array $actions, ?string $dateScope): ?string
+    private function intent(BeanRun $run, array $actions, ?string $timeLabel): ?string
     {
         if ($actions !== []) {
             $intent = (string) $actions[0];
-            return $dateScope ? $intent.'.'.$dateScope : $intent;
+            return $timeLabel ? $intent.'.'.$timeLabel : $intent;
         }
         $input = mb_strtolower((string) $run->input);
         if (str_contains($input, 'time')) return 'time.now';
@@ -243,8 +243,8 @@ class BeanQualityAuditService
             if (! $toolCall instanceof BeanToolCall || $toolCall->action !== 'task.list') continue;
             $arguments = is_array($toolCall->arguments) ? $toolCall->arguments : [];
             $result = is_array($toolCall->result) ? $toolCall->result : [];
-            $scope = strtolower(trim((string) ($arguments['date_scope'] ?? $result['date_scope'] ?? '')));
-            if ($scope !== 'today') continue;
+            $label = strtolower(trim((string) ($arguments['time_label'] ?? $result['time_label'] ?? '')));
+            if ($label !== 'today') continue;
             foreach (($result['items'] ?? []) as $item) {
                 if (! is_array($item) || empty($item['due_at'])) continue;
                 if (Carbon::parse((string) $item['due_at'])->lt($start)) return true;

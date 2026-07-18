@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\BeanRun;
 use App\Models\BeanSession;
+use App\Models\BeanToolCall;
 use App\Models\CalendarEvent;
 use App\Models\Note;
 use App\Models\NoteFolder;
@@ -64,6 +65,10 @@ class BeanRuntimeTest extends TestCase
             $this->assertContains('calendar_event.update', $actionsEnum);
             $this->assertFalse((bool) ($argumentsSchema['additionalProperties'] ?? true));
             $this->assertContains('title', $argumentsSchema['required'] ?? []);
+            $this->assertArrayHasKey('filters', $argumentsSchema['properties'] ?? []);
+            $this->assertArrayHasKey('sort', $argumentsSchema['properties'] ?? []);
+            $this->assertArrayHasKey('workspace_scope', $argumentsSchema['properties'] ?? []);
+            $this->assertArrayNotHasKey('date_scope', $argumentsSchema['properties'] ?? []);
 
             return Http::response([
                 'choices' => [[
@@ -633,7 +638,15 @@ class BeanRuntimeTest extends TestCase
                         'response' => 'I’ll check today’s tasks.',
                         'actions' => [[
                             'action' => 'task.list',
-                            'arguments' => ['date_scope' => 'today'],
+                            'arguments' => [
+                                'filters' => [[
+                                    'field' => 'due_at',
+                                    'operator' => '<=',
+                                    'value' => now()->endOfDay()->toIso8601String(),
+                                ]],
+                                'time_label' => 'today',
+                                'workspace_scope' => 'accessible',
+                            ],
                         ]],
                     ]),
                 ],
@@ -717,6 +730,72 @@ class BeanRuntimeTest extends TestCase
             'action' => 'calendar_event.list',
             'status' => 'completed',
         ]);
+        $toolCall = BeanToolCall::query()->where('action', 'calendar_event.list')->latest('id')->firstOrFail();
+        $filters = collect($toolCall->arguments['filters'] ?? []);
+        $this->assertTrue($filters->contains(fn (array $filter): bool => ($filter['field'] ?? null) === 'starts_at' && ($filter['operator'] ?? null) === 'between'));
+        $this->assertArrayNotHasKey('date_scope', $toolCall->arguments ?? []);
+    }
+
+    public function test_openai_planner_calendar_query_uses_generic_filters_not_date_scope(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.bean_text_model' => 'gpt-4.1-mini',
+        ]);
+        Carbon::setTestNow(Carbon::parse('2026-07-17 18:42:00', config('app.timezone')));
+        $token = $this->apiToken('bean-calendar-generic-filter@example.com');
+        $user = User::where('email', 'bean-calendar-generic-filter@example.com')->firstOrFail();
+
+        foreach ([
+            ['Today shared event', now()->setTime(10, 0)],
+            ['Tomorrow only event', now()->addDay()->setTime(9, 0)],
+            ['Future shared event', now()->addDays(5)->setTime(14, 0)],
+        ] as [$title, $startsAt]) {
+            CalendarEvent::create([
+                'user_id' => $user->id,
+                'workspace_id' => $user->default_workspace_id,
+                'created_by_user_id' => $user->id,
+                'title' => $title,
+                'status' => 'scheduled',
+                'starts_at' => $startsAt,
+                'ends_at' => (clone $startsAt)->addHour(),
+                'recurrence' => 'none',
+            ]);
+        }
+
+        Http::fakeSequence()->push([
+            'choices' => [[
+                'message' => [
+                    'content' => json_encode([
+                        'response' => 'I’ll check tomorrow’s calendar.',
+                        'actions' => [[
+                            'action' => 'calendar_event.list',
+                            'arguments' => [
+                                'filters' => [[
+                                    'field' => 'starts_at',
+                                    'operator' => 'between',
+                                    'value' => [now()->addDay()->startOfDay()->toIso8601String(), now()->addDay()->endOfDay()->toIso8601String()],
+                                ]],
+                                'time_label' => 'tomorrow',
+                                'workspace_scope' => 'accessible',
+                                'sort' => [['field' => 'starts_at', 'direction' => 'asc']],
+                            ],
+                        ]],
+                    ]),
+                ],
+            ]],
+        ], 200);
+
+        $response = $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Do I have anything on my calendar for tomorrow?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'You have 1 calendar event tomorrow: Tomorrow only event.']);
+
+        $this->assertStringNotContainsString('Today shared event', $response->getContent());
+        $this->assertStringNotContainsString('Future shared event', $response->getContent());
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'calendar_event.list', 'status' => 'completed']);
+        Carbon::setTestNow();
     }
 
     public function test_weather_question_answers_with_forecast_facts_not_generic_done(): void

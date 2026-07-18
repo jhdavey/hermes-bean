@@ -200,9 +200,9 @@ class BeanQualityLabTest extends TestCase
             'user_id' => $user->id,
             'workspace_id' => $user->default_workspace_id,
             'action' => 'task.list',
-            'arguments' => ['date_scope' => 'today'],
+            'arguments' => ['time_label' => 'today'],
             'status' => 'completed',
-            'result' => ['ok' => true, 'date_scope' => 'today', 'items' => [[
+            'result' => ['ok' => true, 'time_label' => 'today', 'items' => [[
                 'title' => 'Pay the travel card',
                 'due_at' => now()->subDay()->toIso8601String(),
             ]]],

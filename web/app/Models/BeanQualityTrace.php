@@ -14,7 +14,7 @@ class BeanQualityTrace extends Model
         'mode',
         'intent',
         'actions',
-        'date_scope',
+        'time_label',
         'tool_results_count',
         'user_message',
         'assistant_answer',

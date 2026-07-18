@@ -16,7 +16,7 @@ return new class extends Migration
             $table->string('mode')->default('text')->index();
             $table->string('intent')->nullable()->index();
             $table->json('actions')->nullable();
-            $table->string('date_scope')->nullable()->index();
+            $table->string('time_label')->nullable()->index();
             $table->unsignedInteger('tool_results_count')->default(0);
             $table->text('user_message')->nullable();
             $table->text('assistant_answer')->nullable();
