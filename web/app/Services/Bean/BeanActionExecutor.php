@@ -13,6 +13,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
+use App\Services\Domain\DomainResourceCatalog;
 use App\Services\Domain\DomainResourceService;
 use App\Services\WorkspaceService;
 use Illuminate\Database\Eloquent\Builder;
@@ -27,6 +28,7 @@ class BeanActionExecutor
     public function __construct(
         private readonly BeanActivityLogger $activity,
         private readonly DomainResourceService $domainResources,
+        private readonly DomainResourceCatalog $resourceCatalog,
     ) {}
 
     public function execute(BeanSession $session, BeanRun $run, string $action, array $arguments = [], bool $confirmed = false): array
@@ -88,7 +90,7 @@ class BeanActionExecutor
                 'calendar_event.create' => $this->createCalendarEvent($run, $arguments),
                 'calendar_event.update' => $this->updateResource(CalendarEvent::class, $run, $arguments, ['title', 'description', 'location', 'category', 'color', 'is_critical', 'recurrence', 'starts_at', 'ends_at', 'all_day', 'status', 'metadata']),
                 'calendar_event.delete' => $this->deleteResource(CalendarEvent::class, $run, $arguments),
-                'note.list' => $this->listResources(Note::class, $run, 'updated_at'),
+                'note.list' => $this->listResources(Note::class, $run, 'updated_at', $arguments),
                 'note.search' => $this->searchResources(Note::class, $run, $arguments, ['title', 'plain_text']),
                 'note.create' => $this->createNote($run, $arguments),
                 'note.update' => $this->updateResource(Note::class, $run, $arguments, ['title', 'body_html', 'plain_text', 'body_delta', 'is_pinned', 'metadata']),
@@ -166,18 +168,20 @@ class BeanActionExecutor
     private function normalizeStatusArgument(string $class, array $arguments): array
     {
         $status = strtolower(trim((string) ($arguments['status'] ?? '')));
-        if ($status === '') return $arguments;
+        if ($status === '') {
+            unset($arguments['status']);
+            return $arguments;
+        }
 
-        if ($class === Task::class && in_array($status, ['active', 'incomplete', 'not_completed', 'not completed', 'not complete', 'pending', 'overdue'], true)) {
-            $arguments['status'] = 'open';
+        $normalized = $this->resourceCatalog->normalizeStatusForClass($class, $status);
+        if ($normalized !== null) {
+            $arguments['status'] = $normalized;
             if ($status === 'overdue' && $this->timeLabel($arguments) === null) {
                 $arguments['time_label'] = 'overdue';
             }
-        } elseif ($class === Reminder::class && in_array($status, ['active', 'pending', 'incomplete', 'not_completed', 'not completed', 'not complete', 'overdue'], true)) {
-            $arguments['status'] = 'scheduled';
-            if ($status === 'overdue' && $this->timeLabel($arguments) === null) {
-                $arguments['time_label'] = 'overdue';
-            }
+        }
+        if (strtolower(trim((string) ($arguments['status'] ?? ''))) === 'overdue' && $this->timeLabel($arguments) === null) {
+            $arguments['time_label'] = 'overdue';
         }
 
         return $arguments;
@@ -210,23 +214,12 @@ class BeanActionExecutor
 
     private function classForResourceName(string $resource): ?string
     {
-        return match ($resource) {
-            'task', 'tasks' => Task::class,
-            'reminder', 'reminders' => Reminder::class,
-            'calendar_event', 'calendar_events', 'event', 'events', 'calendar' => CalendarEvent::class,
-            'note', 'notes' => Note::class,
-            default => null,
-        };
+        return $this->resourceCatalog->classForResource($resource);
     }
 
     private function temporalField(string $class): ?string
     {
-        return match ($class) {
-            Task::class => 'due_at',
-            Reminder::class => 'remind_at',
-            CalendarEvent::class => 'starts_at',
-            default => null,
-        };
+        return $this->resourceCatalog->temporalFieldForClass($class);
     }
 
     private function temporalFilters(string $class, string $field, string $timeLabel): array
@@ -270,12 +263,11 @@ class BeanActionExecutor
 
     private function applyDefaultReadConstraints(Builder $query, string $class, array $arguments): void
     {
-        if ($this->hasFilter($arguments, 'status')) return;
+        if (($arguments['status'] ?? null) !== null || $this->hasFilter($arguments, 'status')) return;
 
-        if ($class === Task::class) {
-            $query->where('status', 'open');
-        } elseif ($class === Reminder::class || $class === CalendarEvent::class) {
-            $query->where('status', 'scheduled');
+        $activeStatus = $this->resourceCatalog->activeStatusForClass($class);
+        if ($activeStatus !== null) {
+            $query->where('status', $activeStatus);
         }
     }
 
@@ -320,13 +312,7 @@ class BeanActionExecutor
 
     private function filterableFields(string $class): array
     {
-        return match ($class) {
-            Task::class => ['id', 'title', 'type', 'status', 'category', 'due_at', 'completed_at', 'created_at', 'updated_at'],
-            Reminder::class => ['id', 'title', 'status', 'category', 'remind_at', 'created_at', 'updated_at'],
-            CalendarEvent::class => ['id', 'title', 'status', 'category', 'starts_at', 'ends_at', 'created_at', 'updated_at'],
-            Note::class => ['id', 'title', 'plain_text', 'is_pinned', 'created_at', 'updated_at'],
-            default => ['id', 'title', 'created_at', 'updated_at'],
-        };
+        return $this->resourceCatalog->filterableFieldsForClass($class);
     }
 
     private function hasFilter(array $arguments, string $field): bool
@@ -370,7 +356,19 @@ class BeanActionExecutor
                 }
             });
         }
-        return ['ok' => true, 'items' => $this->summaries($query->orderByDesc('updated_at')->limit(10)->get(), $this->workspaceIds($run))];
+        $this->applyDefaultReadConstraints($query, $class, $arguments);
+        if (($arguments['status'] ?? null) !== null) {
+            $query->where('status', (string) $arguments['status']);
+        }
+        $this->applyStructuredFilters($query, $class, $arguments['filters'] ?? []);
+        $items = $query->orderByDesc('updated_at')->limit($this->limit($arguments))->get();
+
+        return [
+            'ok' => true,
+            'items' => $this->summaries($items, $this->workspaceIds($run)),
+            'filters' => array_values(array_filter(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [], 'is_array')),
+            'time_label' => $this->timeLabel($arguments),
+        ];
     }
 
     private function resourceContext(string $class, BeanRun $run, array $arguments): array
@@ -390,13 +388,9 @@ class BeanActionExecutor
     private function genericResourceQuery(BeanRun $run, array $arguments): array
     {
         $resource = strtolower(trim((string) ($arguments['resource'] ?? 'tasks')));
-        [$class, $orderField, $label] = match ($resource) {
-            'task', 'tasks', 'todo', 'todos' => [Task::class, 'due_at', 'tasks'],
-            'reminder', 'reminders' => [Reminder::class, 'remind_at', 'reminders'],
-            'calendar', 'calendar_event', 'calendar_events', 'events' => [CalendarEvent::class, 'starts_at', 'calendar_events'],
-            'note', 'notes' => [Note::class, 'updated_at', 'notes'],
-            default => [Task::class, 'due_at', 'tasks'],
-        };
+        $class = $this->resourceCatalog->classForResource($resource) ?? Task::class;
+        $orderField = $this->resourceCatalog->temporalFieldForClass($class) ?? 'updated_at';
+        $label = $this->resourceCatalog->resourceForClass($class) ?? 'tasks';
 
         $query = $this->baseQuery($class, $run);
         if (isset($arguments['id'])) {
@@ -685,9 +679,9 @@ class BeanActionExecutor
     private function dashboardSummary(BeanRun $run): array
     {
         return ['ok' => true, 'summary' => [
-            'tasks' => $this->baseQuery(Task::class, $run)->where('status', 'open')->count(),
-            'reminders' => $this->baseQuery(Reminder::class, $run)->where('status', 'scheduled')->count(),
-            'calendar_events' => $this->baseQuery(CalendarEvent::class, $run)->where('starts_at', '>=', now()->startOfDay())->count(),
+            'tasks' => $this->baseQuery(Task::class, $run)->where('status', $this->resourceCatalog->activeStatusForClass(Task::class))->count(),
+            'reminders' => $this->baseQuery(Reminder::class, $run)->where('status', $this->resourceCatalog->activeStatusForClass(Reminder::class))->count(),
+            'calendar_events' => $this->baseQuery(CalendarEvent::class, $run)->where('status', $this->resourceCatalog->activeStatusForClass(CalendarEvent::class))->where('starts_at', '>=', now()->startOfDay())->count(),
             'notes' => $this->baseQuery(Note::class, $run)->count(),
         ]];
     }

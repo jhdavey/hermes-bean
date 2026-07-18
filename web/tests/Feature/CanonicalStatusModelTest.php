@@ -59,37 +59,35 @@ class CanonicalStatusModelTest extends TestCase
         }
     }
 
-    public function test_active_task_projection_recognizes_only_canonical_recurrence_metadata(): void
+    public function test_active_task_projection_recognizes_only_canonical_open_status(): void
     {
         Carbon::setTestNow('2026-07-14T12:00:00Z');
-        $this->apiToken('canonical-task-recurrence@example.com');
-        $user = User::where('email', 'canonical-task-recurrence@example.com')->firstOrFail();
+        $this->apiToken('canonical-task-active-status@example.com');
+        $user = User::where('email', 'canonical-task-active-status@example.com')->firstOrFail();
         $workspaceId = (int) $user->default_workspace_id;
 
         foreach ([
-            'canonical' => ['recurrence' => 'daily'],
-            'none' => ['recurrence' => 'none'],
-            'legacy-recurring' => ['recurring' => true],
-            'legacy-rrule' => ['rrule' => 'FREQ=DAILY'],
-        ] as $title => $metadata) {
+            'open task' => 'open',
+            'completed task' => 'completed',
+            'semantic-incomplete task' => 'incomplete',
+        ] as $title => $status) {
             Task::create([
                 'user_id' => $user->id,
                 'workspace_id' => $workspaceId,
                 'created_by_user_id' => $user->id,
                 'title' => $title,
                 'type' => 'todo',
-                'status' => 'completed',
+                'status' => $status,
                 'due_at' => now()->subDays(2),
-                'completed_at' => now()->subDay(),
-                'metadata' => $metadata,
+                'completed_at' => $status === 'completed' ? now()->subDay() : null,
+                'metadata' => ['recurrence' => 'daily'],
             ]);
         }
 
         $visible = Task::query()->visibleInActiveViews()->pluck('title')->all();
 
-        $this->assertContains('canonical', $visible);
-        $this->assertNotContains('none', $visible);
-        $this->assertNotContains('legacy-recurring', $visible);
-        $this->assertNotContains('legacy-rrule', $visible);
+        $this->assertContains('open task', $visible);
+        $this->assertNotContains('completed task', $visible);
+        $this->assertNotContains('semantic-incomplete task', $visible);
     }
 }

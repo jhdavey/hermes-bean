@@ -8231,7 +8231,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function activeTasks() {
-        return state.tasks.filter((task) => !taskCompleted(task));
+        return state.tasks.filter((task) => task?.status === 'open');
     }
 
     function activeTopLevelTasks() {

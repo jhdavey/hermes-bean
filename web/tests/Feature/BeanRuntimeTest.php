@@ -1067,7 +1067,7 @@ class BeanRuntimeTest extends TestCase
         $this->assertStringNotContainsString('Tomorrow task', $response->getContent());
     }
 
-    public function test_openai_overdue_task_query_ignores_invalid_status_alias_and_excludes_completed_tasks(): void
+    public function test_openai_overdue_task_query_normalizes_incomplete_alias_to_canonical_open_status(): void
     {
         config([
             'services.openai.api_key' => 'test-openai-key',
@@ -1138,6 +1138,7 @@ class BeanRuntimeTest extends TestCase
         $toolCall = BeanToolCall::query()->where('action', 'task.list')->latest('id')->firstOrFail();
         $this->assertSame('overdue', $toolCall->arguments['time_label'] ?? null);
         $this->assertSame('open', $toolCall->arguments['status'] ?? null);
+        $this->assertFalse(collect($toolCall->arguments['filters'] ?? [])->contains(fn (array $filter): bool => ($filter['field'] ?? null) === 'completed_at'));
         Carbon::setTestNow();
     }
 

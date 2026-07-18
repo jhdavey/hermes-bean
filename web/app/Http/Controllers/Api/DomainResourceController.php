@@ -12,6 +12,7 @@ use App\Models\Task;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
 use App\Models\WorkspaceMembership;
+use App\Services\Domain\DomainResourceCatalog;
 use App\Services\Domain\DomainResourceService;
 use App\Services\GoogleCalendarSyncService;
 use App\Services\OutlookCalendarSyncService;
@@ -32,12 +33,6 @@ use Illuminate\Validation\ValidationException;
 class DomainResourceController extends Controller
 {
     private const DEFAULT_CATEGORY_COLOR = '#34C759';
-
-    private const TASK_STATUSES = ['open', 'completed'];
-
-    private const REMINDER_STATUSES = ['scheduled', 'completed'];
-
-    private const CALENDAR_STATUSES = ['scheduled', 'cancelled'];
 
     private const RECURRENCES = ['none', 'daily', 'weekly', 'monthly', 'yearly', 'specific_days', 'interval'];
 
@@ -61,6 +56,7 @@ class DomainResourceController extends Controller
         private readonly PlanLimitService $planLimits,
         private readonly PlanHistoryService $history,
         private readonly DomainResourceService $domainResources,
+        private readonly DomainResourceCatalog $resourceCatalog,
     ) {}
 
     public function listNoteFolders(Request $request): JsonResponse
@@ -223,10 +219,7 @@ class DomainResourceController extends Controller
     public function listTasks(Request $request): JsonResponse
     {
         $tasks = $this->scoped(Task::query(), $request)
-            ->where(function ($query): void {
-                $query->whereNull('status')
-                    ->orWhere('status', '!=', 'completed');
-            })
+            ->visibleInActiveViews()
             ->orderBy('due_at')
             ->orderBy('id')
             ->get();
@@ -326,7 +319,7 @@ class DomainResourceController extends Controller
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:255'],
             'type' => ['required', Rule::in(['todo', 'chore', 'maintenance'])],
-            'status' => ['sometimes', 'required', 'string', Rule::in(self::TASK_STATUSES)],
+            'status' => ['sometimes', 'required', 'string', Rule::in($this->resourceCatalog->statusesFor('tasks'))],
             'notes' => ['nullable', 'string'],
             'category' => ['nullable', 'string', 'max:80'],
             'color' => ['nullable', 'string', 'max:20'],
@@ -348,7 +341,7 @@ class DomainResourceController extends Controller
         $validated = $request->validate([
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'type' => ['sometimes', 'required', Rule::in(['todo', 'chore', 'maintenance'])],
-            'status' => ['sometimes', 'required', 'string', Rule::in(self::TASK_STATUSES)],
+            'status' => ['sometimes', 'required', 'string', Rule::in($this->resourceCatalog->statusesFor('tasks'))],
             'notes' => ['sometimes', 'nullable', 'string'],
             'category' => ['sometimes', 'nullable', 'string', 'max:80'],
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
@@ -386,7 +379,7 @@ class DomainResourceController extends Controller
             'color' => ['nullable', 'string', 'max:20'],
             'is_critical' => ['nullable', 'boolean'],
             'remind_at' => ['required', 'date'],
-            'status' => ['sometimes', 'required', 'string', Rule::in(self::REMINDER_STATUSES)],
+            'status' => ['sometimes', 'required', 'string', Rule::in($this->resourceCatalog->statusesFor('reminders'))],
             'metadata' => ['nullable', 'array'],
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'sync_to_workspace_ids' => ['nullable', 'array'],
@@ -408,7 +401,7 @@ class DomainResourceController extends Controller
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
             'is_critical' => ['sometimes', 'boolean'],
             'remind_at' => ['sometimes', 'required', 'date'],
-            'status' => ['sometimes', 'required', 'string', Rule::in(self::REMINDER_STATUSES)],
+            'status' => ['sometimes', 'required', 'string', Rule::in($this->resourceCatalog->statusesFor('reminders'))],
             'metadata' => ['sometimes', 'nullable', 'array'],
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],
@@ -443,7 +436,7 @@ class DomainResourceController extends Controller
             'starts_at' => ['required', 'date'],
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
             'all_day' => ['required', $this->canonicalBooleanRule()],
-            'status' => ['sometimes', 'required', 'string', Rule::in(self::CALENDAR_STATUSES)],
+            'status' => ['sometimes', 'required', 'string', Rule::in($this->resourceCatalog->statusesFor('calendar_events'))],
             'metadata' => ['nullable', 'array'],
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'sync_to_workspace_ids' => ['nullable', 'array'],
@@ -468,7 +461,7 @@ class DomainResourceController extends Controller
             'starts_at' => ['sometimes', 'required', 'date'],
             'ends_at' => ['sometimes', 'nullable', 'date', 'after_or_equal:starts_at'],
             'all_day' => ['sometimes', 'required', $this->canonicalBooleanRule()],
-            'status' => ['sometimes', 'required', 'string', Rule::in(self::CALENDAR_STATUSES)],
+            'status' => ['sometimes', 'required', 'string', Rule::in($this->resourceCatalog->statusesFor('calendar_events'))],
             'metadata' => ['sometimes', 'nullable', 'array'],
             'sync_to_workspace_ids' => ['nullable', 'array'],
             'sync_to_workspace_ids.*' => ['integer', 'exists:workspaces,id'],

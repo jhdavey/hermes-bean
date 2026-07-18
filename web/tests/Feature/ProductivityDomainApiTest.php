@@ -338,11 +338,36 @@ class ProductivityDomainApiTest extends TestCase
             'due_at' => now()->toIso8601String(),
         ])->assertCreated();
 
+        $user = User::where('email', 'task-list-recurring@example.com')->firstOrFail();
+
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Semantic incomplete should not list',
+            'type' => 'todo',
+            'status' => 'incomplete',
+            'due_at' => now()->subDay(),
+        ]);
+
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Completed should not list',
+            'type' => 'todo',
+            'status' => 'completed',
+            'due_at' => now()->subDay(),
+            'completed_at' => now(),
+        ]);
+
         $this->withToken($token)->getJson('/api/tasks')
             ->assertOk()
             ->assertJsonFragment(['title' => 'Yesterday one-off'])
             ->assertJsonFragment(['title' => 'Recurring vitamins'])
-            ->assertJsonFragment(['title' => 'Today task']);
+            ->assertJsonFragment(['title' => 'Today task'])
+            ->assertJsonMissing(['title' => 'Semantic incomplete should not list'])
+            ->assertJsonMissing(['title' => 'Completed should not list']);
 
         $this->withToken($token)->getJson('/api/today')
             ->assertOk()
