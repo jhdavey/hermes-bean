@@ -134,6 +134,9 @@ class BeanQualityAuditService
         if (in_array('task.list', $actions, true) && $timeLabel === 'today' && $this->todayTaskResultHasOverdue($toolCalls) && ! str_contains($lowerAnswer, 'overdue')) {
             $flags[] = 'today_task_list_missing_overdue_label';
         }
+        if ($this->looksLikeTomorrowCalendarQuestion($lowerUser) && in_array('calendar_event.list', $actions, true) && $timeLabel !== 'tomorrow') {
+            $flags[] = 'calendar_tomorrow_missing_time_scope';
+        }
         if ($this->looksLikeWorkspaceQuestion($lowerUser) && $this->workspaceNamesFromResults($toolCalls) !== []) {
             $workspaceNames = $this->workspaceNamesFromResults($toolCalls);
             $mentioned = collect($workspaceNames)->contains(fn (string $name): bool => str_contains($lowerAnswer, mb_strtolower($name)));
@@ -200,6 +203,12 @@ class BeanQualityAuditService
     {
         return preg_match('/\b(what|which|where|why|show|list|find|workspace|workspaces)\b/u', $lowerUser) === 1
             && preg_match('/\b(task|tasks|todo|reminder|reminders|calendar|event|events|note|notes|workspace|workspaces|card|grout|grill)\b/u', $lowerUser) === 1;
+    }
+
+    private function looksLikeTomorrowCalendarQuestion(string $lowerUser): bool
+    {
+        return preg_match('/\b(tomorrow|tmrw|next day)\b/u', $lowerUser) === 1
+            && preg_match('/\b(calendar|event|events|meeting|meetings|appointment|appointments|schedule)\b/u', $lowerUser) === 1;
     }
 
     private function isClarifyingAnswer(string $lowerAnswer): bool

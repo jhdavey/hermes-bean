@@ -165,13 +165,38 @@ class BeanQualityLabTest extends TestCase
             'completed_at' => now(),
         ]);
 
+        $calendarRun = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'status' => 'completed',
+            'mode' => 'text',
+            'input' => 'Do I have any events for tomorrow on the calendar?',
+            'output' => 'You have 18 upcoming calendar events: Old event and many more.',
+            'started_at' => now()->subSecond(),
+            'completed_at' => now(),
+        ]);
+        BeanToolCall::create([
+            'bean_run_id' => $calendarRun->id,
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'action' => 'calendar_event.list',
+            'arguments' => ['starts_at' => now()->addDay()->startOfDay()->toIso8601String(), 'ends_at' => now()->addDay()->endOfDay()->toIso8601String()],
+            'status' => 'completed',
+            'result' => ['ok' => true, 'items' => [['title' => 'Old event', 'starts_at' => now()->subMonth()->toIso8601String()]]],
+            'started_at' => now()->subSecond(),
+            'completed_at' => now(),
+        ]);
+
         $workspaceTrace = app(BeanQualityAuditService::class)->traceRun($workspaceRun->fresh());
         $recipeTrace = app(BeanQualityAuditService::class)->traceRun($recipeRun->fresh());
         $correctionTrace = app(BeanQualityAuditService::class)->traceRun($correctionRun->fresh());
+        $calendarTrace = app(BeanQualityAuditService::class)->traceRun($calendarRun->fresh());
 
         $this->assertContains('factual_app_data_answer_without_tool_call', $workspaceTrace->quality_flags);
         $this->assertContains('recipe_request_missing_generated_content', $recipeTrace->quality_flags);
         $this->assertContains('correction_turn_without_recovery_action', $correctionTrace->quality_flags);
+        $this->assertContains('calendar_tomorrow_missing_time_scope', $calendarTrace->quality_flags);
     }
 
     public function test_production_smoke_mode_audits_recent_traces_without_seeding_or_mutating_resources(): void

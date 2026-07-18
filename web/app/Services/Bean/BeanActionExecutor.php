@@ -145,6 +145,7 @@ class BeanActionExecutor
 
         $field = $this->temporalField($class);
         if ($field === null) return $arguments;
+        $arguments = $this->normalizeInlineReadFilters($class, $field, $arguments);
 
         $timeLabel = $this->timeLabel($arguments) ?? $this->inferTemporalLabelFromFilters($class, $field, $arguments);
         if ($timeLabel === null) return $arguments;
@@ -187,13 +188,60 @@ class BeanActionExecutor
         return $arguments;
     }
 
+    private function normalizeInlineReadFilters(string $class, string $field, array $arguments): array
+    {
+        $hasStructuredFilter = collect(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [])
+            ->contains(fn ($filter): bool => is_array($filter) && ($filter['field'] ?? null) === $field);
+        if ($hasStructuredFilter) {
+            unset($arguments[$field]);
+            return $arguments;
+        }
+
+        $start = $arguments[$field] ?? null;
+        if ($start === null || $start === '') return $arguments;
+
+        $filters = is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [];
+        if ($class === CalendarEvent::class && ($arguments['ends_at'] ?? null) !== null) {
+            $filters[] = ['field' => $field, 'operator' => 'between', 'value' => [$start, $arguments['ends_at']]];
+            unset($arguments[$field], $arguments['ends_at']);
+        } else {
+            $filters[] = ['field' => $field, 'operator' => '=', 'value' => $start];
+            unset($arguments[$field]);
+        }
+        $arguments['filters'] = array_values(array_filter($filters, 'is_array'));
+
+        return $arguments;
+    }
+
     private function inferTemporalLabelFromFilters(string $class, string $field, array $arguments): ?string
     {
-        if (! in_array($class, [Task::class, Reminder::class], true)) return null;
         foreach (is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [] as $filter) {
             if (! is_array($filter) || ($filter['field'] ?? null) !== $field) continue;
-            if (in_array(strtolower((string) ($filter['operator'] ?? '=')), ['<', '<='], true)) {
+            $operator = strtolower((string) ($filter['operator'] ?? '='));
+            $value = $filter['value'] ?? null;
+            if ($operator === 'between' && is_array($value) && count($value) >= 2) {
+                $label = $this->timeLabelForRange($value[0], $value[1]);
+                if ($label !== null) return $label;
+            }
+            if (in_array($operator, ['<', '<='], true) && in_array($class, [Task::class, Reminder::class], true)) {
                 return 'overdue';
+            }
+        }
+
+        return null;
+    }
+
+    private function timeLabelForRange(mixed $start, mixed $end): ?string
+    {
+        $startDate = $this->dateOrNull($start);
+        $endDate = $this->dateOrNull($end);
+        if (! $startDate || ! $endDate) return null;
+
+        foreach (['today' => now(), 'tomorrow' => now()->addDay()] as $label => $date) {
+            $dateStart = $date->copy()->startOfDay();
+            $dateEnd = $date->copy()->setTime(23, 59, 59);
+            if ($startDate->isSameDay($date) && $endDate->isSameDay($date) && $startDate->lte($dateStart) && $endDate->gte($dateEnd)) {
+                return $label;
             }
         }
 
