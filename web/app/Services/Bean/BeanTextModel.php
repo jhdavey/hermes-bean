@@ -602,6 +602,11 @@ PROMPT;
         return preg_match('/\b(today|this morning|this afternoon|tonight)\b/', $lower) === 1;
     }
 
+    private function mentionsTomorrow(string $lower): bool
+    {
+        return preg_match('/\b(tomorrow|tmrw|next day)\b/', $lower) === 1;
+    }
+
     private function mentionsOverdue(string $lower): bool
     {
         return preg_match('/\b(overdue|past due|late|miss|missed|before today)\b/', $lower) === 1;
@@ -632,6 +637,7 @@ PROMPT;
     private function listArguments(string $lower): array
     {
         if ($this->mentionsOverdue($lower)) return ['date_scope' => 'overdue'];
+        if ($this->mentionsTomorrow($lower)) return ['date_scope' => 'tomorrow'];
         return $this->mentionsToday($lower) ? ['date_scope' => 'today'] : [];
     }
 

@@ -416,6 +416,7 @@ class BeanQualityLabService
         foreach ($this->calendarPrompts() as $i => $prompt) {
             $scenarios[] = ['name' => 'calendar prompt sweep '.($i + 1), 'category' => 'factual', 'turns' => [$prompt], 'expected' => ['must_include' => ['Lunch with Bob'], 'must_not_include' => ['Team call'], 'required_tool_actions' => ['calendar_event.list'], 'required_date_scope' => 'today']];
         }
+        $scenarios[] = ['name' => 'tomorrow calendar filters tomorrow only', 'category' => 'factual', 'turns' => ['Do I have anything on my calendar for tomorrow?'], 'expected' => ['must_include' => ['Team call'], 'must_not_include' => ['Lunch with Bob'], 'required_tool_actions' => ['calendar_event.list'], 'required_date_scope' => 'tomorrow']];
         foreach ($this->notePrompts() as $i => $prompt) {
             $scenarios[] = ['name' => 'note prompt sweep '.($i + 1), 'category' => 'factual', 'turns' => [$prompt], 'expected' => ['must_include' => ['Grill repair notes']]];
         }

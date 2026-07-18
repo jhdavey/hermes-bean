@@ -143,7 +143,7 @@ class BeanActionExecutor
             $query->where('status', 'scheduled');
         }
         $dateScope = strtolower(trim((string) ($arguments['date_scope'] ?? $arguments['scope'] ?? '')));
-        if (in_array($dateScope, ['today', 'overdue'], true)) {
+        if (in_array($dateScope, ['today', 'tomorrow', 'overdue'], true)) {
             $this->applyDateScope($query, $class, $orderField, $dateScope);
         }
         $accessibleWorkspaceIds = $this->workspaceIds($run);
@@ -155,6 +155,10 @@ class BeanActionExecutor
     {
         $start = now()->startOfDay()->utc();
         $end = now()->endOfDay()->utc();
+        if ($scope === 'tomorrow') {
+            $start = now()->addDay()->startOfDay()->utc();
+            $end = now()->addDay()->endOfDay()->utc();
+        }
         $query->whereNotNull($field);
         if ($scope === 'overdue') {
             $query->where($field, '<', $start);
@@ -165,6 +169,10 @@ class BeanActionExecutor
             return;
         }
         if (in_array($class, [Task::class, Reminder::class], true)) {
+            if ($scope === 'tomorrow') {
+                $query->whereBetween($field, [$start, $end]);
+                return;
+            }
             $query->where($field, '<=', $end);
         }
     }
@@ -245,7 +253,7 @@ class BeanActionExecutor
         }
 
         $dateScope = strtolower(trim((string) ($arguments['date_scope'] ?? '')));
-        if (in_array($dateScope, ['today', 'overdue'], true)) {
+        if (in_array($dateScope, ['today', 'tomorrow', 'overdue'], true)) {
             $this->applyDateScope($query, $class, $orderField, $dateScope);
         }
         if (($arguments['workspace_id'] ?? null) !== null) {

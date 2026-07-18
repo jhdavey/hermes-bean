@@ -44,6 +44,7 @@ class BeanQualityLabTest extends TestCase
         $this->assertContains('current time answers directly', array_column($report['results'], 'name'));
         $this->assertContains('misheard transcript recovers recent task entity', array_column($report['results'], 'name'));
         $this->assertContains('online recipe request uses external lookup path', array_column($report['results'], 'name'));
+        $this->assertContains('tomorrow calendar filters tomorrow only', array_column($report['results'], 'name'));
         $this->assertStringContainsString('Bean Quality Report', (string) file_get_contents($markdownPath));
         $this->assertStringContainsString('CI gate', (string) file_get_contents($markdownPath));
 

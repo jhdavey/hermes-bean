@@ -488,7 +488,7 @@ class BeanRuntimeService
         $kindQualifier = match ($action) {
             'task.list', 'task.search' => 'open',
             'reminder.list', 'reminder.search' => 'scheduled',
-            'calendar_event.list', 'calendar_event.search' => 'upcoming',
+            'calendar_event.list', 'calendar_event.search' => in_array($dateScope, ['today', 'tomorrow'], true) ? '' : 'upcoming',
             default => '',
         };
         if ($plural && ! str_ends_with($noun, 's')) {
@@ -498,6 +498,7 @@ class BeanRuntimeService
 
         return match ($dateScope) {
             'today' => in_array($action, ['task.list', 'reminder.list'], true) ? $resourceLabel.' due by today' : $resourceLabel.' for today',
+            'tomorrow' => $resourceLabel.' tomorrow',
             'overdue' => 'overdue '.$resourceLabel,
             default => $resourceLabel,
         };

@@ -679,6 +679,46 @@ class BeanRuntimeTest extends TestCase
         Carbon::setTestNow();
     }
 
+    public function test_tomorrow_calendar_question_filters_to_only_tomorrow_events(): void
+    {
+        config(['services.openai.api_key' => null]);
+        Carbon::setTestNow(Carbon::parse('2026-07-17 18:42:00', config('app.timezone')));
+        $token = $this->apiToken('bean-calendar-tomorrow@example.com');
+        $user = User::where('email', 'bean-calendar-tomorrow@example.com')->firstOrFail();
+
+        foreach ([
+            ['Yesterday demo', now()->subDay()->setTime(14, 0)],
+            ['Today standup', now()->setTime(10, 0)],
+            ['Tomorrow dentist', now()->addDay()->setTime(9, 0)],
+            ['Tomorrow dinner', now()->addDay()->setTime(19, 0)],
+            ['Next week planning', now()->addWeek()->setTime(12, 0)],
+        ] as [$title, $startsAt]) {
+            CalendarEvent::create([
+                'user_id' => $user->id,
+                'workspace_id' => $user->default_workspace_id,
+                'created_by_user_id' => $user->id,
+                'title' => $title,
+                'status' => 'scheduled',
+                'starts_at' => $startsAt,
+                'ends_at' => (clone $startsAt)->addHour(),
+                'recurrence' => 'none',
+            ]);
+        }
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Do I have anything on my calendar for tomorrow?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'You have 2 calendar events tomorrow: Tomorrow dentist and Tomorrow dinner.'])
+            ->assertJsonMissing(['content' => 'Today standup'])
+            ->assertJsonMissing(['content' => 'Next week planning']);
+
+        $this->assertDatabaseHas('bean_tool_calls', [
+            'action' => 'calendar_event.list',
+            'status' => 'completed',
+        ]);
+    }
+
     public function test_weather_question_answers_with_forecast_facts_not_generic_done(): void
     {
         config(['services.openai.api_key' => null]);
