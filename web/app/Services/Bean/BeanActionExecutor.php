@@ -273,7 +273,7 @@ class BeanActionExecutor
         if ($this->hasFilter($arguments, 'status')) return;
 
         if ($class === Task::class) {
-            $query->where('status', '!=', 'completed');
+            $query->where('status', 'open');
         } elseif ($class === Reminder::class || $class === CalendarEvent::class) {
             $query->where('status', 'scheduled');
         }
@@ -485,13 +485,13 @@ class BeanActionExecutor
             $title = (string) ($item['title'] ?? 'This task');
             $status = (string) ($item['status'] ?? 'open');
             $dueAt = isset($item['due_at']) ? Carbon::parse((string) $item['due_at']) : null;
-            if ($timeLabel === 'today' && $status !== 'completed' && $dueAt) {
+            if ($timeLabel === 'today' && $status === 'open' && $dueAt) {
                 return $dueAt->lt(now()->startOfDay())
-                    ? "{$title} is on today's list because it is overdue and still open."
-                    : "{$title} is on today's list because it is due by today and still open.";
+                    ? "{$title} is on today's list because it is overdue and open."
+                    : "{$title} is on today's list because it is due by today and open.";
             }
-            if ($timeLabel === 'overdue' && $status !== 'completed' && $dueAt) {
-                return "{$title} is overdue because it was due before today and is still open.";
+            if ($timeLabel === 'overdue' && $status === 'open' && $dueAt) {
+                return "{$title} is overdue because it was due before today and is open.";
             }
         } elseif ($class === Reminder::class) {
             $title = (string) ($item['title'] ?? 'This reminder');
@@ -685,7 +685,7 @@ class BeanActionExecutor
     private function dashboardSummary(BeanRun $run): array
     {
         return ['ok' => true, 'summary' => [
-            'tasks' => $this->baseQuery(Task::class, $run)->where('status', '!=', 'completed')->count(),
+            'tasks' => $this->baseQuery(Task::class, $run)->where('status', 'open')->count(),
             'reminders' => $this->baseQuery(Reminder::class, $run)->where('status', 'scheduled')->count(),
             'calendar_events' => $this->baseQuery(CalendarEvent::class, $run)->where('starts_at', '>=', now()->startOfDay())->count(),
             'notes' => $this->baseQuery(Note::class, $run)->count(),

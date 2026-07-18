@@ -319,7 +319,7 @@ class BeanRuntimeTest extends TestCase
             'content' => 'Why is pay the travel card showing on today list?',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
-            ->assertJsonFragment(['content' => "Pay the travel card is on today's list because it is overdue and still open."]);
+            ->assertJsonFragment(['content' => "Pay the travel card is on today's list because it is overdue and open."]);
 
         $this->assertDatabaseHas('bean_tool_calls', [
             'action' => 'resource.query',
