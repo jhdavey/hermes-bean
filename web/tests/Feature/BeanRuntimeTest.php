@@ -798,6 +798,109 @@ class BeanRuntimeTest extends TestCase
         Carbon::setTestNow();
     }
 
+    public function test_follow_up_temporal_calendar_question_reuses_previous_calendar_context(): void
+    {
+        config(['services.openai.api_key' => null]);
+        Carbon::setTestNow(Carbon::parse('2026-07-17 18:42:00', config('app.timezone')));
+        $token = $this->apiToken('bean-calendar-follow-up@example.com');
+        $user = User::where('email', 'bean-calendar-follow-up@example.com')->firstOrFail();
+
+        foreach ([
+            ['Today standup', now()->setTime(10, 0)],
+            ['Tomorrow dentist', now()->addDay()->setTime(9, 0)],
+        ] as [$title, $startsAt]) {
+            CalendarEvent::create([
+                'user_id' => $user->id,
+                'workspace_id' => $user->default_workspace_id,
+                'created_by_user_id' => $user->id,
+                'title' => $title,
+                'status' => 'scheduled',
+                'starts_at' => $startsAt,
+                'ends_at' => (clone $startsAt)->addHour(),
+                'recurrence' => 'none',
+            ]);
+        }
+
+        $first = $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => "what's on my calendar for today",
+        ])->assertOk()
+            ->assertJsonFragment(['content' => 'You have 1 calendar event for today: Today standup.']);
+
+        $sessionId = $first->json('data.session.id');
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'session_id' => $sessionId,
+            'content' => 'What about for tomorrow?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'You have 1 calendar event tomorrow: Tomorrow dentist.']);
+
+        $lastToolCall = BeanToolCall::query()->where('action', 'calendar_event.list')->latest('id')->firstOrFail();
+        $this->assertSame('tomorrow', $lastToolCall->arguments['time_label'] ?? null);
+        $this->assertArrayNotHasKey('date_scope', $lastToolCall->arguments ?? []);
+        Carbon::setTestNow();
+    }
+
+    public function test_planner_time_tool_does_not_override_app_data_results_and_temporal_filters_are_canonicalized(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.bean_text_model' => 'gpt-4.1-mini',
+        ]);
+        Carbon::setTestNow(Carbon::parse('2026-07-17 18:42:00', config('app.timezone')));
+        $token = $this->apiToken('bean-calendar-time-tool-noise@example.com');
+        $user = User::where('email', 'bean-calendar-time-tool-noise@example.com')->firstOrFail();
+
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Tomorrow dentist',
+            'status' => 'scheduled',
+            'starts_at' => now()->addDay()->setTime(9, 0),
+            'ends_at' => now()->addDay()->setTime(10, 0),
+            'recurrence' => 'none',
+        ]);
+
+        Http::fakeSequence()->push([
+            'choices' => [[
+                'message' => [
+                    'content' => json_encode([
+                        'response' => 'I’ll check tomorrow’s events.',
+                        'actions' => [[
+                            'action' => 'time.now',
+                            'arguments' => [],
+                        ], [
+                            'action' => 'calendar_event.list',
+                            'arguments' => [
+                                'filters' => [[
+                                    'field' => 'starts_at',
+                                    'operator' => 'between',
+                                    'value' => ['2024-06-18T00:00:00Z', '2024-06-18T23:59:59Z'],
+                                ]],
+                                'time_label' => 'tomorrow',
+                                'workspace_scope' => 'accessible',
+                                'sort' => [['field' => 'starts_at', 'direction' => 'asc']],
+                            ],
+                        ]],
+                    ]),
+                ],
+            ]],
+        ], 200);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Do I have any events for tomorrow?',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'You have 1 calendar event tomorrow: Tomorrow dentist.']);
+
+        $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'time.now']);
+        $toolCall = BeanToolCall::query()->where('action', 'calendar_event.list')->latest('id')->firstOrFail();
+        $range = collect($toolCall->arguments['filters'] ?? [])->firstWhere('field', 'starts_at')['value'] ?? [];
+        $this->assertStringStartsWith('2026-07-18T00:00:00', $range[0] ?? '');
+        $this->assertStringStartsWith('2026-07-18T23:59:59', $range[1] ?? '');
+        Carbon::setTestNow();
+    }
+
     public function test_weather_question_answers_with_forecast_facts_not_generic_done(): void
     {
         config(['services.openai.api_key' => null]);

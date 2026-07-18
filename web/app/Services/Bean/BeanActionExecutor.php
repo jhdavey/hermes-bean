@@ -31,6 +31,8 @@ class BeanActionExecutor
 
     public function execute(BeanSession $session, BeanRun $run, string $action, array $arguments = [], bool $confirmed = false): array
     {
+        $arguments = $this->normalizeArguments($action, $arguments);
+
         $tool = BeanToolCall::create([
             'bean_run_id' => $run->id,
             'user_id' => $run->user_id,
@@ -130,6 +132,84 @@ class BeanActionExecutor
     private function baseQuery(string $class, BeanRun $run): Builder
     {
         return $class::query()->whereIn('workspace_id', $this->workspaceIds($run));
+    }
+
+    private function normalizeArguments(string $action, array $arguments): array
+    {
+        $class = $this->classForReadAction($action, $arguments);
+        if ($class === null) return $arguments;
+
+        $timeLabel = $this->timeLabel($arguments);
+        if ($timeLabel === null) return $arguments;
+
+        $field = $this->temporalField($class);
+        if ($field === null) return $arguments;
+
+        $temporalFilters = $this->temporalFilters($class, $field, $timeLabel);
+        if ($temporalFilters === []) return $arguments;
+
+        $existing = collect(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [])
+            ->filter(fn ($filter): bool => is_array($filter) && ($filter['field'] ?? null) !== $field)
+            ->values()
+            ->all();
+        $arguments['filters'] = array_merge($existing, $temporalFilters);
+        if (! isset($arguments['sort']) && in_array($action, ['task.list', 'reminder.list', 'calendar_event.list', 'resource.query'], true)) {
+            $arguments['sort'] = [['field' => $field, 'direction' => 'asc']];
+        }
+
+        return $arguments;
+    }
+
+    private function classForReadAction(string $action, array $arguments): ?string
+    {
+        return match ($action) {
+            'task.list', 'task.search' => Task::class,
+            'reminder.list', 'reminder.search' => Reminder::class,
+            'calendar_event.list', 'calendar_event.search' => CalendarEvent::class,
+            'note.list', 'note.search' => Note::class,
+            'resource.query', 'resource.relationships' => $this->classForResourceName((string) ($arguments['resource'] ?? '')),
+            default => null,
+        };
+    }
+
+    private function classForResourceName(string $resource): ?string
+    {
+        return match ($resource) {
+            'task', 'tasks' => Task::class,
+            'reminder', 'reminders' => Reminder::class,
+            'calendar_event', 'calendar_events', 'event', 'events', 'calendar' => CalendarEvent::class,
+            'note', 'notes' => Note::class,
+            default => null,
+        };
+    }
+
+    private function temporalField(string $class): ?string
+    {
+        return match ($class) {
+            Task::class => 'due_at',
+            Reminder::class => 'remind_at',
+            CalendarEvent::class => 'starts_at',
+            default => null,
+        };
+    }
+
+    private function temporalFilters(string $class, string $field, string $timeLabel): array
+    {
+        $start = now()->startOfDay()->toIso8601String();
+        $end = now()->endOfDay()->toIso8601String();
+        if ($timeLabel === 'tomorrow') {
+            $start = now()->addDay()->startOfDay()->toIso8601String();
+            $end = now()->addDay()->endOfDay()->toIso8601String();
+        }
+
+        return match ($timeLabel) {
+            'overdue' => [['field' => $field, 'operator' => '<', 'value' => $start]],
+            'today' => $class === CalendarEvent::class
+                ? [['field' => $field, 'operator' => 'between', 'value' => [$start, $end]]]
+                : [['field' => $field, 'operator' => '<=', 'value' => $end]],
+            'tomorrow' => [['field' => $field, 'operator' => 'between', 'value' => [$start, $end]]],
+            default => [],
+        };
     }
 
     private function listResources(string $class, BeanRun $run, string $orderField, array $arguments = []): array

@@ -71,13 +71,24 @@ class BeanTextModel
                 return $this->heuristic($message, null, $session);
             }
 
-            $actions = $this->cleanActions($decoded['actions'] ?? []);
+            $actions = $this->dropIrrelevantTimeActions($this->cleanActions($decoded['actions'] ?? []), $message);
+            $followUp = $this->temporalFollowUpAction($message, mb_strtolower($message), $session);
             if ($this->isVagueFragment($message)) {
+                if ($actions === [] && $followUp !== null) {
+                    return [
+                        'response' => 'I’ll check that for '.($followUp['arguments']['time_label'] ?? 'then').'.',
+                        'actions' => [$followUp],
+                        'model' => $model,
+                    ];
+                }
                 return [
                     'response' => 'I’m not sure what you mean yet — can you clarify?',
                     'actions' => [],
                     'model' => $model,
                 ];
+            }
+            if ($actions === [] && $followUp !== null) {
+                $actions[] = $followUp;
             }
             if ($actions === [] && ($this->isFactualResourceQuestion(mb_strtolower($message)) || $this->isTaskWorkspaceQuestion(mb_strtolower($message)))) {
                 $actions[] = ['action' => 'resource.query', 'arguments' => [...$this->resourceQueryArguments($message, mb_strtolower($message), $session), 'skip_synthesis' => true]];
@@ -167,7 +178,11 @@ PROMPT;
         $metadata = is_array($session->metadata) ? $session->metadata : [];
         return [
             'recent_entities' => array_slice(is_array($metadata['recent_entities'] ?? null) ? $metadata['recent_entities'] : [], 0, 10),
+            'recent_query_context' => is_array($metadata['recent_query_context'] ?? null) ? $metadata['recent_query_context'] : null,
             'current_workspace_id' => $session->workspace_id,
+            'current_datetime' => now()->toIso8601String(),
+            'current_date' => now()->toDateString(),
+            'timezone' => config('app.timezone', 'UTC'),
         ];
     }
 
@@ -320,7 +335,7 @@ You are Bean, the HeyBean productivity assistant. Return only JSON matching the 
 Use actions only from this list: {$actions}.
 Laravel is the source of truth: you propose structured actions; Laravel validates, scopes, confirms, and executes them.
 For destructive actions include the delete action, but Laravel will require confirmation before execution.
-Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. Use ISO 8601 dates when the user supplied a date/time. Use resource.query for flexible factual questions about app data and resource.relationships for relationship/context questions, including workspace/context/why/relationship questions. For resource.query/resource.relationships set resource to tasks, reminders, calendar_events, notes, or workspaces; set query/title for lookup text; set include_workspaces=true when workspace context could matter; set explain_visibility=true for why-is-this-shown questions. For list/query reads, express exact data constraints in filters: use field/operator/value triples, e.g. starts_at between [tomorrowStart, tomorrowEnd], due_at <= todayEnd, remind_at < todayStart, or status in [scheduled]. Use time_label only as user-facing answer context such as today, tomorrow, or overdue; do not rely on time_label for filtering. If an item needs lookup by title, use query rather than inventing an id. Use strict mutation actions only when changing app state.
+Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. The Recent Bean session context includes current_datetime/current_date/timezone; use those for relative dates like today/tomorrow and for follow-up questions. Use ISO 8601 dates when the user supplied or implied a date/time. Use resource.query for flexible factual questions about app data and resource.relationships for relationship/context questions, including workspace/context/why/relationship questions. For resource.query/resource.relationships set resource to tasks, reminders, calendar_events, notes, or workspaces; set query/title for lookup text; set include_workspaces=true when workspace context could matter; set explain_visibility=true for why-is-this-shown questions. For list/query reads, express exact data constraints in filters: use field/operator/value triples, e.g. starts_at between [tomorrowStart, tomorrowEnd], due_at <= todayEnd, remind_at < todayStart, or status in [scheduled]. Use time_label only as user-facing answer context such as today, tomorrow, or overdue; do not rely on time_label for filtering. If the user says "what about tomorrow?" or another temporal follow-up, reuse recent_query_context.resource. Do not include time.now unless the user is actually asking for the time/date. If an item needs lookup by title, use query rather than inventing an id. Use strict mutation actions only when changing app state.
 Do not invent private dashboard data; call list/search/dashboard actions when data is needed.
 Keep response concise and avoid saying an action is complete before Laravel executes it.
 PROMPT;
@@ -349,6 +364,23 @@ PROMPT;
             ->all();
     }
 
+    private function dropIrrelevantTimeActions(array $actions, string $message): array
+    {
+        if ($this->asksDateTime(mb_strtolower($message))) return $actions;
+        $hasAppDataAction = collect($actions)->contains(fn (array $action): bool => ($action['action'] ?? '') !== 'time.now');
+        if (! $hasAppDataAction) return $actions;
+
+        return collect($actions)
+            ->reject(fn (array $action): bool => ($action['action'] ?? '') === 'time.now')
+            ->values()
+            ->all();
+    }
+
+    private function asksDateTime(string $lower): bool
+    {
+        return preg_match('/\b(time|current time|what time|date|today[’\']?s date|what day)\b/u', $lower) === 1;
+    }
+
     private function withoutNulls(array $values): array
     {
         return collect($values)
@@ -364,7 +396,11 @@ PROMPT;
         $actions = [];
         $response = $prefix ?: 'I can help with that.';
 
+        $followUp = $this->temporalFollowUpAction($text, $lower, $session);
         if ($this->isVagueFragment($text)) {
+            if ($followUp !== null) {
+                return ['response' => 'I’ll check that for '.($followUp['arguments']['time_label'] ?? 'then').'.', 'actions' => [$followUp], 'model' => 'local-heuristic'];
+            }
             return ['response' => 'I’m not sure what you mean yet — can you clarify?', 'actions' => [], 'model' => 'local-heuristic'];
         }
 
@@ -553,6 +589,78 @@ PROMPT;
     {
         return preg_match('/\b(why|which|where|is|explain|context|workspace|workspaces)\b/', $lower) === 1
             && ($this->mentionsTask($lower) || $this->mentionsReminder($lower) || $this->mentionsCalendar($lower) || $this->mentionsNote($lower) || preg_match('/\b(card|grout|grill|item|items)\b/', $lower) === 1);
+    }
+
+    private function temporalFollowUpAction(string $text, string $lower, ?BeanSession $session): ?array
+    {
+        if (! $this->mentionsToday($lower) && ! $this->mentionsTomorrow($lower) && ! $this->mentionsOverdue($lower)) {
+            return null;
+        }
+        if (! preg_match('/\b(what about|how about|for|today|tomorrow|overdue|past due|late)\b/u', $lower)) {
+            return null;
+        }
+
+        $resource = $this->recentQueryResource($session);
+        if (! in_array($resource, ['tasks', 'reminders', 'calendar_events'], true)) return null;
+
+        $action = match ($resource) {
+            'tasks' => 'task.list',
+            'reminders' => 'reminder.list',
+            'calendar_events' => 'calendar_event.list',
+        };
+
+        return ['action' => $action, 'arguments' => $this->listArguments($lower, $resource)];
+    }
+
+    private function recentQueryResource(?BeanSession $session): ?string
+    {
+        if (! $session) return null;
+        $metadata = is_array($session->metadata) ? $session->metadata : [];
+        $context = is_array($metadata['recent_query_context'] ?? null) ? $metadata['recent_query_context'] : null;
+        if (isset($context['resource'])) {
+            $resource = $this->normalizeResourceName((string) $context['resource']);
+            if ($resource !== null) return $resource;
+        }
+
+        $messages = $session->messages()->where('role', 'assistant')->latest('id')->limit(6)->get();
+        foreach ($messages as $message) {
+            $messageMetadata = is_array($message->metadata) ? $message->metadata : [];
+            foreach (is_array($messageMetadata['results'] ?? null) ? $messageMetadata['results'] : [] as $result) {
+                if (! is_array($result)) continue;
+                $resource = $this->resourceFromAction((string) ($result['action'] ?? ''))
+                    ?: $this->normalizeResourceName((string) ($result['resource'] ?? data_get($result, 'arguments.resource') ?? ''));
+                if ($resource !== null) return $resource;
+            }
+        }
+
+        foreach (array_values(array_filter(is_array($metadata['recent_entities'] ?? null) ? $metadata['recent_entities'] : [], 'is_array')) as $entity) {
+            $resource = $this->normalizeResourceName((string) ($entity['type'] ?? ''));
+            if ($resource !== null) return $resource;
+        }
+
+        return null;
+    }
+
+    private function resourceFromAction(string $action): ?string
+    {
+        return match ($action) {
+            'task.list', 'task.search', 'task.context' => 'tasks',
+            'reminder.list', 'reminder.search' => 'reminders',
+            'calendar_event.list', 'calendar_event.search' => 'calendar_events',
+            'note.list', 'note.search' => 'notes',
+            default => null,
+        };
+    }
+
+    private function normalizeResourceName(string $resource): ?string
+    {
+        return match ($resource) {
+            'task', 'tasks' => 'tasks',
+            'reminder', 'reminders' => 'reminders',
+            'calendar', 'event', 'events', 'calendar_event', 'calendar_events' => 'calendar_events',
+            'note', 'notes' => 'notes',
+            default => null,
+        };
     }
 
     private function resourceQueryArguments(string $text, string $lower, ?BeanSession $session = null): array

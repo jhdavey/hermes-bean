@@ -188,6 +188,7 @@ class BeanRuntimeService
         $lower = mb_strtolower($userMessage);
         $asksDate = preg_match('/\b(date|today[’\']?s date|what day)\b/u', $lower) === 1;
         $asksTime = preg_match('/\b(time|current time|now)\b/u', $lower) === 1;
+        if (! $asksDate && ! $asksTime) return null;
 
         if ($asksDate && ! $asksTime) {
             return "Today's date is ".$now->format('F j, Y').'.';
@@ -366,16 +367,54 @@ class BeanRuntimeService
             ->values()
             ->all();
 
-        if ($entities === []) return;
         $metadata = is_array($session->metadata) ? $session->metadata : [];
-        $existing = is_array($metadata['recent_entities'] ?? null) ? $metadata['recent_entities'] : [];
-        $metadata['recent_entities'] = collect($entities)
-            ->merge($existing)
-            ->unique(fn (array $entity): string => ($entity['type'] ?? '').':'.($entity['id'] ?? ''))
-            ->take(20)
-            ->values()
-            ->all();
-        $session->forceFill(['metadata' => $metadata])->save();
+        $queryContext = $this->recentQueryContextFromResults($results);
+        if ($queryContext !== null) {
+            $metadata['recent_query_context'] = $queryContext;
+        }
+
+        if ($entities !== []) {
+            $existing = is_array($metadata['recent_entities'] ?? null) ? $metadata['recent_entities'] : [];
+            $metadata['recent_entities'] = collect($entities)
+                ->merge($existing)
+                ->unique(fn (array $entity): string => ($entity['type'] ?? '').':'.($entity['id'] ?? ''))
+                ->take(20)
+                ->values()
+                ->all();
+        }
+        if ($queryContext !== null || $entities !== []) {
+            $session->forceFill(['metadata' => $metadata])->save();
+        }
+    }
+
+    private function recentQueryContextFromResults(array $results): ?array
+    {
+        foreach (array_reverse($results) as $result) {
+            if (! is_array($result) || ($result['ok'] ?? false) !== true) continue;
+            $resource = $this->resourceFromResult($result);
+            if ($resource === null) continue;
+            return [
+                'resource' => $resource,
+                'action' => $result['action'] ?? null,
+                'time_label' => $result['time_label'] ?? data_get($result, 'arguments.time_label'),
+            ];
+        }
+
+        return null;
+    }
+
+    private function resourceFromResult(array $result): ?string
+    {
+        $resource = (string) ($result['resource'] ?? data_get($result, 'arguments.resource') ?? '');
+        if ($resource !== '') return $resource;
+
+        return match ((string) ($result['action'] ?? '')) {
+            'task.list', 'task.search', 'task.context' => 'tasks',
+            'reminder.list', 'reminder.search' => 'reminders',
+            'calendar_event.list', 'calendar_event.search' => 'calendar_events',
+            'note.list', 'note.search' => 'notes',
+            default => null,
+        };
     }
 
     private function contextResponse(array $results): ?string
