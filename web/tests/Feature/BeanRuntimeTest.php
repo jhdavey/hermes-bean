@@ -1127,6 +1127,37 @@ class BeanRuntimeTest extends TestCase
         $this->assertSame(0, Task::where('user_id', $user->id)->count());
     }
 
+    public function test_yes_message_approves_pending_confirmation_in_same_session(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-yes-confirmation@example.com');
+        $user = User::where('email', 'bean-yes-confirmation@example.com')->firstOrFail();
+        $task = Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Delete by voice yes',
+            'type' => 'todo',
+            'status' => 'open',
+        ]);
+
+        $delete = $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Delete task Delete by voice yes',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'waiting_confirmation');
+
+        $sessionId = $delete->json('data.session.id');
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'session_id' => $sessionId,
+            'content' => 'yes',
+        ])->assertOk()
+            ->assertJsonPath('data.result.ok', true)
+            ->assertJsonPath('data.confirmation.status', 'approved');
+
+        $this->assertDatabaseMissing('tasks', ['id' => $task->id]);
+        $this->assertDatabaseMissing('bean_confirmation_requests', ['action' => 'task.delete', 'status' => 'pending']);
+    }
+
     public function test_destructive_action_requires_confirmation_then_can_be_approved(): void
     {
         $token = $this->apiToken('bean-delete@example.com');

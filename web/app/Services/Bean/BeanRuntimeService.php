@@ -31,11 +31,46 @@ class BeanRuntimeService
         ]);
     }
 
+    private function isAffirmativeConfirmationReply(string $content): bool
+    {
+        $lower = mb_strtolower(trim(preg_replace('/[^\pL\pN\s]/u', ' ', $content) ?: $content));
+        $lower = trim(preg_replace('/\s+/', ' ', $lower) ?: $lower);
+
+        return preg_match('/^(yes|yeah|yep|yup|ok|okay|confirm|confirmed|approve|approved|do it|go ahead|that is right|that\s right)$/u', $lower) === 1;
+    }
+
+    private function withConversationState(BeanSession $session, array $payload): array
+    {
+        return [
+            ...$payload,
+            'session' => $session->refresh(),
+            'messages' => $session->messages()->latest('id')->limit(20)->get()->reverse()->values(),
+            'activity' => $session->activityEvents()->latest('id')->limit(50)->get()->reverse()->values(),
+            'confirmations' => BeanConfirmationRequest::query()
+                ->where('bean_session_id', $session->id)
+                ->where('status', 'pending')
+                ->latest('id')
+                ->get(),
+        ];
+    }
+
     public function handleMessage(User $user, string $content, ?int $sessionId = null, ?int $workspaceId = null): array
     {
         $session = $sessionId
             ? BeanSession::query()->where('user_id', $user->id)->findOrFail($sessionId)
             : $this->createSession($user, $workspaceId);
+
+        if ($this->isAffirmativeConfirmationReply($content) && $sessionId) {
+            $confirmation = BeanConfirmationRequest::query()
+                ->where('bean_session_id', $session->id)
+                ->where('user_id', $user->id)
+                ->where('status', 'pending')
+                ->latest('id')
+                ->first();
+            if ($confirmation) {
+                return $this->withConversationState($session, $this->approveConfirmation($user, $confirmation->id));
+            }
+        }
 
         $run = BeanRun::create([
             'bean_session_id' => $session->id,
