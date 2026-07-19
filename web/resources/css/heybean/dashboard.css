@@ -892,6 +892,7 @@
 .hb-bean-activity > div { max-height: 150px; overflow: auto; display: grid; gap: 6px; padding-top: 8px; }
 .hb-bean-activity-row { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 6px; }
 .hb-bean-activity-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hb-bean-activity-row em { display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; color: var(--hb-muted2); font-style: normal; font-weight: 700; }
 
 .hb-bean-confirmations { display: grid; gap: 8px; }
 .hb-bean-confirmation { justify-content: space-between; border: 1px solid rgba(245, 158, 11, .26); background: rgba(245, 158, 11, .08); border-radius: 14px; padding: 9px; font-size: 12px; font-weight: 800; }

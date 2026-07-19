@@ -46,7 +46,8 @@ class BeanActionExecutor
             'started_at' => now(),
         ]);
 
-        $this->activity->log($session, $run, 'tool_started', $this->labelFor($action), ['action' => $action]);
+        $this->markRunProgress($run, $action, 'running');
+        $this->activity->log($session, $run, 'tool_started', $this->labelFor($action), ['action' => $action, 'progress' => $this->progressSnapshot($action, 'running')]);
 
         try {
             if ($this->isDestructive($action) && ! $confirmed) {
@@ -98,20 +99,24 @@ class BeanActionExecutor
                 default => ['ok' => false, 'error' => "Unsupported Bean action: {$action}"],
             };
 
-            $tool->update(['status' => ($result['ok'] ?? false) ? 'completed' : 'failed', 'result' => $result, 'error' => $result['error'] ?? null, 'completed_at' => now()]);
-            $this->activity->log($session, $run, ($result['ok'] ?? false) ? 'tool_completed' : 'tool_failed', $this->resultLabel($action, $result), ['action' => $action, 'result' => $result]);
+            $status = ($result['ok'] ?? false) ? 'completed' : 'failed';
+            $tool->update(['status' => $status, 'result' => $result, 'error' => $result['error'] ?? null, 'completed_at' => now()]);
+            $this->markRunProgress($run, $action, $status, $result);
+            $this->activity->log($session, $run, $status === 'completed' ? 'tool_completed' : 'tool_failed', $this->resultLabel($action, $result), ['action' => $action, 'result' => $result, 'progress' => $this->progressSnapshot($action, $status, $result)]);
             return $result;
         } catch (HttpResponseException $exception) {
             $payload = json_decode((string) $exception->getResponse()->getContent(), true) ?: [];
             $message = (string) ($payload['message'] ?? data_get($payload, 'error.message') ?? 'Bean could not complete that action.');
             $result = ['ok' => false, 'error' => $message, 'response' => $payload];
             $tool->update(['status' => 'failed', 'result' => $result, 'error' => $message, 'completed_at' => now()]);
-            $this->activity->log($session, $run, 'tool_failed', $message, $result);
+            $this->markRunProgress($run, $action, 'failed', $result);
+            $this->activity->log($session, $run, 'tool_failed', $this->resultLabel($action, $result), ['action' => $action, 'result' => $result, 'progress' => $this->progressSnapshot($action, 'failed', $result)]);
             return $result;
         } catch (Throwable $exception) {
             $result = ['ok' => false, 'error' => $exception->getMessage()];
             $tool->update(['status' => 'failed', 'result' => $result, 'error' => $exception->getMessage(), 'completed_at' => now()]);
-            $this->activity->log($session, $run, 'tool_failed', "Bean could not complete {$action}.", $result);
+            $this->markRunProgress($run, $action, 'failed', $result);
+            $this->activity->log($session, $run, 'tool_failed', $this->resultLabel($action, $result), ['action' => $action, 'result' => $result, 'progress' => $this->progressSnapshot($action, 'failed', $result)]);
             return $result;
         }
     }
@@ -905,10 +910,82 @@ class BeanActionExecutor
         return $duration;
     }
 
+    private function markRunProgress(BeanRun $run, string $action, string $status, array $result = []): void
+    {
+        $progress = $this->progressSnapshot($action, $status, $result);
+        $metadata = is_array($run->metadata) ? $run->metadata : [];
+        $history = collect($metadata['progress_history'] ?? [])
+            ->filter(fn ($item): bool => is_array($item))
+            ->push($progress)
+            ->take(-20)
+            ->values()
+            ->all();
+
+        $metadata['progress'] = $progress;
+        $metadata['progress_history'] = $history;
+        $run->forceFill(['metadata' => $metadata])->save();
+    }
+
+    private function progressSnapshot(string $action, string $status, array $result = []): array
+    {
+        $details = $this->progressDetails($action, $result);
+
+        return array_filter([
+            'action' => $action,
+            'status' => $status,
+            'label' => $status === 'running' ? $this->labelFor($action) : $this->resultLabel($action, $result),
+            'status_text' => $status === 'running' ? $this->labelFor($action) : $this->resultLabel($action, $result),
+            'details' => $details,
+            'updated_at' => now()->toIso8601String(),
+        ], fn ($value) => $value !== null && $value !== [] && $value !== '');
+    }
+
+    private function progressDetails(string $action, array $result): array
+    {
+        if ($result === []) return [];
+
+        $details = [];
+        if ($action === 'external.lookup') {
+            $provider = trim((string) ($result['provider'] ?? ''));
+            if ($provider !== '') $details['provider'] = $provider;
+            $sourceCount = data_get($result, 'evidence.source_count');
+            if ($sourceCount !== null) $details['source_count'] = (int) $sourceCount;
+            $confidence = trim((string) ($result['confidence'] ?? data_get($result, 'evidence.confidence') ?? ''));
+            if ($confidence !== '') $details['confidence'] = $confidence;
+        }
+
+        $title = trim((string) data_get($result, 'item.title', ''));
+        if ($title !== '') {
+            $details['title'] = $title;
+        }
+
+        foreach (['resource_type', 'total_count', 'returned_count', 'limit', 'grounded_from'] as $key) {
+            if (array_key_exists($key, $result) && $result[$key] !== null && $result[$key] !== '') {
+                $details[$key] = $result[$key];
+            }
+        }
+
+        return $details;
+    }
+
+    private function progressDetailText(string $action, array $result): string
+    {
+        $details = $this->progressDetails($action, $result);
+        $parts = [];
+        if (($details['provider'] ?? null) !== null) $parts[] = 'provider '.$details['provider'];
+        if (($details['source_count'] ?? null) !== null) $parts[] = ((int) $details['source_count']).' sources';
+        if (($details['confidence'] ?? null) !== null) $parts[] = 'confidence '.$details['confidence'];
+        if (($details['title'] ?? null) !== null) $parts[] = (string) $details['title'];
+        if (($details['total_count'] ?? null) !== null) $parts[] = 'total '.$details['total_count'];
+        if (($details['returned_count'] ?? null) !== null) $parts[] = 'shown '.$details['returned_count'];
+
+        return $parts === [] ? '' : ' · '.implode(' · ', $parts);
+    }
+
     private function isDestructive(string $action): bool { return str_ends_with($action, '.delete'); }
     private function confirmationSummary(string $action, array $arguments): string { return "Confirm before I run {$action}."; }
-    private function labelFor(string $action): string { return 'Bean is '.str_replace('_', ' ', str_replace('.', ' ', $action)).'...'; }
-    private function resultLabel(string $action, array $result): string { return ($result['ok'] ?? false) ? 'Bean finished '.str_replace('.', ' ', $action).'.' : (string) ($result['error'] ?? 'Bean hit a problem.'); }
+    private function labelFor(string $action): string { return "Working: {$action}"; }
+    private function resultLabel(string $action, array $result): string { return ($result['ok'] ?? false) ? "Done: {$action}".$this->progressDetailText($action, $result) : "Failed: {$action}".($result['error'] ?? null ? ' · '.(string) $result['error'] : ''); }
 
     private function dateOrNull(mixed $value): ?Carbon { return blank($value) ? null : Carbon::parse((string) $value)->utc(); }
     private function metadata(array $args): array { return is_array($args['metadata'] ?? null) ? $args['metadata'] : ['created_by' => 'bean']; }

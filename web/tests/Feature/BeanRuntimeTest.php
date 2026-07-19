@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\BeanActivityEvent;
 use App\Models\BeanRun;
 use App\Models\BeanSession;
 use App\Models\BeanToolCall;
@@ -661,7 +662,7 @@ class BeanRuntimeTest extends TestCase
             'https://example.test/smoked-trout-dip' => Http::response($this->recipeJsonLdHtml(), 200, ['content-type' => 'text/html']),
         ]);
 
-        $this->withToken($token)->postJson('/api/bean/messages', [
+        $response = $this->withToken($token)->postJson('/api/bean/messages', [
             'content' => 'Create a note with a recipe for smoked trout dip.',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
@@ -677,6 +678,31 @@ class BeanRuntimeTest extends TestCase
         $this->assertDatabaseHas('bean_tool_calls', ['action' => 'external.lookup', 'status' => 'completed']);
         $this->assertDatabaseHas('bean_tool_calls', ['action' => 'note.create', 'status' => 'completed']);
         $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'recipe.lookup']);
+
+        $events = BeanActivityEvent::query()
+            ->where('user_id', $user->id)
+            ->whereIn('type', ['tool_started', 'tool_completed'])
+            ->orderBy('id')
+            ->get();
+        $this->assertSame('Working: external.lookup', $events->firstWhere('type', 'tool_started')?->label);
+        $this->assertTrue($events->contains(fn (BeanActivityEvent $event): bool => $event->label === 'Working: note.create'));
+        $externalCompleted = $events->first(fn (BeanActivityEvent $event): bool => $event->type === 'tool_completed' && data_get($event->payload, 'action') === 'external.lookup');
+        $this->assertNotNull($externalCompleted);
+        $this->assertStringContainsString('Done: external.lookup', (string) $externalCompleted->label);
+        $this->assertSame('Working: external.lookup', data_get($events->firstWhere('type', 'tool_started')?->payload, 'progress.status_text'));
+        $this->assertSame('brave_html', data_get($externalCompleted?->payload, 'progress.details.provider'));
+        $this->assertSame(1, data_get($externalCompleted?->payload, 'progress.details.source_count'));
+
+        $run = BeanRun::query()->where('user_id', $user->id)->latest('id')->firstOrFail();
+        $this->assertSame('note.create', data_get($run->metadata, 'progress.action'));
+        $this->assertSame('completed', data_get($run->metadata, 'progress.status'));
+        $this->assertSame(['external.lookup', 'external.lookup', 'note.create', 'note.create'], collect(data_get($run->metadata, 'progress_history'))->pluck('action')->all());
+
+        $this->withToken($token)->getJson('/api/bean/runs/'.data_get($response->json(), 'data.run.id'))
+            ->assertOk()
+            ->assertJsonPath('data.progress.action', 'note.create')
+            ->assertJsonPath('data.progress.status', 'completed')
+            ->assertJsonPath('data.progress_history.0.status_text', 'Working: external.lookup');
     }
 
     public function test_openai_direct_recipe_note_create_is_normalized_to_grounded_creation(): void

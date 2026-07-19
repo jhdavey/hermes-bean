@@ -119,11 +119,12 @@ class BeanRuntimeService
             $this->activity->log($session, $run, 'assistant_message', $assistantText, ['results' => $results]);
             $this->activity->log($session, $run, 'status', 'Done', ['mode' => 'wake_listening']);
 
+            $runMetadata = is_array($run->metadata) ? $run->metadata : [];
             $run->update([
                 'status' => collect($results)->contains(fn ($result): bool => ($result['requires_confirmation'] ?? false) === true) ? 'waiting_confirmation' : 'completed',
                 'model' => $proposal['model'] ?? null,
                 'output' => $assistantText,
-                'metadata' => ['results' => $results],
+                'metadata' => [...$runMetadata, 'results' => $results],
                 'completed_at' => now(),
             ]);
             app(\App\Services\Bean\Quality\BeanQualityAuditService::class)->traceRun($run->refresh());
@@ -171,7 +172,8 @@ class BeanRuntimeService
             $confirmation->update(['status' => ($result['ok'] ?? false) ? 'approved' : 'failed', 'approved_at' => now()]);
             $text = ($result['ok'] ?? false) ? 'Done — I completed the confirmed action.' : 'I could not complete that confirmed action.';
             BeanMessage::create(['bean_session_id' => $session->id, 'bean_run_id' => $run->id, 'user_id' => $user->id, 'role' => 'assistant', 'content' => $text, 'metadata' => ['result' => $result]]);
-            $run->update(['status' => ($result['ok'] ?? false) ? 'completed' : 'failed', 'output' => $text, 'metadata' => ['result' => $result], 'completed_at' => now()]);
+            $runMetadata = is_array($run->metadata) ? $run->metadata : [];
+            $run->update(['status' => ($result['ok'] ?? false) ? 'completed' : 'failed', 'output' => $text, 'metadata' => [...$runMetadata, 'result' => $result], 'completed_at' => now()]);
             $this->activity->log($session, $run, 'assistant_message', $text, ['result' => $result]);
             return ['confirmation' => $confirmation->refresh(), 'run' => $run->refresh(), 'result' => $result];
         });

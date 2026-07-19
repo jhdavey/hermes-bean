@@ -1818,7 +1818,24 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function beanActivityMarkup(event) {
-        return `<div class="hb-bean-activity-row"><small>${escapeHtml(formatActivityTime(event.created_at || event.createdAt))}</small><span>${escapeHtml(event.label || event.type || 'Bean activity')}</span></div>`;
+        const details = beanActivityDetails(event);
+        return `<div class="hb-bean-activity-row"><small>${escapeHtml(formatActivityTime(event.created_at || event.createdAt))}</small><span>${escapeHtml(event.label || event.type || 'Bean activity')}${details ? `<em>${escapeHtml(details)}</em>` : ''}</span></div>`;
+    }
+
+    function beanActivityDetails(event) {
+        const details = event?.payload?.progress?.details || {};
+        const parts = [];
+        if (details.provider) parts.push(`provider ${details.provider}`);
+        if (details.source_count !== undefined && details.source_count !== null) parts.push(`${details.source_count} sources`);
+        if (details.confidence) parts.push(`confidence ${details.confidence}`);
+        if (details.title) parts.push(details.title);
+        if (details.total_count !== undefined && details.total_count !== null) parts.push(`total ${details.total_count}`);
+        if (details.returned_count !== undefined && details.returned_count !== null) parts.push(`shown ${details.returned_count}`);
+        return parts.join(' · ');
+    }
+
+    function beanEventStatusText(event, fallback = '') {
+        return event?.payload?.progress?.status_text || event?.payload?.progress?.label || event?.label || fallback;
     }
 
     function beanConfirmationMarkup(confirmation) {
@@ -7533,12 +7550,15 @@ export function mountHeyBeanWebApp(mount) {
         const liveStatusEvent = isLiveBeanStatusEvent(event);
         if (event.type === 'status' && payloadMode && liveStatusEvent) {
             state.bean.mode = payloadMode;
-            state.bean.statusText = event.label || state.bean.statusText;
+            state.bean.statusText = beanEventStatusText(event, state.bean.statusText);
         } else if (event.type === 'tool_started' && liveStatusEvent) {
             state.bean.mode = 'working';
-            state.bean.statusText = event.label || 'Working…';
+            state.bean.statusText = beanEventStatusText(event, 'Working…');
+        } else if ((event.type === 'tool_completed' || event.type === 'tool_failed') && liveStatusEvent) {
+            state.bean.mode = event.type === 'tool_failed' ? 'error' : 'working';
+            state.bean.statusText = beanEventStatusText(event, event.type === 'tool_failed' ? 'Action failed' : 'Action complete');
         } else if (event.type === 'assistant_message' && liveStatusEvent) {
-            state.bean.statusText = event.label || 'Done';
+            state.bean.statusText = beanEventStatusText(event, 'Done');
         }
         if (state.bean.panelOpen || ['status', 'tool_started', 'tool_completed', 'tool_failed', 'assistant_message'].includes(event.type)) {
             render();

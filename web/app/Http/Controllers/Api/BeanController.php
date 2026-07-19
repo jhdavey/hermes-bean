@@ -52,7 +52,12 @@ class BeanController extends Controller
     public function run(Request $request, BeanRun $run): JsonResponse
     {
         abort_unless((int) $run->user_id === (int) $request->user()->id, 404);
-        return response()->json(['data' => $run->load(['toolCalls', 'activityEvents'])]);
+        $run->load(['toolCalls', 'activityEvents']);
+        $data = $run->toArray();
+        $data['progress'] = data_get($run->metadata, 'progress');
+        $data['progress_history'] = data_get($run->metadata, 'progress_history', []);
+
+        return response()->json(['data' => $data]);
     }
 
     public function approve(Request $request, BeanConfirmationRequest $confirmation): JsonResponse
