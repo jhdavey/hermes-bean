@@ -782,6 +782,10 @@ class BeanActionExecutor
     private function externalLookupNoteTitle(?array $lookup): ?string
     {
         if ($lookup === null) return null;
+        $structured = $this->firstStructuredRecipe($lookup);
+        if ($structured !== null && trim((string) ($structured['name'] ?? '')) !== '') {
+            return str((string) $structured['name'])->title()->limit(80, '')->toString();
+        }
         $title = trim((string) ($lookup['title'] ?? '')) ?: trim((string) ($lookup['query'] ?? ''));
         $title = preg_replace('/^search results for\s+/i', '', $title) ?: $title;
         return $title !== '' ? str($title)->title()->limit(80, '')->toString() : null;
@@ -789,6 +793,11 @@ class BeanActionExecutor
 
     private function externalLookupNoteText(array $lookup): string
     {
+        $structured = $this->firstStructuredRecipe($lookup);
+        if ($structured !== null) {
+            return $this->structuredRecipeNoteText($lookup, $structured);
+        }
+
         $lines = [];
         $query = trim((string) ($lookup['query'] ?? ''));
         if ($query !== '') $lines[] = 'Lookup: '.$query;
@@ -821,6 +830,79 @@ class BeanActionExecutor
         }
 
         return trim(implode("\n", $lines));
+    }
+
+    private function firstStructuredRecipe(array $lookup): ?array
+    {
+        foreach ($lookup['documents'] ?? [] as $document) {
+            if (! is_array($document)) continue;
+            foreach (data_get($document, 'structured.recipes', []) as $recipe) {
+                if (is_array($recipe)) {
+                    $recipe['source_url'] = $document['url'] ?? null;
+                    return $recipe;
+                }
+            }
+        }
+        return null;
+    }
+
+    private function structuredRecipeNoteText(array $lookup, array $recipe): string
+    {
+        $lines = [];
+        $name = trim((string) ($recipe['name'] ?? $lookup['title'] ?? $lookup['query'] ?? ''));
+        if ($name !== '') $lines[] = $name;
+        $sourceUrl = trim((string) ($recipe['source_url'] ?? $lookup['source_url'] ?? ''));
+        if ($sourceUrl !== '') $lines[] = 'Source: '.$sourceUrl;
+        $yield = collect($recipe['yield'] ?? [])->filter()->implode(', ');
+        if ($yield !== '') $lines[] = 'Servings/Yield: '.$yield;
+        $times = collect([
+            'Prep' => $this->humanDuration($recipe['prep_time'] ?? null),
+            'Cook' => $this->humanDuration($recipe['cook_time'] ?? null),
+            'Total' => $this->humanDuration($recipe['total_time'] ?? null),
+        ])->filter(fn ($value): bool => trim((string) $value) !== '');
+        if ($times->isNotEmpty()) {
+            $lines[] = 'Time: '.$times->map(fn ($value, $label): string => $label.' '.$value)->implode(' · ');
+        }
+
+        $ingredients = collect($recipe['ingredients'] ?? [])->filter()->values();
+        if ($ingredients->isNotEmpty()) {
+            $lines[] = '';
+            $lines[] = 'Ingredients:';
+            foreach ($ingredients->take(30) as $ingredient) $lines[] = '- '.trim((string) $ingredient, " \t\n\r\0\x0B*");
+        }
+
+        $instructions = collect($recipe['instructions'] ?? [])->filter()->values();
+        if ($instructions->isNotEmpty()) {
+            $lines[] = '';
+            $lines[] = 'Instructions:';
+            foreach ($instructions->take(20) as $index => $step) $lines[] = ((int) $index + 1).'. '.$step;
+        }
+
+        $sources = collect($lookup['sources'] ?? [])->filter(fn ($source): bool => is_array($source))->values();
+        if ($sources->isNotEmpty()) {
+            $lines[] = '';
+            $lines[] = 'Sources:';
+            foreach ($sources->take(5) as $source) {
+                $title = trim((string) ($source['title'] ?? 'Source')) ?: 'Source';
+                $url = trim((string) ($source['url'] ?? ''));
+                $lines[] = '- '.$title.($url !== '' ? ': '.$url : '');
+            }
+        }
+
+        return trim(implode("\n", $lines));
+    }
+
+    private function humanDuration(mixed $value): string
+    {
+        $duration = trim((string) $value);
+        if ($duration === '') return '';
+        if (preg_match('/^P(?:T)?(?:(\d+)H)?(?:(\d+)M)?$/i', $duration, $match) === 1) {
+            $parts = [];
+            if (! empty($match[1])) $parts[] = ((int) $match[1]).' hr';
+            if (! empty($match[2])) $parts[] = ((int) $match[2]).' min';
+            return implode(' ', $parts);
+        }
+        return $duration;
     }
 
     private function isDestructive(string $action): bool { return str_ends_with($action, '.delete'); }

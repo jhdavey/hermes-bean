@@ -85,6 +85,12 @@ class ExternalLookupService
             'source_url' => trim((string) ($sources[0]['url'] ?? '')) ?: null,
             'sources' => $sources,
             'claims' => $built['claims'] ?? [],
+            'documents' => collect($documents)->map(fn (array $document): array => [
+                'title' => $document['title'] ?? '',
+                'url' => $document['url'] ?? '',
+                'structured' => $document['structured'] ?? [],
+                'retrieved_at' => $document['retrieved_at'] ?? null,
+            ])->values()->all(),
             'confidence' => $built['confidence'] ?? 'none',
             'evidence' => [
                 'query' => $query,

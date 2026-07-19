@@ -122,6 +122,9 @@ class BeanQualityAuditService
         if ($this->looksLikeExternalLookupQuestion($lowerUser) && ! in_array('external.lookup', $actions, true)) {
             $flags[] = 'external_lookup_request_without_external_lookup';
         }
+        if ($this->looksLikeSubstantivePublicNoteCreation($lowerUser) && ! in_array('external.lookup', $actions, true)) {
+            $flags[] = 'grounded_note_creation_without_external_lookup';
+        }
         if (in_array('external.lookup', $actions, true) && ! $this->externalLookupHasSources($toolCalls)) {
             $flags[] = 'external_lookup_completed_without_sources';
         }
@@ -226,6 +229,15 @@ class BeanQualityAuditService
     {
         if (preg_match('/\b(time|date|today[’\']?s date|what day|current time|time is it)\b/u', $lowerUser) === 1) return false;
         return preg_match('/\b(go online|online|look up|lookup|search the web|search online|internet|web|source|sources|cite|citation|verify|latest|recent reviews|weather|forecast|temperature)\b/u', $lowerUser) === 1;
+    }
+
+    private function looksLikeSubstantivePublicNoteCreation(string $lowerUser): bool
+    {
+        if (preg_match('/\b(note that|write down that|jot down that|remember that|called|titled)\b/u', $lowerUser) === 1) return false;
+        return preg_match('/\b(note|notes)\b/u', $lowerUser) === 1
+            && preg_match('/\b(save|create|make|add|write)\b/u', $lowerUser) === 1
+            && preg_match('/\b(guide|instructions|steps|how to|how-to|recipe|research|compare|comparison|best|sources?)\b/u', $lowerUser) === 1
+            && preg_match('/\b(no lookup|don[’\']?t look up|without looking|from your own knowledge|off the top of your head|just make one up)\b/u', $lowerUser) !== 1;
     }
 
     private function externalLookupHasSources(Collection $toolCalls): bool

@@ -647,6 +647,123 @@ class BeanRuntimeTest extends TestCase
         $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'recipe.lookup']);
     }
 
+    public function test_substantive_recipe_note_creation_uses_grounded_lookup_and_saves_portioned_source_content(): void
+    {
+        config(['services.openai.api_key' => null]);
+        $token = $this->apiToken('bean-grounded-recipe-note@example.com');
+        $user = User::where('email', 'bean-grounded-recipe-note@example.com')->firstOrFail();
+
+        Http::fake([
+            'api.duckduckgo.com/*' => Http::response(['Heading' => '', 'AbstractText' => '', 'RelatedTopics' => []], 200),
+            'lite.duckduckgo.com/*' => Http::response($this->duckDuckGoLiteHtml('Smoked Trout Dip - Real Source', 'https://example.test/smoked-trout-dip', 'Smoked trout dip with servings, ingredients, and instructions.'), 200),
+            'https://example.test/smoked-trout-dip' => Http::response($this->recipeJsonLdHtml(), 200, ['content-type' => 'text/html']),
+        ]);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Create a note with a recipe for smoked trout dip.',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'I created a source-grounded note: Smoked Trout Dip.']);
+
+        $note = Note::where('user_id', $user->id)->where('title', 'Smoked Trout Dip')->firstOrFail();
+        $this->assertStringContainsString('Source: https://example.test/smoked-trout-dip', $note->plain_text);
+        $this->assertStringContainsString('Servings/Yield: 6', $note->plain_text);
+        $this->assertStringContainsString('- 8 oz smoked trout fillets', $note->plain_text);
+        $this->assertStringContainsString('- 8 oz cream cheese', $note->plain_text);
+        $this->assertStringContainsString('1. Bring the cream cheese to room temperature.', $note->plain_text);
+        $this->assertSame('external.lookup', data_get($note->metadata, 'grounded_from'));
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'external.lookup', 'status' => 'completed']);
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'note.create', 'status' => 'completed']);
+        $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'recipe.lookup']);
+    }
+
+    public function test_openai_direct_recipe_note_create_is_normalized_to_grounded_creation(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.bean_text_model' => 'gpt-4.1-mini',
+        ]);
+        $token = $this->apiToken('bean-openai-grounded-recipe-note@example.com');
+        $user = User::where('email', 'bean-openai-grounded-recipe-note@example.com')->firstOrFail();
+
+        Http::fake([
+            'api.openai.com/*' => Http::response([
+                'choices' => [[
+                    'message' => [
+                        'content' => json_encode([
+                            'response' => 'I’ll create that note.',
+                            'actions' => [[
+                                'action' => 'note.create',
+                                'arguments' => [
+                                    'title' => 'Smoked Trout Dip Recipe',
+                                    'plain_text' => 'Ingredients: smoked trout, cream cheese. Instructions: mix and serve.',
+                                ],
+                            ]],
+                        ]),
+                    ],
+                ]],
+            ], 200),
+            'api.duckduckgo.com/*' => Http::response(['Heading' => '', 'AbstractText' => '', 'RelatedTopics' => []], 200),
+            'lite.duckduckgo.com/*' => Http::response($this->duckDuckGoLiteHtml('Smoked Trout Dip - Real Source', 'https://example.test/smoked-trout-dip', 'Smoked trout dip with servings, ingredients, and instructions.'), 200),
+            'https://example.test/smoked-trout-dip' => Http::response($this->recipeJsonLdHtml(), 200, ['content-type' => 'text/html']),
+        ]);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'Create a note with a recipe for smoked trout dip.',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed');
+
+        $note = Note::where('user_id', $user->id)->where('title', 'Smoked Trout Dip')->firstOrFail();
+        $this->assertStringContainsString('Servings/Yield: 6', $note->plain_text);
+        $this->assertStringContainsString('- 8 oz smoked trout fillets', $note->plain_text);
+        $this->assertSame('external.lookup', data_get($note->metadata, 'grounded_from'));
+
+        $actions = BeanToolCall::query()->whereHas('run', fn ($query) => $query->where('user_id', $user->id))->pluck('action')->all();
+        $this->assertSame(['external.lookup', 'note.create'], $actions);
+    }
+
+    private function duckDuckGoLiteHtml(string $title, string $url, string $snippet): string
+    {
+        $encodedUrl = htmlspecialchars($url, ENT_QUOTES | ENT_HTML5);
+        $encodedTitle = htmlspecialchars($title, ENT_QUOTES | ENT_HTML5);
+        $encodedSnippet = htmlspecialchars($snippet, ENT_QUOTES | ENT_HTML5);
+
+        return <<<HTML
+<html><body>
+<a rel="nofollow" href="{$encodedUrl}" class="result-link">{$encodedTitle}</a>
+<table><tr><td class="result-snippet">{$encodedSnippet}</td></tr></table>
+</body></html>
+HTML;
+    }
+
+    private function recipeJsonLdHtml(): string
+    {
+        $json = json_encode([
+            '@context' => 'https://schema.org',
+            '@type' => 'Recipe',
+            'name' => 'Smoked Trout Dip',
+            'recipeYield' => ['6'],
+            'prepTime' => 'PT5M',
+            'totalTime' => 'PT5M',
+            'recipeIngredient' => [
+                '8 oz smoked trout fillets',
+                '8 oz cream cheese',
+                '1 tbsp capers',
+                '1 tsp dried dill weed',
+                '1 lemon, zested and juiced',
+            ],
+            'recipeInstructions' => [
+                ['@type' => 'HowToStep', 'text' => 'Bring the cream cheese to room temperature.'],
+                ['@type' => 'HowToStep', 'text' => 'Pulse cream cheese and smoked trout until combined.'],
+                ['@type' => 'HowToStep', 'text' => 'Fold in capers, dill, lemon zest, and lemon juice.'],
+            ],
+        ], JSON_UNESCAPED_SLASHES);
+
+        return <<<HTML
+<html><head><title>Smoked Trout Dip</title><script type="application/ld+json">{$json}</script></head><body>Smoked trout dip recipe.</body></html>
+HTML;
+    }
+
     public function test_today_task_list_response_filters_to_open_tasks_due_today(): void
     {
         config(['services.openai.api_key' => null]);

@@ -198,17 +198,41 @@ class BeanQualityLabTest extends TestCase
             'started_at' => now()->subSecond(),
             'completed_at' => now(),
         ]);
+        $groundedCreationRun = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'status' => 'completed',
+            'mode' => 'text',
+            'input' => 'Create a note with a recipe for smoked trout dip.',
+            'output' => 'I created a recipe note.',
+            'started_at' => now()->subSecond(),
+            'completed_at' => now(),
+        ]);
+        BeanToolCall::create([
+            'bean_run_id' => $groundedCreationRun->id,
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'action' => 'note.create',
+            'arguments' => ['plain_text' => 'Basic recipe.'],
+            'status' => 'completed',
+            'result' => ['ok' => true, 'resource_type' => 'note'],
+            'started_at' => now()->subSecond(),
+            'completed_at' => now(),
+        ]);
 
         $workspaceTrace = app(BeanQualityAuditService::class)->traceRun($workspaceRun->fresh());
         $externalTrace = app(BeanQualityAuditService::class)->traceRun($externalRun->fresh());
         $correctionTrace = app(BeanQualityAuditService::class)->traceRun($correctionRun->fresh());
         $calendarTrace = app(BeanQualityAuditService::class)->traceRun($calendarRun->fresh());
+        $groundedCreationTrace = app(BeanQualityAuditService::class)->traceRun($groundedCreationRun->fresh());
 
         $this->assertContains('factual_app_data_answer_without_tool_call', $workspaceTrace->quality_flags);
         $this->assertContains('external_lookup_completed_without_sources', $externalTrace->quality_flags);
         $this->assertContains('source_claim_without_external_sources', $externalTrace->quality_flags);
         $this->assertContains('correction_turn_without_recovery_action', $correctionTrace->quality_flags);
         $this->assertContains('calendar_tomorrow_missing_time_scope', $calendarTrace->quality_flags);
+        $this->assertContains('grounded_note_creation_without_external_lookup', $groundedCreationTrace->quality_flags);
     }
 
     public function test_production_smoke_mode_audits_recent_traces_without_seeding_or_mutating_resources(): void

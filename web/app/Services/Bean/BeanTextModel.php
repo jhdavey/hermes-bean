@@ -75,6 +75,7 @@ class BeanTextModel
             }
 
             $actions = $this->dropIrrelevantTimeActions($this->cleanActions($decoded['actions'] ?? []), $message);
+            $actions = $this->enforceGroundedCreationActions($actions, $message);
             $followUp = $this->temporalFollowUpAction($message, mb_strtolower($message), $session);
             if ($actions === [] && $followUp !== null) {
                 $actions[] = $followUp;
@@ -329,7 +330,7 @@ You are Bean, the HeyBean productivity assistant. Return only JSON matching the 
 Use actions only from this list: {$actions}.
 Laravel is the source of truth: you propose structured actions; Laravel validates, scopes, confirms, and executes them.
 For destructive actions include the delete action, but Laravel will require confirmation before execution.
-Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. The Recent Bean session context includes current_datetime/current_date/timezone; use those for relative dates like today/tomorrow and for follow-up questions. Use ISO 8601 dates when the user supplied or implied a date/time. Use resource.query for flexible factual questions about app data and resource.relationships for relationship/context questions, including workspace/context/why/relationship questions. Use external.lookup for source-backed public web/internet/current/latest lookup requests, including weather or other current public facts; keep it generic and set query/objective/freshness to the public thing to look up, never to private dashboard data. Use no action for normal evergreen knowledge, brainstorming, drafting, or creative generation unless the user asks to save or change app data. For resource.query/resource.relationships set resource to tasks, reminders, calendar_events, notes, or workspaces; set query/title for lookup text; set include_workspaces=true when workspace context could matter; set explain_visibility=true for why-is-this-shown questions. For list/query reads, express exact data constraints in filters: use field/operator/value triples, e.g. starts_at between [tomorrowStart, tomorrowEnd], due_at <= todayEnd, remind_at < todayStart, or status in [scheduled]. Use time_label only as user-facing answer context such as today, tomorrow, or overdue; do not rely on time_label for filtering. If the user says "what about tomorrow?" or another temporal follow-up, reuse recent_query_context.resource. Do not include time.now unless the user is actually asking for the time/date. If a user asks to find/search public sources and save a note, plan external.lookup followed by note.create with grounded_from/source_action set to external.lookup. If an item needs lookup by title, use query rather than inventing an id. Use strict mutation actions only when changing app state. Do not invent source-backed facts if external.lookup fails.
+Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. The Recent Bean session context includes current_datetime/current_date/timezone; use those for relative dates like today/tomorrow and for follow-up questions. Use ISO 8601 dates when the user supplied or implied a date/time. Use resource.query for flexible factual questions about app data and resource.relationships for relationship/context questions, including workspace/context/why/relationship questions. Use external.lookup for source-backed public web/internet/current/latest lookup requests, including weather or other current public facts; keep it generic and set query/objective/freshness to the public thing to look up, never to private dashboard data. Use no action for normal evergreen knowledge, brainstorming, drafting, or creative generation unless the user asks to save or change app data. When the user asks Bean to create/save a substantive public reference note such as instructions, how-to steps, recipes, research, comparisons, or other externally verifiable content, prefer external.lookup first and then note.create with grounded_from/source_action set to external.lookup unless the user explicitly asks to use only Bean's own knowledge. For resource.query/resource.relationships set resource to tasks, reminders, calendar_events, notes, or workspaces; set query/title for lookup text; set include_workspaces=true when workspace context could matter; set explain_visibility=true for why-is-this-shown questions. For list/query reads, express exact data constraints in filters: use field/operator/value triples, e.g. starts_at between [tomorrowStart, tomorrowEnd], due_at <= todayEnd, remind_at < todayStart, or status in [scheduled]. Use time_label only as user-facing answer context such as today, tomorrow, or overdue; do not rely on time_label for filtering. If the user says "what about tomorrow?" or another temporal follow-up, reuse recent_query_context.resource. Do not include time.now unless the user is actually asking for the time/date. If a user asks to find/search public sources and save a note, plan external.lookup followed by note.create with grounded_from/source_action set to external.lookup. If an item needs lookup by title, use query rather than inventing an id. Use strict mutation actions only when changing app state. Do not invent source-backed facts if external.lookup fails.
 Do not invent private dashboard data; call list/search/dashboard actions when data is needed.
 Keep response concise and avoid saying an action is complete before Laravel executes it.
 PROMPT;
@@ -356,6 +357,41 @@ PROMPT;
             ])
             ->values()
             ->all();
+    }
+
+    private function enforceGroundedCreationActions(array $actions, string $message): array
+    {
+        $lower = mb_strtolower($message);
+        if (! $this->isSubstantivePublicNoteCreationRequest($lower)) return $actions;
+        if ($this->explicitlyRequestsModelKnowledgeOnly($lower)) return $actions;
+        if (collect($actions)->contains(fn (array $action): bool => ($action['action'] ?? null) === 'external.lookup')) return $actions;
+
+        $noteCreate = collect($actions)->first(fn (array $action): bool => ($action['action'] ?? null) === 'note.create');
+        $remaining = collect($actions)->reject(fn (array $action): bool => ($action['action'] ?? null) === 'note.create')->values()->all();
+
+        return [
+            [
+                'action' => 'external.lookup',
+                'arguments' => [
+                    'query' => $this->externalLookupQuery($message),
+                    'objective' => 'find source-backed public reference content for a saved note',
+                    'freshness' => $this->externalLookupFreshness($lower),
+                    'include_sources' => true,
+                    'limit' => 5,
+                ],
+            ],
+            ...$remaining,
+            [
+                'action' => 'note.create',
+                'arguments' => [
+                    ...($noteCreate['arguments'] ?? []),
+                    'title' => '',
+                    'plain_text' => '',
+                    'grounded_from' => 'external.lookup',
+                    'source_action' => 'external.lookup',
+                ],
+            ],
+        ];
     }
 
     private function dropIrrelevantTimeActions(array $actions, string $message): array
@@ -414,6 +450,9 @@ PROMPT;
                 ]];
             }
             $response = $this->isGroundedNoteCreationRequest($lower) ? 'I’ll look that up and save a grounded note.' : 'I’ll look that up.';
+        } elseif ($this->isSubstantivePublicNoteCreationRequest($lower) && ! $this->explicitlyRequestsModelKnowledgeOnly($lower)) {
+            $actions = $this->enforceGroundedCreationActions([], $text);
+            $response = 'I’ll look that up and save a grounded note.';
         } elseif ($this->mentionsOverdue($lower) && ! $this->mentionsNote($lower) && ! $this->mentionsCalendar($lower)) {
             if ($this->mentionsReminder($lower) && ! $this->mentionsTask($lower)) {
                 $actions[] = ['action' => 'reminder.list', 'arguments' => $this->listArguments($lower, 'reminders')];
@@ -825,6 +864,19 @@ PROMPT;
     {
         return $this->mentionsNote($lower)
             && preg_match('/\b(save|create|make|add|write)\b/u', $lower) === 1;
+    }
+
+    private function isSubstantivePublicNoteCreationRequest(string $lower): bool
+    {
+        if (! $this->isGroundedNoteCreationRequest($lower)) return false;
+        if (preg_match('/\b(note that|write down that|jot down that|remember that|called|titled)\b/u', $lower) === 1) return false;
+
+        return preg_match('/\b(guide|instructions|steps|how to|how-to|recipe|research|compare|comparison|best|sources?)\b/u', $lower) === 1;
+    }
+
+    private function explicitlyRequestsModelKnowledgeOnly(string $lower): bool
+    {
+        return preg_match('/\b(no lookup|don[’\']?t look up|without looking|from your own knowledge|off the top of your head|just make one up)\b/u', $lower) === 1;
     }
 
     private function isExternalLookupRequest(string $lower): bool
