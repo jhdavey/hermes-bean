@@ -9,6 +9,7 @@ class ExternalLookupService
     public function __construct(
         private readonly DuckDuckGoInstantAnswerProvider $instantAnswers,
         private readonly DuckDuckGoLiteSearchProvider $liteSearch,
+        private readonly BraveSearchProvider $braveSearch,
         private readonly BingSearchProvider $bingSearch,
         private readonly PageFetcher $fetcher,
         private readonly ContentExtractor $extractor,
@@ -31,21 +32,27 @@ class ExternalLookupService
             'include_sources' => (bool) ($arguments['include_sources'] ?? true),
         ];
 
+        $searchQuery = $query;
         $providerNames = [];
         $errors = [];
         $sources = [];
-        foreach ([$this->instantAnswers, $this->liteSearch, $this->bingSearch] as $provider) {
-            try {
-                $providerNames[] = $provider->name();
-                $sources = $provider->search($query, $options);
-                if ($sources !== []) break;
-            } catch (Throwable $exception) {
-                $errors[] = $provider->name().': '.$exception->getMessage();
+        foreach ($this->queryVariants($query) as $candidateQuery) {
+            foreach ($this->providersForQuery($candidateQuery) as $provider) {
+                try {
+                    $providerNames[] = $provider->name();
+                    $sources = $provider->search($candidateQuery, $options);
+                    if ($sources !== []) {
+                        $searchQuery = $candidateQuery;
+                        break 2;
+                    }
+                } catch (Throwable $exception) {
+                    $errors[] = $provider->name().': '.$exception->getMessage();
+                }
             }
         }
 
         if ($sources === []) {
-            $sources = [$this->fallbackSearchSource($query)];
+            $sources = [$this->fallbackSearchSource($searchQuery)];
         }
 
         $sources = collect($sources)
@@ -71,17 +78,18 @@ class ExternalLookupService
             }
         }
 
-        $built = $this->builder->build($query, $sources, $documents);
+        $built = $this->builder->build($searchQuery, $sources, $documents);
         $ok = trim((string) ($built['summary'] ?? '')) !== '' || $sources !== [];
 
         return [
             'ok' => $ok,
             'provider' => implode(',', array_unique($providerNames)),
-            'query' => $query,
+            'query' => $searchQuery,
+            'original_query' => $searchQuery !== $query ? $query : null,
             'objective' => $options['objective'],
             'freshness' => $options['freshness'],
             'retrieved_at' => now()->toIso8601String(),
-            'title' => trim((string) ($sources[0]['title'] ?? '')) ?: $query,
+            'title' => trim((string) ($sources[0]['title'] ?? '')) ?: $searchQuery,
             'summary' => (string) ($built['summary'] ?? ''),
             'source_url' => trim((string) ($sources[0]['url'] ?? '')) ?: null,
             'sources' => $sources,
@@ -94,7 +102,8 @@ class ExternalLookupService
             ])->values()->all(),
             'confidence' => $built['confidence'] ?? 'none',
             'evidence' => [
-                'query' => $query,
+                'query' => $searchQuery,
+                'original_query' => $searchQuery !== $query ? $query : null,
                 'source_count' => count($sources),
                 'sources_used' => collect($sources)->pluck('url')->filter()->values()->all(),
                 'retrieved_at' => now()->toIso8601String(),
@@ -115,5 +124,33 @@ class ExternalLookupService
             'retrieved_at' => now()->toIso8601String(),
             'skip_fetch' => true,
         ];
+    }
+
+    private function queryVariants(string $query): array
+    {
+        $normalized = trim(preg_replace('/\s+/u', ' ', $query) ?: $query);
+        $variants = [];
+        if (preg_match('/^recipe\s+(.+)$/iu', $normalized, $match) === 1) {
+            $subject = trim((string) $match[1]);
+            if ($subject !== '') $variants[] = $subject.' recipe ingredients servings';
+        }
+        $variants[] = $normalized;
+
+        return collect($variants)
+            ->map(fn (string $value): string => trim($value))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /** @return array<int, SearchProviderInterface> */
+    private function providersForQuery(string $query): array
+    {
+        if (preg_match('/\b(recipe|ingredients|servings)\b/iu', $query) === 1) {
+            return [$this->braveSearch, $this->bingSearch, $this->liteSearch, $this->instantAnswers];
+        }
+
+        return [$this->instantAnswers, $this->liteSearch, $this->bingSearch];
     }
 }

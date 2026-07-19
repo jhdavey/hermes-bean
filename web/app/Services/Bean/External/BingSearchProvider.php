@@ -21,6 +21,20 @@ class BingSearchProvider implements SearchProviderInterface
 
         $html = (string) $response->body();
         preg_match_all('/<li[^>]+class="[^"]*b_algo[^"]*"[^>]*>(.*?)<\/li>/isu', $html, $blocks);
+        if (($blocks[1] ?? []) === []) {
+            preg_match_all('/<a[^>]+href=["\']([^"\']+)["\'][^>]+class=["\']result-link["\'][^>]*>(.*?)<\/a>/isu', $html, $links, PREG_SET_ORDER);
+            return collect($links)
+                ->map(fn (array $match): array => [
+                    'title' => $this->clean((string) ($match[2] ?? '')),
+                    'url' => $this->decodeBingUrl(html_entity_decode((string) ($match[1] ?? ''), ENT_QUOTES | ENT_HTML5)),
+                    'snippet' => '',
+                    'published_at' => null,
+                ])
+                ->filter(fn (array $source): bool => preg_match('/^https?:\/\//i', (string) ($source['url'] ?? '')) === 1)
+                ->take((int) ($options['limit'] ?? 5))
+                ->values()
+                ->all();
+        }
 
         return collect($blocks[1] ?? [])
             ->map(function (string $block): ?array {

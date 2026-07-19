@@ -655,6 +655,8 @@ class BeanRuntimeTest extends TestCase
 
         Http::fake([
             'api.duckduckgo.com/*' => Http::response(['Heading' => '', 'AbstractText' => '', 'RelatedTopics' => []], 200),
+            'search.brave.com/*' => Http::response($this->duckDuckGoLiteHtml('Smoked Trout Dip - Real Source', 'https://example.test/smoked-trout-dip', 'Smoked trout dip with servings, ingredients, and instructions.'), 200),
+            'www.bing.com/*' => Http::response($this->duckDuckGoLiteHtml('Smoked Trout Dip - Real Source', 'https://example.test/smoked-trout-dip', 'Smoked trout dip with servings, ingredients, and instructions.'), 200),
             'lite.duckduckgo.com/*' => Http::response($this->duckDuckGoLiteHtml('Smoked Trout Dip - Real Source', 'https://example.test/smoked-trout-dip', 'Smoked trout dip with servings, ingredients, and instructions.'), 200),
             'https://example.test/smoked-trout-dip' => Http::response($this->recipeJsonLdHtml(), 200, ['content-type' => 'text/html']),
         ]);
@@ -704,6 +706,8 @@ class BeanRuntimeTest extends TestCase
                 ]],
             ], 200),
             'api.duckduckgo.com/*' => Http::response(['Heading' => '', 'AbstractText' => '', 'RelatedTopics' => []], 200),
+            'search.brave.com/*' => Http::response($this->duckDuckGoLiteHtml('Smoked Trout Dip - Real Source', 'https://example.test/smoked-trout-dip', 'Smoked trout dip with servings, ingredients, and instructions.'), 200),
+            'www.bing.com/*' => Http::response($this->duckDuckGoLiteHtml('Smoked Trout Dip - Real Source', 'https://example.test/smoked-trout-dip', 'Smoked trout dip with servings, ingredients, and instructions.'), 200),
             'lite.duckduckgo.com/*' => Http::response($this->duckDuckGoLiteHtml('Smoked Trout Dip - Real Source', 'https://example.test/smoked-trout-dip', 'Smoked trout dip with servings, ingredients, and instructions.'), 200),
             'https://example.test/smoked-trout-dip' => Http::response($this->recipeJsonLdHtml(), 200, ['content-type' => 'text/html']),
         ]);
