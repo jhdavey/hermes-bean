@@ -32,6 +32,7 @@ file_put_contents('{$logPath}', json_encode([
     'HERMES_HOME' => getenv('HERMES_HOME'),
     'BEAN_TOOL_CONTEXT' => getenv('BEAN_TOOL_CONTEXT'),
     'BEAN_ARTISAN' => getenv('BEAN_ARTISAN'),
+    'PATH' => getenv('PATH'),
 ], JSON_UNESCAPED_SLASHES));
 echo "Hermes handled this through the user agent.\\n";
 PHP);
@@ -77,6 +78,8 @@ PHP);
         $log = json_decode(File::get($logPath), true);
         $this->assertSame($home, $log['HERMES_HOME']);
         $this->assertStringContainsString('bean-tool-context-', $log['BEAN_TOOL_CONTEXT']);
+        $this->assertStringContainsString('/usr/bin', $log['PATH']);
+        $this->assertStringContainsString('/bin', $log['PATH']);
         $this->assertContains('--continue', $log['argv']);
         $this->assertContains('bean-session-'.$session->id, $log['argv']);
         $this->assertContains('--toolsets', $log['argv']);

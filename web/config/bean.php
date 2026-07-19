@@ -6,9 +6,9 @@ return [
     | Bean Runtime
     |--------------------------------------------------------------------------
     |
-    | Production Bean chat should run as a thin UI over an isolated Hermes agent
-    | for each user. The local runtime remains test-only so automated tests do
-    | not require a live model process.
+    | Production Bean chat runs as a thin UI over an isolated Hermes agent for
+    | each user. Laravel remains the scoped dashboard tool host and safety
+    | boundary; it does not run a separate local deterministic assistant.
     |
     */
 

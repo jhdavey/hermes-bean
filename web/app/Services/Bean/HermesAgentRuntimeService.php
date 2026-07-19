@@ -184,8 +184,12 @@ class HermesAgentRuntimeService
             dirname((string) config('bean.hermes.binary', 'hermes')),
             getenv('HOME') ? getenv('HOME').'/.local/bin' : null,
             getenv('PATH') ?: null,
+            '/usr/local/bin',
+            '/usr/bin',
+            '/bin',
         ])
             ->filter(fn ($value): bool => is_string($value) && $value !== '' && $value !== '.')
+            ->unique()
             ->implode(PATH_SEPARATOR);
 
         $env = [
