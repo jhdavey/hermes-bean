@@ -7,6 +7,7 @@ use App\Models\BeanActivityEvent;
 use App\Models\BeanConfirmationRequest;
 use App\Models\BeanRun;
 use App\Models\BeanSession;
+use App\Rules\ClientTimezone;
 use App\Services\Bean\BeanRuntimeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,8 +20,11 @@ class BeanController extends Controller
 
     public function storeSession(Request $request): JsonResponse
     {
-        $data = $request->validate(['workspace_id' => ['nullable', 'integer', 'exists:workspaces,id']]);
-        return response()->json(['data' => $this->runtime->createSession($request->user(), $data['workspace_id'] ?? null)], 201);
+        $data = $request->validate([
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
+            'client_timezone' => ['nullable', new ClientTimezone()],
+        ]);
+        return response()->json(['data' => $this->runtime->createSession($request->user(), $data['workspace_id'] ?? null, $data['client_timezone'] ?? null)], 201);
     }
 
     public function sessions(Request $request): JsonResponse
@@ -45,8 +49,9 @@ class BeanController extends Controller
             'session_id' => ['nullable', 'integer', 'exists:bean_sessions,id'],
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'content' => ['required', 'string', 'max:8000'],
+            'client_timezone' => ['nullable', new ClientTimezone()],
         ]);
-        return response()->json(['data' => $this->runtime->handleMessage($request->user(), $data['content'], $data['session_id'] ?? null, $data['workspace_id'] ?? null)]);
+        return response()->json(['data' => $this->runtime->handleMessage($request->user(), $data['content'], $data['session_id'] ?? null, $data['workspace_id'] ?? null, $data['client_timezone'] ?? null)]);
     }
 
     public function run(Request $request, BeanRun $run): JsonResponse

@@ -400,6 +400,15 @@ export function mountHeyBeanWebApp(mount) {
         }
     }
 
+    function clientTimezonePayload() {
+        try {
+            const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            return timezone ? { client_timezone: timezone } : {};
+        } catch (error) {
+            return {};
+        }
+    }
+
     async function api(path, options = {}) {
         const headers = {
             Accept: 'application/json',
@@ -4790,7 +4799,7 @@ export function mountHeyBeanWebApp(mount) {
         render();
         try {
             const sessionId = await ensureBeanSession();
-            const data = await api('/bean/messages', { method: 'POST', body: { session_id: sessionId, content } });
+            const data = await api('/bean/messages', { method: 'POST', body: { session_id: sessionId, content, ...clientTimezonePayload() } });
             state.bean.sessionId = data.session?.id || sessionId;
             state.bean.messages = normalizeList(data.messages);
             state.bean.activity = normalizeList(data.activity);
@@ -4841,7 +4850,7 @@ export function mountHeyBeanWebApp(mount) {
 
     async function ensureBeanSession() {
         if (state.bean.sessionId) return state.bean.sessionId;
-        const session = await api('/bean/sessions', { method: 'POST', body: { workspace_id: currentWorkspaceId() } });
+        const session = await api('/bean/sessions', { method: 'POST', body: { workspace_id: currentWorkspaceId(), ...clientTimezonePayload() } });
         state.bean.sessionId = session.id;
         return state.bean.sessionId;
     }
@@ -4872,7 +4881,7 @@ export function mountHeyBeanWebApp(mount) {
         render();
         try {
             const sessionId = await ensureBeanSession();
-            const data = await api('/bean/messages', { method: 'POST', body: { session_id: sessionId, content } });
+            const data = await api('/bean/messages', { method: 'POST', body: { session_id: sessionId, content, ...clientTimezonePayload() } });
             state.bean.sessionId = data.session?.id || sessionId;
             state.bean.messages = normalizeList(data.messages);
             state.bean.activity = normalizeList(data.activity);

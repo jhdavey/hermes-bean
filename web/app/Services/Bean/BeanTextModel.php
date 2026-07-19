@@ -169,13 +169,14 @@ PROMPT;
     private function plannerContext(BeanSession $session): array
     {
         $metadata = is_array($session->metadata) ? $session->metadata : [];
+        $timezone = $this->sessionTimezone($session);
         return [
             'recent_entities' => array_slice(is_array($metadata['recent_entities'] ?? null) ? $metadata['recent_entities'] : [], 0, 10),
             'recent_query_context' => is_array($metadata['recent_query_context'] ?? null) ? $metadata['recent_query_context'] : null,
             'current_workspace_id' => $session->workspace_id,
-            'current_datetime' => now()->toIso8601String(),
-            'current_date' => now()->toDateString(),
-            'timezone' => config('app.timezone', 'UTC'),
+            'current_datetime' => now($timezone)->toIso8601String(),
+            'current_date' => now($timezone)->toDateString(),
+            'timezone' => $timezone,
         ];
     }
 
@@ -894,6 +895,21 @@ PROMPT;
         $lower = trim(preg_replace('/\s+/', ' ', $lower) ?: $lower);
 
         return preg_match('/\b(can you hear me|do you hear me|are you there|you there|can you hear|testing testing|mic check)\b/u', $lower) === 1;
+    }
+
+    private function sessionTimezone(BeanSession $session): string
+    {
+        $timezone = trim((string) data_get($session->metadata, 'client_timezone', ''));
+        if ($timezone !== '') {
+            try {
+                new \DateTimeZone($timezone);
+                return $timezone;
+            } catch (\Throwable) {
+                // Fall through to app default.
+            }
+        }
+
+        return (string) config('app.timezone', 'UTC');
     }
 
     private function isReadOnlyAnswerCorrection(string $text, string $lower, ?BeanSession $session): bool

@@ -34,7 +34,7 @@ class BeanActionExecutor
 
     public function execute(BeanSession $session, BeanRun $run, string $action, array $arguments = [], bool $confirmed = false): array
     {
-        $arguments = $this->normalizeArguments($action, $arguments);
+        $arguments = $this->normalizeArguments($action, $arguments, $session);
 
         $tool = BeanToolCall::create([
             'bean_run_id' => $run->id,
@@ -141,7 +141,7 @@ class BeanActionExecutor
         return $class::query()->whereIn('workspace_id', $this->workspaceIds($run));
     }
 
-    private function normalizeArguments(string $action, array $arguments): array
+    private function normalizeArguments(string $action, array $arguments, BeanSession $session): array
     {
         $class = $this->classForReadAction($action, $arguments);
         if ($class === null) return $arguments;
@@ -150,13 +150,15 @@ class BeanActionExecutor
 
         $field = $this->temporalField($class);
         if ($field === null) return $arguments;
+        $timezone = $this->sessionTimezone($session);
         $arguments = $this->normalizeInlineReadFilters($class, $field, $arguments);
+        $arguments = $this->normalizeDateOnlyTemporalFilters($arguments, $field, $timezone);
 
         $timeLabel = $this->timeLabel($arguments) ?? $this->inferTemporalLabelFromFilters($class, $field, $arguments);
         if ($timeLabel === null) return $arguments;
         $arguments['time_label'] = $timeLabel;
 
-        $temporalFilters = $this->temporalFilters($class, $field, $timeLabel);
+        $temporalFilters = $this->temporalFilters($class, $field, $timeLabel, $timezone);
         if ($temporalFilters === []) return $arguments;
 
         $existing = collect(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [])
@@ -218,6 +220,29 @@ class BeanActionExecutor
         return $arguments;
     }
 
+    private function normalizeDateOnlyTemporalFilters(array $arguments, string $field, string $timezone): array
+    {
+        $filters = collect(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [])
+            ->filter(fn ($filter): bool => is_array($filter))
+            ->map(function (array $filter) use ($field, $timezone): array {
+                $operator = strtolower((string) ($filter['operator'] ?? '='));
+                $value = $filter['value'] ?? null;
+                if (($filter['field'] ?? null) === $field && $operator === '=' && $this->isDateOnlyValue($value)) {
+                    return ['field' => $field, 'operator' => 'between', 'value' => $this->localDayUtcRange((string) $value, $timezone)];
+                }
+
+                return $filter;
+            })
+            ->values()
+            ->all();
+
+        if ($filters !== []) {
+            $arguments['filters'] = $filters;
+        }
+
+        return $arguments;
+    }
+
     private function inferTemporalLabelFromFilters(string $class, string $field, array $arguments): ?string
     {
         foreach (is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [] as $filter) {
@@ -275,13 +300,12 @@ class BeanActionExecutor
         return $this->resourceCatalog->temporalFieldForClass($class);
     }
 
-    private function temporalFilters(string $class, string $field, string $timeLabel): array
+    private function temporalFilters(string $class, string $field, string $timeLabel, string $timezone): array
     {
-        $start = now()->startOfDay()->toIso8601String();
-        $end = now()->endOfDay()->toIso8601String();
+        $today = now($timezone);
+        [$start, $end] = $this->localDayUtcRange($today->toDateString(), $timezone);
         if ($timeLabel === 'tomorrow') {
-            $start = now()->addDay()->startOfDay()->toIso8601String();
-            $end = now()->addDay()->endOfDay()->toIso8601String();
+            [$start, $end] = $this->localDayUtcRange($today->copy()->addDay()->toDateString(), $timezone);
         }
 
         return match ($timeLabel) {
@@ -355,8 +379,7 @@ class BeanActionExecutor
                 continue;
             }
             if ($operator === '=' && $this->isTemporalField($field) && $this->isDateOnlyValue($value)) {
-                $date = Carbon::parse((string) $value, config('app.timezone', 'UTC'));
-                $query->whereNotNull($field)->whereBetween($field, [$date->copy()->startOfDay(), $date->copy()->endOfDay()]);
+                $query->whereNotNull($field)->whereBetween($field, $this->localDayUtcRange((string) $value, (string) config('app.timezone', 'UTC')));
                 continue;
             }
             if (in_array($operator, ['=', '!=', '<', '<=', '>', '>='], true)) {
@@ -372,6 +395,29 @@ class BeanActionExecutor
         }
 
         return $value;
+    }
+
+    private function sessionTimezone(BeanSession $session): string
+    {
+        $timezone = trim((string) data_get($session->metadata, 'client_timezone', ''));
+        if ($timezone !== '') {
+            try {
+                new \DateTimeZone($timezone);
+                return $timezone;
+            } catch (Throwable) {
+                // Fall through to app default.
+            }
+        }
+
+        return (string) config('app.timezone', 'UTC');
+    }
+
+    private function localDayUtcRange(string $date, string $timezone): array
+    {
+        $start = Carbon::parse($date, $timezone)->startOfDay()->utc();
+        $end = Carbon::parse($date, $timezone)->endOfDay()->utc();
+
+        return [$start->toIso8601String(), $end->toIso8601String()];
     }
 
     private function isTemporalField(string $field): bool

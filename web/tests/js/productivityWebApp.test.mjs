@@ -46,6 +46,14 @@ test('expanded Bean panel only shows chat history and the composer', () => {
     assert.match(dashboardSource, /grid-template-rows: minmax\(160px, 1fr\) auto/);
 });
 
+test('Bean requests include the browser timezone for local-day task queries', () => {
+    assert.match(source, /function clientTimezonePayload/);
+    assert.match(source, /Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/);
+    assert.match(source, /client_timezone: timezone/);
+    assert.match(source, /\/bean\/sessions', \{ method: 'POST', body: \{ workspace_id: currentWorkspaceId\(\), \.\.\.clientTimezonePayload\(\) \}/);
+    assert.match(source, /\/bean\/messages', \{ method: 'POST', body: \{ session_id: sessionId, content, \.\.\.clientTimezonePayload\(\) \}/);
+});
+
 test('Bean voice starts from wake detection instead of tap-to-talk', () => {
     assert.doesNotMatch(source, /data-bean-voice/);
     assert.doesNotMatch(source, /Tap to talk/);

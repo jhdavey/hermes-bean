@@ -19,7 +19,7 @@ class BeanRuntimeService
         private readonly BeanActivityLogger $activity,
     ) {}
 
-    public function createSession(User $user, ?int $workspaceId = null): BeanSession
+    public function createSession(User $user, ?int $workspaceId = null, ?string $clientTimezone = null): BeanSession
     {
         $workspace = app(WorkspaceService::class)->resolveWorkspace($user, $workspaceId);
         return BeanSession::create([
@@ -27,7 +27,7 @@ class BeanRuntimeService
             'workspace_id' => $workspace->id,
             'title' => 'Bean chat',
             'status' => 'active',
-            'metadata' => ['privacy_mode' => true, 'wake_phrase' => 'Hey Bean'],
+            'metadata' => array_filter(['privacy_mode' => true, 'wake_phrase' => 'Hey Bean', 'client_timezone' => $clientTimezone]),
         ]);
     }
 
@@ -54,11 +54,16 @@ class BeanRuntimeService
         ];
     }
 
-    public function handleMessage(User $user, string $content, ?int $sessionId = null, ?int $workspaceId = null): array
+    public function handleMessage(User $user, string $content, ?int $sessionId = null, ?int $workspaceId = null, ?string $clientTimezone = null): array
     {
         $session = $sessionId
             ? BeanSession::query()->where('user_id', $user->id)->findOrFail($sessionId)
-            : $this->createSession($user, $workspaceId);
+            : $this->createSession($user, $workspaceId, $clientTimezone);
+        if ($clientTimezone !== null && $sessionId) {
+            $metadata = is_array($session->metadata) ? $session->metadata : [];
+            $session->forceFill(['metadata' => [...$metadata, 'client_timezone' => $clientTimezone]])->save();
+            $session = $session->refresh();
+        }
 
         if ($this->isAffirmativeConfirmationReply($content) && $sessionId) {
             $confirmation = BeanConfirmationRequest::query()
@@ -79,6 +84,7 @@ class BeanRuntimeService
             'status' => 'running',
             'mode' => 'text',
             'input' => $content,
+            'metadata' => array_filter(['client_timezone' => data_get($session->metadata, 'client_timezone')]),
             'started_at' => now(),
         ]);
 
