@@ -1775,7 +1775,7 @@ export function mountHeyBeanWebApp(mount) {
                     <span class="hb-bean-ring" aria-hidden="true"></span>
                     <img src="${escapeAttr(logoUrl)}" alt="Bean">
                 </button>
-                <button class="hb-bean-status-pill" type="button" data-bean-panel aria-label="Open Bean activity">
+                <button class="hb-bean-status-pill" type="button" data-bean-panel aria-label="Toggle Bean chat">
                     <span>${escapeHtml(label)}</span>
                 </button>
             </div>`;
@@ -4373,9 +4373,9 @@ export function mountHeyBeanWebApp(mount) {
     function bindBeanActions() {
         mount.querySelector('[data-bean-toggle]')?.addEventListener('click', toggleBeanPrivacyMode);
         mount.querySelector('[data-bean-panel]')?.addEventListener('click', () => {
-            state.bean.panelOpen = true;
+            state.bean.panelOpen = !state.bean.panelOpen;
             render();
-            loadBeanActivity().finally(render);
+            if (state.bean.panelOpen) loadBeanActivity().finally(render);
         });
         mount.querySelector('[data-bean-input]')?.addEventListener('input', (event) => {
             state.bean.input = event.currentTarget.value;
