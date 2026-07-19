@@ -43,7 +43,7 @@ class BeanQualityLabTest extends TestCase
         $this->assertContains('today task list separates overdue and due today', array_column($report['results'], 'name'));
         $this->assertContains('current time answers directly', array_column($report['results'], 'name'));
         $this->assertContains('misheard transcript recovers recent task entity', array_column($report['results'], 'name'));
-        $this->assertContains('online recipe request uses external lookup path', array_column($report['results'], 'name'));
+        $this->assertContains('source backed public lookup uses generic external lookup path', array_column($report['results'], 'name'));
         $this->assertContains('tomorrow calendar filters tomorrow only', array_column($report['results'], 'name'));
         $this->assertStringContainsString('Bean Quality Report', (string) file_get_contents($markdownPath));
         $this->assertStringContainsString('CI gate', (string) file_get_contents($markdownPath));
@@ -120,7 +120,7 @@ class BeanQualityLabTest extends TestCase
         $this->assertContains('missing_date_after_time_tool', $dateTrace->quality_flags);
     }
 
-    public function test_quality_audit_flags_missing_tool_recipe_and_correction_failures(): void
+    public function test_quality_audit_flags_missing_tool_external_evidence_and_correction_failures(): void
     {
         $user = User::factory()->create(['email' => 'bean-quality-new-flags@example.com']);
         app(\App\Services\WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
@@ -142,14 +142,25 @@ class BeanQualityLabTest extends TestCase
             'started_at' => now()->subSecond(),
             'completed_at' => now(),
         ]);
-        $recipeRun = BeanRun::create([
+        $externalRun = BeanRun::create([
             'bean_session_id' => $session->id,
             'user_id' => $user->id,
             'workspace_id' => $user->default_workspace_id,
             'status' => 'completed',
             'mode' => 'text',
-            'input' => 'Can you create a recipe note for quesadillas?',
-            'output' => 'Please provide the recipe details if you want them included.',
+            'input' => 'Can you go online and find sources for fire extinguisher maintenance?',
+            'output' => 'According to sources, inspect extinguishers monthly.',
+            'started_at' => now()->subSecond(),
+            'completed_at' => now(),
+        ]);
+        BeanToolCall::create([
+            'bean_run_id' => $externalRun->id,
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'action' => 'external.lookup',
+            'arguments' => ['query' => 'fire extinguisher maintenance'],
+            'status' => 'completed',
+            'result' => ['ok' => true, 'summary' => 'inspect monthly', 'sources' => []],
             'started_at' => now()->subSecond(),
             'completed_at' => now(),
         ]);
@@ -189,12 +200,13 @@ class BeanQualityLabTest extends TestCase
         ]);
 
         $workspaceTrace = app(BeanQualityAuditService::class)->traceRun($workspaceRun->fresh());
-        $recipeTrace = app(BeanQualityAuditService::class)->traceRun($recipeRun->fresh());
+        $externalTrace = app(BeanQualityAuditService::class)->traceRun($externalRun->fresh());
         $correctionTrace = app(BeanQualityAuditService::class)->traceRun($correctionRun->fresh());
         $calendarTrace = app(BeanQualityAuditService::class)->traceRun($calendarRun->fresh());
 
         $this->assertContains('factual_app_data_answer_without_tool_call', $workspaceTrace->quality_flags);
-        $this->assertContains('recipe_request_missing_generated_content', $recipeTrace->quality_flags);
+        $this->assertContains('external_lookup_completed_without_sources', $externalTrace->quality_flags);
+        $this->assertContains('source_claim_without_external_sources', $externalTrace->quality_flags);
         $this->assertContains('correction_turn_without_recovery_action', $correctionTrace->quality_flags);
         $this->assertContains('calendar_tomorrow_missing_time_scope', $calendarTrace->quality_flags);
     }

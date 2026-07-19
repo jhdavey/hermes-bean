@@ -119,11 +119,14 @@ class BeanQualityAuditService
         if ($toolCalls->where('status', 'completed')->isEmpty() && $this->isAppDataFactualQuestion($lowerUser) && ! $this->isClarifyingAnswer($lowerAnswer)) {
             $flags[] = 'factual_app_data_answer_without_tool_call';
         }
-        if (str_contains($lowerUser, 'recipe') && $this->isRecipePlaceholderAnswer($lowerAnswer, $actions)) {
-            $flags[] = 'recipe_request_missing_generated_content';
-        }
         if ($this->looksLikeExternalLookupQuestion($lowerUser) && ! in_array('external.lookup', $actions, true)) {
             $flags[] = 'external_lookup_request_without_external_lookup';
+        }
+        if (in_array('external.lookup', $actions, true) && ! $this->externalLookupHasSources($toolCalls)) {
+            $flags[] = 'external_lookup_completed_without_sources';
+        }
+        if (preg_match('/\b(source|sources|according to|citation|cited)\b/u', $lowerAnswer) === 1 && in_array('external.lookup', $actions, true) && ! $this->externalLookupHasSources($toolCalls)) {
+            $flags[] = 'source_claim_without_external_sources';
         }
         if ($this->looksLikeCorrection($lowerUser) && $toolCalls->where('status', 'completed')->isEmpty()) {
             $flags[] = 'correction_turn_without_recovery_action';
@@ -219,16 +222,23 @@ class BeanQualityAuditService
         return preg_match('/\b(which one|can you clarify|please clarify|did you mean|i heard)\b/u', $lowerAnswer) === 1;
     }
 
-    private function isRecipePlaceholderAnswer(string $lowerAnswer, array $actions): bool
-    {
-        if (preg_match('/\b(ingredients|instructions|steps|flour tortillas|cook until|recipe:)\b/u', $lowerAnswer) === 1) return false;
-        return preg_match('/\b(provide the recipe|provide the details|can\'t browse|cannot browse|don\'t have the recipe|need the recipe text)\b/u', $lowerAnswer) === 1;
-    }
-
     private function looksLikeExternalLookupQuestion(string $lowerUser): bool
     {
         if (preg_match('/\b(time|date|today[’\']?s date|what day|current time|time is it)\b/u', $lowerUser) === 1) return false;
-        return preg_match('/\b(go online|online|look up|lookup|search the web|search online|internet|web|source|sources|latest)\b/u', $lowerUser) === 1;
+        return preg_match('/\b(go online|online|look up|lookup|search the web|search online|internet|web|source|sources|cite|citation|verify|latest|recent reviews|weather|forecast|temperature)\b/u', $lowerUser) === 1;
+    }
+
+    private function externalLookupHasSources(Collection $toolCalls): bool
+    {
+        foreach ($toolCalls as $toolCall) {
+            if (! $toolCall instanceof BeanToolCall || $toolCall->action !== 'external.lookup') continue;
+            if ($toolCall->status !== 'completed') continue;
+            $result = is_array($toolCall->result) ? $toolCall->result : [];
+            $sources = is_array($result['sources'] ?? null) ? $result['sources'] : [];
+            if (collect($sources)->contains(fn ($source): bool => is_array($source) && trim((string) ($source['url'] ?? $source['snippet'] ?? $source['title'] ?? '')) !== '')) return true;
+        }
+
+        return false;
     }
 
     private function looksLikeCorrection(string $lowerUser): bool

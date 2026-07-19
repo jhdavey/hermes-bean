@@ -13,6 +13,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
+use App\Services\Bean\External\ExternalLookupService;
 use App\Services\Domain\DomainResourceCatalog;
 use App\Services\Domain\DomainResourceService;
 use App\Services\WorkspaceService;
@@ -20,7 +21,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Http;
 use Throwable;
 
 class BeanActionExecutor
@@ -29,6 +29,7 @@ class BeanActionExecutor
         private readonly BeanActivityLogger $activity,
         private readonly DomainResourceService $domainResources,
         private readonly DomainResourceCatalog $resourceCatalog,
+        private readonly ExternalLookupService $externalLookup,
     ) {}
 
     public function execute(BeanSession $session, BeanRun $run, string $action, array $arguments = [], bool $confirmed = false): array
@@ -70,7 +71,6 @@ class BeanActionExecutor
                 'resource.query' => $this->genericResourceQuery($run, $arguments),
                 'resource.relationships' => $this->resourceRelationships($run, $arguments),
                 'time.now' => $this->timeNow(),
-                'weather.lookup' => $this->weatherLookup($arguments),
                 'external.lookup' => $this->externalLookup($arguments),
                 'task.list' => $this->listResources(Task::class, $run, 'due_at', $arguments),
                 'task.search' => $this->searchResources(Task::class, $run, $arguments),
@@ -612,7 +612,21 @@ class BeanActionExecutor
     private function createNote(BeanRun $run, array $args): array
     {
         $plain = trim((string) ($args['plain_text'] ?? $args['body'] ?? $args['content'] ?? ''));
-        $title = trim((string) ($args['title'] ?? '')) ?: (str($plain ?: 'New Note')->limit(80, '')->toString());
+        $groundedLookup = $this->latestExternalLookupResult($run);
+        if ($plain === '' && $groundedLookup !== null && (($args['grounded_from'] ?? null) === 'external.lookup' || ($args['source_action'] ?? null) === 'external.lookup')) {
+            $plain = $this->externalLookupNoteText($groundedLookup);
+        }
+        $title = trim((string) ($args['title'] ?? '')) ?: $this->externalLookupNoteTitle($groundedLookup) ?: (str($plain ?: 'New Note')->limit(80, '')->toString());
+        $metadata = $this->metadata($args);
+        if ($groundedLookup !== null && (($args['grounded_from'] ?? null) === 'external.lookup' || ($args['source_action'] ?? null) === 'external.lookup')) {
+            $metadata['grounded_from'] = 'external.lookup';
+            $metadata['external_evidence'] = $groundedLookup['evidence'] ?? [
+                'query' => $groundedLookup['query'] ?? null,
+                'sources_used' => collect($groundedLookup['sources'] ?? [])->pluck('url')->filter()->values()->all(),
+                'retrieved_at' => $groundedLookup['retrieved_at'] ?? now()->toIso8601String(),
+                'confidence' => $groundedLookup['confidence'] ?? null,
+            ];
+        }
         $note = $this->domainResources->createNote($this->user($run), [
             'workspace_id' => $this->workspaceId($run),
             'title' => $title,
@@ -621,9 +635,9 @@ class BeanActionExecutor
             'body_delta' => $args['body_delta'] ?? null,
             'note_folder_id' => $args['note_folder_id'] ?? null,
             'is_pinned' => $args['is_pinned'] ?? null,
-            'metadata' => $this->metadata($args),
+            'metadata' => $metadata,
         ]);
-        return ['ok' => true, 'resource_type' => 'note', 'item' => $this->summary($note, $this->workspaceIds($run))];
+        return ['ok' => true, 'resource_type' => 'note', 'item' => $this->summary($note, $this->workspaceIds($run)), 'grounded_from' => $metadata['grounded_from'] ?? null, 'evidence' => $metadata['external_evidence'] ?? null];
     }
 
     private function updateResource(string $class, BeanRun $run, array $args, array $allowed): array
@@ -749,171 +763,64 @@ class BeanActionExecutor
         return ['ok' => true, 'now' => now()->toIso8601String(), 'timezone' => config('app.timezone')];
     }
 
-    private function weatherLookup(array $args): array
-    {
-        $lat = $args['latitude'] ?? $args['lat'] ?? null;
-        $lon = $args['longitude'] ?? $args['lon'] ?? null;
-        $locationLabel = null;
-        if ($lat === null || $lon === null) {
-            $location = trim((string) ($args['location'] ?? $args['query'] ?? ''));
-            $location = trim(preg_replace('/\b(weather|forecast|temperature|like|right now|current|currently|what|is|the|in|for|at|near|can|you|tell|me)\b/i', ' ', $location) ?: $location);
-            if ($location === '') return ['ok' => false, 'error' => 'I need a location for weather.'];
-            $geo = Http::timeout(8)->get('https://geocoding-api.open-meteo.com/v1/search', ['name' => $location, 'count' => 1, 'language' => 'en', 'format' => 'json'])->json('results.0');
-            if (! is_array($geo)) return ['ok' => false, 'error' => 'I could not find that weather location.'];
-            $lat = $geo['latitude']; $lon = $geo['longitude'];
-            $locationLabel = trim((string) ($geo['name'] ?? $location));
-        }
-        $data = Http::timeout(8)->get('https://api.open-meteo.com/v1/forecast', [
-            'latitude' => $lat,
-            'longitude' => $lon,
-            'current' => 'temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m',
-            'daily' => 'temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code',
-            'temperature_unit' => 'fahrenheit',
-            'wind_speed_unit' => 'mph',
-            'precipitation_unit' => 'inch',
-            'timezone' => 'auto',
-            'forecast_days' => 3,
-        ])->json();
-        return [
-            'ok' => true,
-            'provider' => 'open-meteo',
-            'location' => $locationLabel,
-            'current' => $data['current'] ?? null,
-            'current_units' => $data['current_units'] ?? null,
-            'forecast' => $data['daily'] ?? $data,
-            'daily_units' => $data['daily_units'] ?? null,
-        ];
-    }
-
     private function externalLookup(array $args): array
     {
-        $query = trim((string) ($args['query'] ?? $args['question'] ?? $args['title'] ?? ''));
-        if ($query === '') {
-            return ['ok' => false, 'error' => 'Please tell me what to look up.'];
-        }
-
-        $response = Http::acceptJson()
-            ->connectTimeout(2)
-            ->timeout(8)
-            ->get('https://api.duckduckgo.com/', [
-                'q' => $query,
-                'format' => 'json',
-                'no_html' => 1,
-                'skip_disambig' => 1,
-            ]);
-
-        if (! $response->ok()) {
-            return ['ok' => false, 'provider' => 'duckduckgo', 'query' => $query, 'error' => 'External lookup failed.'];
-        }
-
-        $data = $response->json() ?: [];
-        $sources = $this->externalLookupSources($data);
-        $summary = trim((string) ($data['AbstractText'] ?? $data['Answer'] ?? ''));
-        if ($summary === '' && $sources === []) {
-            $sources = $this->externalLookupLiteSearch($query);
-        }
-        if ($summary === '' && $sources !== []) {
-            $summary = trim((string) ($sources[0]['snippet'] ?? ''));
-        }
-
-        return [
-            'ok' => $summary !== '' || $sources !== [],
-            'provider' => 'duckduckgo',
-            'query' => $query,
-            'title' => trim((string) ($data['Heading'] ?? '')) ?: $query,
-            'summary' => $summary,
-            'source_url' => trim((string) ($data['AbstractURL'] ?? '')) ?: ($sources[0]['url'] ?? null),
-            'sources' => $sources,
-            'error' => ($summary === '' && $sources === []) ? 'I could not find a useful external result.' : null,
-        ];
+        return $this->externalLookup->lookup($args);
     }
 
-    private function externalLookupSources(array $data): array
+    private function latestExternalLookupResult(BeanRun $run): ?array
     {
-        $sources = [];
-        $abstractUrl = trim((string) ($data['AbstractURL'] ?? ''));
-        if ($abstractUrl !== '') {
-            $sources[] = [
-                'title' => trim((string) ($data['Heading'] ?? '')) ?: parse_url($abstractUrl, PHP_URL_HOST),
-                'url' => $abstractUrl,
-                'snippet' => trim((string) ($data['AbstractText'] ?? '')),
-            ];
-        }
+        $toolCall = $run->toolCalls()
+            ->where('action', 'external.lookup')
+            ->where('status', 'completed')
+            ->latest('id')
+            ->first();
+        $result = is_array($toolCall?->result) ? $toolCall->result : null;
+        return ($result['ok'] ?? false) === true ? $result : null;
+    }
 
-        $related = is_array($data['RelatedTopics'] ?? null) ? $data['RelatedTopics'] : [];
-        foreach ($related as $topic) {
-            if (is_array($topic['Topics'] ?? null)) {
-                foreach ($topic['Topics'] as $nested) {
-                    $this->appendExternalSource($sources, $nested);
-                }
-            } else {
-                $this->appendExternalSource($sources, $topic);
+    private function externalLookupNoteTitle(?array $lookup): ?string
+    {
+        if ($lookup === null) return null;
+        $title = trim((string) ($lookup['title'] ?? '')) ?: trim((string) ($lookup['query'] ?? ''));
+        $title = preg_replace('/^search results for\s+/i', '', $title) ?: $title;
+        return $title !== '' ? str($title)->title()->limit(80, '')->toString() : null;
+    }
+
+    private function externalLookupNoteText(array $lookup): string
+    {
+        $lines = [];
+        $query = trim((string) ($lookup['query'] ?? ''));
+        if ($query !== '') $lines[] = 'Lookup: '.$query;
+        $summary = trim((string) ($lookup['summary'] ?? ''));
+        if ($summary !== '') {
+            $lines[] = '';
+            $lines[] = 'Summary:';
+            $lines[] = $summary;
+        }
+        $claims = collect($lookup['claims'] ?? [])->filter(fn ($claim): bool => is_array($claim))->values();
+        if ($claims->isNotEmpty()) {
+            $lines[] = '';
+            $lines[] = 'Key points:';
+            foreach ($claims->take(5) as $claim) {
+                $text = trim((string) ($claim['text'] ?? ''));
+                $url = trim((string) ($claim['source_url'] ?? ''));
+                if ($text === '') continue;
+                $lines[] = '- '.$text.($url !== '' ? ' (Source: '.$url.')' : '');
             }
-            if (count($sources) >= 5) break;
+        }
+        $sources = collect($lookup['sources'] ?? [])->filter(fn ($source): bool => is_array($source))->values();
+        if ($sources->isNotEmpty()) {
+            $lines[] = '';
+            $lines[] = 'Sources:';
+            foreach ($sources->take(5) as $source) {
+                $title = trim((string) ($source['title'] ?? 'Source')) ?: 'Source';
+                $url = trim((string) ($source['url'] ?? ''));
+                $lines[] = '- '.$title.($url !== '' ? ': '.$url : '');
+            }
         }
 
-        return collect($sources)
-            ->filter(fn (array $source): bool => trim((string) ($source['url'] ?? '')) !== '' || trim((string) ($source['snippet'] ?? '')) !== '')
-            ->unique(fn (array $source): string => (string) ($source['url'] ?? $source['snippet'] ?? ''))
-            ->take(5)
-            ->values()
-            ->all();
-    }
-
-    private function externalLookupLiteSearch(string $query): array
-    {
-        $response = Http::withHeaders(['User-Agent' => 'HeyBean/1.0'])
-            ->connectTimeout(2)
-            ->timeout(8)
-            ->get('https://lite.duckduckgo.com/lite/', ['q' => $query]);
-        if (! $response->ok()) return [];
-
-        $html = (string) $response->body();
-        preg_match_all("/<a[^>]+href=['\"]([^'\"]+)['\"][^>]+class=['\"]result-link['\"][^>]*>(.*?)<\/a>/isu", $html, $links, PREG_SET_ORDER);
-        if ($links === []) {
-            preg_match_all("/<a[^>]+class=['\"]result-link['\"][^>]+href=['\"]([^'\"]+)['\"][^>]*>(.*?)<\/a>/isu", $html, $links, PREG_SET_ORDER);
-        }
-        preg_match_all("/<td[^>]+class=['\"]result-snippet['\"][^>]*>(.*?)<\/td>/isu", $html, $snippets);
-        $snippetValues = collect($snippets[1] ?? [])
-            ->map(fn (string $snippet): string => trim(html_entity_decode(strip_tags($snippet), ENT_QUOTES | ENT_HTML5)))
-            ->values();
-
-        return collect($links)
-            ->take(5)
-            ->values()
-            ->map(function (array $match, int $index) use ($snippetValues): array {
-                $url = $this->decodeDuckDuckGoUrl(html_entity_decode($match[1], ENT_QUOTES | ENT_HTML5));
-                $title = trim(html_entity_decode(strip_tags($match[2]), ENT_QUOTES | ENT_HTML5));
-                return [
-                    'title' => $title,
-                    'url' => $url,
-                    'snippet' => (string) ($snippetValues[$index] ?? ''),
-                ];
-            })
-            ->filter(fn (array $source): bool => trim((string) ($source['url'] ?? '')) !== '')
-            ->values()
-            ->all();
-    }
-
-    private function decodeDuckDuckGoUrl(string $url): string
-    {
-        if (str_starts_with($url, '//')) $url = 'https:'.$url;
-        $parts = parse_url($url);
-        parse_str((string) ($parts['query'] ?? ''), $query);
-        return isset($query['uddg']) ? (string) $query['uddg'] : $url;
-    }
-
-    private function appendExternalSource(array &$sources, mixed $topic): void
-    {
-        if (! is_array($topic)) return;
-        $text = trim((string) ($topic['Text'] ?? ''));
-        $url = trim((string) ($topic['FirstURL'] ?? ''));
-        if ($text === '' && $url === '') return;
-        $sources[] = [
-            'title' => $text !== '' ? str($text)->before(' - ')->limit(100, '')->toString() : parse_url($url, PHP_URL_HOST),
-            'url' => $url,
-            'snippet' => $text,
-        ];
+        return trim(implode("\n", $lines));
     }
 
     private function isDestructive(string $action): bool { return str_ends_with($action, '.delete'); }

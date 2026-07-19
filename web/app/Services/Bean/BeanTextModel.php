@@ -35,7 +35,6 @@ class BeanTextModel
         'note.update',
         'note.delete',
         'time.now',
-        'weather.lookup',
         'external.lookup',
         'dashboard.summary',
     ];
@@ -305,6 +304,11 @@ PROMPT;
             'workspace_scope' => $nullableString,
             'include_workspaces' => $nullableBoolean,
             'explain_visibility' => $nullableBoolean,
+            'objective' => $nullableString,
+            'freshness' => $nullableString,
+            'include_sources' => $nullableBoolean,
+            'grounded_from' => $nullableString,
+            'source_action' => $nullableString,
         ];
 
         return [
@@ -325,7 +329,7 @@ You are Bean, the HeyBean productivity assistant. Return only JSON matching the 
 Use actions only from this list: {$actions}.
 Laravel is the source of truth: you propose structured actions; Laravel validates, scopes, confirms, and executes them.
 For destructive actions include the delete action, but Laravel will require confirmation before execution.
-Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. The Recent Bean session context includes current_datetime/current_date/timezone; use those for relative dates like today/tomorrow and for follow-up questions. Use ISO 8601 dates when the user supplied or implied a date/time. Use resource.query for flexible factual questions about app data and resource.relationships for relationship/context questions, including workspace/context/why/relationship questions. Use external.lookup for source-backed public web/internet/current/latest lookup requests; keep it generic and set query to the public thing to look up, never to private dashboard data. For resource.query/resource.relationships set resource to tasks, reminders, calendar_events, notes, or workspaces; set query/title for lookup text; set include_workspaces=true when workspace context could matter; set explain_visibility=true for why-is-this-shown questions. For list/query reads, express exact data constraints in filters: use field/operator/value triples, e.g. starts_at between [tomorrowStart, tomorrowEnd], due_at <= todayEnd, remind_at < todayStart, or status in [scheduled]. Use time_label only as user-facing answer context such as today, tomorrow, or overdue; do not rely on time_label for filtering. If the user says "what about tomorrow?" or another temporal follow-up, reuse recent_query_context.resource. Do not include time.now unless the user is actually asking for the time/date. If an item needs lookup by title, use query rather than inventing an id. Use strict mutation actions only when changing app state.
+Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. The Recent Bean session context includes current_datetime/current_date/timezone; use those for relative dates like today/tomorrow and for follow-up questions. Use ISO 8601 dates when the user supplied or implied a date/time. Use resource.query for flexible factual questions about app data and resource.relationships for relationship/context questions, including workspace/context/why/relationship questions. Use external.lookup for source-backed public web/internet/current/latest lookup requests, including weather or other current public facts; keep it generic and set query/objective/freshness to the public thing to look up, never to private dashboard data. Use no action for normal evergreen knowledge, brainstorming, drafting, or creative generation unless the user asks to save or change app data. For resource.query/resource.relationships set resource to tasks, reminders, calendar_events, notes, or workspaces; set query/title for lookup text; set include_workspaces=true when workspace context could matter; set explain_visibility=true for why-is-this-shown questions. For list/query reads, express exact data constraints in filters: use field/operator/value triples, e.g. starts_at between [tomorrowStart, tomorrowEnd], due_at <= todayEnd, remind_at < todayStart, or status in [scheduled]. Use time_label only as user-facing answer context such as today, tomorrow, or overdue; do not rely on time_label for filtering. If the user says "what about tomorrow?" or another temporal follow-up, reuse recent_query_context.resource. Do not include time.now unless the user is actually asking for the time/date. If a user asks to find/search public sources and save a note, plan external.lookup followed by note.create with grounded_from/source_action set to external.lookup. If an item needs lookup by title, use query rather than inventing an id. Use strict mutation actions only when changing app state. Do not invent source-backed facts if external.lookup fails.
 Do not invent private dashboard data; call list/search/dashboard actions when data is needed.
 Keep response concise and avoid saying an action is complete before Laravel executes it.
 PROMPT;
@@ -393,38 +397,23 @@ PROMPT;
         } elseif ($this->isCorrectionRequest($lower, $session)) {
             $actions[] = ['action' => 'resource.query', 'arguments' => $this->resourceQueryArguments($text, $lower, $session)];
             $response = 'I’ll use the correction.';
-        } elseif (str_contains($lower, 'weather')) {
-            $actions[] = ['action' => 'weather.lookup', 'arguments' => ['query' => $text]];
-            $response = 'I’ll check the weather.';
         } elseif ($this->isExternalLookupRequest($lower)) {
-            $actions[] = ['action' => 'external.lookup', 'arguments' => ['query' => $this->externalLookupQuery($text)]];
-            $response = 'I’ll look that up.';
-        } elseif ($this->isAddRecipesToRecentMealNoteRequest($lower, $session)) {
-            $note = $this->recentNoteEntity($session);
-            $title = (string) ($note['title'] ?? 'Simple Dinner Meals for This Coming Week');
-            $actions[] = ['action' => 'note.update', 'arguments' => [
-                'id' => (int) ($note['id'] ?? 0),
-                'title' => $title,
-                'plain_text' => $this->dinnerMealsWithRecipesText(),
-                'generated_recipe_followup' => true,
+            $query = $this->externalLookupQuery($text);
+            $actions[] = ['action' => 'external.lookup', 'arguments' => [
+                'query' => $query,
+                'objective' => $this->externalLookupObjective($text),
+                'freshness' => $this->externalLookupFreshness($lower),
+                'include_sources' => true,
             ]];
-            $response = 'I’ll add simple recipes under each meal.';
-        } elseif ($this->isMealPlanNoteRequest($lower)) {
-            $actions[] = ['action' => 'note.create', 'arguments' => [
-                'title' => 'Simple Dinner Meals for This Coming Week',
-                'plain_text' => $this->simpleDinnerMealsText(),
-                'generated_meal_plan' => true,
-            ]];
-            $response = 'I’ll create that dinner-meal note.';
-        } elseif ($this->isRecipeNoteRequest($lower)) {
-            $subject = $this->recipeSubject($text, $lower);
-            $actions[] = ['action' => 'note.create', 'arguments' => [
-                'title' => str($subject)->title().' Recipe',
-                'plain_text' => $this->recipeText($subject),
-                'category' => 'recipe',
-                'generated_recipe' => true,
-            ]];
-            $response = 'I’ll create that recipe note.';
+            if ($this->isGroundedNoteCreationRequest($lower)) {
+                $actions[] = ['action' => 'note.create', 'arguments' => [
+                    'title' => '',
+                    'plain_text' => '',
+                    'grounded_from' => 'external.lookup',
+                    'source_action' => 'external.lookup',
+                ]];
+            }
+            $response = $this->isGroundedNoteCreationRequest($lower) ? 'I’ll look that up and save a grounded note.' : 'I’ll look that up.';
         } elseif ($this->mentionsOverdue($lower) && ! $this->mentionsNote($lower) && ! $this->mentionsCalendar($lower)) {
             if ($this->mentionsReminder($lower) && ! $this->mentionsTask($lower)) {
                 $actions[] = ['action' => 'reminder.list', 'arguments' => $this->listArguments($lower, 'reminders')];
@@ -813,14 +802,35 @@ PROMPT;
 
     private function externalLookupQuery(string $text): string
     {
-        $query = $this->queryFromText($text, ['can', 'you', 'please', 'go', 'online', 'look', 'lookup', 'search', 'the', 'web', 'internet', 'find']);
+        $query = $this->queryFromText($text, ['can', 'you', 'please', 'go', 'online', 'look', 'lookup', 'search', 'the', 'web', 'internet', 'find', 'save', 'create', 'make', 'add', 'note', 'with', 'source', 'sources', 'for', 'and', 'a', 'an']);
         return $query !== '' ? $query : trim($text);
+    }
+
+    private function externalLookupObjective(string $text): string
+    {
+        $lower = mb_strtolower($text);
+        if (preg_match('/\b(compare|comparison|options|best|top|versus|vs)\b/u', $lower) === 1) return 'compare public options using source-backed evidence';
+        if (preg_match('/\b(source|sources|cite|citation|verify|confirm)\b/u', $lower) === 1) return 'verify public facts with sources';
+        if (preg_match('/\b(weather|forecast|temperature|latest|current|recent|today|right now)\b/u', $lower) === 1) return 'answer current public factual question';
+        return 'answer source-backed public lookup';
+    }
+
+    private function externalLookupFreshness(string $lower): string
+    {
+        if (preg_match('/\b(latest|current|recent|today|right now|weather|forecast|price|prices|open now)\b/u', $lower) === 1) return 'latest';
+        return 'any';
+    }
+
+    private function isGroundedNoteCreationRequest(string $lower): bool
+    {
+        return $this->mentionsNote($lower)
+            && preg_match('/\b(save|create|make|add|write)\b/u', $lower) === 1;
     }
 
     private function isExternalLookupRequest(string $lower): bool
     {
         if (preg_match('/\b(time|date|today[’\']?s date|what day|current time|time is it)\b/u', $lower) === 1) return false;
-        return preg_match('/\b(go online|online|look up|lookup|search the web|search online|internet|web|source|sources|latest)\b/u', $lower) === 1;
+        return preg_match('/\b(go online|online|look up|lookup|search the web|search online|internet|web|source|sources|cite|citation|verify|latest|current public|recent reviews|weather|forecast|temperature)\b/u', $lower) === 1;
     }
 
     private function isVoiceHealthCheck(string $text): bool
@@ -836,35 +846,6 @@ PROMPT;
         return $this->correctionEntity($session, $lower, '') !== null;
     }
 
-    private function isRecipeNoteRequest(string $lower): bool
-    {
-        return str_contains($lower, 'recipe') && str_contains($lower, 'note') && preg_match('/\b(create|make|add|write)\b/u', $lower) === 1;
-    }
-
-    private function isMealPlanNoteRequest(string $lower): bool
-    {
-        return str_contains($lower, 'note') && str_contains($lower, 'dinner') && str_contains($lower, 'meal') && preg_match('/\b(five|5)\b/u', $lower) === 1;
-    }
-
-    private function isAddRecipesToRecentMealNoteRequest(string $lower, ?BeanSession $session): bool
-    {
-        if (! str_contains($lower, 'recipe') || ! preg_match('/\b(each|those|meals?)\b/u', $lower)) return false;
-        $note = $this->recentNoteEntity($session);
-        if ($note === null) return false;
-        $title = mb_strtolower((string) ($note['title'] ?? ''));
-        return str_contains($title, 'dinner') || str_contains($title, 'meal');
-    }
-
-    private function recentNoteEntity(?BeanSession $session): ?array
-    {
-        if (! $session) return null;
-        $metadata = is_array($session->metadata) ? $session->metadata : [];
-        $entities = array_values(array_filter(is_array($metadata['recent_entities'] ?? null) ? $metadata['recent_entities'] : [], 'is_array'));
-        foreach ($entities as $entity) {
-            if (($entity['type'] ?? null) === 'note') return $entity;
-        }
-        return null;
-    }
 
     private function correctionEntity(?BeanSession $session, string $lower, string $query): ?array
     {
@@ -921,34 +902,6 @@ PROMPT;
             ->all();
     }
 
-    private function recipeSubject(string $text, string $lower): string
-    {
-        if (preg_match('/\b(?:for|of)\s+([a-z][a-z\s-]+?)(?:\?|$)/iu', $text, $match) === 1) {
-            return trim((string) $match[1]);
-        }
-        $query = $this->queryFromText($text, ['can', 'you', 'please', 'create', 'make', 'add', 'write', 'note', 'recipe', 'go', 'online', 'find', 'look', 'up', 'search', 'internet', 'web', 'for']);
-        return $query !== '' ? $query : 'quesadillas';
-    }
-
-    private function recipeText(string $subject): string
-    {
-        $subject = trim($subject) ?: 'quesadillas';
-        if (str_contains(mb_strtolower($subject), 'quesadilla')) {
-            return "Quesadillas Recipe\n\nIngredients:\n- 4 flour tortillas\n- 1 1/2 cups shredded cheese\n- 1/2 cup cooked chicken, beans, or vegetables (optional)\n- 1 tablespoon butter or oil\n- Salsa, sour cream, or guacamole for serving\n\nInstructions:\n1. Warm a skillet over medium heat.\n2. Place one tortilla in the skillet and sprinkle cheese over half. Add optional filling.\n3. Fold the tortilla and cook 2–3 minutes per side until crisp and melted.\n4. Slice into wedges and serve with salsa or sour cream.\n\nTime: about 15 minutes.";
-        }
-
-        return str($subject)->title()." Recipe\n\nIngredients:\n- Main ingredient for {$subject}\n- Olive oil or butter\n- Salt and pepper\n- Simple sides or toppings\n\nInstructions:\n1. Prep the ingredients.\n2. Cook over medium heat until done.\n3. Taste, season, and serve warm.\n\nTime: about 20 minutes.";
-    }
-
-    private function simpleDinnerMealsText(): string
-    {
-        return "Here are five simple dinner meals for the coming week:\n1. Grilled chicken with steamed vegetables\n2. Spaghetti with marinara sauce\n3. Baked salmon with rice and broccoli\n4. Tacos with ground beef and salad\n5. Vegetable stir-fry with tofu";
-    }
-
-    private function dinnerMealsWithRecipesText(): string
-    {
-        return "Simple Dinner Meals for This Coming Week\n\n1. Grilled chicken with steamed vegetables\nRecipe:\nIngredients: chicken breasts, mixed vegetables, olive oil, salt, pepper, garlic powder.\nInstructions: Season chicken, grill or pan-cook until done, steam vegetables, and serve together.\n\n2. Spaghetti with marinara sauce\nRecipe:\nIngredients: spaghetti, marinara sauce, parmesan, olive oil, salt.\nInstructions: Boil spaghetti, warm marinara, toss together, and top with parmesan.\n\n3. Baked salmon with rice and broccoli\nRecipe:\nIngredients: salmon fillets, rice, broccoli, lemon, olive oil, salt, pepper.\nInstructions: Bake seasoned salmon at 400°F until flaky, cook rice, steam broccoli, and serve with lemon.\n\n4. Tacos with ground beef and salad\nRecipe:\nIngredients: ground beef, taco seasoning, tortillas, lettuce, tomato, cheese, salsa.\nInstructions: Brown beef with seasoning, fill tortillas, and serve with salad toppings.\n\n5. Vegetable stir-fry with tofu\nRecipe:\nIngredients: firm tofu, mixed vegetables, soy sauce, garlic, sesame oil, rice.\nInstructions: Sear tofu, stir-fry vegetables with garlic and soy sauce, and serve over rice.";
-    }
 
     private function titleFromText(string $text): string
     {

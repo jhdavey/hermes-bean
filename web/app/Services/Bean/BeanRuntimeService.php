@@ -190,12 +190,10 @@ class BeanRuntimeService
         }
         $timeResponse = $this->timeResponse($results, $userMessage);
         if ($timeResponse !== null) return $timeResponse;
-        $weatherResponse = $this->weatherResponse($results);
-        if ($weatherResponse !== null) return $weatherResponse;
-        $externalLookupResponse = $this->externalLookupResponse($results);
-        if ($externalLookupResponse !== null) return $externalLookupResponse;
         $noteMutationResponse = $this->noteMutationResponse($results);
         if ($noteMutationResponse !== null) return $noteMutationResponse;
+        $externalLookupResponse = $this->externalLookupResponse($results);
+        if ($externalLookupResponse !== null) return $externalLookupResponse;
         $listResponse = $this->listResponse($results);
         if ($listResponse !== null) return $listResponse;
         if ($this->shouldSynthesize($results)) {
@@ -208,7 +206,7 @@ class BeanRuntimeService
         if ($contextResponse !== null) return $contextResponse;
         $completed = collect($results)->filter(fn ($result): bool => ($result['ok'] ?? false) === true)->count();
         if ($completed > 0) return $proposed !== '' ? $proposed.' Done.' : 'Done.';
-        return $proposed !== '' ? $proposed : 'I’m here. Ask me to help with your calendar, tasks, reminders, notes, date/time, or weather.';
+        return $proposed !== '' ? $proposed : 'I’m here. Ask me to help with your calendar, tasks, reminders, notes, date/time, or public lookups.';
     }
 
     private function timeResponse(array $results, string $userMessage): ?string
@@ -235,65 +233,24 @@ class BeanRuntimeService
         return 'The current time is '.$now->format('g:i A T').'.';
     }
 
-    private function weatherResponse(array $results): ?string
-    {
-        $weather = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
-            && ($result['action'] ?? null) === 'weather.lookup');
-        if (! $weather) return null;
-
-        $location = trim((string) ($weather['location'] ?? '')) ?: 'that location';
-        $current = is_array($weather['current'] ?? null) ? $weather['current'] : [];
-        $currentUnits = is_array($weather['current_units'] ?? null) ? $weather['current_units'] : [];
-        $forecast = is_array($weather['forecast'] ?? null) ? $weather['forecast'] : [];
-        $dailyUnits = is_array($weather['daily_units'] ?? null) ? $weather['daily_units'] : [];
-
-        $temperature = $this->weatherValue($current['temperature_2m'] ?? null, $currentUnits['temperature_2m'] ?? '°F');
-        $feelsLike = $this->weatherValue($current['apparent_temperature'] ?? null, $currentUnits['apparent_temperature'] ?? '°F');
-        $high = $this->weatherValue(data_get($forecast, 'temperature_2m_max.0'), $dailyUnits['temperature_2m_max'] ?? '°F');
-        $low = $this->weatherValue(data_get($forecast, 'temperature_2m_min.0'), $dailyUnits['temperature_2m_min'] ?? '°F');
-        $precipChance = $this->weatherValue(data_get($forecast, 'precipitation_probability_max.0'), $dailyUnits['precipitation_probability_max'] ?? '%');
-
-        if ($temperature !== null && $feelsLike !== null && $high !== null && $low !== null && $precipChance !== null) {
-            return "Right now in {$location}, it’s {$temperature} and feels like {$feelsLike}. Today’s forecast is {$high} high / {$low} low with a {$precipChance} precipitation chance.";
-        }
-
-        if ($high !== null && $low !== null) {
-            $precip = $precipChance !== null ? " with a {$precipChance} precipitation chance" : '';
-            return "Today’s forecast for {$location} is {$high} high / {$low} low{$precip}.";
-        }
-
-        if ($temperature !== null) {
-            $feels = $feelsLike !== null ? " and feels like {$feelsLike}" : '';
-            return "Right now in {$location}, it’s {$temperature}{$feels}.";
-        }
-
-        return null;
-    }
-
-    private function weatherValue(mixed $value, mixed $unit): ?string
-    {
-        if ($value === null || $value === '') return null;
-        $number = is_numeric($value) ? (float) $value : null;
-        $formatted = $number !== null && floor($number) === $number ? (string) (int) $number : (string) $value;
-        return $formatted.(string) $unit;
-    }
-
     private function externalLookupResponse(array $results): ?string
     {
         $lookup = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
             && ($result['action'] ?? null) === 'external.lookup');
         if (! $lookup) return null;
         $summary = trim((string) ($lookup['summary'] ?? ''));
-        $source = trim((string) ($lookup['source_url'] ?? ''));
-        if ($summary !== '' && $source !== '') return "I found this online: {$summary} Source: {$source}";
-        if ($summary !== '') return "I found this online: {$summary}";
         $sources = collect($lookup['sources'] ?? [])->filter(fn ($source): bool => is_array($source))->values();
+        $source = trim((string) ($lookup['source_url'] ?? ($sources->first()['url'] ?? '')));
+        $sourceCount = $sources->count();
+        $prefix = $sourceCount > 1 ? "I found {$sourceCount} sources" : 'I found this online';
+        if ($summary !== '' && $source !== '') return "{$prefix}: {$summary} Source: {$source}";
+        if ($summary !== '') return "{$prefix}: {$summary}";
         if ($sources->isNotEmpty()) {
             $first = $sources->first();
             $snippet = trim((string) ($first['snippet'] ?? $first['title'] ?? ''));
             $url = trim((string) ($first['url'] ?? ''));
-            if ($snippet !== '' && $url !== '') return "I found this online: {$snippet} Source: {$url}";
-            if ($snippet !== '') return "I found this online: {$snippet}";
+            if ($snippet !== '' && $url !== '') return "{$prefix}: {$snippet} Source: {$url}";
+            if ($snippet !== '') return "{$prefix}: {$snippet}";
         }
         return null;
     }
@@ -307,15 +264,8 @@ class BeanRuntimeService
         $arguments = is_array($note['arguments'] ?? null) ? $note['arguments'] : [];
         $item = $note['item'];
         $title = trim((string) ($item['title'] ?? $arguments['title'] ?? 'that note'));
-        if (($arguments['generated_recipe'] ?? false) === true) {
-            $subject = preg_replace('/\s+recipe$/i', '', $title) ?: $title;
-            return 'I created a recipe note for '.mb_strtolower($subject).' with ingredients and quick steps.';
-        }
-        if (($arguments['generated_meal_plan'] ?? false) === true) {
-            return 'I created a note with five simple dinner meals for this coming week.';
-        }
-        if (($arguments['generated_recipe_followup'] ?? false) === true) {
-            return "I added simple recipes under each of the five meals in {$title}.";
+        if (($note['grounded_from'] ?? null) === 'external.lookup' || ($arguments['grounded_from'] ?? null) === 'external.lookup') {
+            return "I created a source-grounded note: {$title}.";
         }
         return null;
     }

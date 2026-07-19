@@ -65,6 +65,7 @@ class BeanRuntimeTest extends TestCase
             $this->assertContains('calendar_event.update', $actionsEnum);
             $this->assertContains('external.lookup', $actionsEnum);
             $this->assertNotContains('recipe.lookup', $actionsEnum);
+            $this->assertNotContains('weather.lookup', $actionsEnum);
             $this->assertFalse((bool) ($argumentsSchema['additionalProperties'] ?? true));
             $this->assertContains('title', $argumentsSchema['required'] ?? []);
             $this->assertArrayHasKey('filters', $argumentsSchema['properties'] ?? []);
@@ -540,26 +541,37 @@ class BeanRuntimeTest extends TestCase
         Http::assertSentCount(1);
     }
 
-    public function test_recipe_note_request_generates_useful_recipe_content(): void
+    public function test_evergreen_generation_uses_model_knowledge_without_external_lookup(): void
     {
-        config(['services.openai.api_key' => null]);
-        $token = $this->apiToken('bean-recipe-note@example.com');
-        $user = User::where('email', 'bean-recipe-note@example.com')->firstOrFail();
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.bean_text_model' => 'gpt-4.1-mini',
+        ]);
+        $token = $this->apiToken('bean-evergreen-generation@example.com');
+
+        Http::fake(fn () => Http::response([
+            'choices' => [[
+                'message' => [
+                    'content' => json_encode([
+                        'response' => 'Here’s a simple evergreen answer from model knowledge.',
+                        'actions' => [],
+                    ]),
+                ],
+            ]],
+        ], 200));
 
         $this->withToken($token)->postJson('/api/bean/messages', [
-            'content' => 'Can you create a recipe note for quesadillas?',
+            'content' => 'Give me a simple chicken quesadilla recipe.',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
-            ->assertJsonFragment(['content' => 'I created a recipe note for quesadillas with ingredients and quick steps.']);
+            ->assertJsonFragment(['content' => 'Here’s a simple evergreen answer from model knowledge.']);
 
-        $note = Note::where('user_id', $user->id)->where('title', 'Quesadillas Recipe')->firstOrFail();
-        $this->assertStringContainsString('Ingredients', $note->plain_text);
-        $this->assertStringContainsString('Instructions', $note->plain_text);
-        $this->assertStringContainsString('tortillas', strtolower($note->plain_text));
-        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'note.create', 'status' => 'completed']);
+        $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'external.lookup']);
+        $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'recipe.lookup']);
+        $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'weather.lookup']);
     }
 
-    public function test_online_recipe_request_uses_general_external_lookup_instead_of_recipe_tool(): void
+    public function test_source_backed_public_request_uses_general_external_lookup(): void
     {
         config(['services.openai.api_key' => null]);
         $token = $this->apiToken('bean-external-lookup@example.com');
@@ -568,58 +580,71 @@ class BeanRuntimeTest extends TestCase
             'user_id' => $user->id,
             'workspace_id' => $user->default_workspace_id,
             'created_by_user_id' => $user->id,
-            'title' => 'Quesadillas Recipe',
+            'title' => 'Private maintenance note',
             'plain_text' => 'Old private note should not be treated as a web result.',
         ]);
 
         Http::fake([
             'api.duckduckgo.com/*' => Http::response([
-                'Heading' => 'Quesadilla',
-                'AbstractText' => 'A quesadilla is a Mexican dish consisting of a tortilla filled primarily with cheese and sometimes meats, spices, and other fillings.',
-                'AbstractURL' => 'https://example.test/quesadilla',
+                'Heading' => 'Fire extinguisher maintenance',
+                'AbstractText' => 'Fire extinguishers should be inspected monthly and serviced according to the manufacturer instructions.',
+                'AbstractURL' => 'https://example.test/fire-extinguisher',
                 'RelatedTopics' => [[
-                    'Text' => 'Quesadilla recipe source with tortillas and cheese.',
-                    'FirstURL' => 'https://example.test/recipe',
+                    'Text' => 'Check the pressure gauge and instructions before relying on an extinguisher.',
+                    'FirstURL' => 'https://example.test/extinguisher-check',
                 ]],
             ], 200),
+            'https://example.test/*' => Http::response('<html><title>Fire Extinguisher Maintenance</title><body>Fire extinguishers should be inspected monthly. Check the pressure gauge.</body></html>', 200, ['content-type' => 'text/html']),
         ]);
 
         $this->withToken($token)->postJson('/api/bean/messages', [
-            'content' => 'Can you go online and find a recipe for quesadillas?',
+            'content' => 'Can you go online and find sources for home fire extinguisher maintenance?',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
-            ->assertJsonFragment(['content' => 'I found this online: A quesadilla is a Mexican dish consisting of a tortilla filled primarily with cheese and sometimes meats, spices, and other fillings. Source: https://example.test/quesadilla']);
+            ->assertJsonFragment(['content' => 'I found 2 sources: Fire extinguishers should be inspected monthly and serviced according to the manufacturer instructions. Check the pressure gauge and instructions before relying on an extinguisher. Source: https://example.test/fire-extinguisher']);
 
         $this->assertDatabaseHas('bean_tool_calls', ['action' => 'external.lookup', 'status' => 'completed']);
         $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'recipe.lookup']);
+        $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'weather.lookup']);
         $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'note.search']);
+
+        $toolCall = BeanToolCall::query()->where('action', 'external.lookup')->latest('id')->firstOrFail();
+        $this->assertSame('medium', data_get($toolCall->result, 'confidence'));
+        $this->assertSame(2, data_get($toolCall->result, 'evidence.source_count'));
     }
 
-    public function test_follow_up_add_recipes_to_recent_meal_note_preserves_existing_meals(): void
+    public function test_source_backed_lookup_can_create_grounded_note_without_domain_specific_tool(): void
     {
         config(['services.openai.api_key' => null]);
-        $token = $this->apiToken('bean-meal-recipes@example.com');
-        $user = User::where('email', 'bean-meal-recipes@example.com')->firstOrFail();
+        $token = $this->apiToken('bean-grounded-note@example.com');
+        $user = User::where('email', 'bean-grounded-note@example.com')->firstOrFail();
 
-        $first = $this->withToken($token)->postJson('/api/bean/messages', [
-            'content' => 'Okay, now, can you create a note with five simple dinner meals for this coming week?',
-        ])->assertOk()
-            ->assertJsonPath('data.run.status', 'completed');
-        $sessionId = data_get($first->json(), 'data.session.id');
+        Http::fake([
+            'api.duckduckgo.com/*' => Http::response([
+                'Heading' => 'Emergency kit supplies',
+                'AbstractText' => 'Emergency kits commonly include water, food, first aid supplies, flashlight, radio, and batteries.',
+                'AbstractURL' => 'https://example.test/emergency-kit',
+                'RelatedTopics' => [[
+                    'Text' => 'Emergency preparedness source recommends supplies for at least several days.',
+                    'FirstURL' => 'https://example.test/preparedness',
+                ]],
+            ], 200),
+            'https://example.test/*' => Http::response('<html><title>Emergency Kit Supplies</title><body>Emergency kits commonly include water, food, first aid, flashlight, radio, and batteries.</body></html>', 200, ['content-type' => 'text/html']),
+        ]);
 
         $this->withToken($token)->postJson('/api/bean/messages', [
-            'session_id' => $sessionId,
-            'content' => 'For each of those meals, can you add a recipe?',
+            'content' => 'Go online, find sources for emergency kit supplies, and save a note.',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
-            ->assertJsonFragment(['content' => 'I added simple recipes under each of the five meals in Simple Dinner Meals for This Coming Week.']);
+            ->assertJsonFragment(['content' => 'I created a source-grounded note: Emergency Kit Supplies.']);
 
-        $note = Note::where('user_id', $user->id)->where('title', 'Simple Dinner Meals for This Coming Week')->firstOrFail();
-        foreach (['Grilled chicken with steamed vegetables', 'Spaghetti with marinara sauce', 'Baked salmon with rice and broccoli', 'Tacos with ground beef and salad', 'Vegetable stir-fry with tofu'] as $meal) {
-            $this->assertStringContainsString($meal, $note->plain_text);
-        }
-        $this->assertStringContainsString('Recipe:', $note->plain_text);
-        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'note.update', 'status' => 'completed']);
+        $note = Note::where('user_id', $user->id)->where('title', 'Emergency Kit Supplies')->firstOrFail();
+        $this->assertStringContainsString('Summary:', $note->plain_text);
+        $this->assertStringContainsString('Sources:', $note->plain_text);
+        $this->assertSame('external.lookup', data_get($note->metadata, 'grounded_from'));
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'external.lookup', 'status' => 'completed']);
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'note.create', 'status' => 'completed']);
+        $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'recipe.lookup']);
     }
 
     public function test_today_task_list_response_filters_to_open_tasks_due_today(): void
@@ -1048,50 +1073,32 @@ class BeanRuntimeTest extends TestCase
         Carbon::setTestNow();
     }
 
-    public function test_weather_question_answers_with_forecast_facts_not_generic_done(): void
+    public function test_weather_question_uses_generic_external_lookup_not_weather_specific_action(): void
     {
         config(['services.openai.api_key' => null]);
         $token = $this->apiToken('bean-weather-answer@example.com');
 
-        Http::fakeSequence()
-            ->push(['results' => [[
-                'name' => 'Orlando',
-                'admin1' => 'Florida',
-                'country' => 'United States',
-                'latitude' => 28.5383,
-                'longitude' => -81.3792,
-            ]]], 200)
-            ->push([
-                'current' => [
-                    'temperature_2m' => 82,
-                    'apparent_temperature' => 86,
-                    'wind_speed_10m' => 5,
-                    'precipitation' => 0,
-                    'weather_code' => 1,
-                ],
-                'current_units' => [
-                    'temperature_2m' => '°F',
-                    'apparent_temperature' => '°F',
-                    'wind_speed_10m' => 'mph',
-                    'precipitation' => 'inch',
-                ],
-                'daily' => [
-                    'temperature_2m_max' => [91],
-                    'temperature_2m_min' => [75],
-                    'precipitation_probability_max' => [20],
-                ],
-                'daily_units' => [
-                    'temperature_2m_max' => '°F',
-                    'temperature_2m_min' => '°F',
-                    'precipitation_probability_max' => '%',
-                ],
-            ], 200);
+        Http::fake([
+            'api.duckduckgo.com/*' => Http::response([
+                'Heading' => 'Orlando weather',
+                'AbstractText' => 'The current weather in Orlando is 82°F and partly cloudy with a forecast high near 91°F.',
+                'AbstractURL' => 'https://example.test/orlando-weather',
+                'RelatedTopics' => [[
+                    'Text' => 'Orlando forecast source reports warm conditions and a chance of rain.',
+                    'FirstURL' => 'https://example.test/orlando-forecast',
+                ]],
+            ], 200),
+            'https://example.test/*' => Http::response('<html><title>Orlando weather</title><body>The current weather in Orlando is 82°F and partly cloudy.</body></html>', 200, ['content-type' => 'text/html']),
+        ]);
 
         $this->withToken($token)->postJson('/api/bean/messages', [
             'content' => 'Can you tell me what the weather is like in Orlando right now?',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
-            ->assertJsonFragment(['content' => 'Right now in Orlando, it’s 82°F and feels like 86°F. Today’s forecast is 91°F high / 75°F low with a 20% precipitation chance.']);
+            ->assertJsonFragment(['content' => 'I found 2 sources: The current weather in Orlando is 82°F and partly cloudy with a forecast high near 91°F. Orlando forecast source reports warm conditions and a chance of rain. Source: https://example.test/orlando-weather']);
+
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'external.lookup', 'status' => 'completed']);
+        $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'weather.lookup']);
     }
 
     public function test_today_task_list_collapses_linked_workspace_copies(): void
