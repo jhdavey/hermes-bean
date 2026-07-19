@@ -76,6 +76,9 @@ class BeanTextModel
 
             $actions = $this->dropIrrelevantTimeActions($this->cleanActions($decoded['actions'] ?? []), $message);
             $actions = $this->enforceGroundedCreationActions($actions, $message);
+            if ($this->isReadOnlyAnswerCorrection($message, mb_strtolower($message), $session) && $this->containsMutationAction($actions)) {
+                $actions = [$this->readOnlyCorrectionAction($message, mb_strtolower($message), $session)];
+            }
             $followUp = $this->temporalFollowUpAction($message, mb_strtolower($message), $session);
             if ($actions === [] && $followUp !== null) {
                 $actions[] = $followUp;
@@ -697,8 +700,8 @@ PROMPT;
             'workspace', 'workspaces', 'is', 'are', 'in', 'does', 'do', 'the', 'a', 'an',
             'task', 'tasks', 'todo', 'todos', 'to-do', 'to-dos', 'item', 'items', 'one',
             'first', 'second', 'third', 'that', 'this', 'it', 'on', 'my', 'list', 'for',
-            'today', 'tomorrow', 'showing', 'appear', 'appearing', 'has', 'contains', 'contain', 'live',
-            'lives', 'belong', 'belongs', 'to', 'family', 'personal',
+            'today', 'tomorrow', 'showing', 'appear', 'appearing', 'has', 'have', 'contains', 'contain', 'live',
+            'lives', 'belong', 'belongs', 'to', 'family', 'personal', 'yes', 'no', 'actually', 'i', 'do',
         ]);
         $correction = $this->correctionEntity($session, $lower, $query);
         if ($correction !== null) {
@@ -891,6 +894,46 @@ PROMPT;
         $lower = trim(preg_replace('/\s+/', ' ', $lower) ?: $lower);
 
         return preg_match('/\b(can you hear me|do you hear me|are you there|you there|can you hear|testing testing|mic check)\b/u', $lower) === 1;
+    }
+
+    private function isReadOnlyAnswerCorrection(string $text, string $lower, ?BeanSession $session): bool
+    {
+        if (! $session) return false;
+        if (preg_match('/\b(create|add|remind me|set a reminder|schedule|make a reminder)\b/u', $lower) === 1) return false;
+        if (preg_match('/\b(yes|no|actually|wait|i do|i have|there is|there are|you missed|wrong|not true)\b/u', $lower) !== 1) return false;
+
+        $resource = $this->recentQueryResource($session);
+        if (! in_array($resource, ['tasks', 'reminders', 'calendar_events'], true)) return false;
+        if ($this->isCorrectionRequest($lower, $session)) return true;
+
+        $assistantMessages = $session->messages()->where('role', 'assistant')->latest('id')->limit(3)->pluck('content');
+        foreach ($assistantMessages as $message) {
+            $assistant = mb_strtolower((string) $message);
+            if (preg_match('/\b(don[’\']?t have any|couldn[’\']?t find|no\s+(open|scheduled|upcoming)?\s*(tasks?|reminders?|calendar events?|items?)|nothing)\b/u', $assistant) === 1) {
+                return true;
+            }
+        }
+
+        return preg_match('/\b(i do|i have|there is|there are|you missed)\b/u', $lower) === 1;
+    }
+
+    private function containsMutationAction(array $actions): bool
+    {
+        return collect($actions)->contains(function (array $action): bool {
+            $name = (string) ($action['action'] ?? '');
+            return preg_match('/\.(create|update|delete|complete)$/', $name) === 1;
+        });
+    }
+
+    private function readOnlyCorrectionAction(string $text, string $lower, ?BeanSession $session): array
+    {
+        $resource = $this->recentQueryResource($session) ?? 'tasks';
+        $arguments = $this->resourceQueryArguments($text, $lower, $session);
+        $arguments['resource'] = $resource;
+        $arguments['include_workspaces'] = true;
+        $arguments['question'] = $text;
+
+        return ['action' => 'resource.query', 'arguments' => $arguments];
     }
 
     private function isCorrectionRequest(string $lower, ?BeanSession $session): bool

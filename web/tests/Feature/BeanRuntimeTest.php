@@ -920,6 +920,133 @@ HTML;
         Http::assertSentCount(1);
     }
 
+    public function test_date_only_task_filter_matches_tasks_due_any_time_that_day(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.bean_text_model' => 'gpt-4.1-mini',
+        ]);
+        Carbon::setTestNow(Carbon::parse('2026-07-19 18:42:00', config('app.timezone')));
+        $token = $this->apiToken('bean-tuesday-date-filter@example.com');
+        $user = User::where('email', 'bean-tuesday-date-filter@example.com')->firstOrFail();
+
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Take out trash',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => Carbon::parse('2026-07-21 23:45:00', config('app.timezone')),
+            'metadata' => ['recurrence' => 'weekly'],
+        ]);
+
+        Http::fakeSequence()->push([
+            'choices' => [[
+                'message' => [
+                    'content' => json_encode([
+                        'response' => 'I’ll check Tuesday’s tasks.',
+                        'actions' => [[
+                            'action' => 'task.list',
+                            'arguments' => [
+                                'filters' => [[
+                                    'field' => 'due_at',
+                                    'operator' => '=',
+                                    'value' => '2026-07-21',
+                                ]],
+                                'workspace_scope' => 'accessible',
+                                'include_workspaces' => true,
+                            ],
+                        ]],
+                    ]),
+                ],
+            ]],
+        ], 200);
+
+        $response = $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => "what's on my to-do list for Tuesday",
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed');
+
+        $this->assertStringContainsString('Take out trash', $response->getContent());
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'task.list', 'status' => 'completed']);
+        $this->assertSame(0, Reminder::where('user_id', $user->id)->count());
+        Carbon::setTestNow();
+    }
+
+    public function test_correction_after_task_list_question_does_not_create_reminder(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.bean_text_model' => 'gpt-4.1-mini',
+        ]);
+        Carbon::setTestNow(Carbon::parse('2026-07-19 18:42:00', config('app.timezone')));
+        $token = $this->apiToken('bean-tuesday-correction-no-reminder@example.com');
+        $user = User::where('email', 'bean-tuesday-correction-no-reminder@example.com')->firstOrFail();
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Take out trash',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => Carbon::parse('2026-07-21 23:45:00', config('app.timezone')),
+            'metadata' => ['recurrence' => 'weekly'],
+        ]);
+
+        Http::fakeSequence()
+            ->push([
+                'choices' => [[
+                    'message' => [
+                        'content' => json_encode([
+                            'response' => 'I’ll check Tuesday’s tasks.',
+                            'actions' => [[
+                                'action' => 'task.list',
+                                'arguments' => [
+                                    'filters' => [[
+                                        'field' => 'due_at',
+                                        'operator' => '=',
+                                        'value' => '2026-07-21',
+                                    ]],
+                                    'workspace_scope' => 'accessible',
+                                ],
+                            ]],
+                        ]),
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'choices' => [[
+                    'message' => [
+                        'content' => json_encode([
+                            'response' => 'I’ll create a reminder for that.',
+                            'actions' => [[
+                                'action' => 'reminder.create',
+                                'arguments' => ['title' => 'Take out the trash'],
+                            ]],
+                        ]),
+                    ],
+                ]],
+            ], 200);
+
+        $first = $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => "what's on my to-do list for Tuesday",
+        ])->assertOk();
+        $sessionId = data_get($first->json(), 'data.session.id');
+
+        $response = $this->withToken($token)->postJson('/api/bean/messages', [
+            'session_id' => $sessionId,
+            'content' => 'Yes, I do. I have to take out the trash.',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed');
+
+        $this->assertStringContainsString('Take out trash', $response->getContent());
+        $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'reminder.create']);
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'resource.query', 'status' => 'completed']);
+        $this->assertSame(0, Reminder::where('user_id', $user->id)->count());
+        Carbon::setTestNow();
+    }
+
     public function test_time_question_answers_with_current_time_not_generic_done(): void
     {
         config(['services.openai.api_key' => null]);

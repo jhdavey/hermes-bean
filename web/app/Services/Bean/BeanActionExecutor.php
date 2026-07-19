@@ -354,6 +354,11 @@ class BeanActionExecutor
                 $query->where($field, 'like', '%'.addcslashes((string) $value, '%_\\').'%');
                 continue;
             }
+            if ($operator === '=' && $this->isTemporalField($field) && $this->isDateOnlyValue($value)) {
+                $date = Carbon::parse((string) $value, config('app.timezone', 'UTC'));
+                $query->whereNotNull($field)->whereBetween($field, [$date->copy()->startOfDay(), $date->copy()->endOfDay()]);
+                continue;
+            }
             if (in_array($operator, ['=', '!=', '<', '<=', '>', '>='], true)) {
                 $query->whereNotNull($field)->where($field, $operator, $this->filterValue($field, $value));
             }
@@ -362,11 +367,21 @@ class BeanActionExecutor
 
     private function filterValue(string $field, mixed $value): mixed
     {
-        if (in_array($field, ['due_at', 'completed_at', 'remind_at', 'starts_at', 'ends_at', 'updated_at', 'created_at'], true)) {
+        if ($this->isTemporalField($field)) {
             return $this->dateOrNull($value) ?: $value;
         }
 
         return $value;
+    }
+
+    private function isTemporalField(string $field): bool
+    {
+        return in_array($field, ['due_at', 'completed_at', 'remind_at', 'starts_at', 'ends_at', 'updated_at', 'created_at'], true);
+    }
+
+    private function isDateOnlyValue(mixed $value): bool
+    {
+        return is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($value)) === 1;
     }
 
     private function filterableFields(string $class): array
