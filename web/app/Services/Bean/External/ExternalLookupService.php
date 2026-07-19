@@ -9,6 +9,7 @@ class ExternalLookupService
     public function __construct(
         private readonly DuckDuckGoInstantAnswerProvider $instantAnswers,
         private readonly DuckDuckGoLiteSearchProvider $liteSearch,
+        private readonly BingSearchProvider $bingSearch,
         private readonly PageFetcher $fetcher,
         private readonly ContentExtractor $extractor,
         private readonly GroundedAnswerBuilder $builder,
@@ -33,7 +34,7 @@ class ExternalLookupService
         $providerNames = [];
         $errors = [];
         $sources = [];
-        foreach ([$this->instantAnswers, $this->liteSearch] as $provider) {
+        foreach ([$this->instantAnswers, $this->liteSearch, $this->bingSearch] as $provider) {
             try {
                 $providerNames[] = $provider->name();
                 $sources = $provider->search($query, $options);
