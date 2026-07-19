@@ -113,20 +113,42 @@ class BeanRuntimeService
         $this->activity->log($session, $run, 'status', 'Thinking...', ['mode' => 'thinking']);
 
         try {
-            $proposal = $this->model->propose($session, $content);
-            $actions = is_array($proposal['actions'] ?? null) ? $proposal['actions'] : [];
             $results = [];
+            $assistantText = '';
+            $modelName = null;
+            $maxTurns = 8;
 
-            foreach ($actions as $action) {
-                if (! is_array($action)) continue;
-                $name = (string) ($action['action'] ?? '');
-                if ($name === '') continue;
-                $args = is_array($action['arguments'] ?? null) ? $action['arguments'] : [];
+            for ($turn = 0; $turn < $maxTurns; $turn++) {
+                $step = $this->model->nextStep($session, $content, $results);
+                if ($modelName === null || (is_string($step['model'] ?? null) && $step['model'] !== 'local-heuristic')) {
+                    $modelName = $step['model'] ?? $modelName;
+                }
+                $final = trim((string) ($step['final_response'] ?? ''));
+                $name = trim((string) ($step['action'] ?? ''));
+                $args = is_array($step['arguments'] ?? null) ? $step['arguments'] : [];
+
+                if ($name === '') {
+                    $assistantText = $final;
+                    break;
+                }
+                $alreadyRan = collect($results)->contains(function (array $result) use ($name, $args): bool {
+                    return ($result['action'] ?? null) === $name
+                        && json_encode(is_array($result['arguments'] ?? null) ? $result['arguments'] : []) === json_encode($args);
+                });
+                if ($alreadyRan) {
+                    break;
+                }
+
                 $result = $this->executor->execute($session, $run, $name, $args);
                 $results[] = ['action' => $name, 'arguments' => $args, ...$result];
+                if (($result['requires_confirmation'] ?? false) === true) {
+                    break;
+                }
             }
 
-            $assistantText = $this->finalResponse($session, $content, (string) ($proposal['response'] ?? ''), $results);
+            if ($assistantText === '') {
+                $assistantText = $this->finalResponse($session, $content, '', $results);
+            }
             $this->rememberResults($session, $results);
             BeanMessage::create([
                 'bean_session_id' => $session->id,
@@ -142,7 +164,7 @@ class BeanRuntimeService
             $runMetadata = is_array($run->metadata) ? $run->metadata : [];
             $run->update([
                 'status' => collect($results)->contains(fn ($result): bool => ($result['requires_confirmation'] ?? false) === true) ? 'waiting_confirmation' : 'completed',
-                'model' => $proposal['model'] ?? null,
+                'model' => $modelName,
                 'output' => $assistantText,
                 'metadata' => [...$runMetadata, 'results' => $results],
                 'completed_at' => now(),
@@ -223,10 +245,6 @@ class BeanRuntimeService
         if ($externalLookupResponse !== null) return $externalLookupResponse;
         $listResponse = $this->listResponse($results);
         if ($listResponse !== null) return $listResponse;
-        if ($this->shouldSynthesize($results)) {
-            $synthesized = $this->model->synthesizeAnswer($session, $userMessage, $proposed, $results);
-            if ($synthesized !== null) return $synthesized;
-        }
         $resourceQueryResponse = $this->resourceQueryResponse($results);
         if ($resourceQueryResponse !== null) return $resourceQueryResponse;
         $contextResponse = $this->contextResponse($results);
@@ -295,14 +313,6 @@ class BeanRuntimeService
             return "I created a source-grounded note: {$title}.";
         }
         return null;
-    }
-
-    private function shouldSynthesize(array $results): bool
-    {
-        if (collect($results)->contains(fn ($result): bool => (bool) data_get($result, 'arguments.skip_synthesis'))) return false;
-
-        return collect($results)->contains(fn ($result): bool => ($result['ok'] ?? false) === true
-            && in_array($result['action'] ?? '', ['resource.query', 'resource.relationships', 'task.list', 'task.search', 'task.context', 'reminder.list', 'calendar_event.list', 'note.list'], true));
     }
 
     private function resourceQueryResponse(array $results): ?string

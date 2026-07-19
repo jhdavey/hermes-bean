@@ -41,15 +41,15 @@ class BeanTextModel
         'dashboard.summary',
     ];
 
-    public function propose(BeanSession $session, string $message): array
+    public function nextStep(BeanSession $session, string $message, array $toolResults = []): array
     {
         if ($this->isVoiceHealthCheck($message)) {
-            return ['response' => 'Yes — I can hear you.', 'actions' => [], 'model' => 'local-heuristic'];
+            return ['final_response' => 'Yes — I can hear you.', 'action' => null, 'arguments' => [], 'model' => 'local-heuristic'];
         }
 
         $apiKey = (string) config('services.openai.api_key');
         if ($apiKey === '') {
-            return $this->heuristic($message, null, $session);
+            return $this->heuristicStep($message, $session, $toolResults);
         }
 
         try {
@@ -58,114 +58,47 @@ class BeanTextModel
                 ->timeout(20)
                 ->post('https://api.openai.com/v1/chat/completions', [
                     'model' => $model,
-                    'response_format' => $this->responseFormat(),
+                    'response_format' => $this->stepResponseFormat(),
                     'messages' => [
-                        ['role' => 'system', 'content' => $this->systemPrompt()],
-                        ['role' => 'system', 'content' => 'Recent Bean session context: '.json_encode($this->plannerContext($session), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)],
-                        ['role' => 'user', 'content' => $message],
-                    ],
-                ]);
-
-            if (! $response->ok()) {
-                return $this->heuristic($message, 'I had trouble reaching my AI model, so I used a basic local parser.', $session);
-            }
-
-            $content = (string) data_get($response->json(), 'choices.0.message.content', '');
-            $decoded = json_decode($content, true);
-            if (! is_array($decoded)) {
-                return $this->heuristic($message, null, $session);
-            }
-
-            $actions = $this->dropIrrelevantTimeActions($this->cleanActions($decoded['actions'] ?? []), $message);
-            $actions = $this->enforceGroundedCreationActions($actions, $message);
-            if ($this->isReadOnlyAnswerCorrection($message, mb_strtolower($message), $session) && $this->containsMutationAction($actions)) {
-                $actions = [$this->readOnlyCorrectionAction($message, mb_strtolower($message), $session)];
-            }
-            $followUp = $this->temporalFollowUpAction($message, mb_strtolower($message), $session);
-            if ($actions === [] && $followUp !== null) {
-                $actions[] = $followUp;
-            }
-            if ($actions === [] && ($this->isFactualResourceQuestion(mb_strtolower($message)) || $this->isTaskWorkspaceQuestion(mb_strtolower($message)))) {
-                $actions[] = ['action' => 'resource.query', 'arguments' => [...$this->resourceQueryArguments($message, mb_strtolower($message), $session), 'skip_synthesis' => true]];
-            }
-
-            return [
-                'response' => $this->cleanResponse($decoded['response'] ?? null),
-                'actions' => $actions,
-                'model' => $model,
-            ];
-        } catch (Throwable) {
-            return $this->heuristic($message, 'I had trouble reaching my AI model, so I used a basic local parser.', $session);
-        }
-    }
-
-    public function synthesizeAnswer(BeanSession $session, string $userMessage, string $proposed, array $results): ?string
-    {
-        $apiKey = (string) config('services.openai.api_key');
-        if ($apiKey === '' || $results === []) {
-            return null;
-        }
-
-        try {
-            $model = (string) config('services.openai.bean_text_model', 'gpt-4.1-mini');
-            $response = Http::withToken($apiKey)
-                ->timeout(20)
-                ->post('https://api.openai.com/v1/chat/completions', [
-                    'model' => $model,
-                    'response_format' => $this->answerResponseFormat(),
-                    'messages' => [
-                        ['role' => 'system', 'content' => $this->answerSystemPrompt()],
+                        ['role' => 'system', 'content' => $this->agentSystemPrompt()],
+                        ['role' => 'system', 'content' => 'Bean runtime context: '.json_encode($this->plannerContext($session), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)],
                         ['role' => 'user', 'content' => json_encode([
-                            'user_message' => $userMessage,
-                            'proposed_response' => $proposed,
-                            'recent_context' => $this->recentContext($session),
-                            'tool_results' => $results,
+                            'user_request' => $message,
+                            'tool_results' => $toolResults,
                         ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)],
                     ],
                 ]);
 
             if (! $response->ok()) {
-                return null;
+                return $this->heuristicStep($message, $session, $toolResults, 'I had trouble reaching my AI model, so I used the local tool router.');
             }
+
             $decoded = json_decode((string) data_get($response->json(), 'choices.0.message.content', ''), true);
-            $answer = trim((string) ($decoded['answer'] ?? ''));
+            if (! is_array($decoded)) {
+                return $this->heuristicStep($message, $session, $toolResults);
+            }
 
-            return $answer !== '' ? str($answer)->limit(900, '')->toString() : null;
+            $step = $this->cleanStep($decoded, $model);
+            $lower = mb_strtolower($message);
+            if (($step['action'] ?? null) === null && $toolResults === [] && ($this->isFactualResourceQuestion($lower) || $this->isTaskWorkspaceQuestion($lower))) {
+                $action = ['action' => 'resource.query', 'arguments' => [...$this->resourceQueryArguments($message, $lower, $session), 'skip_synthesis' => true]];
+                return ['final_response' => '', 'action' => $action['action'], 'arguments' => $action['arguments'], 'model' => $model];
+            }
+            if (($step['action'] ?? null) === 'time.now' && ! $this->asksDateTime($lower) && ($this->isFactualResourceQuestion($lower) || $this->mentionsCalendar($lower) || $this->mentionsTask($lower) || $this->mentionsReminder($lower))) {
+                $fallback = $this->heuristicStep($message, $session, []);
+                return ['final_response' => '', 'action' => $fallback['action'], 'arguments' => $fallback['arguments'] ?? [], 'model' => $model];
+            }
+            if (($step['action'] ?? null) !== null
+                && $this->isReadOnlyAnswerCorrection($message, $lower, $session)
+                && $this->containsMutationAction([['action' => $step['action']]])) {
+                $action = $this->readOnlyCorrectionAction($message, $lower, $session);
+                return ['final_response' => '', 'action' => $action['action'], 'arguments' => $action['arguments'], 'model' => $model];
+            }
+
+            return $step;
         } catch (Throwable) {
-            return null;
+            return $this->heuristicStep($message, $session, $toolResults, 'I had trouble reaching my AI model, so I used the local tool router.');
         }
-    }
-
-    private function answerResponseFormat(): array
-    {
-        return [
-            'type' => 'json_schema',
-            'json_schema' => [
-                'name' => 'bean_final_answer',
-                'strict' => true,
-                'schema' => [
-                    'type' => 'object',
-                    'additionalProperties' => false,
-                    'required' => ['answer'],
-                    'properties' => [
-                        'answer' => ['type' => 'string'],
-                    ],
-                ],
-            ],
-        ];
-    }
-
-    private function answerSystemPrompt(): string
-    {
-        return <<<'PROMPT'
-You are Bean, HeyBean's natural productivity assistant. Write the final user-facing answer after Laravel has executed scoped tools/actions.
-Use only the provided tool_results and recent_context as facts. Do not invent private app data.
-If the user asked a factual question, answer it directly with the actual titles, workspace names, dates, counts, or reasons found in tool_results.
-Do not mention internal action names, JSON, tools, or Laravel.
-Do not append generic "Done" to factual answers.
-If a mutation completed, briefly confirm it. If data is missing or ambiguous, say exactly what is missing and ask a concise follow-up.
-Keep the answer conversational and concise. For voice, one or two sentences is best unless listing multiple items.
-PROMPT;
     }
 
     private function plannerContext(BeanSession $session): array
@@ -183,52 +116,28 @@ PROMPT;
         ];
     }
 
-    private function recentContext(BeanSession $session): array
-    {
-        return [
-            'session_metadata' => $session->metadata ?? [],
-            'recent_messages' => $session->messages()
-                ->latest('id')
-                ->limit(8)
-                ->get(['role', 'content'])
-                ->reverse()
-                ->values()
-                ->all(),
-        ];
-    }
-
-    private function responseFormat(): array
+    private function stepResponseFormat(): array
     {
         return [
             'type' => 'json_schema',
             'json_schema' => [
-                'name' => 'bean_action_proposal',
+                'name' => 'bean_agent_step',
                 'strict' => true,
                 'schema' => [
                     'type' => 'object',
                     'additionalProperties' => false,
-                    'required' => ['response', 'actions'],
+                    'required' => ['final_response', 'action', 'arguments'],
                     'properties' => [
-                        'response' => [
+                        'final_response' => [
                             'type' => 'string',
-                            'description' => 'Short user-facing Bean response. Do not claim an action is done unless an action is included for Laravel to execute.',
+                            'description' => 'Final user-facing answer when no more tool/action is needed. Empty string when calling an action.',
                         ],
-                        'actions' => [
-                            'type' => 'array',
-                            'description' => 'Zero or more allowlisted structured actions for Laravel to validate and execute.',
-                            'items' => [
-                                'type' => 'object',
-                                'additionalProperties' => false,
-                                'required' => ['action', 'arguments'],
-                                'properties' => [
-                                    'action' => [
-                                        'type' => 'string',
-                                        'enum' => self::ACTIONS,
-                                    ],
-                                    'arguments' => $this->argumentsSchema(),
-                                ],
-                            ],
+                        'action' => [
+                            'type' => ['string', 'null'],
+                            'enum' => [...self::ACTIONS, null],
+                            'description' => 'One next action to execute, or null when final_response is complete.',
                         ],
+                        'arguments' => $this->argumentsSchema(),
                     ],
                 ],
             ],
@@ -328,18 +237,22 @@ PROMPT;
         ];
     }
 
-    private function systemPrompt(): string
+    private function agentSystemPrompt(): string
     {
         $actions = implode(', ', self::ACTIONS);
 
         return <<<PROMPT
-You are Bean, the HeyBean productivity assistant. Return only JSON matching the provided schema.
-Use actions only from this list: {$actions}.
-Laravel is the source of truth: you propose structured actions; Laravel validates, scopes, confirms, and executes them.
-For destructive actions include the delete action, but Laravel will require confirmation before execution.
-Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. The Recent Bean session context includes current_datetime/current_date/timezone; use those for relative dates like today/tomorrow and for follow-up questions. Use ISO 8601 dates when the user supplied or implied a date/time. Use resource.query for flexible factual questions about app data and resource.relationships for relationship/context questions, including workspace/context/why/relationship questions. Use external.lookup for source-backed public web/internet/current/latest lookup requests, including weather or other current public facts; keep it generic and set query/objective/freshness to the public thing to look up, never to private dashboard data. Use no action for normal evergreen knowledge, brainstorming, drafting, or creative generation unless the user asks to save or change app data. When the user asks Bean to create/save a substantive public reference note such as instructions, how-to steps, recipes, research, comparisons, or other externally verifiable content, prefer external.lookup first and then note.create with grounded_from/source_action set to external.lookup unless the user explicitly asks to use only Bean's own knowledge. For resource.query/resource.relationships set resource to tasks, reminders, calendar_events, notes, or workspaces; set query/title for lookup text; set include_workspaces=true when workspace context could matter; set explain_visibility=true for why-is-this-shown questions. For list/query reads, express exact data constraints in filters: use field/operator/value triples, e.g. starts_at between [tomorrowStart, tomorrowEnd], due_at <= todayEnd, remind_at < todayStart, or status in [scheduled]. Use time_label only as user-facing answer context such as today, tomorrow, or overdue; do not rely on time_label for filtering. If the user says "what about tomorrow?" or another temporal follow-up, reuse recent_query_context.resource. Do not include time.now unless the user is actually asking for the time/date. If a user asks to find/search public sources and save a note, plan external.lookup followed by note.create with grounded_from/source_action set to external.lookup. If an item needs lookup by title, use query rather than inventing an id. Use strict mutation actions only when changing app state. Do not invent source-backed facts if external.lookup fails.
-Do not invent private dashboard data; call list/search/dashboard actions when data is needed.
-Keep response concise and avoid saying an action is complete before Laravel executes it.
+You are Bean, HeyBean's model-driven productivity agent. Return only JSON matching the provided schema.
+You own the reasoning loop. Laravel is only the thin tool host for dashboard data: it authenticates, scopes workspaces, validates schemas, normalizes dates with TimeContext, asks confirmations, and executes CRUD.
+Use exactly one next action from this list when a tool is needed: {$actions}. Set action=null and final_response to answer the user when you are done.
+You will receive prior tool_results. Read them before deciding the next step. Do not pre-fill a later dashboard mutation with placeholder content before you have seen the data needed for it.
+For private dashboard facts, use dashboard/resource/list/search tools; never invent private app data.
+For public/current/source-backed information, use external.lookup. If a lookup result is not useful for the request, search again with a better query rather than saving/answering from irrelevant results.
+For dashboard mutations, call the relevant CRUD action with complete structured fields. For notes, put the actual user-requested content in plain_text/body; do not create empty or placeholder notes.
+When the user asks to find/source/save public information, first use external.lookup, then after seeing the lookup result call note.create only if you can put useful content into the note.
+For normal evergreen knowledge, brainstorming, drafting, or creative answers, use action=null and answer directly unless the user asks to save/change dashboard data.
+For dates like today/tomorrow/Tuesday, use the provided time_context/current_date/timezone. Express exact read constraints with filters; TimeContext and Laravel will normalize storage ranges.
+Do not mention internal action names, JSON, tools, or Laravel to the user.
 PROMPT;
     }
 
@@ -350,72 +263,168 @@ PROMPT;
         return $text !== '' ? str($text)->limit(500, '')->toString() : 'I can help with that.';
     }
 
-    private function cleanActions(mixed $actions): array
+    private function cleanStep(array $decoded, string $model): array
     {
-        if (! is_array($actions)) {
-            return [];
+        $action = $decoded['action'] ?? null;
+        $action = is_string($action) && in_array($action, self::ACTIONS, true) ? $action : null;
+        $arguments = $this->withoutNulls(is_array($decoded['arguments'] ?? null) ? $decoded['arguments'] : []);
+        $final = trim((string) ($decoded['final_response'] ?? ''));
+
+        if ($action !== null) {
+            return ['final_response' => '', 'action' => $action, 'arguments' => $arguments, 'model' => $model];
         }
 
-        return collect($actions)
-            ->filter(fn ($action) => is_array($action) && in_array($action['action'] ?? null, self::ACTIONS, true))
-            ->map(fn (array $action) => [
-                'action' => $action['action'],
-                'arguments' => $this->withoutNulls(is_array($action['arguments'] ?? null) ? $action['arguments'] : []),
-            ])
-            ->values()
-            ->all();
+        return ['final_response' => $final, 'action' => null, 'arguments' => [], 'model' => $model];
     }
 
-    private function enforceGroundedCreationActions(array $actions, string $message): array
+    private function heuristicStep(string $message, BeanSession $session, array $toolResults = [], ?string $prefix = null): array
+    {
+        if ($toolResults !== []) {
+            $next = $this->heuristicFollowUpStep($message, $session, $toolResults);
+            if ($next !== null) return $next;
+
+            return ['final_response' => $this->localFinalResponse($message, $toolResults, $prefix), 'action' => null, 'arguments' => [], 'model' => 'local-heuristic'];
+        }
+
+        $proposal = $this->heuristic($message, $prefix, $session);
+        $actions = is_array($proposal['actions'] ?? null) ? $proposal['actions'] : [];
+        $first = collect($actions)->first(fn ($action): bool => is_array($action) && in_array($action['action'] ?? null, self::ACTIONS, true));
+        if (is_array($first)) {
+            return [
+                'final_response' => '',
+                'action' => (string) $first['action'],
+                'arguments' => $this->withoutNulls(is_array($first['arguments'] ?? null) ? $first['arguments'] : []),
+                'model' => 'local-heuristic',
+            ];
+        }
+
+        return ['final_response' => $this->cleanResponse($proposal['response'] ?? null), 'action' => null, 'arguments' => [], 'model' => 'local-heuristic'];
+    }
+
+    private function heuristicFollowUpStep(string $message, BeanSession $session, array $toolResults): ?array
     {
         $lower = mb_strtolower($message);
-        if (! $this->isSubstantivePublicNoteCreationRequest($lower)) return $actions;
-        if ($this->explicitlyRequestsModelKnowledgeOnly($lower)) return $actions;
-        if (collect($actions)->contains(fn (array $action): bool => ($action['action'] ?? null) === 'external.lookup')) return $actions;
-
-        $noteCreate = collect($actions)->first(fn (array $action): bool => ($action['action'] ?? null) === 'note.create');
-        $remaining = collect($actions)->reject(fn (array $action): bool => ($action['action'] ?? null) === 'note.create')->values()->all();
-
-        return [
-            [
-                'action' => 'external.lookup',
-                'arguments' => [
-                    'query' => $this->externalLookupQuery($message),
-                    'objective' => 'find source-backed public reference content for a saved note',
-                    'freshness' => $this->externalLookupFreshness($lower),
-                    'include_sources' => true,
-                    'limit' => 5,
-                ],
-            ],
-            ...$remaining,
-            [
+        $hasLookup = collect($toolResults)->contains(fn (array $result): bool => ($result['action'] ?? null) === 'external.lookup' && ($result['ok'] ?? false) === true);
+        $hasNoteCreate = collect($toolResults)->contains(fn (array $result): bool => ($result['action'] ?? null) === 'note.create');
+        if ($hasLookup && ! $hasNoteCreate && $this->isGroundedNoteCreationRequest($lower)) {
+            $lookup = collect($toolResults)->last(fn (array $result): bool => ($result['action'] ?? null) === 'external.lookup' && ($result['ok'] ?? false) === true);
+            $text = $this->genericLookupNoteText(is_array($lookup) ? $lookup : []);
+            return [
+                'final_response' => '',
                 'action' => 'note.create',
                 'arguments' => [
-                    ...($noteCreate['arguments'] ?? []),
-                    'title' => '',
-                    'plain_text' => '',
+                    'title' => $this->genericLookupNoteTitle(is_array($lookup) ? $lookup : [], $message),
+                    'plain_text' => $text,
                     'grounded_from' => 'external.lookup',
                     'source_action' => 'external.lookup',
                 ],
-            ],
-        ];
+                'model' => 'local-heuristic',
+            ];
+        }
+
+        $proposal = $this->heuristic($message, null, $session);
+        $planned = is_array($proposal['actions'] ?? null) ? array_values(array_filter($proposal['actions'], 'is_array')) : [];
+        if (count($planned) <= 1) return null;
+        foreach ($planned as $action) {
+            if (! is_array($action) || ! in_array($action['action'] ?? null, self::ACTIONS, true)) continue;
+            $arguments = $this->withoutNulls(is_array($action['arguments'] ?? null) ? $action['arguments'] : []);
+            $alreadyRan = collect($toolResults)->contains(function (array $result) use ($action, $arguments): bool {
+                return ($result['action'] ?? null) === ($action['action'] ?? null)
+                    && json_encode($this->withoutNulls(is_array($result['arguments'] ?? null) ? $result['arguments'] : [])) === json_encode($arguments);
+            });
+            if (! $alreadyRan) {
+                return ['final_response' => '', 'action' => (string) $action['action'], 'arguments' => $arguments, 'model' => 'local-heuristic'];
+            }
+        }
+
+        return null;
     }
 
-    private function dropIrrelevantTimeActions(array $actions, string $message): array
+    private function localFinalResponse(string $message, array $toolResults, ?string $prefix = null): string
     {
-        if ($this->asksDateTime(mb_strtolower($message))) return $actions;
-        $hasAppDataAction = collect($actions)->contains(fn (array $action): bool => ($action['action'] ?? '') !== 'time.now');
-        if (! $hasAppDataAction) return $actions;
+        $last = collect($toolResults)->last();
+        $lastOk = collect($toolResults)->last(fn (array $result): bool => ($result['ok'] ?? false) === true);
+        if (! is_array($lastOk)) {
+            if (is_array($last) && ($last['ambiguous'] ?? false) === true && is_array($last['items'] ?? null)) {
+                $noun = match ((string) ($last['action'] ?? '')) {
+                    'task.complete', 'task.update', 'task.delete' => 'task',
+                    'reminder.complete', 'reminder.update', 'reminder.delete' => 'reminder',
+                    default => 'item',
+                };
+                $titles = collect($last['items'])->filter(fn ($item): bool => is_array($item))->take(5)->map(fn (array $item): string => trim((string) ($item['title'] ?? 'Untitled')) ?: 'Untitled')->all();
+                return 'I found multiple matching '.$noun.'s: '.$this->naturalList($titles).'. Which one should I use?';
+            }
+            if (is_array($last) && trim((string) ($last['error'] ?? '')) !== '') return (string) $last['error'];
+            return $prefix ?: 'I could not complete that.';
+        }
+        $last = $lastOk;
+        if (($last['action'] ?? null) === 'external.lookup') {
+            $summary = trim((string) ($last['summary'] ?? ''));
+            $sources = collect($last['sources'] ?? [])->filter(fn ($source): bool => is_array($source))->values();
+            $source = trim((string) ($last['source_url'] ?? ($sources->first()['url'] ?? '')));
+            $prefix = $sources->count() > 1 ? 'I found '.$sources->count().' sources' : 'I found this online';
+            if ($summary !== '' && $source !== '') return $prefix.': '.$summary.' Source: '.$source;
+            if ($summary !== '') return $prefix.': '.$summary;
+            return 'I found source-backed information for that.';
+        }
+        if (($last['action'] ?? null) === 'note.create' && is_array($last['item'] ?? null)) {
+            $title = trim((string) data_get($last, 'item.title', 'that note')) ?: 'that note';
+            return (($last['grounded_from'] ?? null) === 'external.lookup') ? "I created a source-grounded note: {$title}." : "I created the note: {$title}.";
+        }
 
-        return collect($actions)
-            ->reject(fn (array $action): bool => ($action['action'] ?? '') === 'time.now')
-            ->values()
-            ->all();
+        return '';
+    }
+
+    private function naturalList(array $items): string
+    {
+        $items = array_values(array_filter(array_map(fn ($item): string => trim((string) $item), $items), fn ($item): bool => $item !== ''));
+        if (count($items) <= 1) return $items[0] ?? '';
+        if (count($items) === 2) return $items[0].' and '.$items[1];
+        $last = array_pop($items);
+        return implode(', ', $items).', and '.$last;
+    }
+
+    private function genericLookupNoteTitle(array $lookup, string $message): string
+    {
+        $title = trim((string) ($lookup['title'] ?? $lookup['query'] ?? ''));
+        $title = preg_replace('/^search results for\s+/i', '', $title) ?: $title;
+        return $title !== '' ? str($title)->title()->limit(80, '')->toString() : str($message)->limit(80, '')->toString();
+    }
+
+    private function genericLookupNoteText(array $lookup): string
+    {
+        $lines = [];
+        $summary = trim((string) ($lookup['summary'] ?? ''));
+        if ($summary !== '') {
+            $lines[] = 'Summary:';
+            $lines[] = $summary;
+        }
+        $claims = collect($lookup['claims'] ?? [])->filter(fn ($claim): bool => is_array($claim))->values();
+        if ($claims->isNotEmpty()) {
+            $lines[] = '';
+            $lines[] = 'Key points:';
+            foreach ($claims->take(8) as $claim) {
+                $text = trim((string) ($claim['text'] ?? ''));
+                if ($text !== '') $lines[] = '- '.$text;
+            }
+        }
+        $sources = collect($lookup['sources'] ?? [])->filter(fn ($source): bool => is_array($source))->values();
+        if ($sources->isNotEmpty()) {
+            $lines[] = '';
+            $lines[] = 'Sources:';
+            foreach ($sources->take(5) as $source) {
+                $title = trim((string) ($source['title'] ?? 'Source')) ?: 'Source';
+                $url = trim((string) ($source['url'] ?? ''));
+                $lines[] = '- '.$title.($url !== '' ? ': '.$url : '');
+            }
+        }
+
+        return trim(implode("\n", $lines));
     }
 
     private function asksDateTime(string $lower): bool
     {
-        return preg_match('/\b(time|current time|what time|date|today[’\']?s date|what day)\b/u', $lower) === 1;
+        return preg_match('/\b(time|current time|what time|date|today[’\']?s date|what day|time is it)\b/u', $lower) === 1;
     }
 
     private function withoutNulls(array $values): array
@@ -448,18 +457,15 @@ PROMPT;
                 'freshness' => $this->externalLookupFreshness($lower),
                 'include_sources' => true,
             ]];
-            if ($this->isGroundedNoteCreationRequest($lower)) {
-                $actions[] = ['action' => 'note.create', 'arguments' => [
-                    'title' => '',
-                    'plain_text' => '',
-                    'grounded_from' => 'external.lookup',
-                    'source_action' => 'external.lookup',
-                ]];
-            }
-            $response = $this->isGroundedNoteCreationRequest($lower) ? 'I’ll look that up and save a grounded note.' : 'I’ll look that up.';
+            $response = $this->isGroundedNoteCreationRequest($lower) ? 'I’ll look that up first.' : 'I’ll look that up.';
         } elseif ($this->isSubstantivePublicNoteCreationRequest($lower) && ! $this->explicitlyRequestsModelKnowledgeOnly($lower)) {
-            $actions = $this->enforceGroundedCreationActions([], $text);
-            $response = 'I’ll look that up and save a grounded note.';
+            $actions[] = ['action' => 'external.lookup', 'arguments' => [
+                'query' => $this->externalLookupQuery($text),
+                'objective' => $this->externalLookupObjective($text),
+                'freshness' => $this->externalLookupFreshness($lower),
+                'include_sources' => true,
+            ]];
+            $response = 'I’ll look that up first.';
         } elseif ($this->mentionsOverdue($lower) && ! $this->mentionsNote($lower) && ! $this->mentionsCalendar($lower)) {
             if ($this->mentionsReminder($lower) && ! $this->mentionsTask($lower)) {
                 $actions[] = ['action' => 'reminder.list', 'arguments' => $this->listArguments($lower, 'reminders', null, $session)];

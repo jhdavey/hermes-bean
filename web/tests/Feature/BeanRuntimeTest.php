@@ -57,9 +57,9 @@ class BeanRuntimeTest extends TestCase
             $this->assertSame('gpt-4.1-mini', $payload['model'] ?? null);
             $this->assertSame('json_schema', data_get($payload, 'response_format.type'));
             $this->assertTrue((bool) data_get($payload, 'response_format.json_schema.strict'));
-            $this->assertSame('bean_action_proposal', data_get($payload, 'response_format.json_schema.name'));
-            $actionsEnum = data_get($payload, 'response_format.json_schema.schema.properties.actions.items.properties.action.enum');
-            $argumentsSchema = data_get($payload, 'response_format.json_schema.schema.properties.actions.items.properties.arguments');
+            $this->assertSame('bean_agent_step', data_get($payload, 'response_format.json_schema.name'));
+            $actionsEnum = data_get($payload, 'response_format.json_schema.schema.properties.action.enum');
+            $argumentsSchema = data_get($payload, 'response_format.json_schema.schema.properties.arguments');
             $this->assertContains('resource.query', $actionsEnum);
             $this->assertContains('resource.relationships', $actionsEnum);
             $this->assertContains('task.create', $actionsEnum);
@@ -78,11 +78,9 @@ class BeanRuntimeTest extends TestCase
                 'choices' => [[
                     'message' => [
                         'content' => json_encode([
-                            'response' => 'I’ll add that task.',
-                            'actions' => [[
-                                'action' => 'task.create',
-                                'arguments' => ['title' => 'from structured model', 'type' => 'todo'],
-                            ]],
+                            'final_response' => '',
+                            'action' => 'task.create',
+                            'arguments' => ['title' => 'from structured model', 'type' => 'todo'],
                         ]),
                     ],
                 ]],
@@ -95,7 +93,7 @@ class BeanRuntimeTest extends TestCase
             ->assertJsonPath('data.run.model', 'gpt-4.1-mini');
 
         $this->assertDatabaseHas('tasks', ['title' => 'from structured model']);
-        Http::assertSentCount(1);
+        Http::assertSentCount(2);
     }
 
     public function test_openai_planner_no_longer_uses_fragment_guard(): void
@@ -110,8 +108,9 @@ class BeanRuntimeTest extends TestCase
             'choices' => [[
                 'message' => [
                     'content' => json_encode([
-                        'response' => 'I heard you.',
-                        'actions' => [],
+                        'final_response' => 'I heard you.',
+                        'action' => null,
+                        'arguments' => [],
                     ]),
                 ],
             ]],
@@ -246,11 +245,9 @@ class BeanRuntimeTest extends TestCase
             'choices' => [[
                 'message' => [
                     'content' => json_encode([
-                        'response' => 'I’ll check your notes.',
-                        'actions' => [[
-                            'action' => 'note.list',
-                            'arguments' => ['limit' => 1, 'include_workspaces' => true],
-                        ]],
+                        'final_response' => '',
+                        'action' => 'note.list',
+                        'arguments' => ['limit' => 1, 'include_workspaces' => true],
                     ]),
                 ],
             ]],
@@ -397,11 +394,9 @@ class BeanRuntimeTest extends TestCase
                 'choices' => [[
                     'message' => [
                         'content' => json_encode([
-                            'response' => 'I’ll check that.',
-                            'actions' => [[
-                                'action' => 'resource.query',
-                                'arguments' => ['resource' => 'tasks', 'query' => 'Pay the travel card', 'include_workspaces' => true],
-                            ]],
+                            'final_response' => '',
+                            'action' => 'resource.query',
+                            'arguments' => ['resource' => 'tasks', 'query' => 'Pay the travel card', 'include_workspaces' => true],
                         ]),
                     ],
                 ]],
@@ -410,7 +405,9 @@ class BeanRuntimeTest extends TestCase
                 'choices' => [[
                     'message' => [
                         'content' => json_encode([
-                            'answer' => 'Pay the travel card is in your personal workspace.',
+                            'final_response' => 'Pay the travel card is in your personal workspace.',
+                            'action' => null,
+                            'arguments' => [],
                         ]),
                     ],
                 ]],
@@ -522,8 +519,9 @@ class BeanRuntimeTest extends TestCase
             'choices' => [[
                 'message' => [
                     'content' => json_encode([
-                        'response' => 'Pay the travel card is in your personal workspace.',
-                        'actions' => [],
+                        'final_response' => 'Pay the travel card is in your personal workspace.',
+                        'action' => null,
+                        'arguments' => [],
                     ]),
                 ],
             ]],
@@ -554,8 +552,9 @@ class BeanRuntimeTest extends TestCase
             'choices' => [[
                 'message' => [
                     'content' => json_encode([
-                        'response' => 'Here’s a simple evergreen answer from model knowledge.',
-                        'actions' => [],
+                        'final_response' => 'Here’s a simple evergreen answer from model knowledge.',
+                        'action' => null,
+                        'arguments' => [],
                     ]),
                 ],
             ]],
@@ -666,14 +665,13 @@ class BeanRuntimeTest extends TestCase
             'content' => 'Create a note with a recipe for smoked trout dip.',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
-            ->assertJsonFragment(['content' => 'I created a source-grounded note: Smoked Trout Dip.']);
+            ->assertJsonFragment(['content' => 'I created a source-grounded note: Smoked Trout Dip - Real Source.']);
 
-        $note = Note::where('user_id', $user->id)->where('title', 'Smoked Trout Dip')->firstOrFail();
-        $this->assertStringContainsString('Source: https://example.test/smoked-trout-dip', $note->plain_text);
-        $this->assertStringContainsString('Servings/Yield: 6', $note->plain_text);
-        $this->assertStringContainsString('- 8 oz smoked trout fillets', $note->plain_text);
-        $this->assertStringContainsString('- 8 oz cream cheese', $note->plain_text);
-        $this->assertStringContainsString('1. Bring the cream cheese to room temperature.', $note->plain_text);
+        $note = Note::where('user_id', $user->id)->where('title', 'Smoked Trout Dip - Real Source')->firstOrFail();
+        $this->assertStringContainsString('Summary:', $note->plain_text);
+        $this->assertStringContainsString('Smoked Trout Dip', $note->plain_text);
+        $this->assertStringContainsString('Sources:', $note->plain_text);
+        $this->assertStringContainsString('https://example.test/smoked-trout-dip', $note->plain_text);
         $this->assertSame('external.lookup', data_get($note->metadata, 'grounded_from'));
         $this->assertDatabaseHas('bean_tool_calls', ['action' => 'external.lookup', 'status' => 'completed']);
         $this->assertDatabaseHas('bean_tool_calls', ['action' => 'note.create', 'status' => 'completed']);
@@ -705,51 +703,43 @@ class BeanRuntimeTest extends TestCase
             ->assertJsonPath('data.progress_history.0.status_text', 'Working: external.lookup');
     }
 
-    public function test_openai_direct_recipe_note_create_is_normalized_to_grounded_creation(): void
+    public function test_openai_model_can_create_note_content_without_backend_artifact_rewrite(): void
     {
         config([
             'services.openai.api_key' => 'test-openai-key',
             'services.openai.bean_text_model' => 'gpt-4.1-mini',
         ]);
-        $token = $this->apiToken('bean-openai-grounded-recipe-note@example.com');
-        $user = User::where('email', 'bean-openai-grounded-recipe-note@example.com')->firstOrFail();
+        $token = $this->apiToken('bean-openai-direct-note@example.com');
+        $user = User::where('email', 'bean-openai-direct-note@example.com')->firstOrFail();
 
         Http::fake([
             'api.openai.com/*' => Http::response([
                 'choices' => [[
                     'message' => [
                         'content' => json_encode([
-                            'response' => 'I’ll create that note.',
-                            'actions' => [[
-                                'action' => 'note.create',
-                                'arguments' => [
-                                    'title' => 'Smoked Trout Dip Recipe',
-                                    'plain_text' => 'Ingredients: smoked trout, cream cheese. Instructions: mix and serve.',
-                                ],
-                            ]],
+                            'final_response' => '',
+                            'action' => 'note.create',
+                            'arguments' => [
+                                'title' => 'Smoked Trout Dip Recipe',
+                                'plain_text' => 'Ingredients: smoked trout, cream cheese. Instructions: mix and serve.',
+                            ],
                         ]),
                     ],
                 ]],
             ], 200),
-            'api.duckduckgo.com/*' => Http::response(['Heading' => '', 'AbstractText' => '', 'RelatedTopics' => []], 200),
-            'search.brave.com/*' => Http::response($this->duckDuckGoLiteHtml('Smoked Trout Dip - Real Source', 'https://example.test/smoked-trout-dip', 'Smoked trout dip with servings, ingredients, and instructions.'), 200),
-            'www.bing.com/*' => Http::response($this->duckDuckGoLiteHtml('Smoked Trout Dip - Real Source', 'https://example.test/smoked-trout-dip', 'Smoked trout dip with servings, ingredients, and instructions.'), 200),
-            'lite.duckduckgo.com/*' => Http::response($this->duckDuckGoLiteHtml('Smoked Trout Dip - Real Source', 'https://example.test/smoked-trout-dip', 'Smoked trout dip with servings, ingredients, and instructions.'), 200),
-            'https://example.test/smoked-trout-dip' => Http::response($this->recipeJsonLdHtml(), 200, ['content-type' => 'text/html']),
         ]);
 
         $this->withToken($token)->postJson('/api/bean/messages', [
-            'content' => 'Create a note with a recipe for smoked trout dip.',
+            'content' => 'Create a note with a recipe for smoked trout dip from your own knowledge.',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed');
 
-        $note = Note::where('user_id', $user->id)->where('title', 'Smoked Trout Dip')->firstOrFail();
-        $this->assertStringContainsString('Servings/Yield: 6', $note->plain_text);
-        $this->assertStringContainsString('- 8 oz smoked trout fillets', $note->plain_text);
-        $this->assertSame('external.lookup', data_get($note->metadata, 'grounded_from'));
+        $note = Note::where('user_id', $user->id)->where('title', 'Smoked Trout Dip Recipe')->firstOrFail();
+        $this->assertStringContainsString('Ingredients: smoked trout, cream cheese.', $note->plain_text);
+        $this->assertNull(data_get($note->metadata, 'grounded_from'));
 
         $actions = BeanToolCall::query()->whereHas('run', fn ($query) => $query->where('user_id', $user->id))->pluck('action')->all();
-        $this->assertSame(['external.lookup', 'note.create'], $actions);
+        $this->assertSame(['note.create'], $actions);
     }
 
     private function duckDuckGoLiteHtml(string $title, string $url, string $snippet): string
@@ -893,19 +883,17 @@ HTML;
             'choices' => [[
                 'message' => [
                     'content' => json_encode([
-                        'response' => 'I’ll check today’s tasks.',
-                        'actions' => [[
-                            'action' => 'task.list',
-                            'arguments' => [
-                                'filters' => [[
-                                    'field' => 'due_at',
-                                    'operator' => '<=',
-                                    'value' => now()->endOfDay()->toIso8601String(),
-                                ]],
-                                'time_label' => 'today',
-                                'workspace_scope' => 'accessible',
-                            ],
-                        ]],
+                        'final_response' => '',
+                        'action' => 'task.list',
+                        'arguments' => [
+                            'filters' => [[
+                                'field' => 'due_at',
+                                'operator' => '<=',
+                                'value' => now()->endOfDay()->toIso8601String(),
+                            ]],
+                            'time_label' => 'today',
+                            'workspace_scope' => 'accessible',
+                        ],
                     ]),
                 ],
             ]],
@@ -945,19 +933,17 @@ HTML;
             'choices' => [[
                 'message' => [
                     'content' => json_encode([
-                        'response' => 'I’ll check Tuesday’s tasks.',
-                        'actions' => [[
-                            'action' => 'task.list',
-                            'arguments' => [
-                                'filters' => [[
-                                    'field' => 'due_at',
-                                    'operator' => '=',
-                                    'value' => '2026-07-21',
-                                ]],
-                                'workspace_scope' => 'accessible',
-                                'include_workspaces' => true,
-                            ],
-                        ]],
+                        'final_response' => '',
+                        'action' => 'task.list',
+                        'arguments' => [
+                            'filters' => [[
+                                'field' => 'due_at',
+                                'operator' => '=',
+                                'value' => '2026-07-21',
+                            ]],
+                            'workspace_scope' => 'accessible',
+                            'include_workspaces' => true,
+                        ],
                     ]),
                 ],
             ]],
@@ -1011,19 +997,17 @@ HTML;
             'choices' => [[
                 'message' => [
                     'content' => json_encode([
-                        'response' => 'I’ll check Tuesday’s tasks.',
-                        'actions' => [[
-                            'action' => 'task.list',
-                            'arguments' => [
-                                'filters' => [[
-                                    'field' => 'due_at',
-                                    'operator' => '=',
-                                    'value' => '2026-07-21',
-                                ]],
-                                'workspace_scope' => 'accessible',
-                                'include_workspaces' => true,
-                            ],
-                        ]],
+                        'final_response' => '',
+                        'action' => 'task.list',
+                        'arguments' => [
+                            'filters' => [[
+                                'field' => 'due_at',
+                                'operator' => '=',
+                                'value' => '2026-07-21',
+                            ]],
+                            'workspace_scope' => 'accessible',
+                            'include_workspaces' => true,
+                        ],
                     ]),
                 ],
             ]],
@@ -1074,18 +1058,16 @@ HTML;
                 'choices' => [[
                     'message' => [
                         'content' => json_encode([
-                            'response' => 'I’ll check Tuesday’s tasks.',
-                            'actions' => [[
-                                'action' => 'task.list',
-                                'arguments' => [
-                                    'filters' => [[
-                                        'field' => 'due_at',
-                                        'operator' => '=',
-                                        'value' => '2026-07-21',
-                                    ]],
-                                    'workspace_scope' => 'accessible',
-                                ],
-                            ]],
+                            'final_response' => '',
+                            'action' => 'task.list',
+                            'arguments' => [
+                                'filters' => [[
+                                    'field' => 'due_at',
+                                    'operator' => '=',
+                                    'value' => '2026-07-21',
+                                ]],
+                                'workspace_scope' => 'accessible',
+                            ],
                         ]),
                     ],
                 ]],
@@ -1094,11 +1076,20 @@ HTML;
                 'choices' => [[
                     'message' => [
                         'content' => json_encode([
-                            'response' => 'I’ll create a reminder for that.',
-                            'actions' => [[
-                                'action' => 'reminder.create',
-                                'arguments' => ['title' => 'Take out the trash'],
-                            ]],
+                            'final_response' => 'You have 1 open task Tuesday: Take out trash.',
+                            'action' => null,
+                            'arguments' => [],
+                        ]),
+                    ],
+                ]],
+            ], 200)
+            ->push([
+                'choices' => [[
+                    'message' => [
+                        'content' => json_encode([
+                            'final_response' => '',
+                            'action' => 'reminder.create',
+                            'arguments' => ['title' => 'Take out the trash'],
                         ]),
                     ],
                 ]],
@@ -1227,20 +1218,18 @@ HTML;
             'choices' => [[
                 'message' => [
                     'content' => json_encode([
-                        'response' => 'I’ll check tomorrow’s calendar.',
-                        'actions' => [[
-                            'action' => 'calendar_event.list',
-                            'arguments' => [
-                                'filters' => [[
-                                    'field' => 'starts_at',
-                                    'operator' => 'between',
-                                    'value' => [now()->addDay()->startOfDay()->toIso8601String(), now()->addDay()->endOfDay()->toIso8601String()],
-                                ]],
-                                'time_label' => 'tomorrow',
-                                'workspace_scope' => 'accessible',
-                                'sort' => [['field' => 'starts_at', 'direction' => 'asc']],
-                            ],
-                        ]],
+                        'final_response' => '',
+                        'action' => 'calendar_event.list',
+                        'arguments' => [
+                            'filters' => [[
+                                'field' => 'starts_at',
+                                'operator' => 'between',
+                                'value' => [now()->addDay()->startOfDay()->toIso8601String(), now()->addDay()->endOfDay()->toIso8601String()],
+                            ]],
+                            'time_label' => 'tomorrow',
+                            'workspace_scope' => 'accessible',
+                            'sort' => [['field' => 'starts_at', 'direction' => 'asc']],
+                        ],
                     ]),
                 ],
             ]],
@@ -1289,15 +1278,13 @@ HTML;
             'choices' => [[
                 'message' => [
                     'content' => json_encode([
-                        'response' => 'I’ll check tomorrow’s calendar.',
-                        'actions' => [[
-                            'action' => 'calendar_event.list',
-                            'arguments' => [
-                                'starts_at' => '2026-07-19T00:00:00+00:00',
-                                'ends_at' => '2026-07-19T23:59:59+00:00',
-                                'workspace_id' => $user->default_workspace_id,
-                            ],
-                        ]],
+                        'final_response' => '',
+                        'action' => 'calendar_event.list',
+                        'arguments' => [
+                            'starts_at' => '2026-07-19T00:00:00+00:00',
+                            'ends_at' => '2026-07-19T23:59:59+00:00',
+                            'workspace_id' => $user->default_workspace_id,
+                        ],
                     ]),
                 ],
             ]],
@@ -1386,23 +1373,9 @@ HTML;
             'choices' => [[
                 'message' => [
                     'content' => json_encode([
-                        'response' => 'I’ll check tomorrow’s events.',
-                        'actions' => [[
-                            'action' => 'time.now',
-                            'arguments' => [],
-                        ], [
-                            'action' => 'calendar_event.list',
-                            'arguments' => [
-                                'filters' => [[
-                                    'field' => 'starts_at',
-                                    'operator' => 'between',
-                                    'value' => ['2024-06-18T00:00:00Z', '2024-06-18T23:59:59Z'],
-                                ]],
-                                'time_label' => 'tomorrow',
-                                'workspace_scope' => 'accessible',
-                                'sort' => [['field' => 'starts_at', 'direction' => 'asc']],
-                            ],
-                        ]],
+                        'final_response' => '',
+                        'action' => 'time.now',
+                        'arguments' => [],
                     ]),
                 ],
             ]],
@@ -1585,20 +1558,18 @@ HTML;
             'choices' => [[
                 'message' => [
                     'content' => json_encode([
-                        'response' => 'I’ll check overdue tasks.',
-                        'actions' => [[
-                            'action' => 'task.list',
-                            'arguments' => [
-                                'status' => 'incomplete',
-                                'filters' => [[
-                                    'field' => 'due_at',
-                                    'operator' => '<',
-                                    'value' => '2026-07-18T14:17:24+00:00',
-                                ]],
-                                'workspace_id' => $user->default_workspace_id,
-                                'include_workspaces' => true,
-                            ],
-                        ]],
+                        'final_response' => '',
+                        'action' => 'task.list',
+                        'arguments' => [
+                            'status' => 'incomplete',
+                            'filters' => [[
+                                'field' => 'due_at',
+                                'operator' => '<',
+                                'value' => '2026-07-18T14:17:24+00:00',
+                            ]],
+                            'workspace_id' => $user->default_workspace_id,
+                            'include_workspaces' => true,
+                        ],
                     ]),
                 ],
             ]],
