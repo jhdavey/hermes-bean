@@ -4,7 +4,7 @@
 
 **Goal:** Move Bean from a patched command router to a domain-aware assistant runtime that can answer natural questions, reason over HeyBean data, act safely, and improve through evaluations rather than one-off intent patches.
 
-**Architecture:** Laravel remains the truth/safety boundary. Bean uses an LLM planner for interpretation, Laravel-owned generic read tools for app state retrieval, strict domain services for mutations, a tool-result answer synthesis pass for natural final responses, conversation state for references like “that task,” and an evaluation harness for product-quality scenarios. Reads become broad and composable; writes remain strict and confirmation-aware.
+**Architecture:** Laravel remains the truth/safety boundary. Bean uses the text model as the agent: each turn returns one tool/action or a final answer, Laravel executes dashboard/external tools through generic reads and strict domain services, then returns results to the model for the next step. Reads become broad and composable; writes remain strict, confirmation-aware, and thin.
 
 **Tech Stack:** Laravel services, existing `DomainResourceService`, Eloquent models, OpenAI structured output, OpenAI Realtime/WebRTC, Bean sessions/messages/activity, feature tests, JS voice tests, production smoke scripts.
 
@@ -12,8 +12,8 @@
 
 ## Non-negotiable principles
 
-1. **No per-phrase patch treadmill.** New user questions should usually be solved by better domain context, generic query tools, or answer synthesis — not a bespoke action for every sentence.
-2. **Laravel owns truth and safety.** The model never writes the database directly. It can plan and synthesize, but Laravel scopes, validates, confirms, executes, logs, and emits dashboard changes.
+1. **No per-phrase patch treadmill.** New user questions should usually be solved by better domain context, generic query tools, or clearer model instructions — not a bespoke action for every sentence.
+2. **Laravel owns truth and safety.** The model never writes the database directly. It can choose tools and final answers, but Laravel scopes, validates, confirms, executes, logs, and emits dashboard changes.
 3. **Flexible reads, strict writes.** Read/query/relationship tools can be generic and composable. Mutations stay typed, allowlisted, and domain-service-backed.
 4. **Final answers are grounded in tool results.** Bean should not say “Checking… Done.” It should retrieve data, inspect it, and answer naturally from verified facts.
 5. **Conversation state matters.** Bean tracks recent entities/lists/workspaces so follow-ups like “what workspace is that in?” or “move the second one” resolve without brittle phrase handling.
@@ -24,11 +24,10 @@
 ```text
 User text / voice turn
 → load conversation state + recent entities + workspace context
-→ planner interprets the user goal
-→ policy classifies read vs safe mutation vs confirmation-needed mutation
-→ generic resource tools retrieve relevant app state
-→ Laravel executes safe actions or creates confirmations
-→ model synthesizes the final answer from actual tool results
+→ model returns one next tool/action or a final answer
+→ Laravel executes the tool/action or creates confirmations through thin adapters
+→ tool result is returned to the model
+→ model repeats, confirms, or gives the final answer
 → activity + dashboard events are emitted
 → conversation state records mentioned entities/results
 → evaluation traces are available for debugging and regression tests
@@ -59,25 +58,25 @@ Expose generic read tools such as:
 
 The first implementation should ship `resource.query` with filters for resource type, query/title, status, date scope, workspace, and include options such as workspaces/linked copies.
 
-### 3. Tool-result answer synthesis
+### 3. Model-driven tool loop
 
-After Laravel executes read tools or safe actions, run a final answer synthesis pass that receives:
+Bean's text model is the agent. Instead of proposing every action up front, it returns one `bean_agent_step` at a time:
 
-- original user message;
-- proposed response;
-- executed tool/action results;
-- recent conversation context;
-- policy notes and confirmation state.
+- final answer with `action=null`; or
+- one allowlisted dashboard/external action plus structured arguments.
 
-The answer model must be instructed to:
+Laravel executes that one action, records the result, and feeds the accumulated tool results back to the model for the next step. The model decides whether to search, query dashboard state, mutate dashboard state, answer, or continue. Laravel remains the thin deterministic tool host.
+
+The model must be instructed to:
 
 - answer directly from tool results;
 - mention uncertainty/ambiguity;
 - never claim actions completed when they did not;
 - avoid internal tool/action names;
-- keep voice answers concise unless listing items.
+- keep voice answers concise unless listing items;
+- compose saved notes/artifacts itself from retrieved evidence or model knowledge, then pass valid CRUD fields.
 
-Credential-free tests keep deterministic fallback finalizers, but production should prefer model synthesis when API config is available.
+Credential-free tests keep deterministic fallback formatting, but production should prefer the model-driven loop when API config is available.
 
 ### 4. Conversation state and reference resolution
 
@@ -152,7 +151,7 @@ Every regression becomes an eval scenario so quality compounds instead of relyin
 - Add `resource.query` as a generic read tool.
 - Planner routes flexible app-data questions to `resource.query` instead of one-off actions where possible.
 - Query results include workspace names and linked-workspace context when requested or useful.
-- Runtime can perform a final answer synthesis pass from tool results.
+- Runtime runs a model-driven tool loop from returned results.
 - Deterministic fallback answers generic query results naturally when OpenAI is disabled.
 - Regression: “What workspace is Pay the travel card in?” answers with workspace names without a bespoke formatter path.
 - Regression: “Why is Pay the travel card on today’s list?” explains due-by-today/overdue visibility from structured fields.

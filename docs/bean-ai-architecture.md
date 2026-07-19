@@ -8,7 +8,7 @@ See `docs/bean-intelligent-assistant-runtime-plan.md` for the active implementat
 
 - Laravel owns auth, workspace scoping, permissions, model selection, action execution, external API keys, audit/activity, dashboard change events, and confirmation policy.
 - Text chat and voice use the same Bean runtime, action schema, read/query tools, mutation actions, confirmation policy, and activity log.
-- The model may interpret, plan, request reads, propose mutations, and synthesize final answers, but only Laravel executes mutations.
+- The model interprets, chooses tools, reads returned data, proposes mutations, and writes final answers; Laravel executes mutations and enforces contracts.
 - Mutations go through the same shared domain services used by the normal API. Bean must not grow a separate resource-control layer.
 - Destructive, ambiguous, bulk, external-send, workspace membership, billing/account/settings, and unsafe actions require confirmation before execution.
 - Voice uses local wake detection first. Privacy mode means no microphone stream. Wake-listening mode may keep local browser/native wake detection active, but must not stream audio to OpenAI until `Hey Bean` is detected.
@@ -19,9 +19,9 @@ See `docs/bean-intelligent-assistant-runtime-plan.md` for the active implementat
 2. User sends text, or local wake detection starts a realtime voice turn.
 3. Laravel creates a Bean run and activity events.
 4. Runtime loads session working memory: recent entities, recent lists, current workspace, and unresolved ambiguity.
-5. Planner interprets the request and selects generic read tools and/or strict mutation actions.
-6. Laravel executes read tools or safe actions through scoped services and records structured results.
-7. If needed, the model performs final answer synthesis from actual tool results.
+5. Model returns one next tool/action or a final answer.
+6. Laravel executes that one tool/action through scoped services and records structured results.
+7. Tool results are fed back to the model so it can choose the next action or final answer.
 8. Dashboard changes and Bean activity are emitted over SSE.
 9. Session memory is updated with mentioned resources/lists for follow-up questions.
 10. Client refreshes affected dashboard resources and presents the final text/voice answer.
@@ -40,9 +40,9 @@ Reads should be flexible and composable. Bean should use generic tools such as `
 
 Writes remain allowlisted and domain-service-backed: task/reminder/calendar/note create/update/complete/delete plus future safe capabilities. Laravel validates and confirms; the model never writes directly.
 
-### Answer synthesis
+### Final answers
 
-For factual requests, Bean should retrieve data, inspect results, and answer naturally. It should not return generic `Done` when the user asked for information. The final answer should be grounded in tool output and hide internal tool/action names.
+For factual requests, Bean should retrieve data, inspect results in the model loop, and answer naturally. It should not return generic `Done` when the user asked for information. The final answer should be grounded in tool output and hide internal tool/action names.
 
 ### Conversation state
 
@@ -66,6 +66,6 @@ Implemented foundation:
 
 Next architecture target:
 
-- Promote generic `resource.query` and answer synthesis as the default path for factual app-data questions.
-- Add session working memory for recent entities and follow-up resolution.
+- Continue promoting generic `resource.query` and model-driven tool steps as the default path for factual app-data questions.
+- Expand session working memory for recent entities and follow-up resolution.
 - Grow eval coverage across dashboard/workspace/task/reminder/calendar/note questions and voice turns.

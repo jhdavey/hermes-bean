@@ -26,7 +26,7 @@ The goal is to avoid a per-phrase action patch treadmill: reads are composable; 
 Generic reads must:
 
 - scope to authenticated user accessible workspaces;
-- include enough structured facts for answer synthesis;
+- include enough structured facts for the model's next step or final answer;
 - avoid private data leakage across workspaces;
 - never mutate data;
 - return workspace names/linked workspace context when relevant.
@@ -52,7 +52,7 @@ Longer-term, most factual read/context requests should use generic read tools, w
 
 - Domain-resource mutations must call the same shared domain services used by the normal API; Bean must not keep a separate Eloquent CRUD implementation.
 - Scope all reads/writes to authenticated user accessible workspaces.
-- Return structured success/error/confirmation payloads with factual fields for answer synthesis.
+- Return structured success/error/confirmation payloads with factual fields for the model's next step or final answer.
 - Emit activity entries for tool started/completed/failed/confirmation requested.
 - Emit dashboard changes for mutations through existing model observers or notifier.
 - Never directly run arbitrary model-provided code, URLs, SQL, or shell commands.
