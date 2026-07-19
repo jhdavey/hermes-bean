@@ -33,8 +33,9 @@ file_put_contents('{$logPath}', json_encode([
     'BEAN_TOOL_CONTEXT' => getenv('BEAN_TOOL_CONTEXT'),
     'BEAN_ARTISAN' => getenv('BEAN_ARTISAN'),
     'PATH' => getenv('PATH'),
-], JSON_UNESCAPED_SLASHES));
-echo "Hermes handled this through the user agent.\\n";
+], JSON_UNESCAPED_SLASHES).PHP_EOL, FILE_APPEND);
+echo in_array('--resume', \$argv, true) ? "Hermes resumed this user agent.\\n" : "Hermes started this user agent.\\n";
+echo "Session ID: fake-hermes-session-123\\n";
 PHP);
         chmod($fakeHermes, 0755);
 
@@ -57,7 +58,7 @@ PHP);
 
         $response->assertJsonPath('data.run.status', 'completed')
             ->assertJsonPath('data.run.model', 'hermes:custom/gpt-test')
-            ->assertJsonFragment(['content' => 'Hermes handled this through the user agent.']);
+            ->assertJsonFragment(['content' => 'Hermes started this user agent.']);
 
         $home = $usersPath.'/'.$user->id;
         $this->assertDirectoryExists($home);
@@ -75,19 +76,39 @@ PHP);
         $this->assertSame($home, data_get($session->metadata, 'hermes_home'));
         $this->assertSame('bean-session-'.$session->id, data_get($session->metadata, 'hermes_session_name'));
 
-        $log = json_decode(File::get($logPath), true);
+        $logs = collect(preg_split('/\R/', trim(File::get($logPath))) ?: [])
+            ->filter()
+            ->map(fn (string $line): array => json_decode($line, true))
+            ->values();
+        $log = $logs->first();
         $this->assertSame($home, $log['HERMES_HOME']);
         $this->assertStringContainsString('bean-tool-context-', $log['BEAN_TOOL_CONTEXT']);
         $this->assertStringContainsString('/usr/bin', $log['PATH']);
         $this->assertStringContainsString('/bin', $log['PATH']);
-        $this->assertContains('--continue', $log['argv']);
-        $this->assertContains('bean-session-'.$session->id, $log['argv']);
+        $this->assertNotContains('--continue', $log['argv']);
+        $this->assertNotContains('--resume', $log['argv']);
         $this->assertContains('--toolsets', $log['argv']);
         $this->assertContains('bean_dashboard,skills,memory,session_search,web', $log['argv']);
         $this->assertContains('--provider', $log['argv']);
         $this->assertContains('custom', $log['argv']);
         $this->assertContains('--model', $log['argv']);
         $this->assertContains('gpt-test', $log['argv']);
+        $this->assertSame('fake-hermes-session-123', data_get($session->refresh()->metadata, 'hermes_session_id'));
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'session_id' => $session->id,
+            'content' => 'continue this conversation',
+            'client_timezone' => 'America/Chicago',
+        ])->assertOk()
+            ->assertJsonFragment(['content' => 'Hermes resumed this user agent.']);
+
+        $logs = collect(preg_split('/\R/', trim(File::get($logPath))) ?: [])
+            ->filter()
+            ->map(fn (string $line): array => json_decode($line, true))
+            ->values();
+        $resumeLog = $logs->last();
+        $this->assertContains('--resume', $resumeLog['argv']);
+        $this->assertContains('fake-hermes-session-123', $resumeLog['argv']);
     }
 
     public function test_hermes_dashboard_tool_bridge_executes_scoped_laravel_actions(): void

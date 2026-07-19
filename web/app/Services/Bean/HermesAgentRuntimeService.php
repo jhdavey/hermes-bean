@@ -22,7 +22,7 @@ class HermesAgentRuntimeService
 
     public function handleMessage(User $user, string $content, BeanSession $session, ?string $clientTimezone = null): array
     {
-        [$home, $hermesSession] = $this->homes->ensureForSession($session->refresh());
+        [$home, $hermesSessionName, $hermesSessionId] = $this->homes->ensureForSession($session->refresh());
         $timeContext = $this->timeContext->forSession($session->refresh());
 
         $run = BeanRun::create([
@@ -35,7 +35,8 @@ class HermesAgentRuntimeService
             'metadata' => array_filter([
                 'runtime_driver' => 'hermes',
                 'hermes_home' => $home,
-                'hermes_session_name' => $hermesSession,
+                'hermes_session_name' => $hermesSessionName,
+                'hermes_session_id' => $hermesSessionId,
                 'client_timezone' => $timeContext['timezone'],
                 'time_context' => $timeContext,
             ]),
@@ -54,8 +55,14 @@ class HermesAgentRuntimeService
 
         try {
             $contextPath = $this->writeToolContext($home, $user, $session, $run, $clientTimezone);
-            $assistantText = $this->invokeHermes($home, $hermesSession, $content, $contextPath);
+            [$assistantText, $returnedHermesSessionId] = $this->invokeHermes($home, $hermesSessionId, $content, $contextPath);
             $assistantText = trim($assistantText) !== '' ? trim($assistantText) : 'Done.';
+            if ($returnedHermesSessionId !== null && $returnedHermesSessionId !== $hermesSessionId) {
+                $hermesSessionId = $returnedHermesSessionId;
+                $sessionMetadata = is_array($session->metadata) ? $session->metadata : [];
+                $session->forceFill(['metadata' => [...$sessionMetadata, 'hermes_session_id' => $hermesSessionId]])->save();
+                $session = $session->refresh();
+            }
 
             BeanMessage::create([
                 'bean_session_id' => $session->id,
@@ -65,7 +72,8 @@ class HermesAgentRuntimeService
                 'content' => $assistantText,
                 'metadata' => [
                     'runtime_driver' => 'hermes',
-                    'hermes_session_name' => $hermesSession,
+                    'hermes_session_name' => $hermesSessionName,
+                    'hermes_session_id' => $hermesSessionId,
                 ],
             ]);
             $this->activity->log($session, $run, 'assistant_message', $assistantText, ['runtime' => 'hermes']);
@@ -77,7 +85,7 @@ class HermesAgentRuntimeService
                 'status' => $waiting ? 'waiting_confirmation' : 'completed',
                 'model' => $this->modelLabel(),
                 'output' => $assistantText,
-                'metadata' => [...$metadata, 'tool_calls_count' => $run->toolCalls()->count()],
+                'metadata' => [...$metadata, 'hermes_session_id' => $hermesSessionId, 'tool_calls_count' => $run->toolCalls()->count()],
                 'completed_at' => now(),
             ]);
         } catch (Throwable $exception) {
@@ -134,7 +142,10 @@ class HermesAgentRuntimeService
         return $path;
     }
 
-    private function invokeHermes(string $home, string $sessionName, string $content, string $contextPath): string
+    /**
+     * @return array{0: string, 1: string|null}
+     */
+    private function invokeHermes(string $home, ?string $sessionId, string $content, string $contextPath): array
     {
         $binary = (string) config('bean.hermes.binary', 'hermes');
         $toolsets = (string) config('bean.hermes.toolsets', 'bean_dashboard,skills,memory,session_search,web');
@@ -148,8 +159,12 @@ class HermesAgentRuntimeService
         $command = [
             $binary,
             'chat',
-            '--continue',
-            $sessionName,
+        ];
+        if (is_string($sessionId) && $sessionId !== '') {
+            array_push($command, '--resume', $sessionId);
+        }
+        array_push(
+            $command,
             '--query',
             $content,
             '--quiet',
@@ -165,7 +180,7 @@ class HermesAgentRuntimeService
             $skills,
             '--max-turns',
             $maxTurns,
-        ];
+        );
 
         $process = new Process($command, base_path(), $this->processEnv($home, $contextPath), null, $timeout);
         $process->run();
@@ -175,7 +190,7 @@ class HermesAgentRuntimeService
             throw new \RuntimeException($error);
         }
 
-        return $this->cleanHermesOutput($process->getOutput());
+        return $this->parseHermesOutput($process->getOutput());
     }
 
     private function processEnv(string $home, string $contextPath): array
@@ -210,14 +225,29 @@ class HermesAgentRuntimeService
         return $env;
     }
 
-    private function cleanHermesOutput(string $output): string
+    /**
+     * @return array{0: string, 1: string|null}
+     */
+    private function parseHermesOutput(string $output): array
     {
+        $sessionId = null;
         $lines = collect(preg_split('/\R/', trim($output)) ?: [])
             ->map(fn (string $line): string => trim($line))
-            ->filter(fn (string $line): bool => $line !== '' && ! str_starts_with($line, 'Session ID:'))
+            ->filter(function (string $line) use (&$sessionId): bool {
+                if ($line === '') {
+                    return false;
+                }
+                if (preg_match('/^Session ID:\s*(\S+)/', $line, $matches) === 1) {
+                    $sessionId = $matches[1];
+
+                    return false;
+                }
+
+                return true;
+            })
             ->values();
 
-        return $lines->implode("\n");
+        return [$lines->implode("\n"), $sessionId];
     }
 
     private function modelLabel(): string

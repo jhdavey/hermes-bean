@@ -31,19 +31,21 @@ class HermesUserHomeService
         $home = $this->ensureForUser($session->user);
         $metadata = is_array($session->metadata) ? $session->metadata : [];
         $sessionName = (string) ($metadata['hermes_session_name'] ?? 'bean-session-'.$session->id);
+        $sessionId = isset($metadata['hermes_session_id']) ? (string) $metadata['hermes_session_id'] : null;
 
         $next = [
             ...$metadata,
             'runtime_driver' => 'hermes',
             'hermes_home' => $home,
             'hermes_session_name' => $sessionName,
+            'hermes_session_id' => $sessionId,
         ];
 
         if (($metadata['hermes_home'] ?? null) !== $home || ($metadata['hermes_session_name'] ?? null) !== $sessionName || ($metadata['runtime_driver'] ?? null) !== 'hermes') {
             $session->forceFill(['metadata' => $next])->save();
         }
 
-        return [$home, $sessionName];
+        return [$home, $sessionName, $sessionId];
     }
 
     public function homePath(User $user): string
