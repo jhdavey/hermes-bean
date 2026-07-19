@@ -62,7 +62,7 @@ void main() {
               'run': {
                 'id': 7,
                 'status': 'completed',
-                'model': 'local-heuristic',
+                'model': 'hermes:custom/gpt-test',
               },
               'messages': [
                 {'id': 1, 'role': 'user', 'content': 'Create task call mom'},

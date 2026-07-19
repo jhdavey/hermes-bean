@@ -51,18 +51,27 @@ class HermesUserHomeService
         return rtrim((string) config('bean.hermes.users_path'), '/').'/'.$user->id;
     }
 
+    public function deleteForUser(User $user): void
+    {
+        File::deleteDirectory($this->homePath($user));
+    }
+
     private function writeConfig(string $home): void
     {
-        $provider = (string) config('bean.hermes.provider', 'openai');
+        $provider = (string) config('bean.hermes.provider', 'custom');
         $model = (string) config('bean.hermes.model', 'gpt-4.1-mini');
+        $baseUrl = trim((string) config('bean.hermes.base_url', 'https://api.openai.com/v1'));
+        $toolsets = (string) config('bean.hermes.toolsets', 'bean_dashboard,skills,memory,session_search,web');
+        $skills = (string) config('bean.hermes.skills', 'bean-dashboard');
         $maxTurns = (int) config('bean.hermes.max_turns', 24);
-
+        $baseUrlYaml = $baseUrl !== '' ? "  base_url: {$baseUrl}\n" : '';
         $config = <<<YAML
 model:
   provider: {$provider}
   default: {$model}
-agent:
+{$baseUrlYaml}agent:
   max_turns: {$maxTurns}
+  reasoning_effort: none
   tool_use_enforcement: auto
   task_completion_guidance: true
 compression:

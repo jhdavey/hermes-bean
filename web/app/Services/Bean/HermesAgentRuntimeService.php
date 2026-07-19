@@ -142,6 +142,8 @@ class HermesAgentRuntimeService
         $timeout = (int) config('bean.hermes.timeout_seconds', 120);
         $maxTurns = (string) config('bean.hermes.max_turns', 24);
         $source = (string) config('bean.hermes.source', 'bean');
+        $provider = (string) config('bean.hermes.provider', 'custom');
+        $model = (string) config('bean.hermes.model', 'gpt-4.1-mini');
 
         $command = [
             $binary,
@@ -153,6 +155,10 @@ class HermesAgentRuntimeService
             '--quiet',
             '--source',
             $source,
+            '--provider',
+            $provider,
+            '--model',
+            $model,
             '--toolsets',
             $toolsets,
             '--skills',
@@ -174,6 +180,14 @@ class HermesAgentRuntimeService
 
     private function processEnv(string $home, string $contextPath): array
     {
+        $path = collect([
+            dirname((string) config('bean.hermes.binary', 'hermes')),
+            getenv('HOME') ? getenv('HOME').'/.local/bin' : null,
+            getenv('PATH') ?: null,
+        ])
+            ->filter(fn ($value): bool => is_string($value) && $value !== '' && $value !== '.')
+            ->implode(PATH_SEPARATOR);
+
         $env = [
             'HERMES_HOME' => $home,
             'BEAN_TOOL_CONTEXT' => $contextPath,
@@ -181,6 +195,7 @@ class HermesAgentRuntimeService
             'BEAN_PHP' => PHP_BINARY,
             'BEAN_TOOL_TIMEOUT' => '60',
             'HERMES_ACCEPT_HOOKS' => '1',
+            'PATH' => $path,
         ];
 
         $openAiKey = (string) config('services.openai.api_key');
@@ -203,7 +218,7 @@ class HermesAgentRuntimeService
 
     private function modelLabel(): string
     {
-        return 'hermes:'.((string) config('bean.hermes.provider', 'openai')).'/'.((string) config('bean.hermes.model', 'gpt-4.1-mini'));
+        return 'hermes:'.((string) config('bean.hermes.provider', 'custom')).'/'.((string) config('bean.hermes.model', 'gpt-4.1-mini'));
     }
 
     private function signature(array $payload): string

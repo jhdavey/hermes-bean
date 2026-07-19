@@ -13,6 +13,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\ResetPasswordLink;
+use App\Services\Bean\HermesUserHomeService;
 use App\Services\CouponCodeService;
 use App\Services\PlanLimitService;
 use App\Services\WorkspaceService;
@@ -94,6 +95,7 @@ class AuthController extends Controller
             ]);
 
             app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+            app(HermesUserHomeService::class)->ensureForUser($user);
             EarlyAccessSignup::updateOrCreate(
                 ['email' => $user->email],
                 [
@@ -135,6 +137,7 @@ class AuthController extends Controller
         }
 
         app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        app(HermesUserHomeService::class)->ensureForUser($user);
 
         return response()->json(['data' => [
             'user' => $this->hydratedUser($user),
@@ -259,6 +262,7 @@ class AuthController extends Controller
             Workspace::where('personal_owner_user_id', $user->id)->delete();
             $user->delete();
         });
+        app(HermesUserHomeService::class)->deleteForUser($user);
 
         return response()->json(null, 204);
     }

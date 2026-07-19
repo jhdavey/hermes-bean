@@ -74,10 +74,14 @@ Artisan::command('admin:grant {email}', function (string $email): int {
 })->purpose('Grant admin permissions to an existing user without changing their password');
 
 Artisan::command('bean:evaluate {--json=} {--markdown=} {--ci} {--production-smoke} {--recent=200}', function (BeanQualityLabService $lab): int {
+    if (! (bool) $this->option('production-smoke')) {
+        $this->error('Seeded Bean evaluation was removed with the Hermes-first runtime. Use --production-smoke to audit recorded Hermes traces.');
+
+        return self::FAILURE;
+    }
+
     $recent = (int) $this->option('recent');
-    $report = (bool) $this->option('production-smoke')
-        ? $lab->productionSmoke($recent)
-        : $lab->evaluate();
+    $report = $lab->productionSmoke($recent);
 
     $defaultBase = storage_path('app/bean-quality');
     File::ensureDirectoryExists($defaultBase);
@@ -87,31 +91,14 @@ Artisan::command('bean:evaluate {--json=} {--markdown=} {--ci} {--production-smo
     $lab->writeJsonReport($report, $jsonPath);
     $lab->writeMarkdownReport($report, $markdownPath);
 
-    if (($report['mode'] ?? '') === 'production-smoke') {
-        $this->info('Bean Quality Production Smoke Report');
-        $this->line('Traces audited: '.($report['trace_count'] ?? 0));
-        $this->line('Flagged traces: '.($report['flagged_trace_count'] ?? 0));
-        $this->line('JSON: '.$jsonPath);
-        $this->line('Markdown: '.$markdownPath);
-
-        return self::SUCCESS;
-    }
-
-    $this->info('Bean Quality Report');
-    $this->line('Overall: '.($report['overall_score'] ?? 0).'/100');
-    foreach (($report['categories'] ?? []) as $name => $category) {
-        $this->line(str_replace('_', ' ', $name).': '.$category['points'].'/'.$category['weight'].' ('.$category['passed'].'/'.$category['total'].')');
-    }
-    $this->line('CI gate: '.(data_get($report, 'ci_gate.passed') ? 'PASS' : 'FAIL'));
+    $this->info('Bean Quality Production Smoke Report');
+    $this->line('Traces audited: '.($report['trace_count'] ?? 0));
+    $this->line('Flagged traces: '.($report['flagged_trace_count'] ?? 0));
     $this->line('JSON: '.$jsonPath);
     $this->line('Markdown: '.$markdownPath);
 
-    if ((bool) $this->option('ci') && ! data_get($report, 'ci_gate.passed')) {
-        return self::FAILURE;
-    }
-
     return self::SUCCESS;
-})->purpose('Run the read-only Bean Quality Lab evaluation harness and report scorecard');
+})->purpose('Run the read-only Bean production trace audit');
 
 Schedule::command('plan-history:prune')->daily();
 Schedule::command('calendar-events:materialize-recurring')->daily();

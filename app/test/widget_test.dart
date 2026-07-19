@@ -257,7 +257,7 @@ class _DashboardApiClient extends BeanApiClient {
       run: const BeanAssistantRun(
         id: 7,
         status: 'completed',
-        model: 'local-heuristic',
+        model: 'hermes:custom/gpt-test',
       ),
       messages: [
         BeanAssistantMessage(role: 'user', content: content),

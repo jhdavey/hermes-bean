@@ -9,6 +9,7 @@ use App\Models\Workspace;
 use App\Notifications\ResetPasswordLink;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password as PasswordBroker;
@@ -22,6 +23,8 @@ class AuthAndAccountLifecycleTest extends TestCase
     public function test_register_creates_user_auth_token_and_early_access_signup(): void
     {
         Notification::fake();
+        $usersPath = storage_path('framework/testing/hermes-register-'.uniqid());
+        config(['bean.hermes.users_path' => $usersPath]);
 
         $response = $this->postJson('/api/auth/register', [
             'name' => 'Bean User',
@@ -57,6 +60,12 @@ class AuthAndAccountLifecycleTest extends TestCase
         ]);
 
         $user = User::where('email', 'bean@example.com')->firstOrFail();
+        $home = $usersPath.'/'.$user->id;
+        $this->assertDirectoryExists($home);
+        $this->assertFileExists($home.'/config.yaml');
+        $this->assertFileExists($home.'/skills/bean-dashboard/SKILL.md');
+        $this->assertFileExists($home.'/plugins/bean-dashboard/plugin.yaml');
+        $this->assertStringContainsString('bean_dashboard', File::get($home.'/config.yaml'));
         Notification::assertSentTo($user, VerifyEmail::class);
     }
 
@@ -131,6 +140,8 @@ class AuthAndAccountLifecycleTest extends TestCase
 
     public function test_login_me_logout_and_hashed_tokens(): void
     {
+        $usersPath = storage_path('framework/testing/hermes-login-'.uniqid());
+        config(['bean.hermes.users_path' => $usersPath]);
         User::factory()->create([
             'name' => 'Bean User',
             'email' => 'bean@example.com',
@@ -145,6 +156,8 @@ class AuthAndAccountLifecycleTest extends TestCase
 
         $plainToken = $login->json('data.token');
         $userId = User::where('email', 'bean@example.com')->value('id');
+        $this->assertDirectoryExists($usersPath.'/'.$userId);
+        $this->assertFileExists($usersPath.'/'.$userId.'/config.yaml');
         $hashedRegisterToken = hash('sha256', $plainToken);
         $this->assertDatabaseMissing('personal_access_tokens', ['token' => $plainToken]);
         $this->assertDatabaseHas('personal_access_tokens', [
@@ -306,6 +319,8 @@ class AuthAndAccountLifecycleTest extends TestCase
 
     public function test_export_returns_only_owned_productivity_data_and_delete_removes_account_data_and_tokens(): void
     {
+        $usersPath = storage_path('framework/testing/hermes-delete-'.uniqid());
+        config(['bean.hermes.users_path' => $usersPath]);
         $aliceToken = $this->registerToken('alice@example.com');
         $bobToken = $this->registerToken('bob@example.com');
 
@@ -327,6 +342,9 @@ class AuthAndAccountLifecycleTest extends TestCase
 
         $aliceId = User::where('email', 'alice@example.com')->value('id');
         $alicePersonalWorkspaceId = Workspace::where('personal_owner_user_id', $aliceId)->value('id');
+        File::ensureDirectoryExists($usersPath.'/'.$aliceId.'/sessions');
+        File::put($usersPath.'/'.$aliceId.'/config.yaml', 'test hermes home');
+        $this->assertDirectoryExists($usersPath.'/'.$aliceId);
 
         $this->withToken($aliceToken)->deleteJson('/api/account')
             ->assertNoContent();
@@ -336,6 +354,7 @@ class AuthAndAccountLifecycleTest extends TestCase
         $this->assertDatabaseMissing('workspaces', ['id' => $alicePersonalWorkspaceId]);
         $this->assertDatabaseMissing('workspace_memberships', ['workspace_id' => $alicePersonalWorkspaceId]);
         $this->assertDatabaseMissing('tasks', ['user_id' => $aliceId]);
+        $this->assertDirectoryDoesNotExist($usersPath.'/'.$aliceId);
         $this->assertDatabaseHas('users', ['email' => 'bob@example.com']);
         $this->assertDatabaseHas('tasks', ['title' => 'Bob private task']);
     }

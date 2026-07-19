@@ -7,8 +7,8 @@ use App\Models\BeanSession;
 use App\Models\BeanToolCall;
 use App\Models\User;
 use App\Services\Bean\Quality\BeanQualityAuditService;
+use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Tests\TestCase;
 
@@ -16,45 +16,10 @@ class BeanQualityLabTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_bean_evaluate_runs_seeded_scenarios_and_writes_score_reports(): void
-    {
-        config(['services.openai.api_key' => null]);
-        Carbon::setTestNow(Carbon::parse('2026-07-17 09:15:00', config('app.timezone')));
-        $jsonPath = storage_path('app/bean-quality/test-report.json');
-        $markdownPath = storage_path('app/bean-quality/test-report.md');
-        @unlink($jsonPath);
-        @unlink($markdownPath);
-
-        $exit = Artisan::call('bean:evaluate', [
-            '--json' => $jsonPath,
-            '--markdown' => $markdownPath,
-        ]);
-
-        $this->assertSame(0, $exit, Artisan::output());
-        $this->assertFileExists($jsonPath);
-        $this->assertFileExists($markdownPath);
-
-        $report = json_decode((string) file_get_contents($jsonPath), true);
-        $this->assertIsArray($report);
-        $this->assertGreaterThanOrEqual(100, $report['scenario_count']);
-        $this->assertArrayHasKey('overall_score', $report);
-        $this->assertArrayHasKey('factual_correctness', $report['categories']);
-        $this->assertArrayHasKey('safety', $report['categories']);
-        $this->assertContains('today task list separates overdue and due today', array_column($report['results'], 'name'));
-        $this->assertContains('current time answers directly', array_column($report['results'], 'name'));
-        $this->assertContains('misheard transcript recovers recent task entity', array_column($report['results'], 'name'));
-        $this->assertContains('source backed public lookup uses generic external lookup path', array_column($report['results'], 'name'));
-        $this->assertContains('tomorrow calendar filters tomorrow only', array_column($report['results'], 'name'));
-        $this->assertStringContainsString('Bean Quality Report', (string) file_get_contents($markdownPath));
-        $this->assertStringContainsString('CI gate', (string) file_get_contents($markdownPath));
-
-        Carbon::setTestNow();
-    }
-
     public function test_quality_audit_flags_bad_factual_answers_and_persists_trace(): void
     {
         $user = User::factory()->create(['email' => 'bean-quality-trace@example.com']);
-        app(\App\Services\WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
         $session = BeanSession::create([
             'user_id' => $user->id,
             'workspace_id' => $user->default_workspace_id,
@@ -123,7 +88,7 @@ class BeanQualityLabTest extends TestCase
     public function test_quality_audit_flags_missing_tool_external_evidence_and_correction_failures(): void
     {
         $user = User::factory()->create(['email' => 'bean-quality-new-flags@example.com']);
-        app(\App\Services\WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
         $session = BeanSession::create([
             'user_id' => $user->id,
             'workspace_id' => $user->default_workspace_id,
@@ -238,7 +203,7 @@ class BeanQualityLabTest extends TestCase
     public function test_production_smoke_mode_audits_recent_traces_without_seeding_or_mutating_resources(): void
     {
         $user = User::factory()->create(['email' => 'bean-production-smoke@example.com']);
-        app(\App\Services\WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
         $session = BeanSession::create([
             'user_id' => $user->id,
             'workspace_id' => $user->default_workspace_id,

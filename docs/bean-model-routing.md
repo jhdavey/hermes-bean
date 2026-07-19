@@ -1,66 +1,83 @@
 # Bean Model Routing
 
-Bean now routes product chat toward a Hermes-first runtime.
+Bean routes product chat through per-user Hermes agents. There is no Laravel local deterministic router or test-only local runtime.
 
-## Runtime routing
+## Runtime
 
-`config/bean.php` controls the driver:
-
-```php
-'bean.runtime_driver' // hermes | local
+```text
+/api/bean/messages
+  → BeanRuntimeService
+  → HermesAgentRuntimeService
+  → hermes chat --continue bean-session-{id}
 ```
 
-- `hermes` is the production/default architecture.
-- `local` is test-only so CI can verify dashboard contracts without a live model process.
-
-## Hermes agent routing
-
-For each Bean session, Laravel invokes a per-user Hermes home:
+`HermesAgentRuntimeService` sets:
 
 ```bash
-HERMES_HOME=storage/hermes/users/{user_id} \
-BEAN_TOOL_CONTEXT=<signed context json> \
-BEAN_ARTISAN=<web/artisan> \
+HERMES_HOME=storage/hermes/users/{user_id}
+BEAN_TOOL_CONTEXT=/path/to/signed/context.json
+BEAN_ARTISAN=/path/to/artisan
+```
+
+and invokes Hermes with the configured provider/model/toolsets/skills:
+
+```bash
 hermes chat \
-  --continue bean-session-{bean_session_id} \
-  --query "<user message>" \
-  --quiet \
+  --continue bean-session-{id} \
+  --provider custom \
+  --model gpt-4.1-mini \
   --source bean \
+  --max-turns 24 \
   --toolsets bean_dashboard,skills,memory,session_search,web \
-  --skills bean-dashboard
+  --skills bean-dashboard \
+  "<user message>"
 ```
 
-Hermes owns the normal model loop, context window, compression, memory, tool calling, and final answer.
+## Configuration
 
-## Dashboard tool routing
-
-Hermes agents get the `bean_dashboard` plugin tool by default. The tool is generic by design:
-
-```json
-{
-  "action": "task.create",
-  "arguments": {"title": "Call mom", "due_at": "tomorrow morning"}
-}
+```env
+BEAN_HERMES_BINARY=hermes
+BEAN_HERMES_USERS_PATH=storage/hermes/users
+BEAN_HERMES_SOURCE=bean
+BEAN_HERMES_PROVIDER=custom
+BEAN_HERMES_MODEL=gpt-4.1-mini
+BEAN_HERMES_BASE_URL=https://api.openai.com/v1
+BEAN_HERMES_TIMEOUT_SECONDS=120
+BEAN_HERMES_MAX_TURNS=24
+BEAN_HERMES_TOOLSETS=bean_dashboard,skills,memory,session_search,web
+BEAN_HERMES_SKILLS=bean-dashboard
 ```
 
-The plugin does not access the database. It shells back into Laravel:
+`OPENAI_API_KEY` is still required by the default per-user Hermes config. Bean uses Hermes provider `custom` with `BEAN_HERMES_BASE_URL=https://api.openai.com/v1` because current Hermes installs expose OpenAI-compatible endpoints through the `custom` provider, not a literal `openai` provider. Generated Bean user homes set `agent.reasoning_effort: none` so non-reasoning fast models such as `gpt-4.1-mini` do not receive unsupported reasoning parameters.
 
-```bash
-php artisan bean:dashboard-tool <signed-context>
+## Default Bean tool
+
+Each user's Hermes home includes the `bean-dashboard` plugin. It registers:
+
+```text
+bean_dashboard(action, arguments)
 ```
 
-Laravel verifies the signed context and executes through `BeanActionExecutor`, preserving auth, workspace scope, TimeContext, confirmations, and domain-service writes.
+The plugin is a thin adapter. It sends the action and arguments to Laravel through the signed `bean:dashboard-tool` bridge. Laravel executes via `BeanActionExecutor` and records `bean_tool_calls`.
 
-## Guidance for the model
+## Confirmation path
 
-The default `bean-dashboard` skill tells Hermes:
+Hermes should call dashboard tools normally. If Laravel returns `requires_confirmation: true`, Hermes asks the user to confirm. The current Bean API also short-circuits simple affirmative replies (`yes`, `confirm`, `do it`, etc.) when a pending confirmation exists in the session, so confirmations remain reliable for voice and UI flows.
 
-- use `bean_dashboard` for private dashboard facts or mutations;
-- never invent private app data;
-- ask confirmation when the tool returns `requires_confirmation`;
-- confirm success only from returned structured results;
-- keep durable memory for stable preferences only, not current dashboard truth.
+## Removed paths
 
-## Retired direction
+Removed:
 
-The product should not continue growing Laravel-side semantic routing, final-answer synthesis, or short-term memory layers. If the model needs to do more, expose a better Bean tool or improve the Bean skill rather than adding another PHP reasoning patch.
+- `BeanTextModel`;
+- local heuristic routing;
+- `BEAN_RUNTIME_DRIVER`;
+- seeded deterministic Bean runtime tests;
+- seeded deterministic `bean:evaluate`.
+
+Kept:
+
+- `BeanActionExecutor` as the scoped dashboard tool host;
+- `BeanTimeContext` for deterministic timezone/date interpretation at the tool boundary;
+- confirmation records;
+- activity/UI mirroring;
+- production trace smoke audit.
