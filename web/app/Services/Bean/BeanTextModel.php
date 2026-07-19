@@ -8,6 +8,8 @@ use Throwable;
 
 class BeanTextModel
 {
+    public function __construct(private readonly BeanTimeContext $timeContext) {}
+
     private const ACTIONS = [
         'task.list',
         'task.search',
@@ -169,14 +171,15 @@ PROMPT;
     private function plannerContext(BeanSession $session): array
     {
         $metadata = is_array($session->metadata) ? $session->metadata : [];
-        $timezone = $this->sessionTimezone($session);
+        $timeContext = $this->timeContext->forSession($session);
         return [
             'recent_entities' => array_slice(is_array($metadata['recent_entities'] ?? null) ? $metadata['recent_entities'] : [], 0, 10),
             'recent_query_context' => is_array($metadata['recent_query_context'] ?? null) ? $metadata['recent_query_context'] : null,
             'current_workspace_id' => $session->workspace_id,
-            'current_datetime' => now($timezone)->toIso8601String(),
-            'current_date' => now($timezone)->toDateString(),
-            'timezone' => $timezone,
+            'time_context' => $timeContext,
+            'current_datetime' => $timeContext['local_now'],
+            'current_date' => $timeContext['local_date'],
+            'timezone' => $timeContext['timezone'],
         ];
     }
 
@@ -459,21 +462,21 @@ PROMPT;
             $response = 'I’ll look that up and save a grounded note.';
         } elseif ($this->mentionsOverdue($lower) && ! $this->mentionsNote($lower) && ! $this->mentionsCalendar($lower)) {
             if ($this->mentionsReminder($lower) && ! $this->mentionsTask($lower)) {
-                $actions[] = ['action' => 'reminder.list', 'arguments' => $this->listArguments($lower, 'reminders')];
+                $actions[] = ['action' => 'reminder.list', 'arguments' => $this->listArguments($lower, 'reminders', null, $session)];
                 $response = 'I’ll check overdue reminders.';
             } elseif ($this->mentionsTask($lower) && ! $this->mentionsReminder($lower)) {
-                $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower, 'tasks')];
+                $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower, 'tasks', null, $session)];
                 $response = 'I’ll check overdue tasks.';
             } else {
-                $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower, 'tasks')];
-                $actions[] = ['action' => 'reminder.list', 'arguments' => $this->listArguments($lower, 'reminders')];
+                $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower, 'tasks', null, $session)];
+                $actions[] = ['action' => 'reminder.list', 'arguments' => $this->listArguments($lower, 'reminders', null, $session)];
                 $response = 'I’ll check overdue tasks and reminders.';
             }
         } elseif ($this->isTodayTaskListQuestion($lower)) {
-            $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower, 'tasks', 'today')];
+            $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower, 'tasks', 'today', $session)];
             $response = 'I’ll check today’s tasks.';
         } elseif ($this->isTodayCalendarListQuestion($lower)) {
-            $actions[] = ['action' => 'calendar_event.list', 'arguments' => $this->listArguments($lower, 'calendar_events')];
+            $actions[] = ['action' => 'calendar_event.list', 'arguments' => $this->listArguments($lower, 'calendar_events', null, $session)];
             $response = 'I’ll check today’s calendar.';
         } elseif ($this->isNoteCreationRequest($lower)) {
             $actions[] = ['action' => 'note.create', 'arguments' => ['plain_text' => $text]];
@@ -492,7 +495,7 @@ PROMPT;
                 $actions[] = ['action' => 'resource.query', 'arguments' => $this->resourceQueryArguments($text, $lower, $session)];
                 $response = 'I’ll check the task workspace.';
             } elseif ($this->isListRequest($lower)) {
-                $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower, 'tasks')];
+                $actions[] = ['action' => 'task.list', 'arguments' => $this->listArguments($lower, 'tasks', null, $session)];
                 $response = $this->mentionsToday($lower) ? 'I’ll check today’s tasks.' : 'I’ll check your tasks.';
             } elseif ($this->isDeleteRequest($lower)) {
                 $actions[] = ['action' => 'task.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'task', 'todo', 'to-do'])]];
@@ -515,13 +518,13 @@ PROMPT;
                 $actions[] = ['action' => 'reminder.complete', 'arguments' => ['query' => $this->queryFromText($text, ['complete', 'finish', 'done', 'mark', 'reminder', 'as', 'to'])]];
                 $response = 'I’ll mark that reminder complete.';
             } elseif ($this->isListRequest($lower)) {
-                $actions[] = ['action' => 'reminder.list', 'arguments' => $this->listArguments($lower, 'reminders')];
+                $actions[] = ['action' => 'reminder.list', 'arguments' => $this->listArguments($lower, 'reminders', null, $session)];
                 $response = $this->mentionsToday($lower) ? 'I’ll check today’s reminders.' : 'I’ll check your reminders.';
             } elseif ($this->isSearchRequest($lower)) {
                 $actions[] = ['action' => 'reminder.search', 'arguments' => ['query' => $this->queryFromText($text, ['find', 'search', 'for', 'reminder'])]];
                 $response = 'I’ll search your reminders.';
             } else {
-                $actions[] = ['action' => 'reminder.create', 'arguments' => ['title' => $this->titleFromText($text), 'remind_at' => now()->addDay()->setTime(9, 0)->toIso8601String()]];
+                $actions[] = ['action' => 'reminder.create', 'arguments' => ['title' => $this->titleFromText($text), 'remind_at' => $this->defaultLocalFutureIso($session, 1, 9, 0)]];
                 $response = 'I’ll create that reminder.';
             }
         } elseif ($this->mentionsNote($lower)) {
@@ -543,13 +546,13 @@ PROMPT;
                 $actions[] = ['action' => 'calendar_event.delete', 'arguments' => ['query' => $this->queryFromText($text, ['delete', 'remove', 'calendar', 'appointment', 'event'])]];
                 $response = 'I’ll ask you to confirm before deleting that calendar event.';
             } elseif ($this->isListRequest($lower)) {
-                $actions[] = ['action' => 'calendar_event.list', 'arguments' => $this->listArguments($lower, 'calendar_events')];
+                $actions[] = ['action' => 'calendar_event.list', 'arguments' => $this->listArguments($lower, 'calendar_events', null, $session)];
                 $response = $this->mentionsToday($lower) ? 'I’ll check today’s calendar.' : 'I’ll check your calendar.';
             } elseif ($this->isSearchRequest($lower)) {
                 $actions[] = ['action' => 'calendar_event.search', 'arguments' => ['query' => $this->queryFromText($text, ['find', 'search', 'for', 'calendar', 'appointment', 'event'])]];
                 $response = 'I’ll search your calendar.';
             } else {
-                $actions[] = ['action' => 'calendar_event.create', 'arguments' => ['title' => $this->titleFromText($text), 'starts_at' => now()->addDay()->setTime(9, 0)->toIso8601String(), 'ends_at' => now()->addDay()->setTime(10, 0)->toIso8601String(), 'all_day' => false]];
+                $actions[] = ['action' => 'calendar_event.create', 'arguments' => ['title' => $this->titleFromText($text), 'starts_at' => $this->defaultLocalFutureIso($session, 1, 9, 0), 'ends_at' => $this->defaultLocalFutureIso($session, 1, 10, 0), 'all_day' => false]];
                 $response = 'I’ll add that calendar event.';
             }
         }
@@ -627,7 +630,7 @@ PROMPT;
             'calendar_events' => 'calendar_event.list',
         };
 
-        return ['action' => $action, 'arguments' => $this->listArguments($lower, $resource)];
+        return ['action' => $action, 'arguments' => $this->listArguments($lower, $resource, null, $session)];
     }
 
     private function recentQueryResource(?BeanSession $session): ?string
@@ -717,7 +720,7 @@ PROMPT;
             'include_workspaces' => true,
             'explain_visibility' => preg_match('/\b(why|showing|appear|appearing)\b/', $lower) === 1,
         ];
-        $listArguments = $this->listArguments($lower, $resource);
+        $listArguments = $this->listArguments($lower, $resource, null, $session);
         if ($listArguments !== []) {
             $arguments = [...$arguments, ...$listArguments];
         }
@@ -792,7 +795,7 @@ PROMPT;
         return preg_match('/\b(write down|jot down|take a note|add a note|create a note)\b/', $lower) === 1;
     }
 
-    private function listArguments(string $lower, string $resource, ?string $defaultTimeLabel = null): array
+    private function listArguments(string $lower, string $resource, ?string $defaultTimeLabel = null, ?BeanSession $session = null): array
     {
         $scope = match (true) {
             $this->mentionsOverdue($lower) => 'overdue',
@@ -802,13 +805,13 @@ PROMPT;
         };
         if ($scope === null) return [];
         return [
-            'filters' => $this->temporalFilters($resource, $scope),
+            'filters' => $this->temporalFilters($resource, $scope, $session),
             'time_label' => $scope,
             'workspace_scope' => 'accessible',
         ];
     }
 
-    private function temporalFilters(string $resource, string $scope): array
+    private function temporalFilters(string $resource, string $scope, ?BeanSession $session = null): array
     {
         $field = match ($resource) {
             'tasks' => 'due_at',
@@ -816,10 +819,9 @@ PROMPT;
             'calendar_events' => 'starts_at',
             default => 'updated_at',
         };
-        $todayStart = now()->startOfDay()->toIso8601String();
-        $todayEnd = now()->endOfDay()->toIso8601String();
-        $tomorrowStart = now()->addDay()->startOfDay()->toIso8601String();
-        $tomorrowEnd = now()->addDay()->endOfDay()->toIso8601String();
+        $timeContext = $session ? $this->timeContext->forSession($session) : $this->timeContext->forClientTimezone(null, 'app_default');
+        [$todayStart, $todayEnd] = $this->timeContext->todayUtcRange($timeContext);
+        [$tomorrowStart, $tomorrowEnd] = $this->timeContext->tomorrowUtcRange($timeContext);
 
         return match ($scope) {
             'overdue' => [['field' => $field, 'operator' => '<', 'value' => $todayStart]],
@@ -829,6 +831,17 @@ PROMPT;
             'tomorrow' => [['field' => $field, 'operator' => 'between', 'value' => [$tomorrowStart, $tomorrowEnd]]],
             default => [],
         };
+    }
+
+    private function defaultLocalFutureIso(?BeanSession $session, int $days, int $hour, int $minute): string
+    {
+        $timeContext = $session ? $this->timeContext->forSession($session) : $this->timeContext->forClientTimezone(null, 'app_default');
+
+        return $this->timeContext->localNow($timeContext)
+            ->addDays($days)
+            ->setTime($hour, $minute)
+            ->utc()
+            ->toIso8601String();
     }
 
     private function queryFromText(string $text, array $words): string
@@ -895,21 +908,6 @@ PROMPT;
         $lower = trim(preg_replace('/\s+/', ' ', $lower) ?: $lower);
 
         return preg_match('/\b(can you hear me|do you hear me|are you there|you there|can you hear|testing testing|mic check)\b/u', $lower) === 1;
-    }
-
-    private function sessionTimezone(BeanSession $session): string
-    {
-        $timezone = trim((string) data_get($session->metadata, 'client_timezone', ''));
-        if ($timezone !== '') {
-            try {
-                new \DateTimeZone($timezone);
-                return $timezone;
-            } catch (\Throwable) {
-                // Fall through to app default.
-            }
-        }
-
-        return (string) config('app.timezone', 'UTC');
     }
 
     private function isReadOnlyAnswerCorrection(string $text, string $lower, ?BeanSession $session): bool

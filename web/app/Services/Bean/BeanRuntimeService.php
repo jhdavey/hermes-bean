@@ -17,17 +17,24 @@ class BeanRuntimeService
         private readonly BeanTextModel $model,
         private readonly BeanActionExecutor $executor,
         private readonly BeanActivityLogger $activity,
+        private readonly BeanTimeContext $timeContext,
     ) {}
 
     public function createSession(User $user, ?int $workspaceId = null, ?string $clientTimezone = null): BeanSession
     {
         $workspace = app(WorkspaceService::class)->resolveWorkspace($user, $workspaceId);
+        $timezone = $this->timeContext->normalizeTimezone($clientTimezone);
         return BeanSession::create([
             'user_id' => $user->id,
             'workspace_id' => $workspace->id,
             'title' => 'Bean chat',
             'status' => 'active',
-            'metadata' => array_filter(['privacy_mode' => true, 'wake_phrase' => 'Hey Bean', 'client_timezone' => $clientTimezone]),
+            'metadata' => array_filter([
+                'privacy_mode' => true,
+                'wake_phrase' => 'Hey Bean',
+                'client_timezone' => $timezone,
+                'timezone_source' => $timezone !== null ? 'browser' : 'app_default',
+            ]),
         ]);
     }
 
@@ -60,9 +67,12 @@ class BeanRuntimeService
             ? BeanSession::query()->where('user_id', $user->id)->findOrFail($sessionId)
             : $this->createSession($user, $workspaceId, $clientTimezone);
         if ($clientTimezone !== null && $sessionId) {
-            $metadata = is_array($session->metadata) ? $session->metadata : [];
-            $session->forceFill(['metadata' => [...$metadata, 'client_timezone' => $clientTimezone]])->save();
-            $session = $session->refresh();
+            $timezone = $this->timeContext->normalizeTimezone($clientTimezone);
+            if ($timezone !== null) {
+                $metadata = is_array($session->metadata) ? $session->metadata : [];
+                $session->forceFill(['metadata' => [...$metadata, 'client_timezone' => $timezone, 'timezone_source' => 'browser']])->save();
+                $session = $session->refresh();
+            }
         }
 
         if ($this->isAffirmativeConfirmationReply($content) && $sessionId) {
@@ -77,6 +87,7 @@ class BeanRuntimeService
             }
         }
 
+        $timeContext = $this->timeContext->forSession($session);
         $run = BeanRun::create([
             'bean_session_id' => $session->id,
             'user_id' => $user->id,
@@ -84,7 +95,10 @@ class BeanRuntimeService
             'status' => 'running',
             'mode' => 'text',
             'input' => $content,
-            'metadata' => array_filter(['client_timezone' => data_get($session->metadata, 'client_timezone')]),
+            'metadata' => array_filter([
+                'client_timezone' => $timeContext['timezone'],
+                'time_context' => $timeContext,
+            ]),
             'started_at' => now(),
         ]);
 
@@ -166,12 +180,17 @@ class BeanRuntimeService
                 ->lockForUpdate()
                 ->findOrFail($confirmationId);
             $session = $confirmation->session;
+            $sessionTimeContext = $this->timeContext->forSession($session);
             $run = $confirmation->run ?: BeanRun::create([
                 'bean_session_id' => $session->id,
                 'user_id' => $user->id,
                 'workspace_id' => $session->workspace_id,
                 'status' => 'running',
                 'mode' => 'confirmation',
+                'metadata' => [
+                    'client_timezone' => $sessionTimeContext['timezone'],
+                    'time_context' => $sessionTimeContext,
+                ],
                 'started_at' => now(),
             ]);
             $result = $this->executor->execute($session, $run, $confirmation->action, $confirmation->arguments ?? [], true);
@@ -489,7 +508,11 @@ class BeanRuntimeService
     {
         $action = (string) ($list['action'] ?? '');
         $dateField = $action === 'reminder.list' ? 'remind_at' : 'due_at';
-        $start = now()->startOfDay();
+        $timeContext = is_array($list['time_context'] ?? null) ? $list['time_context'] : $this->timeContext->forClientTimezone(null, 'app_default');
+        $start = \Illuminate\Support\Carbon::parse((string) data_get($timeContext, 'now_utc', now('UTC')->toIso8601String()), 'UTC')
+            ->timezone((string) data_get($timeContext, 'timezone', config('app.timezone', 'UTC')))
+            ->startOfDay()
+            ->utc();
         $overdue = $items->filter(function (array $item) use ($dateField, $start): bool {
             if (! isset($item[$dateField])) return false;
             return \Illuminate\Support\Carbon::parse((string) $item[$dateField])->lt($start);

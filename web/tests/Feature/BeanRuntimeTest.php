@@ -1037,6 +1037,15 @@ HTML;
 
         $this->assertStringContainsString('Take out trash', $response->getContent());
         $this->assertStringNotContainsString('Payroll', $response->getContent());
+        $response->assertJsonPath('data.run.metadata.time_context.timezone', 'America/Chicago')
+            ->assertJsonPath('data.run.metadata.time_context.local_date', '2026-07-19');
+
+        $toolCall = BeanToolCall::query()->where('user_id', $user->id)->where('action', 'task.list')->latest('id')->firstOrFail();
+        $this->assertSame('America/Chicago', data_get($toolCall->result, 'time_context.timezone'));
+        $this->assertSame([
+            '2026-07-21T05:00:00+00:00',
+            '2026-07-22T04:59:59+00:00',
+        ], data_get($toolCall->arguments, 'filters.0.value'));
         Carbon::setTestNow();
     }
 

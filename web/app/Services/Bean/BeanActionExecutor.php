@@ -30,6 +30,7 @@ class BeanActionExecutor
         private readonly DomainResourceService $domainResources,
         private readonly DomainResourceCatalog $resourceCatalog,
         private readonly ExternalLookupService $externalLookup,
+        private readonly BeanTimeContext $timeContext,
     ) {}
 
     public function execute(BeanSession $session, BeanRun $run, string $action, array $arguments = [], bool $confirmed = false): array
@@ -71,7 +72,7 @@ class BeanActionExecutor
                 'dashboard.summary' => $this->dashboardSummary($run),
                 'resource.query' => $this->genericResourceQuery($run, $arguments),
                 'resource.relationships' => $this->resourceRelationships($run, $arguments),
-                'time.now' => $this->timeNow(),
+                'time.now' => $this->timeNow($run),
                 'external.lookup' => $this->externalLookup($arguments),
                 'task.list' => $this->listResources(Task::class, $run, 'due_at', $arguments),
                 'task.search' => $this->searchResources(Task::class, $run, $arguments),
@@ -148,17 +149,17 @@ class BeanActionExecutor
 
         $arguments = $this->normalizeStatusArgument($class, $arguments);
 
+        $timeContext = $this->timeContext->forSession($session);
         $field = $this->temporalField($class);
         if ($field === null) return $arguments;
-        $timezone = $this->sessionTimezone($session);
         $arguments = $this->normalizeInlineReadFilters($class, $field, $arguments);
-        $arguments = $this->normalizeDateOnlyTemporalFilters($arguments, $field, $timezone);
+        $arguments = $this->normalizeDateOnlyTemporalFilters($arguments, $field, $timeContext);
 
-        $timeLabel = $this->timeLabel($arguments) ?? $this->inferTemporalLabelFromFilters($class, $field, $arguments);
+        $timeLabel = $this->timeLabel($arguments) ?? $this->inferTemporalLabelFromFilters($class, $field, $arguments, $timeContext);
         if ($timeLabel === null) return $arguments;
         $arguments['time_label'] = $timeLabel;
 
-        $temporalFilters = $this->temporalFilters($class, $field, $timeLabel, $timezone);
+        $temporalFilters = $this->temporalFilters($class, $field, $timeLabel, $timeContext);
         if ($temporalFilters === []) return $arguments;
 
         $existing = collect(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [])
@@ -220,15 +221,15 @@ class BeanActionExecutor
         return $arguments;
     }
 
-    private function normalizeDateOnlyTemporalFilters(array $arguments, string $field, string $timezone): array
+    private function normalizeDateOnlyTemporalFilters(array $arguments, string $field, array $timeContext): array
     {
         $filters = collect(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [])
             ->filter(fn ($filter): bool => is_array($filter))
-            ->map(function (array $filter) use ($field, $timezone): array {
+            ->map(function (array $filter) use ($field, $timeContext): array {
                 $operator = strtolower((string) ($filter['operator'] ?? '='));
                 $value = $filter['value'] ?? null;
-                if (($filter['field'] ?? null) === $field && $operator === '=' && $this->isDateOnlyValue($value)) {
-                    return ['field' => $field, 'operator' => 'between', 'value' => $this->localDayUtcRange((string) $value, $timezone)];
+                if (($filter['field'] ?? null) === $field && $operator === '=' && $this->timeContext->isDateOnly($value)) {
+                    return ['field' => $field, 'operator' => 'between', 'value' => $this->timeContext->localDayUtcRange((string) $value, $timeContext)];
                 }
 
                 return $filter;
@@ -243,14 +244,14 @@ class BeanActionExecutor
         return $arguments;
     }
 
-    private function inferTemporalLabelFromFilters(string $class, string $field, array $arguments): ?string
+    private function inferTemporalLabelFromFilters(string $class, string $field, array $arguments, array $timeContext): ?string
     {
         foreach (is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [] as $filter) {
             if (! is_array($filter) || ($filter['field'] ?? null) !== $field) continue;
             $operator = strtolower((string) ($filter['operator'] ?? '='));
             $value = $filter['value'] ?? null;
             if ($operator === 'between' && is_array($value) && count($value) >= 2) {
-                $label = $this->timeLabelForRange($value[0], $value[1]);
+                $label = $this->timeLabelForRange($value[0], $value[1], $timeContext);
                 if ($label !== null) return $label;
             }
             if (in_array($operator, ['<', '<='], true) && in_array($class, [Task::class, Reminder::class], true)) {
@@ -261,16 +262,16 @@ class BeanActionExecutor
         return null;
     }
 
-    private function timeLabelForRange(mixed $start, mixed $end): ?string
+    private function timeLabelForRange(mixed $start, mixed $end, array $timeContext): ?string
     {
         $startDate = $this->dateOrNull($start);
         $endDate = $this->dateOrNull($end);
         if (! $startDate || ! $endDate) return null;
 
-        foreach (['today' => now(), 'tomorrow' => now()->addDay()] as $label => $date) {
-            $dateStart = $date->copy()->startOfDay();
-            $dateEnd = $date->copy()->setTime(23, 59, 59);
-            if ($startDate->isSameDay($date) && $endDate->isSameDay($date) && $startDate->lte($dateStart) && $endDate->gte($dateEnd)) {
+        foreach (['today' => $this->timeContext->todayUtcRange($timeContext), 'tomorrow' => $this->timeContext->tomorrowUtcRange($timeContext)] as $label => $range) {
+            $dateStart = Carbon::parse($range[0])->utc();
+            $dateEnd = Carbon::parse($range[1])->utc();
+            if ($startDate->lte($dateStart) && $endDate->gte($dateEnd)) {
                 return $label;
             }
         }
@@ -300,12 +301,11 @@ class BeanActionExecutor
         return $this->resourceCatalog->temporalFieldForClass($class);
     }
 
-    private function temporalFilters(string $class, string $field, string $timeLabel, string $timezone): array
+    private function temporalFilters(string $class, string $field, string $timeLabel, array $timeContext): array
     {
-        $today = now($timezone);
-        [$start, $end] = $this->localDayUtcRange($today->toDateString(), $timezone);
+        [$start, $end] = $this->timeContext->todayUtcRange($timeContext);
         if ($timeLabel === 'tomorrow') {
-            [$start, $end] = $this->localDayUtcRange($today->copy()->addDay()->toDateString(), $timezone);
+            [$start, $end] = $this->timeContext->tomorrowUtcRange($timeContext);
         }
 
         return match ($timeLabel) {
@@ -320,12 +320,13 @@ class BeanActionExecutor
 
     private function listResources(string $class, BeanRun $run, string $orderField, array $arguments = []): array
     {
+        $timeContext = $this->timeContext->forRun($run);
         $query = $this->baseQuery($class, $run);
         $this->applyDefaultReadConstraints($query, $class, $arguments);
         if (($arguments['status'] ?? null) !== null) {
             $query->where('status', (string) $arguments['status']);
         }
-        $this->applyStructuredFilters($query, $class, $arguments['filters'] ?? []);
+        $this->applyStructuredFilters($query, $class, $arguments['filters'] ?? [], $timeContext);
         $accessibleWorkspaceIds = $this->workspaceIds($run);
         $totalItems = (clone $query)->get();
         $totalCount = count($this->collapseLinkedSummaries($this->summaries($totalItems, $accessibleWorkspaceIds)));
@@ -341,6 +342,7 @@ class BeanActionExecutor
             'limit' => $this->limit($arguments),
             'filters' => array_values(array_filter(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [], 'is_array')),
             'time_label' => $this->timeLabel($arguments),
+            'time_context' => $timeContext,
         ];
     }
 
@@ -354,9 +356,10 @@ class BeanActionExecutor
         }
     }
 
-    private function applyStructuredFilters(Builder $query, string $class, mixed $filters): void
+    private function applyStructuredFilters(Builder $query, string $class, mixed $filters, ?array $timeContext = null): void
     {
         if (! is_array($filters)) return;
+        $timeContext ??= $this->timeContext->forClientTimezone(null, 'app_default');
 
         $allowed = $this->filterableFields($class);
         foreach ($filters as $filter) {
@@ -367,7 +370,7 @@ class BeanActionExecutor
             if (! in_array($field, $allowed, true)) continue;
 
             if ($operator === 'between' && is_array($value) && count($value) >= 2) {
-                $query->whereNotNull($field)->whereBetween($field, [$this->filterValue($field, $value[0]), $this->filterValue($field, $value[1])]);
+                $query->whereNotNull($field)->whereBetween($field, [$this->filterValue($field, $value[0], $timeContext), $this->filterValue($field, $value[1], $timeContext)]);
                 continue;
             }
             if ($operator === 'in' && is_array($value)) {
@@ -378,56 +381,28 @@ class BeanActionExecutor
                 $query->where($field, 'like', '%'.addcslashes((string) $value, '%_\\').'%');
                 continue;
             }
-            if ($operator === '=' && $this->isTemporalField($field) && $this->isDateOnlyValue($value)) {
-                $query->whereNotNull($field)->whereBetween($field, $this->localDayUtcRange((string) $value, (string) config('app.timezone', 'UTC')));
+            if ($operator === '=' && $this->isTemporalField($field) && $this->timeContext->isDateOnly($value)) {
+                $query->whereNotNull($field)->whereBetween($field, $this->timeContext->localDayUtcRange((string) $value, $timeContext));
                 continue;
             }
             if (in_array($operator, ['=', '!=', '<', '<=', '>', '>='], true)) {
-                $query->whereNotNull($field)->where($field, $operator, $this->filterValue($field, $value));
+                $query->whereNotNull($field)->where($field, $operator, $this->filterValue($field, $value, $timeContext));
             }
         }
     }
 
-    private function filterValue(string $field, mixed $value): mixed
+    private function filterValue(string $field, mixed $value, ?array $timeContext = null): mixed
     {
         if ($this->isTemporalField($field)) {
-            return $this->dateOrNull($value) ?: $value;
+            return $this->dateOrNull($value, $timeContext) ?: $value;
         }
 
         return $value;
     }
 
-    private function sessionTimezone(BeanSession $session): string
-    {
-        $timezone = trim((string) data_get($session->metadata, 'client_timezone', ''));
-        if ($timezone !== '') {
-            try {
-                new \DateTimeZone($timezone);
-                return $timezone;
-            } catch (Throwable) {
-                // Fall through to app default.
-            }
-        }
-
-        return (string) config('app.timezone', 'UTC');
-    }
-
-    private function localDayUtcRange(string $date, string $timezone): array
-    {
-        $start = Carbon::parse($date, $timezone)->startOfDay()->utc();
-        $end = Carbon::parse($date, $timezone)->endOfDay()->utc();
-
-        return [$start->toIso8601String(), $end->toIso8601String()];
-    }
-
     private function isTemporalField(string $field): bool
     {
         return in_array($field, ['due_at', 'completed_at', 'remind_at', 'starts_at', 'ends_at', 'updated_at', 'created_at'], true);
-    }
-
-    private function isDateOnlyValue(mixed $value): bool
-    {
-        return is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($value)) === 1;
     }
 
     private function filterableFields(string $class): array
@@ -467,6 +442,7 @@ class BeanActionExecutor
 
     private function searchResources(string $class, BeanRun $run, array $arguments, array $fields = ['title']): array
     {
+        $timeContext = $this->timeContext->forRun($run);
         $queryText = trim((string) ($arguments['query'] ?? $arguments['title'] ?? ''));
         $query = $this->baseQuery($class, $run);
         if ($queryText !== '') {
@@ -480,7 +456,7 @@ class BeanActionExecutor
         if (($arguments['status'] ?? null) !== null) {
             $query->where('status', (string) $arguments['status']);
         }
-        $this->applyStructuredFilters($query, $class, $arguments['filters'] ?? []);
+        $this->applyStructuredFilters($query, $class, $arguments['filters'] ?? [], $timeContext);
         $totalCount = (clone $query)->count();
         $items = $query->orderByDesc('updated_at')->limit($this->limit($arguments))->get();
 
@@ -492,6 +468,7 @@ class BeanActionExecutor
             'limit' => $this->limit($arguments),
             'filters' => array_values(array_filter(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [], 'is_array')),
             'time_label' => $this->timeLabel($arguments),
+            'time_context' => $timeContext,
         ];
     }
 
@@ -511,6 +488,7 @@ class BeanActionExecutor
 
     private function genericResourceQuery(BeanRun $run, array $arguments): array
     {
+        $timeContext = $this->timeContext->forRun($run);
         $resource = strtolower(trim((string) ($arguments['resource'] ?? 'tasks')));
         $class = $this->resourceCatalog->classForResource($resource) ?? Task::class;
         $orderField = $this->resourceCatalog->temporalFieldForClass($class) ?? 'updated_at';
@@ -545,7 +523,7 @@ class BeanActionExecutor
         if (($arguments['status'] ?? null) !== null) {
             $query->where('status', (string) $arguments['status']);
         }
-        $this->applyStructuredFilters($query, $class, $arguments['filters'] ?? []);
+        $this->applyStructuredFilters($query, $class, $arguments['filters'] ?? [], $timeContext);
         if (($arguments['workspace_id'] ?? null) !== null) {
             $query->where('workspace_id', (int) $arguments['workspace_id']);
         }
@@ -561,7 +539,7 @@ class BeanActionExecutor
                 ->map(fn (array $item): array => [
                     'id' => $item['id'] ?? null,
                     'title' => $item['title'] ?? null,
-                    'reason' => $this->visibilityReason($item, $class, $timeLabel ?? ''),
+                    'reason' => $this->visibilityReason($item, $class, $timeLabel ?? '', $timeContext),
                 ])
                 ->filter(fn (array $explanation): bool => ($explanation['reason'] ?? '') !== '')
                 ->values()
@@ -578,6 +556,7 @@ class BeanActionExecutor
             'include_workspaces' => (bool) ($arguments['include_workspaces'] ?? false),
             'items' => $summaries,
             'explanations' => $explanations,
+            'time_context' => $timeContext,
         ];
     }
 
@@ -597,14 +576,15 @@ class BeanActionExecutor
         ];
     }
 
-    private function visibilityReason(array $item, string $class, string $timeLabel): string
+    private function visibilityReason(array $item, string $class, string $timeLabel, array $timeContext): string
     {
         if ($class === Task::class) {
             $title = (string) ($item['title'] ?? 'This task');
             $status = (string) ($item['status'] ?? 'open');
-            $dueAt = isset($item['due_at']) ? Carbon::parse((string) $item['due_at']) : null;
+            $dueAt = isset($item['due_at']) ? Carbon::parse((string) $item['due_at'])->utc() : null;
             if ($timeLabel === 'today' && $status === 'open' && $dueAt) {
-                return $dueAt->lt(now()->startOfDay())
+                $startOfLocalTodayUtc = Carbon::parse($this->timeContext->todayUtcRange($timeContext)[0])->utc();
+                return $dueAt->lt($startOfLocalTodayUtc)
                     ? "{$title} is on today's list because it is overdue and open."
                     : "{$title} is on today's list because it is due by today and open.";
             }
@@ -613,7 +593,7 @@ class BeanActionExecutor
             }
         } elseif ($class === Reminder::class) {
             $title = (string) ($item['title'] ?? 'This reminder');
-            $remindAt = isset($item['remind_at']) ? Carbon::parse((string) $item['remind_at']) : null;
+            $remindAt = isset($item['remind_at']) ? Carbon::parse((string) $item['remind_at'])->utc() : null;
             if ($timeLabel === 'today' && $remindAt) return "{$title} is included because it is scheduled by today.";
             if ($timeLabel === 'overdue' && $remindAt) return "{$title} is overdue because it was scheduled before today.";
         }
@@ -622,6 +602,7 @@ class BeanActionExecutor
 
     private function createTask(BeanRun $run, array $args): array
     {
+        $timeContext = $this->timeContext->forRun($run);
         $task = $this->domainResources->createTask($this->user($run), [
             'workspace_id' => $this->workspaceId($run),
             'title' => trim((string) ($args['title'] ?? 'New task')) ?: 'New task',
@@ -631,8 +612,8 @@ class BeanActionExecutor
             'category' => $args['category'] ?? null,
             'color' => $args['color'] ?? null,
             'is_critical' => $args['is_critical'] ?? null,
-            'due_at' => $args['due_at'] ?? null,
-            'completed_at' => $args['completed_at'] ?? null,
+            'due_at' => ($this->dateOrNull($args['due_at'] ?? null, $timeContext))?->toIso8601String(),
+            'completed_at' => ($this->dateOrNull($args['completed_at'] ?? null, $timeContext))?->toIso8601String(),
             'metadata' => $this->metadata($args),
         ]);
         return ['ok' => true, 'resource_type' => 'task', 'item' => $this->summary($task, $this->workspaceIds($run))];
@@ -640,6 +621,9 @@ class BeanActionExecutor
 
     private function createReminder(BeanRun $run, array $args): array
     {
+        $timeContext = $this->timeContext->forRun($run);
+        $remindAt = $this->dateOrNull($args['remind_at'] ?? null, $timeContext)
+            ?: $this->timeContext->localNow($timeContext)->addDay()->utc();
         $reminder = $this->domainResources->createReminder($this->user($run), [
             'workspace_id' => $this->workspaceId($run),
             'title' => trim((string) ($args['title'] ?? 'New reminder')) ?: 'New reminder',
@@ -647,7 +631,7 @@ class BeanActionExecutor
             'category' => $args['category'] ?? null,
             'color' => $args['color'] ?? null,
             'is_critical' => $args['is_critical'] ?? null,
-            'remind_at' => $args['remind_at'] ?? now()->addDay()->toIso8601String(),
+            'remind_at' => $remindAt->toIso8601String(),
             'status' => $args['status'] ?? 'scheduled',
             'metadata' => $this->metadata($args),
         ]);
@@ -656,7 +640,9 @@ class BeanActionExecutor
 
     private function createCalendarEvent(BeanRun $run, array $args): array
     {
-        $startsAt = $this->dateOrNull($args['starts_at'] ?? null) ?: now()->addDay()->setTime(9, 0);
+        $timeContext = $this->timeContext->forRun($run);
+        $startsAt = $this->dateOrNull($args['starts_at'] ?? null, $timeContext)
+            ?: $this->timeContext->localNow($timeContext)->addDay()->setTime(9, 0)->utc();
         $event = $this->domainResources->createCalendarEvent($this->user($run), [
             'workspace_id' => $this->workspaceId($run),
             'title' => trim((string) ($args['title'] ?? 'New event')) ?: 'New event',
@@ -666,7 +652,7 @@ class BeanActionExecutor
             'color' => $args['color'] ?? null,
             'is_critical' => $args['is_critical'] ?? null,
             'starts_at' => $startsAt->toIso8601String(),
-            'ends_at' => ($this->dateOrNull($args['ends_at'] ?? null) ?: (clone $startsAt)->addHour())->toIso8601String(),
+            'ends_at' => ($this->dateOrNull($args['ends_at'] ?? null, $timeContext) ?: (clone $startsAt)->addHour())->toIso8601String(),
             'all_day' => (bool) ($args['all_day'] ?? false),
             'status' => $args['status'] ?? 'scheduled',
             'recurrence' => (string) ($args['recurrence'] ?? 'none'),
@@ -712,12 +698,13 @@ class BeanActionExecutor
         if (! ($match['ok'] ?? false)) return $match;
         /** @var Model $model */
         $model = $match['model'];
+        $timeContext = $this->timeContext->forRun($run);
         $updates = [];
         foreach ($allowed as $field) {
             if (array_key_exists($field, $args)) $updates[$field] = $args[$field];
         }
         foreach (['due_at', 'completed_at', 'remind_at', 'starts_at', 'ends_at'] as $field) {
-            if (array_key_exists($field, $updates)) $updates[$field] = $this->dateOrNull($updates[$field]);
+            if (array_key_exists($field, $updates)) $updates[$field] = $this->dateOrNull($updates[$field], $timeContext);
         }
         if ($model instanceof CalendarEvent
             && array_key_exists('starts_at', $updates)
@@ -816,17 +803,27 @@ class BeanActionExecutor
 
     private function dashboardSummary(BeanRun $run): array
     {
+        $timeContext = $this->timeContext->forRun($run);
+        $todayStartUtc = $this->timeContext->todayUtcRange($timeContext)[0];
         return ['ok' => true, 'summary' => [
             'tasks' => $this->baseQuery(Task::class, $run)->where('status', $this->resourceCatalog->activeStatusForClass(Task::class))->count(),
             'reminders' => $this->baseQuery(Reminder::class, $run)->where('status', $this->resourceCatalog->activeStatusForClass(Reminder::class))->count(),
-            'calendar_events' => $this->baseQuery(CalendarEvent::class, $run)->where('status', $this->resourceCatalog->activeStatusForClass(CalendarEvent::class))->where('starts_at', '>=', now()->startOfDay())->count(),
+            'calendar_events' => $this->baseQuery(CalendarEvent::class, $run)->where('status', $this->resourceCatalog->activeStatusForClass(CalendarEvent::class))->where('starts_at', '>=', Carbon::parse($todayStartUtc)->utc())->count(),
             'notes' => $this->baseQuery(Note::class, $run)->count(),
-        ]];
+        ], 'time_context' => $timeContext];
     }
 
-    private function timeNow(): array
+    private function timeNow(BeanRun $run): array
     {
-        return ['ok' => true, 'now' => now()->toIso8601String(), 'timezone' => config('app.timezone')];
+        $timeContext = $this->timeContext->forRun($run);
+        return [
+            'ok' => true,
+            'now' => $timeContext['local_now'],
+            'now_utc' => $timeContext['now_utc'],
+            'local_date' => $timeContext['local_date'],
+            'timezone' => $timeContext['timezone'],
+            'time_context' => $timeContext,
+        ];
     }
 
     private function externalLookup(array $args): array
@@ -1048,7 +1045,12 @@ class BeanActionExecutor
     private function labelFor(string $action): string { return "Working: {$action}"; }
     private function resultLabel(string $action, array $result): string { return ($result['ok'] ?? false) ? "Done: {$action}".$this->progressDetailText($action, $result) : "Failed: {$action}".($result['error'] ?? null ? ' · '.(string) $result['error'] : ''); }
 
-    private function dateOrNull(mixed $value): ?Carbon { return blank($value) ? null : Carbon::parse((string) $value)->utc(); }
+    private function dateOrNull(mixed $value, ?array $timeContext = null): ?Carbon
+    {
+        if (blank($value)) return null;
+        $timeContext ??= $this->timeContext->forClientTimezone(null, 'app_default');
+        return $this->timeContext->parseUserDateTime($value, $timeContext);
+    }
     private function metadata(array $args): array { return is_array($args['metadata'] ?? null) ? $args['metadata'] : ['created_by' => 'bean']; }
 
     private function summaries($items, ?array $accessibleWorkspaceIds = null): array { return $items->map(fn ($item): array => $this->summary($item, $accessibleWorkspaceIds))->values()->all(); }
