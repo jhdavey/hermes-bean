@@ -35,6 +35,17 @@ test('Bean assistant presence is web-first and uses the Laravel Bean runtime', (
     assert.match(dashboardSource, /hb-bean-pulse/);
 });
 
+test('expanded Bean panel only shows chat history and the composer', () => {
+    assert.match(source, /function beanPanelMarkup/);
+    assert.match(source, /hb-bean-chat-log/);
+    assert.match(source, /data-bean-chat-form/);
+    assert.match(source, /data-bean-input/);
+    assert.doesNotMatch(source, /hb-bean-panel-head|data-bean-panel-close/);
+    assert.doesNotMatch(source, /hb-bean-privacy-row|data-bean-privacy/);
+    assert.doesNotMatch(source, /Activity log|Your HeyBean assistant/);
+    assert.match(dashboardSource, /grid-template-rows: minmax\(160px, 1fr\) auto/);
+});
+
 test('Bean voice starts from wake detection instead of tap-to-talk', () => {
     assert.doesNotMatch(source, /data-bean-voice/);
     assert.doesNotMatch(source, /Tap to talk/);

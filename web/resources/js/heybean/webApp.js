@@ -1783,32 +1783,15 @@ export function mountHeyBeanWebApp(mount) {
 
     function beanPanelMarkup() {
         const messages = normalizeList(state.bean.messages);
-        const activity = normalizeList(state.bean.activity).slice(-40);
-        const confirmations = normalizeList(state.bean.confirmations);
         return `
             <aside class="hb-bean-panel" aria-label="Bean assistant">
-                <div class="hb-bean-panel-head">
-                    <div><strong>Bean</strong><span>Your HeyBean assistant</span></div>
-                    <button class="hb-icon-button" type="button" data-bean-panel-close aria-label="Close Bean">×</button>
-                </div>
-                <div class="hb-bean-privacy-row" role="group" aria-label="Bean listening mode">
-                    <button class="hb-chip ${state.bean.mode === 'privacy' ? 'hb-chip-active' : ''}" type="button" data-bean-privacy="privacy">Off — privacy mode</button>
-                    <button class="hb-chip ${state.bean.mode !== 'privacy' ? 'hb-chip-active' : ''}" type="button" data-bean-privacy="wake_listening">On — listen for “Hey Bean”</button>
-                </div>
-                ${state.bean.voiceTranscript ? `<div class="hb-bean-voice-draft">${escapeHtml(state.bean.voiceTranscript)}</div>` : ''}
-                ${state.bean.error ? `<div class="hb-error">${escapeHtml(state.bean.error)}</div>` : ''}
                 <div class="hb-bean-chat-log" aria-live="polite">
-                    ${messages.length ? messages.map(beanMessageMarkup).join('') : '<div class="hb-empty hb-surface-soft">Ask Bean to manage your calendar, tasks, reminders, or notes.</div>'}
+                    ${messages.length ? messages.map(beanMessageMarkup).join('') : '<div class="hb-empty hb-surface-soft">Ask Bean anything…</div>'}
                 </div>
-                ${confirmations.length ? `<div class="hb-bean-confirmations">${confirmations.map(beanConfirmationMarkup).join('')}</div>` : ''}
                 <form class="hb-bean-chat-form" data-bean-chat-form>
                     <input type="text" data-bean-input placeholder="Ask Bean anything…" value="${escapeAttr(state.bean.input)}" ${state.bean.busy ? 'disabled' : ''}>
                     <button class="hb-button" type="submit" ${state.bean.busy ? 'disabled' : ''}>${state.bean.busy ? 'Working…' : 'Send'}</button>
                 </form>
-                <details class="hb-bean-activity" open>
-                    <summary>Activity log</summary>
-                    <div>${activity.length ? activity.map(beanActivityMarkup).join('') : '<span>No Bean activity yet.</span>'}</div>
-                </details>
             </aside>`;
     }
 
@@ -4394,11 +4377,6 @@ export function mountHeyBeanWebApp(mount) {
             render();
             loadBeanActivity().finally(render);
         });
-        mount.querySelector('[data-bean-panel-close]')?.addEventListener('click', () => {
-            state.bean.panelOpen = false;
-            render();
-        });
-        mount.querySelectorAll('[data-bean-privacy]').forEach((button) => button.addEventListener('click', () => setBeanMode(button.dataset.beanPrivacy || 'privacy')));
         mount.querySelector('[data-bean-input]')?.addEventListener('input', (event) => {
             state.bean.input = event.currentTarget.value;
         });
