@@ -100,6 +100,9 @@ return [
         'bean_reasoning_model' => env('OPENAI_BEAN_REASONING_MODEL', 'gpt-4.1'),
         'realtime_model' => env('OPENAI_REALTIME_MODEL', 'gpt-realtime'),
         'realtime_voice' => env('OPENAI_REALTIME_VOICE', 'alloy'),
+        'realtime_vad_threshold' => (float) env('OPENAI_REALTIME_VAD_THRESHOLD', 0.75),
+        'realtime_vad_prefix_padding_ms' => (int) env('OPENAI_REALTIME_VAD_PREFIX_PADDING_MS', 300),
+        'realtime_vad_silence_duration_ms' => (int) env('OPENAI_REALTIME_VAD_SILENCE_DURATION_MS', 700),
     ],
 
     'google_calendar' => [

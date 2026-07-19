@@ -93,6 +93,9 @@ class BeanController extends Controller
                         ],
                         'turn_detection' => [
                             'type' => 'server_vad',
+                            'threshold' => (float) config('services.openai.realtime_vad_threshold', 0.75),
+                            'prefix_padding_ms' => (int) config('services.openai.realtime_vad_prefix_padding_ms', 300),
+                            'silence_duration_ms' => (int) config('services.openai.realtime_vad_silence_duration_ms', 700),
                             'create_response' => false,
                         ],
                     ],

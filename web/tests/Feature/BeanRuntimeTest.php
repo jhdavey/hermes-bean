@@ -1725,6 +1725,9 @@ HTML;
             'services.openai.api_key' => 'test-openai-key',
             'services.openai.realtime_model' => 'gpt-realtime',
             'services.openai.realtime_voice' => 'alloy',
+            'services.openai.realtime_vad_threshold' => 0.82,
+            'services.openai.realtime_vad_prefix_padding_ms' => 250,
+            'services.openai.realtime_vad_silence_duration_ms' => 800,
         ]);
         $token = $this->apiToken('bean-realtime-client-secret@example.com');
 
@@ -1737,6 +1740,9 @@ HTML;
             $this->assertSame('gpt-4o-mini-transcribe', data_get($payload, 'session.audio.input.transcription.model'));
             $this->assertSame('en', data_get($payload, 'session.audio.input.transcription.language'));
             $this->assertFalse((bool) data_get($payload, 'session.audio.input.turn_detection.create_response'));
+            $this->assertSame(0.82, data_get($payload, 'session.audio.input.turn_detection.threshold'));
+            $this->assertSame(250, data_get($payload, 'session.audio.input.turn_detection.prefix_padding_ms'));
+            $this->assertSame(800, data_get($payload, 'session.audio.input.turn_detection.silence_duration_ms'));
             $this->assertStringContainsString('Always speak English', data_get($payload, 'session.instructions'));
             $this->assertStringContainsString('Laravel is the source of truth', data_get($payload, 'session.instructions'));
 

@@ -85,7 +85,30 @@ test('Bean voice handles stale page-load status and stop commands locally', () =
     assert.match(source, /handleBeanVoiceControl/);
     assert.match(source, /isBeanStopCommand/);
     assert.match(source, /response\.cancel/);
-    assert.match(source, /Stopped — listening for “Hey Bean”/);
+    assert.match(source, /Dismissed — listening for “Hey Bean”/);
+});
+
+test('Bean voice mutes realtime mic while answering and only opens a short follow-up window', () => {
+    assert.match(source, /const beanFollowUpWindowMs = 30000/);
+    assert.match(source, /const beanPostSpeechInputCooldownMs = 700/);
+    assert.match(source, /function setBeanVoiceInputEnabled/);
+    assert.match(source, /track\.enabled = Boolean\(enabled\)/);
+    assert.match(source, /setBeanVoiceInputEnabled\(false\)/);
+    assert.match(source, /scheduleBeanFollowUpListening/);
+    assert.match(source, /Listening for a follow-up…/);
+    assert.match(source, /input_audio_buffer\.clear/);
+    assert.match(source, /Date\.now\(\) < beanVoiceInputIgnoreUntil/);
+    assert.match(source, /endBeanVoiceConversationForWake\(\)/);
+});
+
+test('Bean voice dismisses to wake-word-only mode before accepting more speech', () => {
+    assert.match(source, /function endBeanVoiceConversationForWake/);
+    assert.match(source, /Dismissed — listening for “Hey Bean”/);
+    assert.match(source, /dismiss bean/);
+    assert.match(source, /thanks bean/);
+    assert.match(source, /goodbye/);
+    assert.match(source, /stopBeanVoiceSession\(\{ statusText \}\)/);
+    assert.match(source, /state\.bean\.mode = localStorage\.getItem\('heybean\.bean\.privacy'\) === 'listening' \? 'wake_listening' : 'privacy'/);
 });
 
 test('Bean local wake mode only uses local wake detectors', () => {
