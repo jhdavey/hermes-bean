@@ -192,8 +192,8 @@ class BeanRuntimeService
         if ($timeResponse !== null) return $timeResponse;
         $weatherResponse = $this->weatherResponse($results);
         if ($weatherResponse !== null) return $weatherResponse;
-        $recipeResponse = $this->recipeResponse($results);
-        if ($recipeResponse !== null) return $recipeResponse;
+        $externalLookupResponse = $this->externalLookupResponse($results);
+        if ($externalLookupResponse !== null) return $externalLookupResponse;
         $noteMutationResponse = $this->noteMutationResponse($results);
         if ($noteMutationResponse !== null) return $noteMutationResponse;
         $listResponse = $this->listResponse($results);
@@ -278,14 +278,23 @@ class BeanRuntimeService
         return $formatted.(string) $unit;
     }
 
-    private function recipeResponse(array $results): ?string
+    private function externalLookupResponse(array $results): ?string
     {
-        $recipe = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
-            && ($result['action'] ?? null) === 'recipe.lookup');
-        if (! $recipe) return null;
-        $title = trim((string) ($recipe['title'] ?? $recipe['query'] ?? 'recipe'));
-        $summary = trim((string) ($recipe['summary'] ?? ''));
-        if ($summary !== '') return "I found a simple {$title} recipe: {$summary}";
+        $lookup = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
+            && ($result['action'] ?? null) === 'external.lookup');
+        if (! $lookup) return null;
+        $summary = trim((string) ($lookup['summary'] ?? ''));
+        $source = trim((string) ($lookup['source_url'] ?? ''));
+        if ($summary !== '' && $source !== '') return "I found this online: {$summary} Source: {$source}";
+        if ($summary !== '') return "I found this online: {$summary}";
+        $sources = collect($lookup['sources'] ?? [])->filter(fn ($source): bool => is_array($source))->values();
+        if ($sources->isNotEmpty()) {
+            $first = $sources->first();
+            $snippet = trim((string) ($first['snippet'] ?? $first['title'] ?? ''));
+            $url = trim((string) ($first['url'] ?? ''));
+            if ($snippet !== '' && $url !== '') return "I found this online: {$snippet} Source: {$url}";
+            if ($snippet !== '') return "I found this online: {$snippet}";
+        }
         return null;
     }
 
@@ -498,7 +507,7 @@ class BeanRuntimeService
     {
         $label = $this->listLabel($list);
         $items = collect($list['items'] ?? [])->filter(fn ($item): bool => is_array($item));
-        $count = $items->count();
+        $count = max((int) ($list['total_count'] ?? 0), $items->count());
         if ($count === 0) {
             return "You don’t have any {$label}.";
         }
@@ -514,7 +523,7 @@ class BeanRuntimeService
             ->map(fn (array $item): string => trim((string) ($item['title'] ?? 'Untitled')) ?: 'Untitled')
             ->values();
         $listText = $this->naturalList($titles->all());
-        $more = $count > 5 ? ' and '.($count - 5).' more' : '';
+        $more = $count > $titles->count() ? ' and '.($count - $titles->count()).' more' : '';
         return 'You have '.$count.' '.$label.': '.$listText.$more.'.';
     }
 

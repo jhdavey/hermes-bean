@@ -71,7 +71,7 @@ class BeanActionExecutor
                 'resource.relationships' => $this->resourceRelationships($run, $arguments),
                 'time.now' => $this->timeNow(),
                 'weather.lookup' => $this->weatherLookup($arguments),
-                'recipe.lookup' => $this->recipeLookup($arguments),
+                'external.lookup' => $this->externalLookup($arguments),
                 'task.list' => $this->listResources(Task::class, $run, 'due_at', $arguments),
                 'task.search' => $this->searchResources(Task::class, $run, $arguments),
                 'task.context' => $this->resourceContext(Task::class, $run, $arguments),
@@ -298,12 +298,18 @@ class BeanActionExecutor
         }
         $this->applyStructuredFilters($query, $class, $arguments['filters'] ?? []);
         $accessibleWorkspaceIds = $this->workspaceIds($run);
+        $totalItems = (clone $query)->get();
+        $totalCount = count($this->collapseLinkedSummaries($this->summaries($totalItems, $accessibleWorkspaceIds)));
         $order = $this->primarySort($class, $arguments, $orderField);
         $items = $query->orderBy($order['field'], $order['direction'])->orderBy('id')->limit($this->limit($arguments))->get();
+        $summaries = $this->collapseLinkedSummaries($this->summaries($items, $accessibleWorkspaceIds));
 
         return [
             'ok' => true,
-            'items' => $this->collapseLinkedSummaries($this->summaries($items, $accessibleWorkspaceIds)),
+            'items' => $summaries,
+            'total_count' => $totalCount,
+            'returned_count' => count($summaries),
+            'limit' => $this->limit($arguments),
             'filters' => array_values(array_filter(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [], 'is_array')),
             'time_label' => $this->timeLabel($arguments),
         ];
@@ -409,11 +415,15 @@ class BeanActionExecutor
             $query->where('status', (string) $arguments['status']);
         }
         $this->applyStructuredFilters($query, $class, $arguments['filters'] ?? []);
+        $totalCount = (clone $query)->count();
         $items = $query->orderByDesc('updated_at')->limit($this->limit($arguments))->get();
 
         return [
             'ok' => true,
             'items' => $this->summaries($items, $this->workspaceIds($run)),
+            'total_count' => $totalCount,
+            'returned_count' => $items->count(),
+            'limit' => $this->limit($arguments),
             'filters' => array_values(array_filter(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [], 'is_array')),
             'time_label' => $this->timeLabel($arguments),
         ];
@@ -775,30 +785,134 @@ class BeanActionExecutor
         ];
     }
 
-    private function recipeLookup(array $args): array
+    private function externalLookup(array $args): array
     {
-        $query = trim((string) ($args['query'] ?? $args['title'] ?? 'quesadillas')) ?: 'quesadillas';
-        $lower = mb_strtolower($query);
-        if (str_contains($lower, 'quesadilla')) {
-            return [
-                'ok' => true,
-                'provider' => 'bean-recipe-library',
-                'query' => 'quesadillas',
-                'title' => 'quesadillas',
-                'summary' => 'fill flour tortillas with cheese, cook until crisp and melted, then serve with salsa or sour cream.',
-                'ingredients' => ['flour tortillas', 'shredded cheese', 'optional chicken/beans/vegetables', 'salsa or sour cream'],
-                'steps' => ['Fill half a tortilla with cheese and optional fillings.', 'Fold and cook in a skillet until both sides are crisp.', 'Slice and serve with salsa or sour cream.'],
-            ];
+        $query = trim((string) ($args['query'] ?? $args['question'] ?? $args['title'] ?? ''));
+        if ($query === '') {
+            return ['ok' => false, 'error' => 'Please tell me what to look up.'];
+        }
+
+        $response = Http::acceptJson()
+            ->connectTimeout(2)
+            ->timeout(8)
+            ->get('https://api.duckduckgo.com/', [
+                'q' => $query,
+                'format' => 'json',
+                'no_html' => 1,
+                'skip_disambig' => 1,
+            ]);
+
+        if (! $response->ok()) {
+            return ['ok' => false, 'provider' => 'duckduckgo', 'query' => $query, 'error' => 'External lookup failed.'];
+        }
+
+        $data = $response->json() ?: [];
+        $sources = $this->externalLookupSources($data);
+        $summary = trim((string) ($data['AbstractText'] ?? $data['Answer'] ?? ''));
+        if ($summary === '' && $sources === []) {
+            $sources = $this->externalLookupLiteSearch($query);
+        }
+        if ($summary === '' && $sources !== []) {
+            $summary = trim((string) ($sources[0]['snippet'] ?? ''));
         }
 
         return [
-            'ok' => true,
-            'provider' => 'bean-recipe-library',
+            'ok' => $summary !== '' || $sources !== [],
+            'provider' => 'duckduckgo',
             'query' => $query,
-            'title' => $query,
-            'summary' => 'combine the main ingredients, cook until done, season to taste, and serve warm.',
-            'ingredients' => ['main ingredient', 'oil or butter', 'salt and pepper', 'simple sides or toppings'],
-            'steps' => ['Prepare the ingredients.', 'Cook over medium heat until done.', 'Season and serve warm.'],
+            'title' => trim((string) ($data['Heading'] ?? '')) ?: $query,
+            'summary' => $summary,
+            'source_url' => trim((string) ($data['AbstractURL'] ?? '')) ?: ($sources[0]['url'] ?? null),
+            'sources' => $sources,
+            'error' => ($summary === '' && $sources === []) ? 'I could not find a useful external result.' : null,
+        ];
+    }
+
+    private function externalLookupSources(array $data): array
+    {
+        $sources = [];
+        $abstractUrl = trim((string) ($data['AbstractURL'] ?? ''));
+        if ($abstractUrl !== '') {
+            $sources[] = [
+                'title' => trim((string) ($data['Heading'] ?? '')) ?: parse_url($abstractUrl, PHP_URL_HOST),
+                'url' => $abstractUrl,
+                'snippet' => trim((string) ($data['AbstractText'] ?? '')),
+            ];
+        }
+
+        $related = is_array($data['RelatedTopics'] ?? null) ? $data['RelatedTopics'] : [];
+        foreach ($related as $topic) {
+            if (is_array($topic['Topics'] ?? null)) {
+                foreach ($topic['Topics'] as $nested) {
+                    $this->appendExternalSource($sources, $nested);
+                }
+            } else {
+                $this->appendExternalSource($sources, $topic);
+            }
+            if (count($sources) >= 5) break;
+        }
+
+        return collect($sources)
+            ->filter(fn (array $source): bool => trim((string) ($source['url'] ?? '')) !== '' || trim((string) ($source['snippet'] ?? '')) !== '')
+            ->unique(fn (array $source): string => (string) ($source['url'] ?? $source['snippet'] ?? ''))
+            ->take(5)
+            ->values()
+            ->all();
+    }
+
+    private function externalLookupLiteSearch(string $query): array
+    {
+        $response = Http::withHeaders(['User-Agent' => 'HeyBean/1.0'])
+            ->connectTimeout(2)
+            ->timeout(8)
+            ->get('https://lite.duckduckgo.com/lite/', ['q' => $query]);
+        if (! $response->ok()) return [];
+
+        $html = (string) $response->body();
+        preg_match_all("/<a[^>]+href=['\"]([^'\"]+)['\"][^>]+class=['\"]result-link['\"][^>]*>(.*?)<\/a>/isu", $html, $links, PREG_SET_ORDER);
+        if ($links === []) {
+            preg_match_all("/<a[^>]+class=['\"]result-link['\"][^>]+href=['\"]([^'\"]+)['\"][^>]*>(.*?)<\/a>/isu", $html, $links, PREG_SET_ORDER);
+        }
+        preg_match_all("/<td[^>]+class=['\"]result-snippet['\"][^>]*>(.*?)<\/td>/isu", $html, $snippets);
+        $snippetValues = collect($snippets[1] ?? [])
+            ->map(fn (string $snippet): string => trim(html_entity_decode(strip_tags($snippet), ENT_QUOTES | ENT_HTML5)))
+            ->values();
+
+        return collect($links)
+            ->take(5)
+            ->values()
+            ->map(function (array $match, int $index) use ($snippetValues): array {
+                $url = $this->decodeDuckDuckGoUrl(html_entity_decode($match[1], ENT_QUOTES | ENT_HTML5));
+                $title = trim(html_entity_decode(strip_tags($match[2]), ENT_QUOTES | ENT_HTML5));
+                return [
+                    'title' => $title,
+                    'url' => $url,
+                    'snippet' => (string) ($snippetValues[$index] ?? ''),
+                ];
+            })
+            ->filter(fn (array $source): bool => trim((string) ($source['url'] ?? '')) !== '')
+            ->values()
+            ->all();
+    }
+
+    private function decodeDuckDuckGoUrl(string $url): string
+    {
+        if (str_starts_with($url, '//')) $url = 'https:'.$url;
+        $parts = parse_url($url);
+        parse_str((string) ($parts['query'] ?? ''), $query);
+        return isset($query['uddg']) ? (string) $query['uddg'] : $url;
+    }
+
+    private function appendExternalSource(array &$sources, mixed $topic): void
+    {
+        if (! is_array($topic)) return;
+        $text = trim((string) ($topic['Text'] ?? ''));
+        $url = trim((string) ($topic['FirstURL'] ?? ''));
+        if ($text === '' && $url === '') return;
+        $sources[] = [
+            'title' => $text !== '' ? str($text)->before(' - ')->limit(100, '')->toString() : parse_url($url, PHP_URL_HOST),
+            'url' => $url,
+            'snippet' => $text,
         ];
     }
 

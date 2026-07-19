@@ -122,6 +122,9 @@ class BeanQualityAuditService
         if (str_contains($lowerUser, 'recipe') && $this->isRecipePlaceholderAnswer($lowerAnswer, $actions)) {
             $flags[] = 'recipe_request_missing_generated_content';
         }
+        if ($this->looksLikeExternalLookupQuestion($lowerUser) && ! in_array('external.lookup', $actions, true)) {
+            $flags[] = 'external_lookup_request_without_external_lookup';
+        }
         if ($this->looksLikeCorrection($lowerUser) && $toolCalls->where('status', 'completed')->isEmpty()) {
             $flags[] = 'correction_turn_without_recovery_action';
         }
@@ -218,9 +221,14 @@ class BeanQualityAuditService
 
     private function isRecipePlaceholderAnswer(string $lowerAnswer, array $actions): bool
     {
-        if (in_array('recipe.lookup', $actions, true)) return false;
         if (preg_match('/\b(ingredients|instructions|steps|flour tortillas|cook until|recipe:)\b/u', $lowerAnswer) === 1) return false;
         return preg_match('/\b(provide the recipe|provide the details|can\'t browse|cannot browse|don\'t have the recipe|need the recipe text)\b/u', $lowerAnswer) === 1;
+    }
+
+    private function looksLikeExternalLookupQuestion(string $lowerUser): bool
+    {
+        if (preg_match('/\b(time|date|today[’\']?s date|what day|current time|time is it)\b/u', $lowerUser) === 1) return false;
+        return preg_match('/\b(go online|online|look up|lookup|search the web|search online|internet|web|source|sources|latest)\b/u', $lowerUser) === 1;
     }
 
     private function looksLikeCorrection(string $lowerUser): bool

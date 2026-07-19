@@ -36,7 +36,7 @@ class BeanTextModel
         'note.delete',
         'time.now',
         'weather.lookup',
-        'recipe.lookup',
+        'external.lookup',
         'dashboard.summary',
     ];
 
@@ -325,7 +325,7 @@ You are Bean, the HeyBean productivity assistant. Return only JSON matching the 
 Use actions only from this list: {$actions}.
 Laravel is the source of truth: you propose structured actions; Laravel validates, scopes, confirms, and executes them.
 For destructive actions include the delete action, but Laravel will require confirmation before execution.
-Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. The Recent Bean session context includes current_datetime/current_date/timezone; use those for relative dates like today/tomorrow and for follow-up questions. Use ISO 8601 dates when the user supplied or implied a date/time. Use resource.query for flexible factual questions about app data and resource.relationships for relationship/context questions, including workspace/context/why/relationship questions. For resource.query/resource.relationships set resource to tasks, reminders, calendar_events, notes, or workspaces; set query/title for lookup text; set include_workspaces=true when workspace context could matter; set explain_visibility=true for why-is-this-shown questions. For list/query reads, express exact data constraints in filters: use field/operator/value triples, e.g. starts_at between [tomorrowStart, tomorrowEnd], due_at <= todayEnd, remind_at < todayStart, or status in [scheduled]. Use time_label only as user-facing answer context such as today, tomorrow, or overdue; do not rely on time_label for filtering. If the user says "what about tomorrow?" or another temporal follow-up, reuse recent_query_context.resource. Do not include time.now unless the user is actually asking for the time/date. If an item needs lookup by title, use query rather than inventing an id. Use strict mutation actions only when changing app state.
+Arguments should be simple JSON. The schema includes common argument fields; set fields that do not apply to null. The Recent Bean session context includes current_datetime/current_date/timezone; use those for relative dates like today/tomorrow and for follow-up questions. Use ISO 8601 dates when the user supplied or implied a date/time. Use resource.query for flexible factual questions about app data and resource.relationships for relationship/context questions, including workspace/context/why/relationship questions. Use external.lookup for source-backed public web/internet/current/latest lookup requests; keep it generic and set query to the public thing to look up, never to private dashboard data. For resource.query/resource.relationships set resource to tasks, reminders, calendar_events, notes, or workspaces; set query/title for lookup text; set include_workspaces=true when workspace context could matter; set explain_visibility=true for why-is-this-shown questions. For list/query reads, express exact data constraints in filters: use field/operator/value triples, e.g. starts_at between [tomorrowStart, tomorrowEnd], due_at <= todayEnd, remind_at < todayStart, or status in [scheduled]. Use time_label only as user-facing answer context such as today, tomorrow, or overdue; do not rely on time_label for filtering. If the user says "what about tomorrow?" or another temporal follow-up, reuse recent_query_context.resource. Do not include time.now unless the user is actually asking for the time/date. If an item needs lookup by title, use query rather than inventing an id. Use strict mutation actions only when changing app state.
 Do not invent private dashboard data; call list/search/dashboard actions when data is needed.
 Keep response concise and avoid saying an action is complete before Laravel executes it.
 PROMPT;
@@ -396,9 +396,9 @@ PROMPT;
         } elseif (str_contains($lower, 'weather')) {
             $actions[] = ['action' => 'weather.lookup', 'arguments' => ['query' => $text]];
             $response = 'I’ll check the weather.';
-        } elseif ($this->isOnlineRecipeRequest($lower)) {
-            $actions[] = ['action' => 'recipe.lookup', 'arguments' => ['query' => $this->recipeSubject($text, $lower)]];
-            $response = 'I’ll find a simple recipe.';
+        } elseif ($this->isExternalLookupRequest($lower)) {
+            $actions[] = ['action' => 'external.lookup', 'arguments' => ['query' => $this->externalLookupQuery($text)]];
+            $response = 'I’ll look that up.';
         } elseif ($this->isAddRecipesToRecentMealNoteRequest($lower, $session)) {
             $note = $this->recentNoteEntity($session);
             $title = (string) ($note['title'] ?? 'Simple Dinner Meals for This Coming Week');
@@ -811,9 +811,16 @@ PROMPT;
         return str($query)->limit(120, '')->toString();
     }
 
-    private function isOnlineRecipeRequest(string $lower): bool
+    private function externalLookupQuery(string $text): string
     {
-        return str_contains($lower, 'recipe') && preg_match('/\b(go online|online|find|look up|lookup|search|internet|web)\b/u', $lower) === 1;
+        $query = $this->queryFromText($text, ['can', 'you', 'please', 'go', 'online', 'look', 'lookup', 'search', 'the', 'web', 'internet', 'find']);
+        return $query !== '' ? $query : trim($text);
+    }
+
+    private function isExternalLookupRequest(string $lower): bool
+    {
+        if (preg_match('/\b(time|date|today[’\']?s date|what day|current time|time is it)\b/u', $lower) === 1) return false;
+        return preg_match('/\b(go online|online|look up|lookup|search the web|search online|internet|web|source|sources|latest)\b/u', $lower) === 1;
     }
 
     private function isVoiceHealthCheck(string $text): bool

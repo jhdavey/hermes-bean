@@ -63,6 +63,8 @@ class BeanRuntimeTest extends TestCase
             $this->assertContains('resource.relationships', $actionsEnum);
             $this->assertContains('task.create', $actionsEnum);
             $this->assertContains('calendar_event.update', $actionsEnum);
+            $this->assertContains('external.lookup', $actionsEnum);
+            $this->assertNotContains('recipe.lookup', $actionsEnum);
             $this->assertFalse((bool) ($argumentsSchema['additionalProperties'] ?? true));
             $this->assertContains('title', $argumentsSchema['required'] ?? []);
             $this->assertArrayHasKey('filters', $argumentsSchema['properties'] ?? []);
@@ -218,6 +220,50 @@ class BeanRuntimeTest extends TestCase
 
         $this->assertSame(1, Note::where('user_id', $user->id)->count());
         $this->assertDatabaseHas('bean_tool_calls', ['action' => 'note.list', 'status' => 'completed']);
+    }
+
+    public function test_limited_note_list_count_question_uses_total_count_not_returned_sample(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.bean_text_model' => 'gpt-4.1-mini',
+        ]);
+        $token = $this->apiToken('bean-note-total-count@example.com');
+        $user = User::where('email', 'bean-note-total-count@example.com')->firstOrFail();
+        foreach (range(1, 11) as $number) {
+            Note::create([
+                'user_id' => $user->id,
+                'workspace_id' => $user->default_workspace_id,
+                'created_by_user_id' => $user->id,
+                'title' => 'Note '.$number,
+                'plain_text' => 'Saved note '.$number,
+            ]);
+        }
+
+        Http::fakeSequence()->push([
+            'choices' => [[
+                'message' => [
+                    'content' => json_encode([
+                        'response' => 'I’ll check your notes.',
+                        'actions' => [[
+                            'action' => 'note.list',
+                            'arguments' => ['limit' => 1, 'include_workspaces' => true],
+                        ]],
+                    ]),
+                ],
+            ]],
+        ], 200);
+
+        $response = $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'how many notes do I have',
+        ])->assertOk()
+            ->assertJsonPath('data.run.status', 'completed')
+            ->assertJsonFragment(['content' => 'You have 11 notes: Note 1 and 10 more.']);
+
+        $this->assertStringNotContainsString('You have 1 note', $response->getContent());
+        $toolCall = BeanToolCall::query()->where('action', 'note.list')->latest('id')->firstOrFail();
+        $this->assertSame(11, $toolCall->result['total_count'] ?? null);
+        $this->assertSame(1, $toolCall->result['returned_count'] ?? null);
     }
 
     public function test_local_parser_routes_remind_me_to_reminder_not_task(): void
@@ -513,11 +559,11 @@ class BeanRuntimeTest extends TestCase
         $this->assertDatabaseHas('bean_tool_calls', ['action' => 'note.create', 'status' => 'completed']);
     }
 
-    public function test_online_recipe_request_uses_lookup_instead_of_existing_notes_as_fake_web(): void
+    public function test_online_recipe_request_uses_general_external_lookup_instead_of_recipe_tool(): void
     {
         config(['services.openai.api_key' => null]);
-        $token = $this->apiToken('bean-recipe-lookup@example.com');
-        $user = User::where('email', 'bean-recipe-lookup@example.com')->firstOrFail();
+        $token = $this->apiToken('bean-external-lookup@example.com');
+        $user = User::where('email', 'bean-external-lookup@example.com')->firstOrFail();
         Note::create([
             'user_id' => $user->id,
             'workspace_id' => $user->default_workspace_id,
@@ -526,13 +572,26 @@ class BeanRuntimeTest extends TestCase
             'plain_text' => 'Old private note should not be treated as a web result.',
         ]);
 
+        Http::fake([
+            'api.duckduckgo.com/*' => Http::response([
+                'Heading' => 'Quesadilla',
+                'AbstractText' => 'A quesadilla is a Mexican dish consisting of a tortilla filled primarily with cheese and sometimes meats, spices, and other fillings.',
+                'AbstractURL' => 'https://example.test/quesadilla',
+                'RelatedTopics' => [[
+                    'Text' => 'Quesadilla recipe source with tortillas and cheese.',
+                    'FirstURL' => 'https://example.test/recipe',
+                ]],
+            ], 200),
+        ]);
+
         $this->withToken($token)->postJson('/api/bean/messages', [
             'content' => 'Can you go online and find a recipe for quesadillas?',
         ])->assertOk()
             ->assertJsonPath('data.run.status', 'completed')
-            ->assertJsonFragment(['content' => 'I found a simple quesadillas recipe: fill flour tortillas with cheese, cook until crisp and melted, then serve with salsa or sour cream.']);
+            ->assertJsonFragment(['content' => 'I found this online: A quesadilla is a Mexican dish consisting of a tortilla filled primarily with cheese and sometimes meats, spices, and other fillings. Source: https://example.test/quesadilla']);
 
-        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'recipe.lookup', 'status' => 'completed']);
+        $this->assertDatabaseHas('bean_tool_calls', ['action' => 'external.lookup', 'status' => 'completed']);
+        $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'recipe.lookup']);
         $this->assertDatabaseMissing('bean_tool_calls', ['action' => 'note.search']);
     }
 
