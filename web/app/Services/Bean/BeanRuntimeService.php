@@ -7,7 +7,10 @@ use App\Models\BeanMessage;
 use App\Models\BeanRun;
 use App\Models\BeanSession;
 use App\Models\User;
+use App\Services\Bean\Quality\BeanQualityAuditService;
 use App\Services\WorkspaceService;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -18,13 +21,15 @@ class BeanRuntimeService
         private readonly BeanActionExecutor $executor,
         private readonly BeanActivityLogger $activity,
         private readonly BeanTimeContext $timeContext,
+        private readonly HermesAgentRuntimeService $hermesRuntime,
+        private readonly HermesUserHomeService $hermesHomes,
     ) {}
 
     public function createSession(User $user, ?int $workspaceId = null, ?string $clientTimezone = null): BeanSession
     {
         $workspace = app(WorkspaceService::class)->resolveWorkspace($user, $workspaceId);
         $timezone = $this->timeContext->normalizeTimezone($clientTimezone);
-        return BeanSession::create([
+        $session = BeanSession::create([
             'user_id' => $user->id,
             'workspace_id' => $workspace->id,
             'title' => 'Bean chat',
@@ -34,8 +39,16 @@ class BeanRuntimeService
                 'wake_phrase' => 'Hey Bean',
                 'client_timezone' => $timezone,
                 'timezone_source' => $timezone !== null ? 'browser' : 'app_default',
+                'runtime_driver' => (string) config('bean.runtime_driver', 'hermes'),
             ]),
         ]);
+
+        if ((string) config('bean.runtime_driver', 'hermes') === 'hermes') {
+            $this->hermesHomes->ensureForSession($session);
+            $session = $session->refresh();
+        }
+
+        return $session;
     }
 
     private function isAffirmativeConfirmationReply(string $content): bool
@@ -85,6 +98,10 @@ class BeanRuntimeService
             if ($confirmation) {
                 return $this->withConversationState($session, $this->approveConfirmation($user, $confirmation->id));
             }
+        }
+
+        if ((string) config('bean.runtime_driver', 'hermes') === 'hermes') {
+            return $this->hermesRuntime->handleMessage($user, $content, $session, $clientTimezone);
         }
 
         $timeContext = $this->timeContext->forSession($session);
@@ -169,13 +186,13 @@ class BeanRuntimeService
                 'metadata' => [...$runMetadata, 'results' => $results],
                 'completed_at' => now(),
             ]);
-            app(\App\Services\Bean\Quality\BeanQualityAuditService::class)->traceRun($run->refresh());
+            app(BeanQualityAuditService::class)->traceRun($run->refresh());
         } catch (Throwable $exception) {
             $assistantText = 'I ran into a problem trying to do that.';
             $run->update(['status' => 'failed', 'error' => $exception->getMessage(), 'output' => $assistantText, 'completed_at' => now()]);
             BeanMessage::create(['bean_session_id' => $session->id, 'bean_run_id' => $run->id, 'user_id' => $user->id, 'role' => 'assistant', 'content' => $assistantText]);
             $this->activity->log($session, $run, 'error', $assistantText, ['error' => $exception->getMessage()]);
-            app(\App\Services\Bean\Quality\BeanQualityAuditService::class)->traceRun($run->refresh());
+            app(BeanQualityAuditService::class)->traceRun($run->refresh());
         }
 
         $session->touch();
@@ -185,7 +202,7 @@ class BeanRuntimeService
             'run' => $run->refresh(),
             'messages' => $session->messages()->latest('id')->limit(20)->get()->reverse()->values(),
             'activity' => $session->activityEvents()->latest('id')->limit(50)->get()->reverse()->values(),
-            'confirmations' => \App\Models\BeanConfirmationRequest::query()
+            'confirmations' => BeanConfirmationRequest::query()
                 ->where('bean_session_id', $session->id)
                 ->where('status', 'pending')
                 ->latest('id')
@@ -222,6 +239,7 @@ class BeanRuntimeService
             $runMetadata = is_array($run->metadata) ? $run->metadata : [];
             $run->update(['status' => ($result['ok'] ?? false) ? 'completed' : 'failed', 'output' => $text, 'metadata' => [...$runMetadata, 'result' => $result], 'completed_at' => now()]);
             $this->activity->log($session, $run, 'assistant_message', $text, ['result' => $result]);
+
             return ['confirmation' => $confirmation->refresh(), 'run' => $run->refresh(), 'result' => $result];
         });
     }
@@ -229,28 +247,47 @@ class BeanRuntimeService
     private function finalResponse(BeanSession $session, string $userMessage, string $proposed, array $results): string
     {
         $needsConfirmation = collect($results)->first(fn ($result): bool => ($result['requires_confirmation'] ?? false) === true);
-        if ($needsConfirmation) return (string) ($needsConfirmation['summary'] ?? 'Please confirm before I do that.');
+        if ($needsConfirmation) {
+            return (string) ($needsConfirmation['summary'] ?? 'Please confirm before I do that.');
+        }
         $failed = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === false);
         if ($failed) {
             $ambiguousResponse = $this->ambiguousResponse($failed);
-            if ($ambiguousResponse !== null) return $ambiguousResponse;
+            if ($ambiguousResponse !== null) {
+                return $ambiguousResponse;
+            }
 
             return (string) ($failed['error'] ?? 'I could not complete that.');
         }
         $timeResponse = $this->timeResponse($results, $userMessage);
-        if ($timeResponse !== null) return $timeResponse;
+        if ($timeResponse !== null) {
+            return $timeResponse;
+        }
         $noteMutationResponse = $this->noteMutationResponse($results);
-        if ($noteMutationResponse !== null) return $noteMutationResponse;
+        if ($noteMutationResponse !== null) {
+            return $noteMutationResponse;
+        }
         $externalLookupResponse = $this->externalLookupResponse($results);
-        if ($externalLookupResponse !== null) return $externalLookupResponse;
+        if ($externalLookupResponse !== null) {
+            return $externalLookupResponse;
+        }
         $listResponse = $this->listResponse($results);
-        if ($listResponse !== null) return $listResponse;
+        if ($listResponse !== null) {
+            return $listResponse;
+        }
         $resourceQueryResponse = $this->resourceQueryResponse($results);
-        if ($resourceQueryResponse !== null) return $resourceQueryResponse;
+        if ($resourceQueryResponse !== null) {
+            return $resourceQueryResponse;
+        }
         $contextResponse = $this->contextResponse($results);
-        if ($contextResponse !== null) return $contextResponse;
+        if ($contextResponse !== null) {
+            return $contextResponse;
+        }
         $completed = collect($results)->filter(fn ($result): bool => ($result['ok'] ?? false) === true)->count();
-        if ($completed > 0) return $proposed !== '' ? $proposed.' Done.' : 'Done.';
+        if ($completed > 0) {
+            return $proposed !== '' ? $proposed.' Done.' : 'Done.';
+        }
+
         return $proposed !== '' ? $proposed : 'I’m here. Ask me to help with your calendar, tasks, reminders, notes, date/time, or public lookups.';
     }
 
@@ -259,14 +296,18 @@ class BeanRuntimeService
         $time = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
             && ($result['action'] ?? null) === 'time.now'
             && isset($result['now']));
-        if (! $time) return null;
+        if (! $time) {
+            return null;
+        }
 
         $timezone = (string) ($time['timezone'] ?? config('app.timezone', 'UTC'));
-        $now = \Illuminate\Support\Carbon::parse((string) $time['now'])->timezone($timezone);
+        $now = Carbon::parse((string) $time['now'])->timezone($timezone);
         $lower = mb_strtolower($userMessage);
         $asksDate = preg_match('/\b(date|today[’\']?s date|what day)\b/u', $lower) === 1;
         $asksTime = preg_match('/\b(time|current time|now)\b/u', $lower) === 1;
-        if (! $asksDate && ! $asksTime) return null;
+        if (! $asksDate && ! $asksTime) {
+            return null;
+        }
 
         if ($asksDate && ! $asksTime) {
             return "Today's date is ".$now->format('F j, Y').'.';
@@ -282,21 +323,32 @@ class BeanRuntimeService
     {
         $lookup = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
             && ($result['action'] ?? null) === 'external.lookup');
-        if (! $lookup) return null;
+        if (! $lookup) {
+            return null;
+        }
         $summary = trim((string) ($lookup['summary'] ?? ''));
         $sources = collect($lookup['sources'] ?? [])->filter(fn ($source): bool => is_array($source))->values();
         $source = trim((string) ($lookup['source_url'] ?? ($sources->first()['url'] ?? '')));
         $sourceCount = $sources->count();
         $prefix = $sourceCount > 1 ? "I found {$sourceCount} sources" : 'I found this online';
-        if ($summary !== '' && $source !== '') return "{$prefix}: {$summary} Source: {$source}";
-        if ($summary !== '') return "{$prefix}: {$summary}";
+        if ($summary !== '' && $source !== '') {
+            return "{$prefix}: {$summary} Source: {$source}";
+        }
+        if ($summary !== '') {
+            return "{$prefix}: {$summary}";
+        }
         if ($sources->isNotEmpty()) {
             $first = $sources->first();
             $snippet = trim((string) ($first['snippet'] ?? $first['title'] ?? ''));
             $url = trim((string) ($first['url'] ?? ''));
-            if ($snippet !== '' && $url !== '') return "{$prefix}: {$snippet} Source: {$url}";
-            if ($snippet !== '') return "{$prefix}: {$snippet}";
+            if ($snippet !== '' && $url !== '') {
+                return "{$prefix}: {$snippet} Source: {$url}";
+            }
+            if ($snippet !== '') {
+                return "{$prefix}: {$snippet}";
+            }
         }
+
         return null;
     }
 
@@ -305,13 +357,16 @@ class BeanRuntimeService
         $note = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
             && in_array(($result['action'] ?? null), ['note.create', 'note.update'], true)
             && is_array($result['item'] ?? null));
-        if (! $note) return null;
+        if (! $note) {
+            return null;
+        }
         $arguments = is_array($note['arguments'] ?? null) ? $note['arguments'] : [];
         $item = $note['item'];
         $title = trim((string) ($item['title'] ?? $arguments['title'] ?? 'that note'));
         if (($note['grounded_from'] ?? null) === 'external.lookup' || ($arguments['grounded_from'] ?? null) === 'external.lookup') {
             return "I created a source-grounded note: {$title}.";
         }
+
         return null;
     }
 
@@ -320,7 +375,9 @@ class BeanRuntimeService
         $query = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
             && in_array(($result['action'] ?? null), ['resource.query', 'resource.relationships'], true)
             && is_array($result['items'] ?? null));
-        if (! $query) return null;
+        if (! $query) {
+            return null;
+        }
 
         $items = collect($query['items'] ?? [])->filter(fn ($item): bool => is_array($item))->values();
         $explanations = collect($query['explanations'] ?? [])
@@ -351,8 +408,13 @@ class BeanRuntimeService
                         : "{$title} is in these workspaces: ".$this->naturalList($workspaceNames).'.';
                     $kind = (string) data_get($query, 'arguments.correction_kind', '');
                     $heard = trim((string) data_get($query, 'arguments.heard_text', ''));
-                    if ($kind === 'correction') return "Got it — you meant {$title}. {$answer}";
-                    if ($kind === 'misheard' && $heard !== '') return "I heard “{$heard},” but I think you may mean {$title}. {$answer}";
+                    if ($kind === 'correction') {
+                        return "Got it — you meant {$title}. {$answer}";
+                    }
+                    if ($kind === 'misheard' && $heard !== '') {
+                        return "I heard “{$heard},” but I think you may mean {$title}. {$answer}";
+                    }
+
                     return $answer;
                 }
             }
@@ -360,6 +422,7 @@ class BeanRuntimeService
         if ($items->isEmpty()) {
             $resource = str_replace('_', ' ', (string) ($query['resource'] ?? 'items'));
             $lookup = trim((string) ($query['query'] ?? ''));
+
             return $lookup !== '' ? "I couldn’t find any matching {$resource} for {$lookup}." : "I couldn’t find any matching {$resource}.";
         }
         if ($items->count() === 1) {
@@ -377,6 +440,7 @@ class BeanRuntimeService
         $resource = str_replace('_', ' ', (string) ($query['resource'] ?? 'items'));
         $titles = $items->take(5)->map(fn (array $item): string => trim((string) ($item['title'] ?? 'Untitled')) ?: 'Untitled')->all();
         $more = $items->count() > 5 ? ' and '.($items->count() - 5).' more' : '';
+
         return 'I found '.$items->count().' matching '.$resource.': '.$this->naturalList($titles).$more.'.';
     }
 
@@ -384,8 +448,13 @@ class BeanRuntimeService
     {
         $entities = collect($results)
             ->flatMap(function (array $result): array {
-                if (is_array($result['item'] ?? null)) return [$result['item']];
-                if (is_array($result['items'] ?? null)) return $result['items'];
+                if (is_array($result['item'] ?? null)) {
+                    return [$result['item']];
+                }
+                if (is_array($result['items'] ?? null)) {
+                    return $result['items'];
+                }
+
                 return [];
             })
             ->filter(fn ($item): bool => is_array($item) && isset($item['id'], $item['resource_type']))
@@ -421,9 +490,14 @@ class BeanRuntimeService
     private function recentQueryContextFromResults(array $results): ?array
     {
         foreach (array_reverse($results) as $result) {
-            if (! is_array($result) || ($result['ok'] ?? false) !== true) continue;
+            if (! is_array($result) || ($result['ok'] ?? false) !== true) {
+                continue;
+            }
             $resource = $this->resourceFromResult($result);
-            if ($resource === null) continue;
+            if ($resource === null) {
+                continue;
+            }
+
             return [
                 'resource' => $resource,
                 'action' => $result['action'] ?? null,
@@ -437,7 +511,9 @@ class BeanRuntimeService
     private function resourceFromResult(array $result): ?string
     {
         $resource = (string) ($result['resource'] ?? data_get($result, 'arguments.resource') ?? '');
-        if ($resource !== '') return $resource;
+        if ($resource !== '') {
+            return $resource;
+        }
 
         return match ((string) ($result['action'] ?? '')) {
             'task.list', 'task.search', 'task.context' => 'tasks',
@@ -453,7 +529,9 @@ class BeanRuntimeService
         $context = collect($results)->first(fn ($result): bool => ($result['ok'] ?? false) === true
             && ($result['context_type'] ?? null) === 'workspace'
             && is_array($result['item'] ?? null));
-        if (! $context) return null;
+        if (! $context) {
+            return null;
+        }
 
         $item = $context['item'];
         $title = trim((string) ($item['title'] ?? 'That item')) ?: 'That item';
@@ -479,8 +557,12 @@ class BeanRuntimeService
             && is_array($result['items'] ?? null)
             && (str_ends_with((string) ($result['action'] ?? ''), '.list') || str_ends_with((string) ($result['action'] ?? ''), '.search')))
             ->values();
-        if ($lists->isEmpty()) return null;
-        if ($lists->count() === 1) return $this->singleListResponse($lists->first());
+        if ($lists->isEmpty()) {
+            return null;
+        }
+        if ($lists->count() === 1) {
+            return $this->singleListResponse($lists->first());
+        }
 
         $sentences = $lists
             ->map(fn (array $list): string => $this->singleListResponse($list))
@@ -503,7 +585,9 @@ class BeanRuntimeService
         $timeLabel = strtolower(trim((string) ($list['time_label'] ?? data_get($list, 'arguments.time_label') ?? '')));
         if ($timeLabel === 'today' && in_array((string) ($list['action'] ?? ''), ['task.list', 'reminder.list'], true)) {
             $grouped = $this->todayListBreakdown($list, $items);
-            if ($grouped !== null) return $grouped;
+            if ($grouped !== null) {
+                return $grouped;
+            }
         }
         $titles = $items
             ->take(5)
@@ -511,28 +595,37 @@ class BeanRuntimeService
             ->values();
         $listText = $this->naturalList($titles->all());
         $more = $count > $titles->count() ? ' and '.($count - $titles->count()).' more' : '';
+
         return 'You have '.$count.' '.$label.': '.$listText.$more.'.';
     }
 
-    private function todayListBreakdown(array $list, \Illuminate\Support\Collection $items): ?string
+    private function todayListBreakdown(array $list, Collection $items): ?string
     {
         $action = (string) ($list['action'] ?? '');
         $dateField = $action === 'reminder.list' ? 'remind_at' : 'due_at';
         $timeContext = is_array($list['time_context'] ?? null) ? $list['time_context'] : $this->timeContext->forClientTimezone(null, 'app_default');
-        $start = \Illuminate\Support\Carbon::parse((string) data_get($timeContext, 'now_utc', now('UTC')->toIso8601String()), 'UTC')
+        $start = Carbon::parse((string) data_get($timeContext, 'now_utc', now('UTC')->toIso8601String()), 'UTC')
             ->timezone((string) data_get($timeContext, 'timezone', config('app.timezone', 'UTC')))
             ->startOfDay()
             ->utc();
         $overdue = $items->filter(function (array $item) use ($dateField, $start): bool {
-            if (! isset($item[$dateField])) return false;
-            return \Illuminate\Support\Carbon::parse((string) $item[$dateField])->lt($start);
+            if (! isset($item[$dateField])) {
+                return false;
+            }
+
+            return Carbon::parse((string) $item[$dateField])->lt($start);
         })->values();
         $today = $items->reject(function (array $item) use ($dateField, $start): bool {
-            if (! isset($item[$dateField])) return false;
-            return \Illuminate\Support\Carbon::parse((string) $item[$dateField])->lt($start);
+            if (! isset($item[$dateField])) {
+                return false;
+            }
+
+            return Carbon::parse((string) $item[$dateField])->lt($start);
         })->values();
 
-        if ($overdue->isEmpty()) return null;
+        if ($overdue->isEmpty()) {
+            return null;
+        }
 
         $total = $items->count();
         $label = $this->listLabel($list, $total !== 1);
@@ -609,9 +702,14 @@ class BeanRuntimeService
     private function naturalList(array $items): string
     {
         $items = array_values(array_filter(array_map(fn ($item): string => trim((string) $item), $items), fn ($item): bool => $item !== ''));
-        if (count($items) <= 1) return $items[0] ?? '';
-        if (count($items) === 2) return $items[0].' and '.$items[1];
+        if (count($items) <= 1) {
+            return $items[0] ?? '';
+        }
+        if (count($items) === 2) {
+            return $items[0].' and '.$items[1];
+        }
         $last = array_pop($items);
+
         return implode(', ', $items).', and '.$last;
     }
 }

@@ -1,5 +1,8 @@
 <?php
 
+use App\Console\Commands\ExecuteBeanDashboardTool;
+use App\Console\Commands\MaterializeRecurringCalendarEvents;
+use App\Console\Commands\SendDueReminderNotifications;
 use App\Http\Middleware\ApiRateLimit;
 use App\Http\Middleware\ApiSecurityHeaders;
 use App\Http\Middleware\AuthenticateBearerToken;
@@ -17,6 +20,11 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->withCommands([
+        ExecuteBeanDashboardTool::class,
+        MaterializeRecurringCalendarEvents::class,
+        SendDueReminderNotifications::class,
+    ])
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->prepend([
             HandleApiCors::class,

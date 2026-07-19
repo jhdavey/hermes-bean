@@ -1,71 +1,88 @@
 # Bean AI Architecture
 
-Bean is evolving from a Laravel-owned structured assistant MVP into a domain-aware intelligent assistant runtime for HeyBean. Web ships first; Flutter reuses the same runtime. Clients render presence, chat, voice controls, activity, and dashboard refreshes, but do not duplicate CRUD, safety, tool execution, or reasoning state.
+Bean's target architecture is Hermes-first: the Bean web/Flutter/voice UI is a product shell over a real, isolated Hermes agent for each Bean user.
 
-See `docs/bean-intelligent-assistant-runtime-plan.md` for the active implementation plan.
+```text
+Bean Web / Flutter / Voice UI
+  → Bean API: auth, session mapping, activity/UI mirror
+    → per-user Hermes agent with HERMES_HOME=storage/hermes/users/{user_id}
+      → bean_dashboard Hermes tool
+        → Laravel BeanActionExecutor / domain services
+          → HeyBean dashboard database
+```
 
-## Non-negotiable boundaries
+## Core principle
 
-- Laravel owns auth, workspace scoping, permissions, model selection, action execution, external API keys, audit/activity, dashboard change events, and confirmation policy.
-- Text chat and voice use the same Bean runtime, action schema, read/query tools, mutation actions, confirmation policy, and activity log.
-- The model interprets, chooses tools, reads returned data, proposes mutations, and writes final answers; Laravel executes mutations and enforces contracts.
-- Mutations go through the same shared domain services used by the normal API. Bean must not grow a separate resource-control layer.
-- Destructive, ambiguous, bulk, external-send, workspace membership, billing/account/settings, and unsafe actions require confirmation before execution.
-- Voice uses local wake detection first. Privacy mode means no microphone stream. Wake-listening mode may keep local browser/native wake detection active, but must not stream audio to OpenAI until `Hey Bean` is detected.
+Do not make Bean smarter by adding Laravel reasoning layers. Make Bean smarter by giving each user a real Hermes agent with good tools, good skills, scoped data access, and verifiable tool results.
 
-## Target runtime flow
+## Ownership boundaries
 
-1. Client creates or reuses a Bean session.
-2. User sends text, or local wake detection starts a realtime voice turn.
-3. Laravel creates a Bean run and activity events.
-4. Runtime loads session working memory: recent entities, recent lists, current workspace, and unresolved ambiguity.
-5. Model returns one next tool/action or a final answer.
-6. Laravel executes that one tool/action through scoped services and records structured results.
-7. Tool results are fed back to the model so it can choose the next action or final answer.
-8. Dashboard changes and Bean activity are emitted over SSE.
-9. Session memory is updated with mentioned resources/lists for follow-up questions.
-10. Client refreshes affected dashboard resources and presents the final text/voice answer.
+Hermes owns:
 
-## Runtime layers
+- conversation history and in-conversation memory;
+- context-window management and compression;
+- persistent user memory/preferences;
+- skills;
+- tool choice and multi-step reasoning;
+- final user-facing response wording.
 
-### Domain intelligence
+Laravel owns:
 
-Bean needs declarative knowledge of HeyBean concepts: workspaces, linked workspace copies, tasks, reminders, calendar events, notes, folders, categories, due-by-today, overdue, recurrence, scheduled/completed states, visibility rules, and safety classes.
+- authentication and user isolation;
+- workspace scoping and permissions;
+- dashboard schemas/contracts;
+- TimeContext normalization;
+- confirmation requirements;
+- DB writes through shared domain services;
+- activity events, dashboard change events, and UI response shape.
 
-### Universal read/query layer
+Hermes must not write Bean tables directly. It calls scoped Bean tools. Laravel validates, executes, and returns structured results.
 
-Reads should be flexible and composable. Bean should use generic tools such as `resource.query`, `resource.describe`, `resource.relationships`, `resource.aggregate`, `resource.recent`, and `resource.explain_visibility` instead of requiring a new action for every factual question.
+## Per-user isolation
 
-### Strict mutation layer
+Each Bean user gets a separate Hermes home:
 
-Writes remain allowlisted and domain-service-backed: task/reminder/calendar/note create/update/complete/delete plus future safe capabilities. Laravel validates and confirms; the model never writes directly.
+```text
+storage/hermes/users/{user_id}/
+  config.yaml
+  sessions/
+  memories/
+  skills/bean-dashboard/SKILL.md
+  plugins/bean-dashboard/
+  tmp/
+  logs/
+```
 
-### Final answers
+This isolates sessions, memory, skills, plugin config, and runtime state between users. The Bean session stores the mapped Hermes session name in `bean_sessions.metadata.hermes_session_name`.
 
-For factual requests, Bean should retrieve data, inspect results in the model loop, and answer naturally. It should not return generic `Done` when the user asked for information. The final answer should be grounded in tool output and hide internal tool/action names.
+## Current runtime path
 
-### Conversation state
+The existing `/api/bean/*` UI contract is preserved. Flutter and Laravel UI continue to send messages to `/api/bean/messages` and render Bean sessions/messages/runs/activity.
 
-Bean tracks recent resources and lists so follow-ups like “that task,” “the second one,” “what workspace is it in,” and “move it to tomorrow” work without bespoke phrase patches.
+In production-like environments, `config('bean.runtime_driver')` defaults to `hermes`:
 
-### Evaluation harness
+1. `BeanRuntimeService` resolves or creates the Bean session.
+2. `HermesUserHomeService` provisions the user's isolated Hermes home, default Bean plugin, and `bean-dashboard` skill.
+3. `HermesAgentRuntimeService` creates the Bean run/message/activity mirror.
+4. Laravel invokes `hermes chat --continue bean-session-{id}` with that user's `HERMES_HOME`.
+5. Hermes sees normal conversation history/memory/compression and can call the `bean_dashboard` plugin tool.
+6. The plugin calls `php artisan bean:dashboard-tool <signed-context>`.
+7. Laravel verifies the signed context, scopes the run/session/user, executes the action through `BeanActionExecutor`, and returns JSON.
+8. Hermes reads the result and produces the final response.
+9. Laravel mirrors the final response back into `bean_messages`, `bean_runs`, and activity events for the current UI.
 
-Assistant quality is measured with representative text and voice scenarios. Every production miss should become an eval case so quality compounds over time.
+## Test/local fallback
 
-## Current implementation status
+Automated tests default `BEAN_RUNTIME_DRIVER=local` through `APP_ENV=testing` so CI does not require a live Hermes process or model credentials. This is a test harness path, not the product architecture.
 
-Implemented foundation:
+## Memory model
 
-- Laravel-owned Bean sessions/runs/messages/activity.
-- Shared domain service layer for mutations.
-- Text chat and web Bean panel.
-- OpenAI structured text model with deterministic fallback.
-- OpenAI Realtime session minting and wake-first web voice flow.
-- Initial strict domain actions for tasks, reminders, calendar events, and notes.
-- Initial generic/context read improvements and task workspace answers.
+- Conversation continuity: Hermes session history + compression.
+- Durable user preferences/facts: Hermes persistent memory under that user's isolated home.
+- Current dashboard truth: Bean dashboard tools only.
 
-Next architecture target:
+Dashboard facts should not be answered from memory because app state can change outside the chat.
 
-- Continue promoting generic `resource.query` and model-driven tool steps as the default path for factual app-data questions.
-- Expand session working memory for recent entities and follow-up resolution.
-- Grow eval coverage across dashboard/workspace/task/reminder/calendar/note questions and voice turns.
+## Voice
+
+Voice remains a Bean UI transport. Wake detection and Realtime voice capture produce text turns for the same Bean/Hermes session. The assistant should not maintain a separate voice-only brain or mutate dashboard state through Realtime directly.

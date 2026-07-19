@@ -1,0 +1,216 @@
+<?php
+
+namespace App\Services\Bean;
+
+use App\Models\BeanConfirmationRequest;
+use App\Models\BeanMessage;
+use App\Models\BeanRun;
+use App\Models\BeanSession;
+use App\Models\User;
+use App\Services\Bean\Quality\BeanQualityAuditService;
+use Illuminate\Support\Facades\File;
+use Symfony\Component\Process\Process;
+use Throwable;
+
+class HermesAgentRuntimeService
+{
+    public function __construct(
+        private readonly HermesUserHomeService $homes,
+        private readonly BeanActivityLogger $activity,
+        private readonly BeanTimeContext $timeContext,
+    ) {}
+
+    public function handleMessage(User $user, string $content, BeanSession $session, ?string $clientTimezone = null): array
+    {
+        [$home, $hermesSession] = $this->homes->ensureForSession($session->refresh());
+        $timeContext = $this->timeContext->forSession($session->refresh());
+
+        $run = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'status' => 'running',
+            'mode' => 'hermes',
+            'input' => $content,
+            'metadata' => array_filter([
+                'runtime_driver' => 'hermes',
+                'hermes_home' => $home,
+                'hermes_session_name' => $hermesSession,
+                'client_timezone' => $timeContext['timezone'],
+                'time_context' => $timeContext,
+            ]),
+            'started_at' => now(),
+        ]);
+
+        BeanMessage::create([
+            'bean_session_id' => $session->id,
+            'bean_run_id' => $run->id,
+            'user_id' => $user->id,
+            'role' => 'user',
+            'content' => $content,
+        ]);
+        $this->activity->log($session, $run, 'user_message', $content);
+        $this->activity->log($session, $run, 'status', 'Thinking...', ['mode' => 'thinking', 'runtime' => 'hermes']);
+
+        try {
+            $contextPath = $this->writeToolContext($home, $user, $session, $run, $clientTimezone);
+            $assistantText = $this->invokeHermes($home, $hermesSession, $content, $contextPath);
+            $assistantText = trim($assistantText) !== '' ? trim($assistantText) : 'Done.';
+
+            BeanMessage::create([
+                'bean_session_id' => $session->id,
+                'bean_run_id' => $run->id,
+                'user_id' => $user->id,
+                'role' => 'assistant',
+                'content' => $assistantText,
+                'metadata' => [
+                    'runtime_driver' => 'hermes',
+                    'hermes_session_name' => $hermesSession,
+                ],
+            ]);
+            $this->activity->log($session, $run, 'assistant_message', $assistantText, ['runtime' => 'hermes']);
+            $this->activity->log($session, $run, 'status', 'Done', ['mode' => 'wake_listening', 'runtime' => 'hermes']);
+
+            $waiting = $run->toolCalls()->where('status', 'waiting_confirmation')->exists();
+            $metadata = is_array($run->metadata) ? $run->metadata : [];
+            $run->update([
+                'status' => $waiting ? 'waiting_confirmation' : 'completed',
+                'model' => $this->modelLabel(),
+                'output' => $assistantText,
+                'metadata' => [...$metadata, 'tool_calls_count' => $run->toolCalls()->count()],
+                'completed_at' => now(),
+            ]);
+        } catch (Throwable $exception) {
+            $assistantText = 'I ran into a problem trying to reach your Hermes agent.';
+            $run->update([
+                'status' => 'failed',
+                'model' => $this->modelLabel(),
+                'error' => $exception->getMessage(),
+                'output' => $assistantText,
+                'completed_at' => now(),
+            ]);
+            BeanMessage::create([
+                'bean_session_id' => $session->id,
+                'bean_run_id' => $run->id,
+                'user_id' => $user->id,
+                'role' => 'assistant',
+                'content' => $assistantText,
+                'metadata' => ['runtime_driver' => 'hermes', 'error' => $exception->getMessage()],
+            ]);
+            $this->activity->log($session, $run, 'error', $assistantText, ['runtime' => 'hermes', 'error' => $exception->getMessage()]);
+        } finally {
+            app(BeanQualityAuditService::class)->traceRun($run->refresh());
+            $session->touch();
+        }
+
+        return [
+            'session' => $session->refresh(),
+            'run' => $run->refresh(),
+            'messages' => $session->messages()->latest('id')->limit(20)->get()->reverse()->values(),
+            'activity' => $session->activityEvents()->latest('id')->limit(50)->get()->reverse()->values(),
+            'confirmations' => BeanConfirmationRequest::query()
+                ->where('bean_session_id', $session->id)
+                ->where('status', 'pending')
+                ->latest('id')
+                ->get(),
+        ];
+    }
+
+    private function writeToolContext(string $home, User $user, BeanSession $session, BeanRun $run, ?string $clientTimezone): string
+    {
+        $payload = [
+            'user_id' => $user->id,
+            'bean_session_id' => $session->id,
+            'bean_run_id' => $run->id,
+            'workspace_id' => $session->workspace_id,
+            'client_timezone' => $clientTimezone,
+            'expires_at' => now()->addMinutes(30)->timestamp,
+        ];
+        $payload['signature'] = $this->signature($payload);
+
+        $path = $home.'/tmp/bean-tool-context-'.$run->id.'.json';
+        File::put($path, json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+        return $path;
+    }
+
+    private function invokeHermes(string $home, string $sessionName, string $content, string $contextPath): string
+    {
+        $binary = (string) config('bean.hermes.binary', 'hermes');
+        $toolsets = (string) config('bean.hermes.toolsets', 'bean_dashboard,skills,memory,session_search,web');
+        $skills = (string) config('bean.hermes.skills', 'bean-dashboard');
+        $timeout = (int) config('bean.hermes.timeout_seconds', 120);
+        $maxTurns = (string) config('bean.hermes.max_turns', 24);
+        $source = (string) config('bean.hermes.source', 'bean');
+
+        $command = [
+            $binary,
+            'chat',
+            '--continue',
+            $sessionName,
+            '--query',
+            $content,
+            '--quiet',
+            '--source',
+            $source,
+            '--toolsets',
+            $toolsets,
+            '--skills',
+            $skills,
+            '--max-turns',
+            $maxTurns,
+        ];
+
+        $process = new Process($command, base_path(), $this->processEnv($home, $contextPath), null, $timeout);
+        $process->run();
+
+        if (! $process->isSuccessful()) {
+            $error = trim($process->getErrorOutput()) ?: trim($process->getOutput()) ?: 'Hermes exited with status '.$process->getExitCode();
+            throw new \RuntimeException($error);
+        }
+
+        return $this->cleanHermesOutput($process->getOutput());
+    }
+
+    private function processEnv(string $home, string $contextPath): array
+    {
+        $env = [
+            'HERMES_HOME' => $home,
+            'BEAN_TOOL_CONTEXT' => $contextPath,
+            'BEAN_ARTISAN' => base_path('artisan'),
+            'BEAN_PHP' => PHP_BINARY,
+            'BEAN_TOOL_TIMEOUT' => '60',
+            'HERMES_ACCEPT_HOOKS' => '1',
+        ];
+
+        $openAiKey = (string) config('services.openai.api_key');
+        if ($openAiKey !== '') {
+            $env['OPENAI_API_KEY'] = $openAiKey;
+        }
+
+        return $env;
+    }
+
+    private function cleanHermesOutput(string $output): string
+    {
+        $lines = collect(preg_split('/\R/', trim($output)) ?: [])
+            ->map(fn (string $line): string => trim($line))
+            ->filter(fn (string $line): bool => $line !== '' && ! str_starts_with($line, 'Session ID:'))
+            ->values();
+
+        return $lines->implode("\n");
+    }
+
+    private function modelLabel(): string
+    {
+        return 'hermes:'.((string) config('bean.hermes.provider', 'openai')).'/'.((string) config('bean.hermes.model', 'gpt-4.1-mini'));
+    }
+
+    private function signature(array $payload): string
+    {
+        $signed = $payload;
+        unset($signed['signature']);
+
+        return hash_hmac('sha256', json_encode($signed, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), (string) config('app.key'));
+    }
+}
