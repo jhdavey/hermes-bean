@@ -162,6 +162,102 @@ class ReminderNotificationDeliveryTest extends TestCase
         $this->assertArrayNotHasKey((string) $user->id, $delivery['email_sent_at_by_user']);
     }
 
+    public function test_reserved_test_domain_recipient_is_suppressed_without_contacting_mailer(): void
+    {
+        Notification::fake();
+        Carbon::setTestNow('2026-07-20 15:01:08');
+        config()->set('mail.suppress_reserved_recipient_domains', true);
+        $user = User::factory()->create([
+            'email' => 'production-fixture@example.com',
+            'subscription_tier' => 'premium',
+            'notification_preferences' => [
+                'reminder_push' => false,
+                'reminder_email' => true,
+            ],
+        ]);
+        $reminder = Reminder::create([
+            'user_id' => $user->id,
+            'title' => 'Reserved-domain reminder',
+            'remind_at' => now()->subMinute(),
+            'status' => 'scheduled',
+            'metadata' => [
+                'notification_delivery' => [
+                    'email_failed_at_by_user' => [
+                        (string) $user->id => '2026-07-20T15:00:00+00:00',
+                    ],
+                    'email_retry_after_by_user' => [
+                        (string) $user->id => '2026-07-20T16:00:00+00:00',
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->assertSame(0, Artisan::call('reminders:send-due-notifications'));
+        $this->assertStringContainsString('suppressed 1 undeliverable', Artisan::output());
+        $this->assertSame(0, Artisan::call('reminders:send-due-notifications'));
+
+        Notification::assertNothingSent();
+        $metadata = $reminder->refresh()->metadata;
+        $delivery = $metadata['notification_delivery'];
+        $recipientId = (string) $user->id;
+        $this->assertSame('2026-07-20T15:01:08+00:00', $delivery['email_terminal_at_by_user'][$recipientId]);
+        $this->assertSame('reserved_domain', $delivery['email_terminal_reason_by_user'][$recipientId]);
+        $this->assertArrayNotHasKey($recipientId, $delivery['email_retry_after_by_user']);
+        $this->assertSame('2026-07-20T15:01:08+00:00', $metadata['email_notification_resolved_at']);
+        $this->assertSame('2026-07-20T15:01:08+00:00', $metadata['push_notification_resolved_at']);
+    }
+
+    public function test_resend_invalid_to_failure_is_permanent_and_is_not_retried(): void
+    {
+        Carbon::setTestNow('2026-07-20 15:01:08');
+        $sendAttempts = 0;
+        $this->app->bind(NotificationDispatcher::class, function () use (&$sendAttempts) {
+            return new class($sendAttempts) implements NotificationDispatcher
+            {
+                public function __construct(private int &$sendAttempts) {}
+
+                public function send($notifiables, $notification): void
+                {
+                    $this->sendAttempts++;
+
+                    throw new \RuntimeException('Request to Resend API failed. Reason: Invalid `to` field. Please use our testing email address instead of domains like `example.com`.');
+                }
+
+                public function sendNow($notifiables, $notification, ?array $channels = null): void
+                {
+                    $this->send($notifiables, $notification);
+                }
+            };
+        });
+
+        $user = User::factory()->create([
+            'email' => 'blocked-recipient@heybean.dev',
+            'subscription_tier' => 'premium',
+            'notification_preferences' => [
+                'reminder_push' => false,
+                'reminder_email' => true,
+            ],
+        ]);
+        $reminder = Reminder::create([
+            'user_id' => $user->id,
+            'title' => 'Permanently rejected reminder',
+            'remind_at' => now()->subMinute(),
+            'status' => 'scheduled',
+        ]);
+
+        $this->assertSame(0, Artisan::call('reminders:send-due-notifications'));
+        Carbon::setTestNow(now()->addHours(2));
+        $this->assertSame(0, Artisan::call('reminders:send-due-notifications'));
+
+        $metadata = $reminder->refresh()->metadata;
+        $delivery = $metadata['notification_delivery'];
+        $recipientId = (string) $user->id;
+        $this->assertSame(1, $sendAttempts);
+        $this->assertSame('invalid_recipient', $delivery['email_terminal_reason_by_user'][$recipientId]);
+        $this->assertArrayNotHasKey($recipientId, $delivery['email_retry_after_by_user']);
+        $this->assertSame('2026-07-20T15:01:08+00:00', $metadata['email_notification_resolved_at']);
+    }
+
     public function test_due_reminder_email_header_includes_black_bean_logo(): void
     {
         Carbon::setTestNow('2026-05-18 13:45:00');

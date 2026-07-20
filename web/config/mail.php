@@ -18,6 +18,30 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Recipient Safety
+    |--------------------------------------------------------------------------
+    |
+    | Production mail should never be sent to RFC-reserved example or test
+    | domains. Tests may opt in explicitly when exercising this policy.
+    |
+    */
+
+    'suppress_reserved_recipient_domains' => (bool) env(
+        'MAIL_SUPPRESS_RESERVED_RECIPIENT_DOMAINS',
+        env('APP_ENV', 'production') === 'production',
+    ),
+
+    'reserved_recipient_domains' => [
+        'example.com',
+        'example.net',
+        'example.org',
+        'test',
+        'invalid',
+        'localhost',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Mailer Configurations
     |--------------------------------------------------------------------------
     |

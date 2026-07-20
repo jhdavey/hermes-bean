@@ -736,9 +736,19 @@ class DomainResourceService
 
     private function resetReminderNotificationDeliveryMetadata(array $metadata): array
     {
-        unset($metadata['email_notification_sent_at'], $metadata['push_notification_sent_at']);
+        unset(
+            $metadata['email_notification_sent_at'],
+            $metadata['email_notification_failed_at'],
+            $metadata['email_notification_resolved_at'],
+            $metadata['push_notification_sent_at'],
+            $metadata['push_notification_resolved_at'],
+        );
         $delivery = is_array($metadata['notification_delivery'] ?? null) ? $metadata['notification_delivery'] : [];
         $delivery['email_sent_at_by_user'] = [];
+        $delivery['email_failed_at_by_user'] = [];
+        $delivery['email_retry_after_by_user'] = [];
+        $delivery['email_terminal_at_by_user'] = [];
+        $delivery['email_terminal_reason_by_user'] = [];
         $delivery['push_sent_at_by_user'] = [];
         $metadata['notification_delivery'] = $delivery;
         return $metadata;

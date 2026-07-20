@@ -10,6 +10,7 @@ use App\Services\FirebaseCloudMessagingService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class SendDueReminderNotifications extends Command
 {
@@ -21,22 +22,30 @@ class SendDueReminderNotifications extends Command
     {
         $emailSent = 0;
         $emailFailed = 0;
+        $emailSuppressed = 0;
         $pushSent = 0;
         Reminder::query()
             ->whereNotNull('remind_at')
             ->where('remind_at', '<=', now())
             ->where('status', 'scheduled')
             ->where(function ($query): void {
-                $query->whereNull('metadata->email_notification_sent_at')
-                    ->orWhereNull('metadata->push_notification_sent_at');
+                $query->where(function ($email): void {
+                    $email->whereNull('metadata->email_notification_sent_at')
+                        ->whereNull('metadata->email_notification_resolved_at');
+                })->orWhere(function ($push): void {
+                    $push->whereNull('metadata->push_notification_sent_at')
+                        ->whereNull('metadata->push_notification_resolved_at');
+                });
             })
             ->with('user')
             ->orderBy('remind_at')
             ->limit((int) $this->option('limit'))
             ->get()
-            ->each(function (Reminder $reminder) use ($firebase, &$emailSent, &$emailFailed, &$pushSent): void {
+            ->each(function (Reminder $reminder) use ($firebase, &$emailSent, &$emailFailed, &$emailSuppressed, &$pushSent): void {
                 $recipients = $this->notificationRecipients($reminder);
                 if ($recipients->isEmpty()) {
+                    $this->resolveNotificationChannels($reminder);
+
                     return;
                 }
 
@@ -45,6 +54,8 @@ class SendDueReminderNotifications extends Command
                 $emailSentByUser = is_array($delivery['email_sent_at_by_user'] ?? null) ? $delivery['email_sent_at_by_user'] : [];
                 $emailFailedByUser = is_array($delivery['email_failed_at_by_user'] ?? null) ? $delivery['email_failed_at_by_user'] : [];
                 $emailRetryAfterByUser = is_array($delivery['email_retry_after_by_user'] ?? null) ? $delivery['email_retry_after_by_user'] : [];
+                $emailTerminalAtByUser = is_array($delivery['email_terminal_at_by_user'] ?? null) ? $delivery['email_terminal_at_by_user'] : [];
+                $emailTerminalReasonByUser = is_array($delivery['email_terminal_reason_by_user'] ?? null) ? $delivery['email_terminal_reason_by_user'] : [];
                 $pushSentByUser = is_array($delivery['push_sent_at_by_user'] ?? null) ? $delivery['push_sent_at_by_user'] : [];
 
                 foreach ($recipients as $recipient) {
@@ -52,27 +63,52 @@ class SendDueReminderNotifications extends Command
                     if (
                         $recipient->wantsReminderEmailNotifications()
                         && empty($emailSentByUser[$recipientId])
-                        && ! $this->emailRetryIsActive($emailRetryAfterByUser[$recipientId] ?? null)
+                        && empty($emailTerminalAtByUser[$recipientId])
                     ) {
-                        try {
-                            $recipient->notify(new ReminderDueNotification($reminder));
-                            $emailSentByUser[$recipientId] = now()->toIso8601String();
-                            unset($emailFailedByUser[$recipientId], $emailRetryAfterByUser[$recipientId]);
-                            $metadata['email_notification_sent_at'] ??= $emailSentByUser[$recipientId];
-                            $emailSent++;
-                            $this->notifyDashboard($reminder, 'email', $recipient);
-                        } catch (\Throwable $exception) {
-                            $failedAt = now()->toIso8601String();
-                            $emailFailedByUser[$recipientId] = $failedAt;
-                            $emailRetryAfterByUser[$recipientId] = $this->emailRetryAfter($exception)->toIso8601String();
-                            $metadata['email_notification_failed_at'] ??= $failedAt;
-                            $emailFailed++;
-                            Log::warning('Reminder email notification failed; delivery will be retried later.', [
-                                'reminder_id' => $reminder->id,
-                                'recipient_id' => $recipient->id,
-                                'error' => $exception->getMessage(),
-                                'retry_after' => $emailRetryAfterByUser[$recipientId],
-                            ]);
+                        $suppressionReason = $this->emailSuppressionReason($recipient);
+                        if ($suppressionReason !== null) {
+                            $emailTerminalAtByUser[$recipientId] = now()->toIso8601String();
+                            $emailTerminalReasonByUser[$recipientId] = $suppressionReason;
+                            unset($emailRetryAfterByUser[$recipientId]);
+                            $emailSuppressed++;
+                        } elseif (! $this->emailRetryIsActive($emailRetryAfterByUser[$recipientId] ?? null)) {
+                            try {
+                                $recipient->notify(new ReminderDueNotification($reminder));
+                                $emailSentByUser[$recipientId] = now()->toIso8601String();
+                                unset(
+                                    $emailFailedByUser[$recipientId],
+                                    $emailRetryAfterByUser[$recipientId],
+                                    $emailTerminalAtByUser[$recipientId],
+                                    $emailTerminalReasonByUser[$recipientId],
+                                );
+                                $metadata['email_notification_sent_at'] ??= $emailSentByUser[$recipientId];
+                                $emailSent++;
+                                $this->notifyDashboard($reminder, 'email', $recipient);
+                            } catch (\Throwable $exception) {
+                                $failedAt = now()->toIso8601String();
+                                $emailFailedByUser[$recipientId] = $failedAt;
+                                $metadata['email_notification_failed_at'] ??= $failedAt;
+                                $emailFailed++;
+
+                                if ($this->isPermanentEmailDeliveryFailure($exception)) {
+                                    $emailTerminalAtByUser[$recipientId] = $failedAt;
+                                    $emailTerminalReasonByUser[$recipientId] = 'invalid_recipient';
+                                    unset($emailRetryAfterByUser[$recipientId]);
+                                    Log::warning('Reminder email notification failed permanently; delivery will not be retried.', [
+                                        'reminder_id' => $reminder->id,
+                                        'recipient_id' => $recipient->id,
+                                        'error' => $exception->getMessage(),
+                                    ]);
+                                } else {
+                                    $emailRetryAfterByUser[$recipientId] = $this->emailRetryAfter($exception)->toIso8601String();
+                                    Log::warning('Reminder email notification failed; delivery will be retried later.', [
+                                        'reminder_id' => $reminder->id,
+                                        'recipient_id' => $recipient->id,
+                                        'error' => $exception->getMessage(),
+                                        'retry_after' => $emailRetryAfterByUser[$recipientId],
+                                    ]);
+                                }
+                            }
                         }
                     }
 
@@ -93,15 +129,32 @@ class SendDueReminderNotifications extends Command
                 $delivery['email_sent_at_by_user'] = $emailSentByUser;
                 $delivery['email_failed_at_by_user'] = $emailFailedByUser;
                 $delivery['email_retry_after_by_user'] = $emailRetryAfterByUser;
+                $delivery['email_terminal_at_by_user'] = $emailTerminalAtByUser;
+                $delivery['email_terminal_reason_by_user'] = $emailTerminalReasonByUser;
                 $delivery['push_sent_at_by_user'] = $pushSentByUser;
                 $metadata['notification_delivery'] = $delivery;
+
+                if ($recipients->every(fn (User $recipient): bool => $this->emailDeliveryIsResolved(
+                    $recipient,
+                    $emailSentByUser,
+                    $emailTerminalAtByUser,
+                ))) {
+                    $metadata['email_notification_resolved_at'] ??= now()->toIso8601String();
+                }
+
+                if ($recipients->every(fn (User $recipient): bool => $this->pushDeliveryIsResolved(
+                    $recipient,
+                    $pushSentByUser,
+                ))) {
+                    $metadata['push_notification_resolved_at'] ??= now()->toIso8601String();
+                }
 
                 if ($metadata !== ($reminder->metadata ?? [])) {
                     $reminder->forceFill(['metadata' => $metadata])->save();
                 }
             });
 
-        $this->info("Sent {$emailSent} reminder email notification(s), failed {$emailFailed} reminder email notification(s), and sent {$pushSent} reminder push notification(s).");
+        $this->info("Sent {$emailSent} reminder email notification(s), suppressed {$emailSuppressed} undeliverable reminder email notification(s), failed {$emailFailed} reminder email notification(s), and sent {$pushSent} reminder push notification(s).");
 
         return self::SUCCESS;
     }
@@ -126,6 +179,70 @@ class SendDueReminderNotifications extends Command
         return str_contains($message, 'daily email sending quota') || str_contains($message, 'daily quota')
             ? now()->addDay()->startOfDay()
             : now()->addHour();
+    }
+
+    private function emailSuppressionReason(User $recipient): ?string
+    {
+        if (! config('mail.suppress_reserved_recipient_domains', false)) {
+            return null;
+        }
+
+        $email = Str::lower(trim((string) $recipient->email));
+        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            return 'invalid_recipient';
+        }
+
+        $domain = Str::afterLast($email, '@');
+        foreach ((array) config('mail.reserved_recipient_domains', []) as $reservedDomain) {
+            $reservedDomain = Str::lower(trim((string) $reservedDomain));
+            if (
+                $reservedDomain !== ''
+                && ($domain === $reservedDomain || str_ends_with($domain, '.'.$reservedDomain))
+            ) {
+                return 'reserved_domain';
+            }
+        }
+
+        return null;
+    }
+
+    private function isPermanentEmailDeliveryFailure(\Throwable $exception): bool
+    {
+        $message = mb_strtolower($exception->getMessage());
+
+        return str_contains($message, 'invalid `to` field')
+            || str_contains($message, 'invalid "to" field')
+            || str_contains($message, 'testing email address instead of domains like');
+    }
+
+    private function emailDeliveryIsResolved(User $recipient, array $sentByUser, array $terminalAtByUser): bool
+    {
+        $recipientId = (string) $recipient->id;
+
+        return ! $recipient->wantsReminderEmailNotifications()
+            || ! empty($sentByUser[$recipientId])
+            || ! empty($terminalAtByUser[$recipientId]);
+    }
+
+    private function pushDeliveryIsResolved(User $recipient, array $sentByUser): bool
+    {
+        $recipientId = (string) $recipient->id;
+
+        return ! $recipient->wantsReminderPushNotifications()
+            || ! empty($sentByUser[$recipientId])
+            || $recipient->pushNotificationDeviceTokens->where('enabled', true)->isEmpty();
+    }
+
+    private function resolveNotificationChannels(Reminder $reminder): void
+    {
+        $metadata = $reminder->metadata ?? [];
+        $resolvedAt = now()->toIso8601String();
+        $metadata['email_notification_resolved_at'] ??= $resolvedAt;
+        $metadata['push_notification_resolved_at'] ??= $resolvedAt;
+
+        if ($metadata !== ($reminder->metadata ?? [])) {
+            $reminder->forceFill(['metadata' => $metadata])->save();
+        }
     }
 
     private function notificationRecipients(Reminder $reminder)
