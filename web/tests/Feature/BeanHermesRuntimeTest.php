@@ -134,6 +134,52 @@ PHP);
         $this->assertContains('10', $voiceLog['argv']);
     }
 
+    public function test_voice_task_list_today_uses_fast_scoped_dashboard_path_without_hermes(): void
+    {
+        $usersPath = storage_path('framework/testing/hermes-users-'.uniqid());
+        $fakeHermesLog = storage_path('framework/testing/voice-fast-path-hermes-'.uniqid().'.log');
+        $fakeHermes = storage_path('framework/testing/fake-hermes-fast-path-'.uniqid().'.php');
+        File::ensureDirectoryExists(dirname($fakeHermes));
+        File::put($fakeHermes, <<<PHP
+#!/usr/bin/env php
+<?php
+file_put_contents('{$fakeHermesLog}', 'invoked'.PHP_EOL, FILE_APPEND);
+echo "Hermes should not be invoked for the fast path.";
+PHP);
+        chmod($fakeHermes, 0755);
+        config([
+            'bean.hermes.binary' => $fakeHermes,
+            'bean.hermes.users_path' => $usersPath,
+        ]);
+
+        $token = $this->apiToken('bean-voice-fast-path@example.com');
+        $user = User::where('email', 'bean-voice-fast-path@example.com')->firstOrFail();
+        $session = app(BeanRuntimeService::class)->createSession($user, null, 'America/New_York');
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'fast voice task',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->timezone('America/New_York')->endOfDay()->utc(),
+        ]);
+
+        $response = $this->withToken($token)->postJson('/api/bean/messages', [
+            'session_id' => $session->id,
+            'content' => "What's on my to-do list for today?",
+            'client_timezone' => 'America/New_York',
+            'source' => 'elevenlabs_agent',
+        ])->assertOk();
+
+        $response->assertJsonPath('data.run.mode', 'voice_fast_path')
+            ->assertJsonPath('data.run.model', 'voice-fast-path')
+            ->assertJsonPath('data.run.status', 'completed');
+        $this->assertStringContainsString('fast voice task', $response->json('data.run.output'));
+        $this->assertDatabaseHas('bean_tool_calls', ['bean_run_id' => $response->json('data.run.id'), 'action' => 'task.list', 'status' => 'completed']);
+        $this->assertFileDoesNotExist($fakeHermesLog);
+    }
+
     public function test_bean_event_stream_includes_session_and_run_ids_for_voice_recovery(): void
     {
         $token = $this->apiToken('bean-event-stream-runtime@example.com');
