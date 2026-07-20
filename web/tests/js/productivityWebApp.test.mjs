@@ -164,6 +164,7 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(agentConfigSource, /silenceEndCallTimeout: 18/);
     assert.match(agentConfigSource, /speculativeTurn: true/);
     assert.match(agentConfigSource, /timeoutSeconds: -1/);
+    assert.match(agentConfigSource, /message: 'Waiting\.'/);
     assert.match(agentConfigSource, /Do not ask "Are you still there\?"/);
     assert.match(agentConfigSource, /clientEvents: \['audio', 'user_transcript', 'agent_response', 'interruption'\]/);
     assert.match(agentConfigSource, /textOnly: false/);

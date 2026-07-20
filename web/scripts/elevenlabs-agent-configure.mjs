@@ -86,7 +86,7 @@ function conversationConfig(toolId) {
             transcribeOnDisabledInterruptions: false,
             softTimeoutConfig: {
                 timeoutSeconds: -1,
-                message: '',
+                message: 'Waiting.',
                 additionalSoftTimeoutMessages: [],
                 useLlmGeneratedMessage: false,
                 randomizeFillers: false,
