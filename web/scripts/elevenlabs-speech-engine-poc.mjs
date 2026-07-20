@@ -23,6 +23,7 @@ const PORT = Number(process.env.ELEVENLABS_SPEECH_ENGINE_POC_PORT || 3001);
 const PATH = process.env.ELEVENLABS_SPEECH_ENGINE_POC_PATH || '/ws';
 const ACK_ENABLED = process.env.BEAN_ELEVENLABS_POC_ACK_ENABLED !== 'false';
 const DUPLICATE_TRANSCRIPT_SUPPRESS_MS = Number(process.env.BEAN_ELEVENLABS_POC_DUPLICATE_SUPPRESS_MS || 3500);
+const INFLIGHT_ANSWER_REUSE_MS = Number(process.env.BEAN_ELEVENLABS_POC_INFLIGHT_REUSE_MS || 30000);
 
 const elevenlabs = new ElevenLabsClient({ apiKey: ELEVENLABS_API_KEY });
 const httpServer = createServer();
@@ -93,6 +94,27 @@ async function askBean(state, content, signal) {
     return answer || 'Bean finished that, but I did not get a spoken answer back.';
 }
 
+function getBeanAnswer(state, content) {
+    const canonical = canonicalizeBeanVoiceTranscript(content);
+    const now = Date.now();
+    const inflight = state.inflightAnswer;
+
+    if (inflight && inflight.canonical === canonical && now - inflight.startedAt < INFLIGHT_ANSWER_REUSE_MS) {
+        console.log(`[bean] reusing in-flight answer for: ${canonical}`);
+        return inflight.promise;
+    }
+
+    const promise = askBean(state, content)
+        .finally(() => {
+            if (state.inflightAnswer?.promise === promise) {
+                state.inflightAnswer = null;
+            }
+        });
+
+    state.inflightAnswer = { canonical, promise, startedAt: now };
+    return promise;
+}
+
 async function* responseStream(state, content, transcript, signal) {
     const localFastResponse = getLocalFastVoiceResponse(content);
     if (localFastResponse) {
@@ -106,7 +128,7 @@ async function* responseStream(state, content, transcript, signal) {
             yield `${acknowledgement} `;
         }
 
-        yield await askBean(state, content, signal);
+        yield await getBeanAnswer(state, content);
     } catch (error) {
         if (signal?.aborted) return;
         console.error('[bean] request failed:', error?.message || error);
@@ -133,16 +155,13 @@ await elevenlabs.speechEngine.attach(ELEVENLABS_SPEECH_ENGINE_ID, httpServer, PA
         const now = Date.now();
         const previousTranscript = state.lastTranscript || '';
         const duplicate = isDuplicateVoiceTranscript(previousTranscript, content);
-        if (duplicate && now - (state.lastTranscriptAt || 0) < DUPLICATE_TRANSCRIPT_SUPPRESS_MS) {
-            console.log(`[elevenlabs] suppressed duplicate transcript: ${content}`);
-            return;
-        }
+        const duplicateRecent = duplicate && now - (state.lastTranscriptAt || 0) < DUPLICATE_TRANSCRIPT_SUPPRESS_MS;
 
         state.lastTranscript = content;
         state.lastCanonicalTranscript = canonicalizeBeanVoiceTranscript(content);
         state.lastTranscriptAt = now;
 
-        console.log(`[elevenlabs] transcript: ${content}`);
+        console.log(`[elevenlabs] ${duplicateRecent ? 'replaying duplicate transcript' : 'transcript'}: ${content}`);
         session.sendResponse(responseStream(state, content, transcript, signal));
     },
 
