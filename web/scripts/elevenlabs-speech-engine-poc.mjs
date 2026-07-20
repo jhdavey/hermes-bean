@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http';
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
+import { chooseBeanVoiceAcknowledgement } from './elevenlabsVoiceAcknowledgement.mjs';
 
 const required = (name) => {
     const value = process.env[name];
@@ -16,6 +17,7 @@ const BEAN_CLIENT_TIMEZONE = process.env.BEAN_CLIENT_TIMEZONE || 'America/New_Yo
 const PORT = Number(process.env.ELEVENLABS_SPEECH_ENGINE_POC_PORT || 3001);
 const PATH = process.env.ELEVENLABS_SPEECH_ENGINE_POC_PATH || '/ws';
 const ACK_ENABLED = process.env.BEAN_ELEVENLABS_POC_ACK_ENABLED !== 'false';
+const ACK_DELAY_MS = Number(process.env.BEAN_ELEVENLABS_POC_ACK_DELAY_MS || 650);
 
 const elevenlabs = new ElevenLabsClient({ apiKey: ELEVENLABS_API_KEY });
 const httpServer = createServer();
@@ -86,17 +88,35 @@ async function askBean(state, content, signal) {
     return answer || 'Bean finished that, but I did not get a spoken answer back.';
 }
 
-async function* responseStream(state, content, signal) {
-    if (ACK_ENABLED) {
-        yield 'Sure — checking Bean now. ';
-    }
+function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function* responseStream(state, content, transcript, signal) {
+    const answerPromise = askBean(state, content, signal);
 
     try {
-        yield await askBean(state, content, signal);
+        const acknowledgement = ACK_ENABLED ? chooseBeanVoiceAcknowledgement(content, transcript) : null;
+
+        if (acknowledgement && ACK_DELAY_MS > 0) {
+            const first = await Promise.race([
+                answerPromise.then((answer) => ({ type: 'answer', answer })),
+                delay(ACK_DELAY_MS).then(() => ({ type: 'acknowledgement' })),
+            ]);
+
+            if (first.type === 'answer') {
+                yield first.answer;
+                return;
+            }
+
+            yield `${acknowledgement} `;
+        }
+
+        yield await answerPromise;
     } catch (error) {
         if (signal?.aborted) return;
         console.error('[bean] request failed:', error?.message || error);
-        yield 'I hit a snag checking Bean. Please try again.';
+        yield 'I hit a snag checking your dashboard. Please try again.';
     }
 }
 
@@ -117,7 +137,7 @@ await elevenlabs.speechEngine.attach(ELEVENLABS_SPEECH_ENGINE_ID, httpServer, PA
         if (!content) return;
 
         console.log(`[elevenlabs] transcript: ${content}`);
-        session.sendResponse(responseStream(state, content, signal));
+        session.sendResponse(responseStream(state, content, transcript, signal));
     },
 
     onClose(session) {
