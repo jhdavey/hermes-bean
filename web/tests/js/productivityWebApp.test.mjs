@@ -55,6 +55,10 @@ test('Bean status and expandable chat share one dynamic bordered control', () =>
     assert.match(dashboardSource, /@keyframes hb-bean-orbit/);
     assert.doesNotMatch(dashboardSource, /\.hb-bean-status-pill/);
     assert.doesNotMatch(dashboardSource, /\.hb-bean-panel\s*\{[^}]*position:\s*fixed/s);
+    const presenceRule = cssRuleContaining(dashboardSource, '.hb-bean-presence');
+    assert.match(presenceRule, /min-width:\s*0/);
+    assert.match(presenceRule, /width:\s*fit-content/);
+    assert.doesNotMatch(presenceRule, /min-width:\s*210px/);
     const toggleRule = cssRuleContaining(dashboardSource, '.hb-bean-panel-toggle');
     assert.match(toggleRule, /border:\s*0/);
     assert.doesNotMatch(toggleRule, /border-left/);

@@ -764,7 +764,7 @@
 .hb-bean-presence {
     --hb-bean-radius: 22px;
     position: relative;
-    min-width: 210px;
+    min-width: 0;
     width: fit-content;
     max-width: min(380px, 36vw);
     display: grid;
@@ -1028,13 +1028,13 @@
 }
 
 @media (max-width: 1120px) {
-    .hb-bean-presence { min-width: min(210px, 30vw); max-width: min(240px, 30vw); }
+    .hb-bean-presence { min-width: 0; width: fit-content; max-width: min(240px, 30vw); }
     .hb-bean-presence-open { width: min(420px, calc(100vw - 40px)); }
 }
 
 @media (max-width: 720px) {
-    .hb-bean-presence { min-width: 0; width: min(210px, calc(100vw - 156px)); max-width: min(210px, calc(100vw - 156px)); }
-    .hb-bean-presence-open { width: calc(100vw - 16px); }
+    .hb-bean-presence { min-width: 0; width: fit-content; max-width: calc(100vw - 156px); }
+    .hb-bean-presence-open { width: calc(100vw - 16px); max-width: calc(100vw - 16px); }
     .hb-bean-status { font-size: 11px; }
     .hb-bean-panel { max-height: calc(100dvh - 76px); }
 }
