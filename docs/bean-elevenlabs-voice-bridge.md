@@ -26,7 +26,7 @@ ELEVENLABS_SPEECH_ENGINE_ID=seng_...
 ELEVENLABS_SPEECH_ENGINE_ENABLED=true
 ELEVENLABS_VOICE_BRIDGE_SECRET=<long random secret>
 ELEVENLABS_SPEECH_ENGINE_PORT=3001
-ELEVENLABS_SPEECH_ENGINE_HOST=0.0.0.0
+ELEVENLABS_SPEECH_ENGINE_HOST=127.0.0.1
 ELEVENLABS_SPEECH_ENGINE_PATH=/ws
 BEAN_API_BASE_URL=https://heybean.org/api
 ```
@@ -46,40 +46,48 @@ ELEVENLABS_SPEECH_ENGINE_PATH="/ws" \
 npm run elevenlabs:voice-bridge
 ```
 
-Current no-sudo production fallback uses `pm2` as the `forge` user:
+Current production uses `pm2` as the `forge` user, with Nginx proxying the stable public path to the localhost bridge:
 
 ```bash
 pm2 start npm --name bean-elevenlabs-voice-bridge -- run elevenlabs:voice-bridge
 pm2 save
 ```
 
-Preferred Forge UI daemon command is the same environment-wrapped command above, or an Nginx reverse proxy to a localhost-bound process:
+Nginx server include installed at `/etc/nginx/forge-conf/3062576/server/bean-elevenlabs-voice-bridge.conf`:
 
 ```nginx
+location = /bean/elevenlabs/speech-engine/healthz {
+    proxy_pass http://127.0.0.1:3001/healthz;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 30s;
+    proxy_send_timeout 30s;
+}
+
 location /bean/elevenlabs/speech-engine/ws {
     proxy_pass http://127.0.0.1:3001/ws;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "Upgrade";
+    proxy_set_header Connection "upgrade";
     proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
+    proxy_buffering off;
 }
 ```
 
-If that proxy is installed, set ElevenLabs Speech Engine `wsUrl` to:
+ElevenLabs Speech Engine `wsUrl` is:
 
 ```text
 wss://heybean.org/bean/elevenlabs/speech-engine/ws
 ```
 
-Without sudo/Nginx access, the bridge can bind publicly and ElevenLabs can use:
-
-```text
-ws://143.244.184.227:3001/ws
-```
-
-The bridge still verifies ElevenLabs' signed Speech Engine JWT before accepting WebSocket sessions.
+The bridge verifies ElevenLabs' signed Speech Engine JWT before accepting WebSocket sessions.
 
 ## Verification
 
