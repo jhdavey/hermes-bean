@@ -240,6 +240,7 @@ export function mountHeyBeanWebApp(mount) {
     let beanPendingWakeTailTimer = 0;
     let beanPendingWakeTail = '';
     let beanFollowUpTimer = 0;
+    let beanAssistantSpeechFallbackTimer = 0;
     let beanVoiceInputIgnoreUntil = 0;
     let beanEventStatusStartedAt = Date.now();
 
@@ -4594,6 +4595,11 @@ export function mountHeyBeanWebApp(mount) {
         beanFollowUpTimer = 0;
     }
 
+    function clearBeanAssistantSpeechFallbackTimer() {
+        window.clearTimeout(beanAssistantSpeechFallbackTimer);
+        beanAssistantSpeechFallbackTimer = 0;
+    }
+
     function setBeanVoiceInputEnabled(enabled) {
         beanMediaStream?.getAudioTracks?.().forEach((track) => {
             track.enabled = Boolean(enabled);
@@ -4609,6 +4615,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function scheduleBeanFollowUpListening() {
         clearBeanFollowUpTimer();
+        clearBeanAssistantSpeechFallbackTimer();
         if (!state.bean.voiceActive || state.bean.voiceConnecting) return;
         beanVoiceInputIgnoreUntil = Date.now() + beanPostSpeechInputCooldownMs;
         setBeanVoiceInputEnabled(false);
@@ -4764,6 +4771,7 @@ export function mountHeyBeanWebApp(mount) {
     function stopBeanVoiceSession(options = {}) {
         clearBeanPendingWakeTail();
         clearBeanFollowUpTimer();
+        clearBeanAssistantSpeechFallbackTimer();
         setBeanVoiceInputEnabled(false);
         beanDataChannel?.close?.();
         beanPeerConnection?.close?.();
@@ -4887,8 +4895,20 @@ export function mountHeyBeanWebApp(mount) {
         return normalizeList(state.bean.messages).slice().reverse().find((message) => String(message.role || '').toLowerCase() === 'assistant')?.content || '';
     }
 
+    function scheduleBeanAssistantSpeechFallback(answer) {
+        clearBeanAssistantSpeechFallbackTimer();
+        const estimatedSpeechMs = Math.min(9000, Math.max(2200, String(answer || '').length * 55));
+        beanAssistantSpeechFallbackTimer = window.setTimeout(() => {
+            if (!state.bean.voiceActive || state.bean.mode !== 'speaking') return;
+            state.bean.mode = 'listening';
+            scheduleBeanFollowUpListening();
+            render();
+        }, estimatedSpeechMs);
+    }
+
     function speakBeanRealtimeAnswer(answer) {
         clearBeanFollowUpTimer();
+        clearBeanAssistantSpeechFallbackTimer();
         setBeanVoiceInputEnabled(false);
         sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
         sendBeanRealtimeEvent({
@@ -4897,6 +4917,7 @@ export function mountHeyBeanWebApp(mount) {
                 instructions: `Say exactly this to the user, conversationally and without adding new information: ${answer}`,
             },
         });
+        scheduleBeanAssistantSpeechFallback(answer);
     }
 
     function sendBeanRealtimeEvent(payload) {

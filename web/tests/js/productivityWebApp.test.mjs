@@ -95,6 +95,9 @@ test('Bean voice mutes realtime mic while answering and only opens a short follo
     assert.match(source, /track\.enabled = Boolean\(enabled\)/);
     assert.match(source, /setBeanVoiceInputEnabled\(false\)/);
     assert.match(source, /scheduleBeanFollowUpListening/);
+    assert.match(source, /scheduleBeanAssistantSpeechFallback/);
+    assert.match(source, /const estimatedSpeechMs = Math\.min\(9000, Math\.max\(2200, String\(answer \|\| ''\)\.length \* 55\)\)/);
+    assert.match(source, /clearBeanAssistantSpeechFallbackTimer/);
     assert.match(source, /Listening for a follow-up…/);
     assert.match(source, /input_audio_buffer\.clear/);
     assert.match(source, /Date\.now\(\) < beanVoiceInputIgnoreUntil/);
