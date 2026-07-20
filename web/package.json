@@ -6,8 +6,7 @@
         "build": "vite build",
         "dev": "vite",
         "test": "node --test tests/js/*.test.mjs",
-        "elevenlabs:voice-bridge": "node scripts/elevenlabs-speech-engine-server.mjs",
-        "elevenlabs:poc": "node scripts/elevenlabs-speech-engine-poc.mjs"
+        "elevenlabs:agent-configure": "node scripts/elevenlabs-agent-configure.mjs"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",

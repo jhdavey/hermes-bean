@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\BeanActivityEvent;
 use App\Models\BeanRun;
 use App\Models\BeanSession;
-use App\Models\BeanVoiceBridgeSession;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\Bean\BeanDashboardToolBridgeService;
@@ -348,78 +347,49 @@ PHP);
         $this->assertFileExists($env['BEAN_TOOL_CONTEXT']);
     }
 
-    public function test_elevenlabs_conversation_token_requires_speech_engine_configuration(): void
+    public function test_elevenlabs_conversation_token_requires_agent_configuration(): void
     {
         config([
-            'services.elevenlabs.speech_engine_enabled' => true,
+            'services.elevenlabs.agent_enabled' => true,
             'services.elevenlabs.api_key' => null,
-            'services.elevenlabs.speech_engine_id' => 'seng_test',
-            'services.elevenlabs.voice_bridge_secret' => 'bridge-secret',
+            'services.elevenlabs.agent_id' => 'agent_test',
         ]);
         $token = $this->apiToken('bean-elevenlabs-missing-key@example.com');
         Http::fake();
 
         $this->withToken($token)->postJson('/api/bean/elevenlabs/conversation-token')
             ->assertStatus(503)
-            ->assertJsonPath('message', 'ElevenLabs Speech Engine is not configured.');
+            ->assertJsonPath('message', 'ElevenLabs Agent voice is not configured.');
 
         Http::assertNothingSent();
     }
 
-    public function test_elevenlabs_conversation_token_creates_authenticated_bridge_session(): void
+    public function test_elevenlabs_conversation_token_mints_agent_session_without_bridge_state(): void
     {
         config([
-            'services.elevenlabs.speech_engine_enabled' => true,
+            'services.elevenlabs.agent_enabled' => true,
             'services.elevenlabs.api_key' => 'test-elevenlabs-key',
-            'services.elevenlabs.speech_engine_id' => 'seng_test',
-            'services.elevenlabs.voice_bridge_secret' => 'bridge-secret',
+            'services.elevenlabs.agent_id' => 'agent_test',
         ]);
         $token = $this->apiToken('bean-elevenlabs-token@example.com');
 
         Http::fake(function (HttpRequest $request) {
-            $this->assertSame('https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=seng_test&participant_name=bean-user-1', $request->url());
+            $this->assertSame('https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=agent_test&participant_name=bean-user-1', $request->url());
             $this->assertSame('test-elevenlabs-key', $request->header('xi-api-key')[0] ?? null);
 
             return Http::response(['token' => 'convai_test_token'], 200);
         });
 
-        $response = $this->withToken($token)->postJson('/api/bean/elevenlabs/conversation-token', [
+        $this->withToken($token)->postJson('/api/bean/elevenlabs/conversation-token', [
             'client_timezone' => 'America/New_York',
         ])->assertOk()
             ->assertJsonPath('data.token', 'convai_test_token')
-            ->assertJsonPath('data.speech_engine_id', 'seng_test')
-            ->assertJsonPath('data.transport', 'elevenlabs_speech_engine');
+            ->assertJsonPath('data.agent_id', 'agent_test')
+            ->assertJsonPath('data.transport', 'elevenlabs_agent')
+            ->assertJsonMissingPath('data.bridge_session_id');
 
-        $bridgeSessionId = $response->json('data.bridge_session_id');
-        $this->assertNotEmpty($bridgeSessionId);
-        $this->assertDatabaseHas('bean_voice_bridge_sessions', [
-            'uuid' => $bridgeSessionId,
-            'status' => 'pending',
-            'client_timezone' => 'America/New_York',
-        ]);
-
-        $this->withToken($token)->postJson("/api/bean/elevenlabs/bridge-sessions/{$bridgeSessionId}/connect", [
-            'conversation_id' => 'conv_test_123',
-        ])->assertOk()
-            ->assertJsonPath('data.conversation_id', 'conv_test_123');
-
-        $this->assertDatabaseHas('bean_voice_bridge_sessions', [
-            'uuid' => $bridgeSessionId,
-            'conversation_id' => 'conv_test_123',
-            'status' => 'connected',
-        ]);
-
+        $this->assertDatabaseCount('bean_sessions', 1);
         Http::assertSentCount(1);
-    }
-
-    public function test_elevenlabs_bridge_message_requires_bridge_secret(): void
-    {
-        config(['services.elevenlabs.voice_bridge_secret' => 'bridge-secret']);
-
-        $this->postJson('/api/bean/elevenlabs/bridge/message', [
-            'conversation_id' => 'conv_test',
-            'content' => 'What tasks do I have today?',
-        ])->assertStatus(401);
     }
 
     private function signedToolContext(User $user, BeanSession $session, BeanRun $run): array

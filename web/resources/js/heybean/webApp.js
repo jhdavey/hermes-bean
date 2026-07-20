@@ -228,29 +228,18 @@ export function mountHeyBeanWebApp(mount) {
     let workspaceSwitchGeneration = 0;
     let beanEventAbort = null;
     let beanEventLastId = 0;
-    let beanPeerConnection = null;
     let beanMediaStream = null;
-    let beanDataChannel = null;
-    let beanRemoteAudio = null;
     let beanElevenLabsConversation = null;
-    let beanElevenLabsBridgeSessionId = '';
     let beanWakeDetector = null;
     let beanRealtimeSessionCache = null;
     let beanRealtimeSessionPromise = null;
-    const beanFollowUpWindowMs = 30000;
-    const beanPostSpeechInputCooldownMs = 700;
-    const beanAssistantSpeechMaxMuteMs = 3500;
-    let beanRealtimeEventQueue = [];
     let beanPendingWakeTailTimer = 0;
     let beanPendingWakeTail = '';
-    let beanFollowUpTimer = 0;
-    let beanAssistantSpeechFallbackTimer = 0;
     let beanPendingVoiceResponseTimer = 0;
     let beanPendingVoiceResponse = null;
     let beanVoiceInputIgnoreUntil = 0;
     let beanLastSpokenAnswer = '';
     let beanLastSpokenAnswerAt = 0;
-    let beanEndVoiceAfterAnswer = false;
     let beanVoiceRequestCount = 0;
     let beanVoiceClientSessionId = '';
     let beanVoiceClientTurnId = '';
@@ -4620,32 +4609,10 @@ export function mountHeyBeanWebApp(mount) {
         return words.length >= 5;
     }
 
-    function scheduleBeanWakeTailStabilization(wakeTail) {
-        window.clearTimeout(beanPendingWakeTailTimer);
-        beanPendingWakeTail = String(wakeTail || '').trim();
-        if (!beanPendingWakeTail || !isLikelyCompleteBeanWakeTail(beanPendingWakeTail)) return;
-        beanPendingWakeTailTimer = window.setTimeout(() => {
-            const content = beanPendingWakeTail;
-            clearBeanPendingWakeTail();
-            if (!content || state.bean.busy) return;
-            sendBeanVoiceTranscript(content);
-        }, 1400);
-    }
-
     function clearBeanPendingWakeTail() {
         window.clearTimeout(beanPendingWakeTailTimer);
         beanPendingWakeTailTimer = 0;
         beanPendingWakeTail = '';
-    }
-
-    function clearBeanFollowUpTimer() {
-        window.clearTimeout(beanFollowUpTimer);
-        beanFollowUpTimer = 0;
-    }
-
-    function clearBeanAssistantSpeechFallbackTimer() {
-        window.clearTimeout(beanAssistantSpeechFallbackTimer);
-        beanAssistantSpeechFallbackTimer = 0;
     }
 
     function clearBeanPendingVoiceResponse() {
@@ -4684,33 +4651,10 @@ export function mountHeyBeanWebApp(mount) {
 
     function endBeanVoiceConversationForWake(statusText = 'Listening locally for “Hey Bean”') {
         const dismissed = /dismiss/i.test(statusText);
-        sendBeanRealtimeEvent({ type: 'response.cancel' });
         stopBeanVoiceSession({ statusText });
         if (dismissed) logBeanVoiceLifecycleEvent('dismiss_closed', { label: statusText });
         state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
         state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : statusText;
-    }
-
-    function scheduleBeanFollowUpListening() {
-        clearBeanFollowUpTimer();
-        clearBeanAssistantSpeechFallbackTimer();
-        if (!state.bean.voiceActive || state.bean.voiceConnecting) return;
-        logBeanVoiceLifecycleEvent('followup_window_opened');
-        beanVoiceInputIgnoreUntil = Date.now() + beanPostSpeechInputCooldownMs;
-        setBeanVoiceInputEnabled(false);
-        window.setTimeout(() => {
-            if (!state.bean.voiceActive || state.bean.busy || state.bean.mode !== 'listening') return;
-            sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
-            setBeanVoiceInputEnabled(true);
-            state.bean.statusText = 'Listening for a follow-up…';
-            render();
-        }, beanPostSpeechInputCooldownMs);
-        beanFollowUpTimer = window.setTimeout(() => {
-            if (!state.bean.voiceActive || state.bean.busy) return;
-            logBeanVoiceLifecycleEvent('followup_window_expired');
-            endBeanVoiceConversationForWake();
-            render();
-        }, beanFollowUpWindowMs);
     }
 
     function stopBeanWakeListening() {
@@ -4774,7 +4718,51 @@ export function mountHeyBeanWebApp(mount) {
 
     function beanRealtimeSessionUsable(session) {
         if (!session) return false;
-        return Boolean(session.token && session.bridge_session_id && session.transport === 'elevenlabs_speech_engine');
+        return Boolean(session.token && session.agent_id && session.transport === 'elevenlabs_agent');
+    }
+
+    async function askBeanFromElevenLabsAgent(parameters = {}) {
+        const content = String(parameters.message || parameters.content || parameters.request || '').trim();
+        if (!content) return 'I did not receive a Bean request.';
+
+        const turnId = newBeanVoiceEventId('voice-agent-tool');
+        beanVoiceClientTurnId = turnId;
+        beanVoiceRequestCount += 1;
+        logBeanVoiceLifecycleEvent('bean_request_sent', { label: content.slice(0, 160), transport: 'elevenlabs_agent', tool: 'askBean' });
+        watchPendingBeanVoiceResponse(turnId, content);
+
+        try {
+            const data = await api('/bean/messages', {
+                method: 'POST',
+                body: {
+                    session_id: state.bean.sessionId || null,
+                    workspace_id: currentWorkspaceId(),
+                    content,
+                    ...clientTimezonePayload(),
+                },
+            });
+            state.bean.sessionId = data.session?.id || state.bean.sessionId;
+            state.bean.messages = normalizeList(data.messages);
+            state.bean.activity = normalizeList(data.activity);
+            state.bean.confirmations = normalizeList(data.confirmations);
+            scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
+            const answer = latestBeanAssistantMessage() || String(data.run?.output || '').trim() || 'Bean finished that.';
+            logBeanVoiceLifecycleEvent('bean_response_received', { run_id: data.run?.id || null, failed: data.run?.status === 'failed', label: answer.slice(0, 160), transport: 'elevenlabs_agent', tool: 'askBean' });
+            clearBeanPendingVoiceResponse();
+            render();
+            return answer;
+        } catch (error) {
+            logBeanVoiceLifecycleEvent('voice_request_error', {
+                label: content.slice(0, 160),
+                error_name: String(error?.name || '').slice(0, 80),
+                error_status: error?.status || null,
+                error_message: String(error?.message || '').slice(0, 160),
+                transport: 'elevenlabs_agent',
+                tool: 'askBean',
+            });
+            clearBeanPendingVoiceResponse();
+            return 'I hit a problem checking Bean. Please try that again.';
+        }
     }
 
     async function startBeanVoiceSession(options = {}) {
@@ -4787,7 +4775,6 @@ export function mountHeyBeanWebApp(mount) {
         }
 
         stopBeanWakeListening();
-        clearBeanFollowUpTimer();
         state.bean.panelOpen = true;
         state.bean.voiceConnecting = true;
         state.bean.error = '';
@@ -4798,45 +4785,29 @@ export function mountHeyBeanWebApp(mount) {
         try {
             const realtime = await fetchBeanRealtimeSession();
             beanRealtimeSessionCache = null;
-            if (!realtime?.token || !realtime?.bridge_session_id) throw new Error('ElevenLabs session did not return bridge credentials.');
+            if (!realtime?.token || !realtime?.agent_id) throw new Error('ElevenLabs Agent session did not return credentials.');
             state.bean.sessionId = realtime.bean_session_id || state.bean.sessionId;
-            beanElevenLabsBridgeSessionId = realtime.bridge_session_id;
 
             await navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
                 stream.getTracks?.().forEach((track) => track.stop());
             });
 
             const wakeTail = String(options?.wakeTail || '').trim();
-            let registered = false;
             beanElevenLabsConversation = await Conversation.startSession({
                 conversationToken: realtime.token,
                 userId: state.user?.id ? `bean-user-${state.user.id}` : undefined,
                 dynamicVariables: {
                     bean_session_id: Number(state.bean.sessionId || realtime.bean_session_id || 0),
-                    bean_bridge_session_id: realtime.bridge_session_id,
                     bean_client_timezone: clientTimezonePayload().client_timezone || '',
+                    bean_workspace_id: Number(currentWorkspaceId() || 0),
                 },
                 overrides: {
                     asr: { keywords: ['Hey Bean', 'HeyBean', 'tasks', 'to-do', 'todo', 'reminders', 'calendar', 'notes'] },
                 },
-                onConnect: async ({ conversationId } = {}) => {
-                    try {
-                        const connectedConversationId = conversationId || beanElevenLabsConversation?.getId?.();
-                        if (connectedConversationId && beanElevenLabsBridgeSessionId) {
-                            await api(`/bean/elevenlabs/bridge-sessions/${encodeURIComponent(beanElevenLabsBridgeSessionId)}/connect`, {
-                                method: 'POST',
-                                body: { conversation_id: connectedConversationId },
-                            });
-                            registered = true;
-                        }
-                    } catch (error) {
-                        logBeanVoiceLifecycleEvent('voice_session_error', { label: friendlyError(error, 'register Bean voice session').slice(0, 160), transport: 'elevenlabs_speech_engine' });
-                        state.bean.error = friendlyError(error, 'register Bean voice session');
-                        state.bean.mode = 'error';
-                        state.bean.statusText = 'Voice hit a problem';
-                        render();
-                        return;
-                    }
+                clientTools: {
+                    askBean: askBeanFromElevenLabsAgent,
+                },
+                onConnect: async () => {
                     state.bean.voiceActive = true;
                     state.bean.voiceConnecting = false;
                     beanVoiceRequestCount = 0;
@@ -4845,7 +4816,7 @@ export function mountHeyBeanWebApp(mount) {
                     logBeanVoiceLifecycleEvent('voice_session_started', {
                         has_wake_event: Boolean(options?.wakeEvent),
                         has_wake_tail: Boolean(wakeTail),
-                        transport: 'elevenlabs_speech_engine',
+                        transport: 'elevenlabs_agent',
                     });
                     if (!state.bean.busy) {
                         state.bean.mode = 'listening';
@@ -4855,21 +4826,18 @@ export function mountHeyBeanWebApp(mount) {
 
                     if (wakeTail && isLikelyCompleteBeanWakeTail(wakeTail)) {
                         beanVoiceClientTurnId = newBeanVoiceEventId('voice-turn');
-                        logBeanVoiceLifecycleEvent('wake_tail_submitted', { label: wakeTail.slice(0, 160), transport: 'elevenlabs_speech_engine' });
+                        logBeanVoiceLifecycleEvent('wake_tail_submitted', { label: wakeTail.slice(0, 160), transport: 'elevenlabs_agent' });
                         beanElevenLabsConversation?.sendUserMessage?.(wakeTail);
                     }
                 },
                 onDisconnect: (details) => {
                     const shouldReset = state.bean.voiceActive || state.bean.voiceConnecting;
                     beanElevenLabsConversation = null;
-                    beanElevenLabsBridgeSessionId = '';
                     state.bean.voiceActive = false;
                     state.bean.voiceConnecting = false;
-                    clearBeanFollowUpTimer();
-                    clearBeanAssistantSpeechFallbackTimer();
-                    clearBeanPendingVoiceResponse();
+                                            clearBeanPendingVoiceResponse();
                     if (shouldReset) {
-                        logBeanVoiceLifecycleEvent('voice_session_closed', { transport: 'elevenlabs_speech_engine', reason: details?.reason || '' });
+                        logBeanVoiceLifecycleEvent('voice_session_closed', { transport: 'elevenlabs_agent', reason: details?.reason || '' });
                     }
                     if (state.bean.mode !== 'privacy') {
                         state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
@@ -4879,7 +4847,7 @@ export function mountHeyBeanWebApp(mount) {
                     render();
                 },
                 onError: (message, context) => {
-                    logBeanVoiceLifecycleEvent('voice_session_error', { label: String(message || '').slice(0, 160), transport: 'elevenlabs_speech_engine', context: context ? String(context).slice(0, 160) : '' });
+                    logBeanVoiceLifecycleEvent('voice_session_error', { label: String(message || '').slice(0, 160), transport: 'elevenlabs_agent', context: context ? String(context).slice(0, 160) : '' });
                     state.bean.error = String(message || 'ElevenLabs voice error.');
                     state.bean.mode = 'error';
                     state.bean.statusText = 'Voice hit a problem';
@@ -4888,8 +4856,8 @@ export function mountHeyBeanWebApp(mount) {
                 onMessage: (message) => handleBeanElevenLabsMessage(message),
                 onModeChange: ({ mode } = {}) => handleBeanElevenLabsMode(mode),
                 onStatusChange: ({ status } = {}) => {
-                    if (status === 'connected' && !registered) {
-                        state.bean.statusText = 'Connecting Bean voice…';
+                    if (status === 'connected') {
+                        state.bean.statusText = 'Listening — speak to Bean';
                         render();
                     }
                 },
@@ -4906,24 +4874,13 @@ export function mountHeyBeanWebApp(mount) {
     function stopBeanVoiceSession(options = {}) {
         const wasActive = state.bean.voiceActive || state.bean.voiceConnecting;
         clearBeanPendingWakeTail();
-        clearBeanFollowUpTimer();
-        clearBeanAssistantSpeechFallbackTimer();
         clearBeanPendingVoiceResponse();
-        beanEndVoiceAfterAnswer = false;
         beanVoiceRequestCount = 0;
         setBeanVoiceInputEnabled(false);
         beanElevenLabsConversation?.endSession?.().catch(() => {});
         beanElevenLabsConversation = null;
-        beanElevenLabsBridgeSessionId = '';
-        beanDataChannel?.close?.();
-        beanPeerConnection?.close?.();
         beanMediaStream?.getTracks?.().forEach((track) => track.stop());
-        if (beanRemoteAudio) beanRemoteAudio.srcObject = null;
-        beanDataChannel = null;
-        beanPeerConnection = null;
         beanMediaStream = null;
-        beanRemoteAudio = null;
-        beanRealtimeEventQueue = [];
         state.bean.voiceActive = false;
         state.bean.voiceConnecting = false;
         state.bean.voiceTranscript = '';
@@ -4950,29 +4907,28 @@ export function mountHeyBeanWebApp(mount) {
 
         if (role === 'user') {
             clearBeanPendingWakeTail();
-            if (isLikelyBeanAssistantEcho(content) || isLikelyBeanHealthCheckBackchannelEcho(content)) {
-                logBeanVoiceLifecycleEvent('assistant_echo_ignored', { label: content.slice(0, 160), transport: 'elevenlabs_speech_engine' });
+            if (isLikelyBeanAssistantEcho(content)) {
+                logBeanVoiceLifecycleEvent('assistant_echo_ignored', { label: content.slice(0, 160), transport: 'elevenlabs_agent' });
                 return;
             }
             if (state.bean.mode === 'speaking') {
-                logBeanVoiceLifecycleEvent('background_audio_ignored', { label: content.slice(0, 160), reason: 'assistant_speaking', transport: 'elevenlabs_speech_engine' });
+                logBeanVoiceLifecycleEvent('background_audio_ignored', { label: content.slice(0, 160), reason: 'assistant_speaking', transport: 'elevenlabs_agent' });
                 return;
             }
             if (handleBeanVoiceControl(content)) return;
             if (state.bean.busy || Date.now() < beanVoiceInputIgnoreUntil) {
-                logBeanVoiceLifecycleEvent('background_audio_ignored', { label: content.slice(0, 160), reason: state.bean.busy ? 'busy' : 'post_speech_cooldown', transport: 'elevenlabs_speech_engine' });
+                logBeanVoiceLifecycleEvent('background_audio_ignored', { label: content.slice(0, 160), reason: state.bean.busy ? 'busy' : 'post_speech_cooldown', transport: 'elevenlabs_agent' });
                 return;
             }
-            clearBeanFollowUpTimer();
-            const isFollowUpTranscript = beanVoiceRequestCount > 0 && state.bean.mode === 'listening' && state.bean.voiceActive;
+                const isFollowUpTranscript = beanVoiceRequestCount > 0 && state.bean.mode === 'listening' && state.bean.voiceActive;
             beanVoiceClientTurnId = newBeanVoiceEventId(isFollowUpTranscript ? 'voice-followup' : 'voice-turn');
-            logBeanVoiceLifecycleEvent(isFollowUpTranscript ? 'followup_transcript_received' : 'user_transcript_received', { label: content.slice(0, 160), transport: 'elevenlabs_speech_engine' });
+            logBeanVoiceLifecycleEvent(isFollowUpTranscript ? 'followup_transcript_received' : 'user_transcript_received', { label: content.slice(0, 160), transport: 'elevenlabs_agent' });
             state.bean.voiceTranscript = content;
             state.bean.messages = [...normalizeList(state.bean.messages), { role: 'user', content }];
             beanVoiceRequestCount += 1;
             watchPendingBeanVoiceResponse(beanVoiceClientTurnId, content);
-            logBeanVoiceLifecycleEvent('thinking_visible', { label: content.slice(0, 160), transport: 'elevenlabs_speech_engine' });
-            logBeanVoiceLifecycleEvent('bean_request_sent', { label: content.slice(0, 160), transport: 'elevenlabs_speech_engine' });
+            logBeanVoiceLifecycleEvent('thinking_visible', { label: content.slice(0, 160), transport: 'elevenlabs_agent' });
+            logBeanVoiceLifecycleEvent('bean_request_sent', { label: content.slice(0, 160), transport: 'elevenlabs_agent' });
             state.bean.busy = true;
             state.bean.mode = 'thinking';
             state.bean.statusText = 'Thinking…';
@@ -4988,16 +4944,14 @@ export function mountHeyBeanWebApp(mount) {
             clearBeanPendingVoiceResponse();
             beanLastSpokenAnswer = content;
             beanLastSpokenAnswerAt = Date.now();
-            beanEndVoiceAfterAnswer = isBeanVoiceHealthCheckAnswer(content);
-            logBeanVoiceLifecycleEvent('bean_response_received', { label: content.slice(0, 160), transport: 'elevenlabs_speech_engine', recovered_from_speech_engine: true });
-            logBeanVoiceLifecycleEvent('assistant_speech_started', { label: content.slice(0, 160), transport: 'elevenlabs_speech_engine' });
+                logBeanVoiceLifecycleEvent('bean_response_received', { label: content.slice(0, 160), transport: 'elevenlabs_agent', agent_managed_response: true });
+            logBeanVoiceLifecycleEvent('assistant_speech_started', { label: content.slice(0, 160), transport: 'elevenlabs_agent' });
             state.bean.messages = [...normalizeList(state.bean.messages), { role: 'assistant', content }];
             state.bean.voiceTranscript = '';
             state.bean.busy = false;
             state.bean.mode = 'speaking';
             state.bean.statusText = 'Speaking…';
             scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
-            scheduleBeanAssistantSpeechFallback(content);
             render();
         }
     }
@@ -5012,46 +4966,12 @@ export function mountHeyBeanWebApp(mount) {
             }
             return;
         }
-        if (normalizedMode === 'listening' && state.bean.mode === 'speaking') {
-            openBeanFollowUpAfterAssistantSpeech();
-            render();
-        }
-    }
-
-    function handleBeanRealtimeEvent(event) {
-        let payload = null;
-        try {
-            payload = JSON.parse(event.data || '{}');
-        } catch (_) {
-            return;
-        }
-        const type = String(payload.type || '');
-        const transcript = String(payload.transcript || payload.text || payload.delta || '').trim();
-        if (transcript && type.includes('transcription') && type.endsWith('completed')) {
-            clearBeanPendingWakeTail();
-            if (isLikelyBeanAssistantEcho(transcript)) {
-                logBeanVoiceLifecycleEvent('assistant_echo_ignored', { label: transcript.slice(0, 160) });
-                sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
-                return;
+        if (normalizedMode === 'listening') {
+            if (state.bean.voiceActive) {
+                state.bean.mode = 'listening';
+                state.bean.statusText = 'Listening — speak to Bean';
+                render();
             }
-            if (handleBeanVoiceControl(transcript)) return;
-            if (state.bean.mode === 'speaking') openBeanFollowUpAfterAssistantSpeech();
-            if (state.bean.busy || Date.now() < beanVoiceInputIgnoreUntil) {
-                logBeanVoiceLifecycleEvent('background_audio_ignored', { label: transcript.slice(0, 160), reason: state.bean.busy ? 'busy' : 'post_speech_cooldown' });
-                sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
-                return;
-            }
-            clearBeanFollowUpTimer();
-            const isFollowUpTranscript = beanVoiceRequestCount > 0 && state.bean.mode === 'listening' && state.bean.voiceActive;
-            beanVoiceClientTurnId = newBeanVoiceEventId(isFollowUpTranscript ? 'voice-followup' : 'voice-turn');
-            logBeanVoiceLifecycleEvent(isFollowUpTranscript ? 'followup_transcript_received' : 'user_transcript_received', { label: transcript.slice(0, 160) });
-            state.bean.voiceTranscript = transcript;
-            render();
-            sendBeanVoiceTranscript(transcript);
-        }
-        if (type === 'response.done' || type === 'response.audio.done' || type === 'output_audio_buffer.stopped') {
-            openBeanFollowUpAfterAssistantSpeech();
-            render();
         }
     }
 
@@ -5081,153 +5001,20 @@ export function mountHeyBeanWebApp(mount) {
         return /^(停止|停|ストップ|止めて|やめて|終了|キャンセル|取消|别说了|不要说了|结束)$/.test(raw);
     }
 
-    async function sendBeanVoiceTranscript(content) {
-        if (!content || state.bean.busy) return;
-        clearBeanFollowUpTimer();
-        setBeanVoiceInputEnabled(false);
-        sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
-        state.bean.busy = true;
-        state.bean.panelOpen = true;
-        state.bean.mode = 'thinking';
-        state.bean.statusText = 'Thinking…';
-        state.bean.messages = [...normalizeList(state.bean.messages), { role: 'user', content }];
-        render();
-        if (!beanVoiceClientTurnId) beanVoiceClientTurnId = newBeanVoiceEventId('voice-turn');
-        logBeanVoiceLifecycleEvent('thinking_visible', { label: String(content || '').slice(0, 160) });
-        try {
-            const sessionId = await ensureBeanSession();
-            logBeanVoiceLifecycleEvent('bean_request_sent', { label: String(content || '').slice(0, 160) });
-            beanVoiceRequestCount += 1;
-            const pendingTurnId = beanVoiceClientTurnId;
-            watchPendingBeanVoiceResponse(pendingTurnId, content);
-            const data = await api('/bean/messages', { method: 'POST', body: { session_id: sessionId, content, ...clientTimezonePayload() } });
-            state.bean.sessionId = data.session?.id || sessionId;
-            const runId = data.run?.id || null;
-            const pendingAlreadyResolved = beanPendingVoiceResponse?.turnId === pendingTurnId && beanPendingVoiceResponse.resolved;
-            logBeanVoiceLifecycleEvent('bean_response_received', { run_id: runId, failed: data.run?.status === 'failed', label: String(data.run?.output || '').slice(0, 160), recovered_from_activity: pendingAlreadyResolved });
-            clearBeanPendingVoiceResponse();
-            state.bean.messages = normalizeList(data.messages);
-            state.bean.activity = normalizeList(data.activity);
-            state.bean.confirmations = normalizeList(data.confirmations);
-            state.bean.voiceTranscript = '';
-            scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
-            const answer = latestBeanAssistantMessage();
-            beanEndVoiceAfterAnswer = data.run?.status === 'failed' || normalizeBeanVoiceText(answer) === normalizeBeanVoiceText('I could not complete that request.');
-            if (answer && !pendingAlreadyResolved) {
-                speakBeanRealtimeAnswer(answer);
-                state.bean.mode = 'speaking';
-                state.bean.statusText = 'Speaking…';
-            } else if (answer && pendingAlreadyResolved) {
-                state.bean.voiceTranscript = '';
-            } else {
-                state.bean.mode = 'listening';
-                state.bean.statusText = 'Listening for a follow-up…';
-                scheduleBeanFollowUpListening();
-            }
-        } catch (error) {
-            logBeanVoiceLifecycleEvent('voice_request_error', {
-                label: String(content || '').slice(0, 160),
-                error_name: String(error?.name || '').slice(0, 80),
-                error_status: error?.status || null,
-                error_message: String(error?.message || '').slice(0, 160),
-            });
-            const mayStillComplete = !error?.status || error?.name === 'AbortError' || /fetch|network|load/i.test(String(error?.message || ''));
-            if (mayStillComplete && state.bean.voiceActive && beanPendingVoiceResponse) {
-                state.bean.error = '';
-                state.bean.mode = 'thinking';
-                state.bean.statusText = 'Bean is still finishing that…';
-                render();
-                return;
-            }
-            state.bean.error = friendlyError(error, 'ask Bean by voice');
-            state.bean.mode = 'error';
-            state.bean.statusText = 'Bean hit a problem';
-            stopBeanVoiceSession({ keepStatus: true });
-        }
-        state.bean.busy = false;
-        render();
-    }
-
     function latestBeanAssistantMessage() {
         return normalizeList(state.bean.messages).slice().reverse().find((message) => String(message.role || '').toLowerCase() === 'assistant')?.content || '';
-    }
-
-    function openBeanFollowUpAfterAssistantSpeech() {
-        if (!state.bean.voiceActive || state.bean.mode !== 'speaking') return;
-        if (beanEndVoiceAfterAnswer) {
-            logBeanVoiceLifecycleEvent('assistant_speech_finished');
-            logBeanVoiceLifecycleEvent('failure_wake_reset');
-            endBeanVoiceConversationForWake('Listening locally for “Hey Bean”');
-            return;
-        }
-        logBeanVoiceLifecycleEvent('assistant_speech_finished');
-        state.bean.mode = 'listening';
-        scheduleBeanFollowUpListening();
     }
 
     function normalizeBeanVoiceText(value) {
         return String(value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
     }
 
-    function isBeanVoiceHealthCheckAnswer(value) {
-        const normalized = normalizeBeanVoiceText(value);
-        return normalized === 'yes i can hear you' || normalized === 'yes i can hear you loud and clear';
-    }
-
-    function isLikelyBeanHealthCheckBackchannelEcho(transcript) {
-        if (!isBeanVoiceHealthCheckAnswer(beanLastSpokenAnswer) || Date.now() - beanLastSpokenAnswerAt > 15000) return false;
-        return /^(ok|okay|yes|yeah|yep|no|nope|thanks|thank you)$/u.test(normalizeBeanVoiceText(transcript));
-    }
-
     function isLikelyBeanAssistantEcho(transcript) {
         if (!beanLastSpokenAnswer || Date.now() - beanLastSpokenAnswerAt > 15000) return false;
         const spoken = normalizeBeanVoiceText(beanLastSpokenAnswer);
         const heard = normalizeBeanVoiceText(transcript);
-        if (!spoken || !heard) return false;
-        if (heard.length < 8) return isBeanVoiceHealthCheckAnswer(beanLastSpokenAnswer) && spoken.includes(heard);
+        if (!spoken || !heard || heard.length < 8) return false;
         return spoken.includes(heard) || heard.includes(spoken.slice(0, Math.min(heard.length, 80)));
-    }
-
-    function scheduleBeanAssistantSpeechFallback(answer) {
-        clearBeanAssistantSpeechFallbackTimer();
-        const estimatedSpeechMs = Math.min(beanAssistantSpeechMaxMuteMs, Math.max(1200, String(answer || '').length * 28));
-        beanAssistantSpeechFallbackTimer = window.setTimeout(() => {
-            openBeanFollowUpAfterAssistantSpeech();
-            render();
-        }, estimatedSpeechMs);
-    }
-
-    function speakBeanRealtimeAnswer(answer) {
-        clearBeanFollowUpTimer();
-        clearBeanAssistantSpeechFallbackTimer();
-        beanLastSpokenAnswer = String(answer || '');
-        beanLastSpokenAnswerAt = Date.now();
-        logBeanVoiceLifecycleEvent('assistant_speech_started', { label: beanLastSpokenAnswer.slice(0, 160) });
-        setBeanVoiceInputEnabled(false);
-        sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
-        sendBeanRealtimeEvent({
-            type: 'response.create',
-            response: {
-                instructions: `Say exactly this to the user, conversationally and without adding new information: ${answer}`,
-            },
-        });
-        scheduleBeanAssistantSpeechFallback(answer);
-    }
-
-    function sendBeanRealtimeEvent(payload) {
-        if (!beanDataChannel || beanDataChannel.readyState === 'connecting') {
-            beanRealtimeEventQueue.push(payload);
-            return false;
-        }
-        if (beanDataChannel.readyState !== 'open') return false;
-        beanDataChannel.send(JSON.stringify(payload));
-        return true;
-    }
-
-    function flushBeanRealtimeEventQueue() {
-        if (!beanDataChannel || beanDataChannel.readyState !== 'open') return;
-        const queued = beanRealtimeEventQueue.splice(0);
-        queued.forEach((payload) => sendBeanRealtimeEvent(payload));
     }
 
     async function ensureBeanSession() {
@@ -7961,17 +7748,9 @@ export function mountHeyBeanWebApp(mount) {
         state.bean.error = '';
         state.bean.voiceTranscript = '';
         state.bean.messages = [...normalizeList(state.bean.messages), { role: 'assistant', content: answer }];
-        beanEndVoiceAfterAnswer = normalizeBeanVoiceText(answer) === normalizeBeanVoiceText('I could not complete that request.');
         logBeanVoiceLifecycleEvent('bean_response_received', { run_id: event.bean_run_id || event.beanRunId || null, label: answer.slice(0, 160), recovered_from_activity: true });
-        if (beanEndVoiceAfterAnswer) {
-            speakBeanRealtimeAnswer(answer);
-            state.bean.mode = 'speaking';
-            state.bean.statusText = 'Speaking…';
-            return true;
-        }
-        speakBeanRealtimeAnswer(answer);
-        state.bean.mode = 'speaking';
-        state.bean.statusText = 'Speaking…';
+        state.bean.mode = 'listening';
+        state.bean.statusText = 'Listening — speak to Bean';
         return true;
     }
 

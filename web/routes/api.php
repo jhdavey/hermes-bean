@@ -27,7 +27,6 @@ Route::middleware('api.rate_limit')->group(function (): void {
     Route::get('/google-calendar/callback', [GoogleCalendarController::class, 'callback']);
     Route::get('/outlook-calendar/callback', [OutlookCalendarController::class, 'callback']);
     Route::post('/billing/stripe/webhook', [BillingController::class, 'webhook']);
-    Route::post('/bean/elevenlabs/bridge/message', [BeanController::class, 'elevenLabsBridgeMessage']);
 
     Route::middleware('auth.bearer')->group(function (): void {
         Route::get('/auth/me', [AuthController::class, 'me']);
@@ -76,7 +75,6 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/bean/voice-events', [BeanController::class, 'voiceEvent']);
         Route::post('/bean/confirmations/{confirmation}/approve', [BeanController::class, 'approve']);
         Route::post('/bean/elevenlabs/conversation-token', [BeanController::class, 'elevenLabsConversationToken']);
-        Route::post('/bean/elevenlabs/bridge-sessions/{bridgeSession}/connect', [BeanController::class, 'connectElevenLabsBridgeSession']);
         Route::post('/issue-reports', [IssueReportController::class, 'store']);
         Route::post('/push-notification-tokens', [PushNotificationDeviceTokenController::class, 'store']);
         Route::delete('/push-notification-tokens', [PushNotificationDeviceTokenController::class, 'destroy']);

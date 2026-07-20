@@ -98,21 +98,14 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
         'bean_text_model' => env('OPENAI_BEAN_TEXT_MODEL', 'gpt-4.1-mini'),
         'bean_reasoning_model' => env('OPENAI_BEAN_REASONING_MODEL', 'gpt-4.1'),
-        'realtime_model' => env('OPENAI_REALTIME_MODEL', 'gpt-realtime'),
-        'realtime_voice' => env('OPENAI_REALTIME_VOICE', 'alloy'),
-        'realtime_vad_threshold' => (float) env('OPENAI_REALTIME_VAD_THRESHOLD', 0.75),
-        'realtime_vad_prefix_padding_ms' => (int) env('OPENAI_REALTIME_VAD_PREFIX_PADDING_MS', 300),
-        'realtime_vad_silence_duration_ms' => (int) env('OPENAI_REALTIME_VAD_SILENCE_DURATION_MS', 700),
     ],
 
     'elevenlabs' => [
         'api_key' => env('ELEVENLABS_API_KEY'),
-        'speech_engine_id' => env('ELEVENLABS_SPEECH_ENGINE_ID'),
-        'speech_engine_environment' => env('ELEVENLABS_SPEECH_ENGINE_ENVIRONMENT'),
-        'speech_engine_branch_id' => env('ELEVENLABS_SPEECH_ENGINE_BRANCH_ID'),
-        'speech_engine_enabled' => (bool) env('ELEVENLABS_SPEECH_ENGINE_ENABLED', env('ELEVENLABS_SPEECH_ENGINE_POC_ENABLED', false)),
-        'speech_engine_poc_enabled' => (bool) env('ELEVENLABS_SPEECH_ENGINE_POC_ENABLED', false),
-        'voice_bridge_secret' => env('ELEVENLABS_VOICE_BRIDGE_SECRET'),
+        'agent_id' => env('ELEVENLABS_AGENT_ID'),
+        'agent_environment' => env('ELEVENLABS_AGENT_ENVIRONMENT'),
+        'agent_branch_id' => env('ELEVENLABS_AGENT_BRANCH_ID'),
+        'agent_enabled' => (bool) env('ELEVENLABS_AGENT_ENABLED', false),
     ],
 
     'google_calendar' => [

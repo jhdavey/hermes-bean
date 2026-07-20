@@ -93,17 +93,17 @@ test('Bean requests include the browser timezone for local-day task queries', ()
     assert.match(source, /\/bean\/messages', \{ method: 'POST', body: \{ session_id: sessionId, content, \.\.\.clientTimezonePayload\(\) \}/);
 });
 
-test('Bean voice starts from wake detection through ElevenLabs Speech Engine', () => {
+test('Bean voice starts from wake detection through ElevenLabs Agent client tools', () => {
     assert.doesNotMatch(source, /data-bean-voice/);
     assert.doesNotMatch(source, /Tap to talk/);
     assert.match(source, /\/bean\/elevenlabs\/conversation-token/);
     assert.match(source, /Conversation\.startSession/);
     assert.match(source, /conversationToken: realtime\.token/);
-    assert.match(source, /\/bean\/elevenlabs\/bridge-sessions/);
-    assert.match(source, /transport: 'elevenlabs_speech_engine'/);
+    assert.match(source, /clientTools: \{/);
+    assert.match(source, /askBean: askBeanFromElevenLabsAgent/);
+    assert.doesNotMatch(source, /\/bean\/elevenlabs\/bridge-sessions/);
+    assert.match(source, /transport: 'elevenlabs_agent'/);
     assert.match(source, /prewarmBeanRealtimeSession/);
-    assert.match(source, /beanRealtimeEventQueue/);
-    assert.match(source, /flushBeanRealtimeEventQueue/);
     assert.match(source, /handleBeanWakeDetected/);
     assert.match(source, /extractBeanWakeTail/);
     assert.match(source, /Hey Bean heard — keep talking/);
@@ -124,42 +124,31 @@ test('Bean voice handles stale page-load status and stop commands locally', () =
     assert.match(source, /isLiveBeanStatusEvent/);
     assert.match(source, /handleBeanVoiceControl/);
     assert.match(source, /isBeanStopCommand/);
-    assert.match(source, /response\.cancel/);
+    assert.doesNotMatch(source, /response\.cancel/);
     assert.match(source, /Dismissed — listening for “Hey Bean”/);
 });
 
-test('Bean voice mutes realtime mic while answering and only opens a short follow-up window', () => {
-    assert.match(source, /const beanFollowUpWindowMs = 30000/);
-    assert.match(source, /const beanPostSpeechInputCooldownMs = 700/);
+test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool calls Bean', () => {
     assert.match(source, /function setBeanVoiceInputEnabled/);
     assert.match(source, /track\.enabled = Boolean\(enabled\)/);
     assert.match(source, /setBeanVoiceInputEnabled\(false\)/);
-    assert.match(source, /scheduleBeanFollowUpListening/);
-    assert.match(source, /const beanAssistantSpeechMaxMuteMs = 3500/);
-    assert.match(source, /function openBeanFollowUpAfterAssistantSpeech/);
     assert.match(source, /function handleBeanElevenLabsMode/);
     assert.match(source, /onModeChange: \(\{ mode \} = \{\}\) => handleBeanElevenLabsMode\(mode\)/);
-    assert.match(source, /scheduleBeanAssistantSpeechFallback/);
-    assert.match(source, /const estimatedSpeechMs = Math\.min\(beanAssistantSpeechMaxMuteMs, Math\.max\(1200, String\(answer \|\| ''\)\.length \* 28\)\)/);
+    assert.match(source, /function askBeanFromElevenLabsAgent/);
+    assert.match(source, /\/bean\/messages/);
+    assert.match(source, /transport: 'elevenlabs_agent'/);
     assert.match(source, /isLikelyBeanAssistantEcho/);
-    assert.match(source, /isBeanVoiceHealthCheckAnswer/);
-    assert.match(source, /isLikelyBeanHealthCheckBackchannelEcho/);
     assert.match(source, /reason: 'assistant_speaking'/);
-    assert.match(source, /if \(state\.bean\.mode === 'speaking'\) openBeanFollowUpAfterAssistantSpeech\(\)/);
-    assert.match(source, /clearBeanAssistantSpeechFallbackTimer/);
     assert.match(source, /beanPendingVoiceResponse/);
     assert.match(source, /watchPendingBeanVoiceResponse/);
     assert.match(source, /resolvePendingBeanVoiceResponseFromActivity/);
     assert.match(source, /voice_request_error/);
-    assert.match(source, /Bean is still finishing that…/);
     assert.match(source, /voice_request_timed_out/);
-    assert.match(source, /recovered_from_activity/);
     assert.match(source, /const voiceOwnsStatus = state\.bean\.voiceActive/);
     assert.match(source, /payloadMode === 'wake_listening' \|\| event\.label === 'Done'/);
-    assert.match(source, /Listening for a follow-up…/);
-    assert.match(source, /input_audio_buffer\.clear/);
-    assert.match(source, /Date\.now\(\) < beanVoiceInputIgnoreUntil/);
-    assert.match(source, /beanEndVoiceAfterAnswer/);
+    assert.doesNotMatch(source, /input_audio_buffer\.clear/);
+    assert.doesNotMatch(source, /response\.create/);
+    assert.doesNotMatch(source, /function sendBeanRealtimeEvent/);
     assert.match(source, /logBeanVoiceLifecycleEvent/);
     assert.match(source, /newBeanVoiceEventId/);
     assert.match(source, /voice_client_session_id/);
@@ -168,19 +157,12 @@ test('Bean voice mutes realtime mic while answering and only opens a short follo
     assert.match(source, /wake_detected/);
     assert.match(source, /voice_session_started/);
     assert.match(source, /user_transcript_received/);
-    assert.match(source, /thinking_visible/);
     assert.match(source, /bean_request_sent/);
     assert.match(source, /bean_response_received/);
     assert.match(source, /assistant_speech_started/);
-    assert.match(source, /assistant_speech_finished/);
-    assert.match(source, /followup_window_opened/);
-    assert.match(source, /followup_transcript_received/);
     assert.match(source, /background_audio_ignored/);
     assert.match(source, /assistant_echo_ignored/);
-    assert.match(source, /failure_wake_reset/);
-    assert.match(source, /data\.run\?\.status === 'failed'/);
-    assert.match(source, /endBeanVoiceConversationForWake\('Listening locally for “Hey Bean”'\)/);
-    assert.match(source, /endBeanVoiceConversationForWake\(\)/);
+    assert.match(source, /function endBeanVoiceConversationForWake\(statusText = 'Listening locally for “Hey Bean”'\)/);
 });
 
 test('Bean voice dismisses to wake-word-only mode before accepting more speech', () => {
