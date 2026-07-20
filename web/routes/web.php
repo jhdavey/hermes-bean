@@ -27,6 +27,7 @@ Route::view('/subscribe', 'app')->name('subscribe');
 Route::view('/forgot-password', 'app')->name('password.request');
 Route::view('/app', 'app')->name('app');
 Route::view('/dashboard', 'app')->name('dashboard');
+Route::view('/elevenlabs-voice-poc', 'elevenlabs-voice-poc')->name('elevenlabs.voice-poc');
 Route::view('/admin', 'app')->name('admin');
 
 Route::view('/privacy', 'legal.privacy')->name('privacy');

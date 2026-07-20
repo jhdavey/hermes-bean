@@ -75,6 +75,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/bean/voice-events', [BeanController::class, 'voiceEvent']);
         Route::post('/bean/confirmations/{confirmation}/approve', [BeanController::class, 'approve']);
         Route::post('/bean/realtime/session', [BeanController::class, 'realtimeSession']);
+        Route::post('/bean/elevenlabs/conversation-token', [BeanController::class, 'elevenLabsConversationToken']);
         Route::post('/issue-reports', [IssueReportController::class, 'store']);
         Route::post('/push-notification-tokens', [PushNotificationDeviceTokenController::class, 'store']);
         Route::delete('/push-notification-tokens', [PushNotificationDeviceTokenController::class, 'destroy']);

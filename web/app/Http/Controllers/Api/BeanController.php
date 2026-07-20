@@ -117,6 +117,45 @@ class BeanController extends Controller
         return response()->json(['data' => ['id' => $event->id]], 201);
     }
 
+    public function elevenLabsConversationToken(Request $request): JsonResponse
+    {
+        if (! config('services.elevenlabs.speech_engine_poc_enabled')) {
+            return response()->json(['message' => 'ElevenLabs Speech Engine POC is not enabled.'], 404);
+        }
+
+        $apiKey = (string) config('services.elevenlabs.api_key');
+        $speechEngineId = (string) config('services.elevenlabs.speech_engine_id');
+
+        if ($apiKey === '' || $speechEngineId === '') {
+            return response()->json(['message' => 'ElevenLabs Speech Engine is not configured.'], 503);
+        }
+
+        $query = array_filter([
+            'agent_id' => $speechEngineId,
+            'participant_name' => 'bean-user-'.$request->user()->id,
+            'environment' => config('services.elevenlabs.speech_engine_environment'),
+            'branch_id' => config('services.elevenlabs.speech_engine_branch_id'),
+        ], static fn ($value): bool => $value !== null && $value !== '');
+
+        $response = Http::withHeaders(['xi-api-key' => $apiKey])
+            ->timeout(10)
+            ->get('https://api.elevenlabs.io/v1/convai/conversation/token', $query);
+
+        if (! $response->successful()) {
+            return response()->json(['message' => 'Could not create ElevenLabs conversation token.'], 502);
+        }
+
+        $token = (string) data_get($response->json(), 'token');
+        if ($token === '') {
+            return response()->json(['message' => 'ElevenLabs conversation token response was empty.'], 502);
+        }
+
+        return response()->json(['data' => [
+            'token' => $token,
+            'speech_engine_id' => $speechEngineId,
+        ]]);
+    }
+
     public function realtimeSession(Request $request): JsonResponse
     {
         $apiKey = (string) config('services.openai.api_key');

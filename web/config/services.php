@@ -105,6 +105,14 @@ return [
         'realtime_vad_silence_duration_ms' => (int) env('OPENAI_REALTIME_VAD_SILENCE_DURATION_MS', 700),
     ],
 
+    'elevenlabs' => [
+        'api_key' => env('ELEVENLABS_API_KEY'),
+        'speech_engine_id' => env('ELEVENLABS_SPEECH_ENGINE_ID'),
+        'speech_engine_environment' => env('ELEVENLABS_SPEECH_ENGINE_ENVIRONMENT'),
+        'speech_engine_branch_id' => env('ELEVENLABS_SPEECH_ENGINE_BRANCH_ID'),
+        'speech_engine_poc_enabled' => (bool) env('ELEVENLABS_SPEECH_ENGINE_POC_ENABLED', false),
+    ],
+
     'google_calendar' => [
         'client_id' => env('GOOGLE_CALENDAR_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CALENDAR_CLIENT_SECRET'),
