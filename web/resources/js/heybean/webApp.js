@@ -1833,7 +1833,7 @@ export function mountHeyBeanWebApp(mount) {
                     </button>
                     <span class="hb-bean-status" title="${escapeAttr(label)}">${escapeHtml(label)}</span>
                     <button class="hb-bean-panel-toggle" type="button" data-bean-panel aria-expanded="${panelOpen}" aria-controls="hb-bean-chat" aria-label="${panelOpen ? 'Collapse Bean chat' : 'Expand Bean chat'}">
-                        <span aria-hidden="true">${panelOpen ? '↑' : '↓'}</span>
+                        <span aria-hidden="true">${panelOpen ? '^' : 'v'}</span>
                     </button>
                 </div>
                 ${panelOpen ? beanPanelMarkup() : ''}

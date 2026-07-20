@@ -43,6 +43,7 @@ test('Bean status and expandable chat share one dynamic bordered control', () =>
     assert.match(source, /hb-bean-status/);
     assert.match(source, /hb-bean-panel-toggle/);
     assert.match(source, /aria-controls="hb-bean-chat"/);
+    assert.match(source, /panelOpen \? '\^' : 'v'/);
     assert.match(source, /panelOpen \? beanPanelMarkup\(\) : ''/);
     assert.match(source, /hb-bean-chat-log/);
     assert.match(source, /data-bean-chat-form/);
