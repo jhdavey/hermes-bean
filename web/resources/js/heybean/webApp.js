@@ -988,13 +988,13 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function filteredNotes() {
-        const folderId = String(state.selectedNoteFolderId || 'all');
+        const requestedFolderId = String(state.selectedNoteFolderId || 'all');
+        const folderId = requestedFolderId === 'unfiled' ? 'all' : requestedFolderId;
         const search = String(state.notesSearch || '').trim().toLowerCase();
         return normalizeNotes(state.notes).filter((note) => {
             const noteFolderId = String(note.note_folder_id || note.noteFolderId || '');
             const folderMatch = folderId === 'all'
                 || (folderId === 'pinned' && Boolean(note.is_pinned ?? note.isPinned))
-                || (folderId === 'unfiled' && !noteFolderId)
                 || noteFolderId === folderId;
             if (!folderMatch) return false;
             if (!search) return true;
@@ -1009,9 +1009,9 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function currentNotesFolderTitle() {
-        const folderId = String(state.selectedNoteFolderId || 'all');
+        const requestedFolderId = String(state.selectedNoteFolderId || 'all');
+        const folderId = requestedFolderId === 'unfiled' ? 'all' : requestedFolderId;
         if (folderId === 'pinned') return 'Pinned';
-        if (folderId === 'unfiled') return 'Unfiled';
         if (folderId === 'all') return 'All Notes';
         return state.noteFolders.find((folder) => String(folder.id) === folderId)?.name || 'All Notes';
     }
@@ -1809,7 +1809,6 @@ export function mountHeyBeanWebApp(mount) {
                     ${appPanelMarkup()}
                 </main>
                 ${bottomMenuMarkup()}
-                ${state.bean.panelOpen ? beanPanelMarkup() : ''}
                 ${onboardingTourMarkup()}
             </div>`;
     }
@@ -1824,22 +1823,27 @@ export function mountHeyBeanWebApp(mount) {
         const mode = state.bean.mode || 'privacy';
         const label = state.bean.statusText || (mode === 'privacy' ? 'Privacy mode' : 'Listening for “Hey Bean”');
         const pressed = mode !== 'privacy';
+        const panelOpen = state.bean.panelOpen;
         return `
-            <div class="hb-bean-presence hb-bean-${escapeAttr(mode)}">
-                <button class="hb-bean-button" type="button" data-bean-toggle aria-pressed="${pressed}" aria-label="${pressed ? 'Turn Bean privacy mode on' : 'Listen for Hey Bean'}" title="${pressed ? 'Bean is listening locally for Hey Bean' : 'Privacy mode'}">
-                    <span class="hb-bean-ring" aria-hidden="true"></span>
-                    <img src="${escapeAttr(logoUrl)}" alt="Bean">
-                </button>
-                <button class="hb-bean-status-pill" type="button" data-bean-panel aria-label="Toggle Bean chat">
-                    <span>${escapeHtml(label)}</span>
-                </button>
+            <div class="hb-bean-presence hb-bean-${escapeAttr(mode)} ${panelOpen ? 'hb-bean-presence-open' : ''}">
+                <span class="hb-bean-ring" aria-hidden="true"></span>
+                <div class="hb-bean-summary">
+                    <button class="hb-bean-button" type="button" data-bean-toggle aria-pressed="${pressed}" aria-label="${pressed ? 'Turn Bean privacy mode on' : 'Listen for Hey Bean'}" title="${pressed ? 'Bean is listening locally for Hey Bean' : 'Privacy mode'}">
+                        <img src="${escapeAttr(logoUrl)}" alt="Bean">
+                    </button>
+                    <span class="hb-bean-status" title="${escapeAttr(label)}">${escapeHtml(label)}</span>
+                    <button class="hb-bean-panel-toggle" type="button" data-bean-panel aria-expanded="${panelOpen}" aria-controls="hb-bean-chat" aria-label="${panelOpen ? 'Collapse Bean chat' : 'Expand Bean chat'}">
+                        <span aria-hidden="true">${panelOpen ? '↑' : '↓'}</span>
+                    </button>
+                </div>
+                ${panelOpen ? beanPanelMarkup() : ''}
             </div>`;
     }
 
     function beanPanelMarkup() {
         const messages = normalizeList(state.bean.messages);
         return `
-            <aside class="hb-bean-panel" aria-label="Bean assistant">
+            <aside class="hb-bean-panel" id="hb-bean-chat" aria-label="Bean assistant">
                 <div class="hb-bean-chat-log" aria-live="polite">
                     ${messages.length ? messages.map(beanMessageMarkup).join('') : '<div class="hb-empty hb-surface-soft">Ask Bean anything…</div>'}
                 </div>
@@ -1946,7 +1950,7 @@ export function mountHeyBeanWebApp(mount) {
             ? state.tasks.filter((task) => taskCompleted(task))
             : activeTopLevelTasks();
         return `
-            <section class="hb-card hb-card-pad hb-board-card" data-tour-target="tasks-view">
+            <section class="hb-card-pad hb-board-card" data-tour-target="tasks-view">
                 ${sectionTitle(icons.tasks, 'Tasks', completed ? 'Completed tasks' : 'Active tasks')}
                 <div class="hb-tabs">
                     <button class="hb-chip" type="button" data-task-filter="active" aria-pressed="${!completed}">Active</button>
@@ -1961,7 +1965,7 @@ export function mountHeyBeanWebApp(mount) {
         const status = completed ? 'completed' : 'scheduled';
         const items = state.reminders.filter((reminder) => reminder?.status === status);
         return `
-            <section class="hb-card hb-card-pad hb-board-card" data-tour-target="reminders-view">
+            <section class="hb-card-pad hb-board-card" data-tour-target="reminders-view">
                 ${sectionTitle(icons.reminders, 'Reminders', completed ? 'Completed reminders' : 'Scheduled reminders')}
                 <div class="hb-tabs">
                     <button class="hb-chip" type="button" data-reminder-filter="scheduled" aria-pressed="${!completed}">Scheduled</button>
@@ -2004,7 +2008,6 @@ export function mountHeyBeanWebApp(mount) {
                     <div class="hb-note-user-folders ${state.noteFoldersEditing ? 'hb-note-user-folders-editing' : ''}" data-note-folder-list>
                         ${folders.map((folder) => noteFolderButtonMarkup(String(folder.id), folder.name, state.notes.filter((note) => String(note.note_folder_id || note.noteFolderId || '') === String(folder.id)).length, icons.notes, folder)).join('')}
                     </div>
-                    ${noteFolderButtonMarkup('unfiled', 'Unfiled', state.notes.filter((note) => !(note.note_folder_id || note.noteFolderId)).length, icons.notes)}
                 </aside>
                 <aside class="hb-notes-list-pane">
                     <div class="hb-notes-list-heading">
@@ -2015,7 +2018,6 @@ export function mountHeyBeanWebApp(mount) {
                                 ${noteListOptionButton('all', 'All Notes', state.notes.length)}
                                 ${noteListOptionButton('pinned', 'Pinned', state.notes.filter((note) => note.is_pinned || note.isPinned).length)}
                                 ${folders.map((folder) => noteListOptionButton(String(folder.id), folder.name, state.notes.filter((note) => String(note.note_folder_id || note.noteFolderId || '') === String(folder.id)).length)).join('')}
-                                ${noteListOptionButton('unfiled', 'Unfiled', state.notes.filter((note) => !(note.note_folder_id || note.noteFolderId)).length)}
                                 <span class="hb-note-list-options-break" aria-hidden="true"></span>
                                 <strong>Sort</strong>
                                 <button class="hb-note-list-option" type="button" data-note-sort="recent" aria-pressed="${state.notesSort !== 'title'}"><span>Most recently edited</span></button>

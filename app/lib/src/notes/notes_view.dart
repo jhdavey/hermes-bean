@@ -99,7 +99,6 @@ class _NotesViewState extends State<_NotesView> {
       final folderMatches =
           _folderFilter == 'all' ||
           (_folderFilter == 'pinned' && note.isPinned) ||
-          (_folderFilter == 'unfiled' && note.folderId == null) ||
           note.folderId?.toString() == _folderFilter;
       if (!folderMatches) return false;
       if (search.isEmpty) return true;
@@ -137,8 +136,6 @@ class _NotesViewState extends State<_NotesView> {
     switch (_folderFilter) {
       case 'pinned':
         return 'Pinned';
-      case 'unfiled':
-        return 'Unfiled';
       case 'all':
         return 'All Notes';
     }
@@ -1472,14 +1469,6 @@ class _NotesListOptionsSheetState extends State<_NotesListOptionsSheet> {
                     count: widget.notes.where((note) => note.isPinned).length,
                     selected: widget.selectedFolder == 'pinned',
                     onTap: () => widget.onFilterSelected('pinned'),
-                  ),
-                  _NotesOptionRow(
-                    key: const Key('notes-filter-unfiled'),
-                    icon: Icons.folder_open_rounded,
-                    label: 'Unfiled',
-                    count: _countForFolder(null),
-                    selected: widget.selectedFolder == 'unfiled',
-                    onTap: () => widget.onFilterSelected('unfiled'),
                   ),
                 ],
               ),

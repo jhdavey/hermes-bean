@@ -13,12 +13,18 @@ class _SignedInBottomDock extends StatelessWidget {
 class _HeyBeanBottomMenu extends StatelessWidget {
   const _HeyBeanBottomMenu({
     required this.selected,
+    required this.beanOpen,
+    required this.beanSending,
+    required this.beanHasError,
     required this.onSelected,
     required this.onBeanPressed,
     required this.onMorePressed,
   });
 
   final _HomeDestination selected;
+  final bool beanOpen;
+  final bool beanSending;
+  final bool beanHasError;
   final ValueChanged<_HomeDestination> onSelected;
   final VoidCallback onBeanPressed;
   final VoidCallback onMorePressed;
@@ -30,7 +36,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
 
     return SizedBox(
       key: const Key('heybean-bottom-menu'),
-      height: 74 + dockBottomPadding,
+      height: 104 + dockBottomPadding,
       child: Stack(
         alignment: Alignment.topCenter,
         clipBehavior: Clip.none,
@@ -103,9 +109,20 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             ),
           ),
           Positioned(
-            top: 12,
+            top: 24,
             child: _CommandCenterFab(
               selected: selected == _HomeDestination.commandCenter,
+              active: beanOpen,
+              working: beanSending,
+              onPressed: onBeanPressed,
+            ),
+          ),
+          Positioned(
+            top: 0,
+            child: _BeanDockStatus(
+              expanded: beanOpen,
+              working: beanSending,
+              hasError: beanHasError,
               onPressed: onBeanPressed,
             ),
           ),
@@ -168,14 +185,22 @@ class _MenuIconButton extends StatelessWidget {
 }
 
 class _CommandCenterFab extends StatelessWidget {
-  const _CommandCenterFab({required this.selected, required this.onPressed});
+  const _CommandCenterFab({
+    required this.selected,
+    required this.active,
+    required this.working,
+    required this.onPressed,
+  });
 
   final bool selected;
+  final bool active;
+  final bool working;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     final activeColor = HeyBeanTheme.accentStrong;
+    final highlighted = selected || active || working;
     return GestureDetector(
       key: const Key('nav-command-center'),
       behavior: HitTestBehavior.opaque,
@@ -196,7 +221,9 @@ class _CommandCenterFab extends StatelessWidget {
                 shape: BoxShape.circle,
                 color: HeyBeanTheme.surface,
                 border: Border.all(
-                  color: selected ? activeColor : _quietBorderColor(alpha: .54),
+                  color: highlighted
+                      ? activeColor
+                      : _quietBorderColor(alpha: .54),
                   width: 1.6,
                 ),
                 boxShadow: [
@@ -210,7 +237,7 @@ class _CommandCenterFab extends StatelessWidget {
               child: Icon(
                 Icons.spa_rounded,
                 size: 30,
-                color: selected ? activeColor : HeyBeanTheme.muted,
+                color: highlighted ? activeColor : HeyBeanTheme.muted,
                 semanticLabel: 'Bean assistant',
               ),
             ),
@@ -219,4 +246,164 @@ class _CommandCenterFab extends StatelessWidget {
       ),
     );
   }
+}
+
+class _BeanDockStatus extends StatefulWidget {
+  const _BeanDockStatus({
+    required this.expanded,
+    required this.working,
+    required this.hasError,
+    required this.onPressed,
+  });
+
+  final bool expanded;
+  final bool working;
+  final bool hasError;
+  final VoidCallback onPressed;
+
+  @override
+  State<_BeanDockStatus> createState() => _BeanDockStatusState();
+}
+
+class _BeanDockStatusState extends State<_BeanDockStatus>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _borderController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.working) _borderController.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _BeanDockStatus oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.working == oldWidget.working) return;
+    if (widget.working) {
+      _borderController.repeat();
+    } else {
+      _borderController
+        ..stop()
+        ..value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _borderController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = widget.working
+        ? 'Bean is working'
+        : widget.hasError
+        ? 'Bean needs attention'
+        : 'Bean ready';
+    return AnimatedBuilder(
+      animation: _borderController,
+      builder: (context, child) => CustomPaint(
+        foregroundPainter: _BeanDockBorderPainter(
+          progress: _borderController.value,
+          active: widget.working,
+        ),
+        child: child,
+      ),
+      child: Material(
+        color: HeyBeanTheme.surface,
+        borderRadius: BorderRadius.circular(999),
+        child: InkWell(
+          key: const Key('bean-assistant-status'),
+          onTap: widget.onPressed,
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            width: 196,
+            height: 36,
+            padding: const EdgeInsets.fromLTRB(14, 0, 9, 0),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: widget.hasError
+                    ? const Color(0xFFB42318).withValues(alpha: .48)
+                    : _quietBorderColor(alpha: .54),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: .08),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: widget.hasError
+                          ? const Color(0xFFB42318)
+                          : HeyBeanTheme.muted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Icon(
+                  widget.expanded
+                      ? Icons.keyboard_arrow_down_rounded
+                      : Icons.keyboard_arrow_up_rounded,
+                  size: 20,
+                  color: HeyBeanTheme.muted,
+                  semanticLabel: widget.expanded
+                      ? 'Collapse Bean chat'
+                      : 'Expand Bean chat',
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BeanDockBorderPainter extends CustomPainter {
+  const _BeanDockBorderPainter({required this.progress, required this.active});
+
+  final double progress;
+  final bool active;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (!active) return;
+    final rect = Offset.zero & size;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.4
+      ..shader = SweepGradient(
+        startAngle: progress * math.pi * 2,
+        endAngle: progress * math.pi * 2 + math.pi * 2,
+        colors: [
+          HeyBeanTheme.accentStrong.withValues(alpha: .12),
+          HeyBeanTheme.accentStrong,
+          HeyBeanTheme.accentStrong.withValues(alpha: .12),
+        ],
+        stops: const [0, .28, 1],
+      ).createShader(rect);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect.deflate(1.2), const Radius.circular(999)),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _BeanDockBorderPainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.active != active;
 }

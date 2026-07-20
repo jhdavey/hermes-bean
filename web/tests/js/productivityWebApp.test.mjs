@@ -5,6 +5,7 @@ import test from 'node:test';
 const source = await readFile(new URL('../../resources/js/heybean/webApp.js', import.meta.url), 'utf8');
 const themeSource = await readFile(new URL('../../resources/css/heybean/theme.css', import.meta.url), 'utf8');
 const dashboardSource = await readFile(new URL('../../resources/css/heybean/dashboard.css', import.meta.url), 'utf8');
+const baseShellSource = await readFile(new URL('../../resources/css/heybean/base-shell.css', import.meta.url), 'utf8');
 
 function cssRuleContaining(sourceText, selector) {
     const selectorIndex = sourceText.indexOf(selector);
@@ -32,11 +33,17 @@ test('Bean assistant presence is web-first and uses the Laravel Bean runtime', (
     assert.match(source, /\/bean\/messages/);
     assert.match(source, /\/bean\/events\?after=/);
     assert.match(dashboardSource, /\.hb-bean-button/);
+    assert.match(dashboardSource, /\.hb-bean-presence-open/);
     assert.match(dashboardSource, /hb-bean-pulse/);
+    assert.doesNotMatch(source, /hb-bean-status-pill/);
 });
 
-test('expanded Bean panel only shows chat history and the composer', () => {
+test('Bean status and expandable chat share one dynamic bordered control', () => {
     assert.match(source, /function beanPanelMarkup/);
+    assert.match(source, /hb-bean-status/);
+    assert.match(source, /hb-bean-panel-toggle/);
+    assert.match(source, /aria-controls="hb-bean-chat"/);
+    assert.match(source, /panelOpen \? beanPanelMarkup\(\) : ''/);
     assert.match(source, /hb-bean-chat-log/);
     assert.match(source, /data-bean-chat-form/);
     assert.match(source, /data-bean-input/);
@@ -44,6 +51,19 @@ test('expanded Bean panel only shows chat history and the composer', () => {
     assert.doesNotMatch(source, /hb-bean-privacy-row|data-bean-privacy/);
     assert.doesNotMatch(source, /Activity log|Your HeyBean assistant/);
     assert.match(dashboardSource, /grid-template-rows: minmax\(160px, 1fr\) auto/);
+    assert.match(dashboardSource, /@keyframes hb-bean-orbit/);
+    assert.doesNotMatch(dashboardSource, /\.hb-bean-status-pill/);
+    assert.doesNotMatch(dashboardSource, /\.hb-bean-panel\s*\{[^}]*position:\s*fixed/s);
+});
+
+test('top navigation, productivity pages, and notes use the simplified surfaces', () => {
+    const topbarRule = cssRuleContaining(baseShellSource, '.hb-topbar');
+    assert.doesNotMatch(topbarRule, /border-bottom/);
+    assert.match(source, /<section class="hb-card-pad hb-board-card" data-tour-target="tasks-view">/);
+    assert.match(source, /<section class="hb-card-pad hb-board-card" data-tour-target="reminders-view">/);
+    assert.doesNotMatch(source, /noteFolderButtonMarkup\('unfiled'/);
+    assert.doesNotMatch(source, /noteListOptionButton\('unfiled'/);
+    assert.doesNotMatch(source, />Unfiled</);
 });
 
 test('Bean requests include the browser timezone for local-day task queries', () => {

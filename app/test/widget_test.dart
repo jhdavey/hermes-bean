@@ -92,6 +92,7 @@ void main() {
       );
 
       expect(find.byKey(const Key('bean-assistant-button')), findsOneWidget);
+      expect(find.byKey(const Key('bean-assistant-status')), findsOneWidget);
       await tester.tap(find.byKey(const Key('bean-assistant-button')));
       await _pumpUntilFound(
         tester,
@@ -106,6 +107,10 @@ void main() {
       await _pumpUntilFound(tester, find.text('I’ll add that task. Done.'));
 
       expect(api.sentBeanMessages, ['Create task call mom']);
+
+      await tester.tap(find.byKey(const Key('bean-assistant-status')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('bean-assistant-panel')), findsNothing);
     },
   );
 
@@ -133,6 +138,8 @@ void main() {
     ]) {
       expect(sources, contains(key));
     }
+    expect(sources, isNot(contains('notes-filter-unfiled')));
+    expect(sources, isNot(contains("label: 'Unfiled'")));
   });
 }
 

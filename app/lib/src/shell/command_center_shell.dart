@@ -1220,13 +1220,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   void _openBeanAssistant() {
     if (_phase != _AuthPhase.signedIn) return;
     setState(() {
-      _beanAssistantOpen = true;
+      _beanAssistantOpen = !_beanAssistantOpen;
       _beanAssistantError = null;
     });
-  }
-
-  void _closeBeanAssistant() {
-    setState(() => _beanAssistantOpen = false);
   }
 
   Future<void> _sendBeanAssistantMessage(String content) async {
@@ -3804,6 +3800,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                   ? _SignedInBottomDock(
                       menu: _HeyBeanBottomMenu(
                         selected: _selectedDestination,
+                        beanOpen: _beanAssistantOpen,
+                        beanSending: _beanAssistantSending,
+                        beanHasError: _beanAssistantError != null,
                         onSelected: _selectDestination,
                         onBeanPressed: _openBeanAssistant,
                         onMorePressed: _openMoreMenu,
@@ -3811,23 +3810,13 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                     )
                   : null,
             ),
-            if (_beanAssistantOpen) ...[
-              Positioned.fill(
-                child: GestureDetector(
-                  key: const Key('bean-assistant-backdrop'),
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _closeBeanAssistant,
-                  child: Container(color: Colors.black.withValues(alpha: .22)),
-                ),
-              ),
+            if (_beanAssistantOpen)
               _BeanAssistantPanel(
                 messages: _beanAssistantMessages,
                 sending: _beanAssistantSending,
                 error: _beanAssistantError,
                 onSend: _sendBeanAssistantMessage,
-                onClose: _closeBeanAssistant,
               ),
-            ],
             if (_onboardingTourVisible)
               _OnboardingTourOverlay(
                 stepIndex: _onboardingTourStep,

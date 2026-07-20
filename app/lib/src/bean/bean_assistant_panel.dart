@@ -6,14 +6,12 @@ class _BeanAssistantPanel extends StatefulWidget {
     required this.sending,
     required this.error,
     required this.onSend,
-    required this.onClose,
   });
 
   final List<BeanAssistantMessage> messages;
   final bool sending;
   final String? error;
   final Future<void> Function(String message) onSend;
-  final VoidCallback onClose;
 
   @override
   State<_BeanAssistantPanel> createState() => _BeanAssistantPanelState();
@@ -42,81 +40,39 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
 
     return Align(
       alignment: Alignment.bottomCenter,
-      child: Material(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
         key: const Key('bean-assistant-panel'),
-        color: Colors.transparent,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          margin: EdgeInsets.fromLTRB(14, 0, 14, 14 + bottomInset),
-          constraints: const BoxConstraints(maxWidth: 720, maxHeight: 560),
-          decoration: BoxDecoration(
-            color: HeyBeanTheme.surface,
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: _quietBorderColor(alpha: .42)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: .18),
-                blurRadius: 28,
-                offset: const Offset(0, 14),
-              ),
-            ],
-          ),
+        margin: EdgeInsets.fromLTRB(
+          14,
+          0,
+          14,
+          104 + MediaQuery.paddingOf(context).bottom + bottomInset,
+        ),
+        constraints: const BoxConstraints(maxWidth: 720, maxHeight: 500),
+        decoration: BoxDecoration(
+          color: HeyBeanTheme.surface,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: _quietBorderColor(alpha: .42)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: .18),
+              blurRadius: 28,
+              offset: const Offset(0, 14),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(28),
+          clipBehavior: Clip.antiAlias,
           child: SafeArea(
             top: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: HeyBeanTheme.accent.withValues(alpha: .14),
-                          border: Border.all(color: HeyBeanTheme.accentStrong),
-                        ),
-                        child: Icon(
-                          Icons.spa_rounded,
-                          color: HeyBeanTheme.accentStrong,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Bean',
-                              style: TextStyle(
-                                color: HeyBeanTheme.text,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            Text(
-                              widget.sending
-                                  ? 'Working through Laravel...'
-                                  : 'Ask about tasks, reminders, calendar, or notes.',
-                              style: TextStyle(
-                                color: HeyBeanTheme.muted,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        key: const Key('bean-assistant-close'),
-                        onPressed: widget.onClose,
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
                   Flexible(
                     child: Container(
                       width: double.infinity,
