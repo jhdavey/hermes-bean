@@ -321,9 +321,8 @@ class _BeanDockStatusState extends State<_BeanDockStatus>
           onTap: widget.onPressed,
           borderRadius: BorderRadius.circular(999),
           child: Container(
-            width: 196,
             height: 36,
-            padding: const EdgeInsets.fromLTRB(14, 0, 9, 0),
+            padding: const EdgeInsets.fromLTRB(14, 0, 10, 0),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(999),
               border: Border.all(
@@ -340,8 +339,10 @@ class _BeanDockStatusState extends State<_BeanDockStatus>
               ],
             ),
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
+                Flexible(
+                  fit: FlexFit.loose,
                   child: Text(
                     label,
                     maxLines: 1,
@@ -355,6 +356,7 @@ class _BeanDockStatusState extends State<_BeanDockStatus>
                     ),
                   ),
                 ),
+                const SizedBox(width: 2),
                 Icon(
                   widget.expanded
                       ? Icons.keyboard_arrow_down_rounded

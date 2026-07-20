@@ -54,6 +54,10 @@ test('Bean status and expandable chat share one dynamic bordered control', () =>
     assert.match(dashboardSource, /@keyframes hb-bean-orbit/);
     assert.doesNotMatch(dashboardSource, /\.hb-bean-status-pill/);
     assert.doesNotMatch(dashboardSource, /\.hb-bean-panel\s*\{[^}]*position:\s*fixed/s);
+    const toggleRule = cssRuleContaining(dashboardSource, '.hb-bean-panel-toggle');
+    assert.match(toggleRule, /border:\s*0/);
+    assert.doesNotMatch(toggleRule, /border-left/);
+    assert.match(dashboardSource, /\.hb-bean-summary\s*\{[^}]*display:\s*flex/s);
 });
 
 test('top navigation, productivity pages, and notes use the simplified surfaces', () => {
@@ -61,6 +65,13 @@ test('top navigation, productivity pages, and notes use the simplified surfaces'
     assert.doesNotMatch(topbarRule, /border-bottom/);
     assert.match(source, /<section class="hb-card-pad hb-board-card" data-tour-target="tasks-view">/);
     assert.match(source, /<section class="hb-card-pad hb-board-card" data-tour-target="reminders-view">/);
+    assert.match(source, /<header class="hb-board-heading"><h2>Tasks<\/h2><\/header>/);
+    assert.match(source, /<header class="hb-board-heading"><h2>Reminders<\/h2><\/header>/);
+    assert.doesNotMatch(source, /sectionTitle\(icons\.tasks, 'Tasks'/);
+    assert.doesNotMatch(source, /sectionTitle\(icons\.reminders, 'Reminders'/);
+    assert.match(dashboardSource, /\.hb-board-card > \.hb-tabs[\s\S]*?border:\s*0/);
+    assert.match(dashboardSource, /\.hb-board-card > \.hb-tabs \.hb-chip\[aria-pressed="true"\][\s\S]*?color:\s*var\(--hb-accent-strong\)/);
+    assert.match(dashboardSource, /\.hb-main-board \.hb-day-board-column[\s\S]*?background:\s*transparent/);
     assert.doesNotMatch(source, /noteFolderButtonMarkup\('unfiled'/);
     assert.doesNotMatch(source, /noteListOptionButton\('unfiled'/);
     assert.doesNotMatch(source, />Unfiled</);

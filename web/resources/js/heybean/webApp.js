@@ -1951,7 +1951,7 @@ export function mountHeyBeanWebApp(mount) {
             : activeTopLevelTasks();
         return `
             <section class="hb-card-pad hb-board-card" data-tour-target="tasks-view">
-                ${sectionTitle(icons.tasks, 'Tasks', completed ? 'Completed tasks' : 'Active tasks')}
+                <header class="hb-board-heading"><h2>Tasks</h2></header>
                 <div class="hb-tabs">
                     <button class="hb-chip" type="button" data-task-filter="active" aria-pressed="${!completed}">Active</button>
                     <button class="hb-chip" type="button" data-task-filter="done" aria-pressed="${completed}">Done</button>
@@ -1966,7 +1966,7 @@ export function mountHeyBeanWebApp(mount) {
         const items = state.reminders.filter((reminder) => reminder?.status === status);
         return `
             <section class="hb-card-pad hb-board-card" data-tour-target="reminders-view">
-                ${sectionTitle(icons.reminders, 'Reminders', completed ? 'Completed reminders' : 'Scheduled reminders')}
+                <header class="hb-board-heading"><h2>Reminders</h2></header>
                 <div class="hb-tabs">
                     <button class="hb-chip" type="button" data-reminder-filter="scheduled" aria-pressed="${!completed}">Scheduled</button>
                     <button class="hb-chip" type="button" data-reminder-filter="completed" aria-pressed="${completed}">Completed</button>
