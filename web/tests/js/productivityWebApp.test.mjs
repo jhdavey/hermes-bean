@@ -104,6 +104,15 @@ test('Bean voice mutes realtime mic while answering and only opens a short follo
     assert.match(source, /isLikelyBeanAssistantEcho/);
     assert.match(source, /if \(state\.bean\.mode === 'speaking'\) openBeanFollowUpAfterAssistantSpeech\(\)/);
     assert.match(source, /clearBeanAssistantSpeechFallbackTimer/);
+    assert.match(source, /beanPendingVoiceResponse/);
+    assert.match(source, /watchPendingBeanVoiceResponse/);
+    assert.match(source, /resolvePendingBeanVoiceResponseFromActivity/);
+    assert.match(source, /voice_request_error/);
+    assert.match(source, /Bean is still finishing that…/);
+    assert.match(source, /voice_request_timed_out/);
+    assert.match(source, /recovered_from_activity/);
+    assert.match(source, /const voiceOwnsStatus = state\.bean\.voiceActive/);
+    assert.match(source, /payloadMode === 'wake_listening' \|\| event\.label === 'Done'/);
     assert.match(source, /Listening for a follow-up…/);
     assert.match(source, /input_audio_buffer\.clear/);
     assert.match(source, /Date\.now\(\) < beanVoiceInputIgnoreUntil/);

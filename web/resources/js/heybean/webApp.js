@@ -242,6 +242,8 @@ export function mountHeyBeanWebApp(mount) {
     let beanPendingWakeTail = '';
     let beanFollowUpTimer = 0;
     let beanAssistantSpeechFallbackTimer = 0;
+    let beanPendingVoiceResponseTimer = 0;
+    let beanPendingVoiceResponse = null;
     let beanVoiceInputIgnoreUntil = 0;
     let beanLastSpokenAnswer = '';
     let beanLastSpokenAnswerAt = 0;
@@ -4639,6 +4641,33 @@ export function mountHeyBeanWebApp(mount) {
         beanAssistantSpeechFallbackTimer = 0;
     }
 
+    function clearBeanPendingVoiceResponse() {
+        window.clearTimeout(beanPendingVoiceResponseTimer);
+        beanPendingVoiceResponseTimer = 0;
+        beanPendingVoiceResponse = null;
+    }
+
+    function watchPendingBeanVoiceResponse(turnId, content) {
+        clearBeanPendingVoiceResponse();
+        beanPendingVoiceResponse = {
+            turnId,
+            content: String(content || ''),
+            startedAt: Date.now(),
+            resolved: false,
+        };
+        beanPendingVoiceResponseTimer = window.setTimeout(() => {
+            if (!beanPendingVoiceResponse || beanPendingVoiceResponse.turnId !== turnId || beanPendingVoiceResponse.resolved) return;
+            logBeanVoiceLifecycleEvent('voice_request_timed_out', { label: beanPendingVoiceResponse.content.slice(0, 160) });
+            clearBeanPendingVoiceResponse();
+            state.bean.busy = false;
+            state.bean.error = 'Bean took too long to answer by voice.';
+            state.bean.mode = 'error';
+            state.bean.statusText = 'Bean hit a problem';
+            stopBeanVoiceSession({ keepStatus: true });
+            render();
+        }, 60000);
+    }
+
     function setBeanVoiceInputEnabled(enabled) {
         beanMediaStream?.getAudioTracks?.().forEach((track) => {
             track.enabled = Boolean(enabled);
@@ -4827,6 +4856,7 @@ export function mountHeyBeanWebApp(mount) {
         clearBeanPendingWakeTail();
         clearBeanFollowUpTimer();
         clearBeanAssistantSpeechFallbackTimer();
+        clearBeanPendingVoiceResponse();
         beanEndVoiceAfterAnswer = false;
         beanVoiceRequestCount = 0;
         setBeanVoiceInputEnabled(false);
@@ -4938,10 +4968,14 @@ export function mountHeyBeanWebApp(mount) {
             const sessionId = await ensureBeanSession();
             logBeanVoiceLifecycleEvent('bean_request_sent', { label: String(content || '').slice(0, 160) });
             beanVoiceRequestCount += 1;
+            const pendingTurnId = beanVoiceClientTurnId;
+            watchPendingBeanVoiceResponse(pendingTurnId, content);
             const data = await api('/bean/messages', { method: 'POST', body: { session_id: sessionId, content, ...clientTimezonePayload() } });
             state.bean.sessionId = data.session?.id || sessionId;
             const runId = data.run?.id || null;
-            logBeanVoiceLifecycleEvent('bean_response_received', { run_id: runId, failed: data.run?.status === 'failed', label: String(data.run?.output || '').slice(0, 160) });
+            const pendingAlreadyResolved = beanPendingVoiceResponse?.turnId === pendingTurnId && beanPendingVoiceResponse.resolved;
+            logBeanVoiceLifecycleEvent('bean_response_received', { run_id: runId, failed: data.run?.status === 'failed', label: String(data.run?.output || '').slice(0, 160), recovered_from_activity: pendingAlreadyResolved });
+            clearBeanPendingVoiceResponse();
             state.bean.messages = normalizeList(data.messages);
             state.bean.activity = normalizeList(data.activity);
             state.bean.confirmations = normalizeList(data.confirmations);
@@ -4949,16 +4983,32 @@ export function mountHeyBeanWebApp(mount) {
             scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
             const answer = latestBeanAssistantMessage();
             beanEndVoiceAfterAnswer = data.run?.status === 'failed' || normalizeBeanVoiceText(answer) === normalizeBeanVoiceText('I could not complete that request.');
-            if (answer) {
+            if (answer && !pendingAlreadyResolved) {
                 speakBeanRealtimeAnswer(answer);
                 state.bean.mode = 'speaking';
                 state.bean.statusText = 'Speaking…';
+            } else if (answer && pendingAlreadyResolved) {
+                state.bean.voiceTranscript = '';
             } else {
                 state.bean.mode = 'listening';
                 state.bean.statusText = 'Listening for a follow-up…';
                 scheduleBeanFollowUpListening();
             }
         } catch (error) {
+            logBeanVoiceLifecycleEvent('voice_request_error', {
+                label: String(content || '').slice(0, 160),
+                error_name: String(error?.name || '').slice(0, 80),
+                error_status: error?.status || null,
+                error_message: String(error?.message || '').slice(0, 160),
+            });
+            const mayStillComplete = !error?.status || error?.name === 'AbortError' || /fetch|network|load/i.test(String(error?.message || ''));
+            if (mayStillComplete && state.bean.voiceActive && beanPendingVoiceResponse) {
+                state.bean.error = '';
+                state.bean.mode = 'thinking';
+                state.bean.statusText = 'Bean is still finishing that…';
+                render();
+                return;
+            }
             state.bean.error = friendlyError(error, 'ask Bean by voice');
             state.bean.mode = 'error';
             state.bean.statusText = 'Bean hit a problem';
@@ -7730,7 +7780,12 @@ export function mountHeyBeanWebApp(mount) {
         }
         const payloadMode = event.payload?.mode || '';
         const liveStatusEvent = isLiveBeanStatusEvent(event);
-        if (event.type === 'status' && payloadMode && liveStatusEvent) {
+        if (event.type === 'assistant_message' && liveStatusEvent && resolvePendingBeanVoiceResponseFromActivity(event)) {
+            render();
+            return;
+        }
+        const voiceOwnsStatus = state.bean.voiceActive && ['thinking', 'speaking', 'listening'].includes(state.bean.mode) && (payloadMode === 'wake_listening' || event.label === 'Done');
+        if (event.type === 'status' && payloadMode && liveStatusEvent && !voiceOwnsStatus) {
             state.bean.mode = payloadMode;
             state.bean.statusText = beanEventStatusText(event, state.bean.statusText);
         } else if (event.type === 'tool_started' && liveStatusEvent) {
@@ -7750,6 +7805,33 @@ export function mountHeyBeanWebApp(mount) {
     function isLiveBeanStatusEvent(event) {
         const createdAt = Date.parse(String(event?.created_at || ''));
         return !createdAt || createdAt >= beanEventStatusStartedAt;
+    }
+
+    function resolvePendingBeanVoiceResponseFromActivity(event) {
+        if (!beanPendingVoiceResponse || beanPendingVoiceResponse.resolved || !state.bean.voiceActive) return false;
+        const createdAt = Date.parse(String(event?.created_at || '')) || Date.now();
+        if (createdAt + 1000 < beanPendingVoiceResponse.startedAt) return false;
+        const answer = String(event?.label || '').trim();
+        if (!answer) return false;
+        beanPendingVoiceResponse.resolved = true;
+        window.clearTimeout(beanPendingVoiceResponseTimer);
+        beanPendingVoiceResponseTimer = 0;
+        state.bean.busy = false;
+        state.bean.error = '';
+        state.bean.voiceTranscript = '';
+        state.bean.messages = [...normalizeList(state.bean.messages), { role: 'assistant', content: answer }];
+        beanEndVoiceAfterAnswer = normalizeBeanVoiceText(answer) === normalizeBeanVoiceText('I could not complete that request.');
+        logBeanVoiceLifecycleEvent('bean_response_received', { run_id: event.bean_run_id || event.beanRunId || null, label: answer.slice(0, 160), recovered_from_activity: true });
+        if (beanEndVoiceAfterAnswer) {
+            speakBeanRealtimeAnswer(answer);
+            state.bean.mode = 'speaking';
+            state.bean.statusText = 'Speaking…';
+            return true;
+        }
+        speakBeanRealtimeAnswer(answer);
+        state.bean.mode = 'speaking';
+        state.bean.statusText = 'Speaking…';
+        return true;
     }
 
     async function pollDashboardChanges() {

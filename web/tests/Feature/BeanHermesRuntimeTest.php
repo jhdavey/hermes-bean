@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\BeanActivityEvent;
 use App\Models\BeanRun;
 use App\Models\BeanSession;
 use App\Models\Task;
@@ -114,6 +115,39 @@ PHP);
         $resumeLog = $logs->last();
         $this->assertContains('--resume', $resumeLog['argv']);
         $this->assertContains('fake-hermes-session-123', $resumeLog['argv']);
+    }
+
+    public function test_bean_event_stream_includes_session_and_run_ids_for_voice_recovery(): void
+    {
+        $token = $this->apiToken('bean-event-stream-runtime@example.com');
+        $user = User::where('email', 'bean-event-stream-runtime@example.com')->firstOrFail();
+        $session = app(BeanRuntimeService::class)->createSession($user);
+        $run = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'status' => 'completed',
+            'mode' => 'hermes',
+            'input' => 'voice followup',
+            'output' => 'Here is the voice follow-up answer.',
+            'started_at' => now()->subSecond(),
+            'completed_at' => now(),
+        ]);
+        BeanActivityEvent::create([
+            'bean_session_id' => $session->id,
+            'bean_run_id' => $run->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'type' => 'assistant_message',
+            'label' => 'Here is the voice follow-up answer.',
+            'payload' => ['runtime' => 'hermes'],
+        ]);
+
+        $content = $this->withToken($token)->get('/api/bean/events?after=0&wait=0')->streamedContent();
+
+        $this->assertStringContainsString('"bean_session_id":'.$session->id, $content);
+        $this->assertStringContainsString('"bean_run_id":'.$run->id, $content);
+        $this->assertStringContainsString('Here is the voice follow-up answer.', $content);
     }
 
     public function test_hermes_dashboard_tool_bridge_executes_scoped_laravel_actions(): void

@@ -187,7 +187,15 @@ class BeanController extends Controller
                     $last = (int) $event->id;
                     echo "id: {$event->id}\n";
                     echo 'event: '.str_replace('_', '.', $event->type)."\n";
-                    echo 'data: '.json_encode(['id' => $event->id, 'type' => $event->type, 'label' => $event->label, 'payload' => $event->payload, 'created_at' => optional($event->created_at)->toIso8601String()])."\n\n";
+                    echo 'data: '.json_encode([
+                        'id' => $event->id,
+                        'type' => $event->type,
+                        'label' => $event->label,
+                        'payload' => $event->payload,
+                        'bean_session_id' => $event->bean_session_id,
+                        'bean_run_id' => $event->bean_run_id,
+                        'created_at' => optional($event->created_at)->toIso8601String(),
+                    ])."\n\n";
                     @ob_flush();
                     @flush();
                 }
