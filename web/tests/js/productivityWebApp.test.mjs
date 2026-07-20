@@ -141,6 +141,7 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(source, /transport: 'elevenlabs_agent'/);
     assert.match(source, /connectionType: 'webrtc'/);
     assert.match(source, /textOnly: false/);
+    assert.doesNotMatch(source, /overrides: \{/);
     assert.match(source, /onAudio: \(base64Audio\) => handleBeanElevenLabsAudio\(base64Audio\)/);
     assert.match(source, /audio_playback_blocked/);
     assert.match(source, /audio_output_detected/);
@@ -152,6 +153,8 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(source, /element\.play/);
     assert.match(source, /voice_conversation_created/);
     assert.match(agentConfigSource, /agentOutputAudioFormat: 'pcm_48000'/);
+    assert.match(agentConfigSource, /provider: 'scribe_realtime'/);
+    assert.match(agentConfigSource, /keywords: \['Hey Bean'/);
     assert.match(agentConfigSource, /textOnly: false/);
     assert.match(source, /isLikelyBeanAssistantEcho/);
     assert.match(source, /reason: 'assistant_speaking'/);

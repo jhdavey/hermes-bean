@@ -4983,9 +4983,6 @@ export function mountHeyBeanWebApp(mount) {
                     bean_client_timezone: clientTimezonePayload().client_timezone || '',
                     bean_workspace_id: Number(currentWorkspaceId() || 0),
                 },
-                overrides: {
-                    asr: { keywords: ['Hey Bean', 'HeyBean', 'tasks', 'to-do', 'todo', 'reminders', 'calendar', 'notes'] },
-                },
                 clientTools: {
                     askBean: askBeanFromElevenLabsAgent,
                 },

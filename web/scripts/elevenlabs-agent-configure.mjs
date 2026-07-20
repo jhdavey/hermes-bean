@@ -92,6 +92,12 @@ function conversationConfig(toolId) {
                 maxSoftTimeoutsPerGeneration: 1,
             },
         },
+        asr: {
+            provider: 'scribe_realtime',
+            quality: 'high',
+            userInputAudioFormat: 'pcm_16000',
+            keywords: ['Hey Bean', 'HeyBean', 'tasks', 'to-do', 'todo', 'reminders', 'calendar', 'notes'],
+        },
         tts: {
             // WebRTC/LiveKit voice sessions operate at 48 kHz. Leaving this at the
             // Agent default (previously pcm_16000) can leave the data channel and
