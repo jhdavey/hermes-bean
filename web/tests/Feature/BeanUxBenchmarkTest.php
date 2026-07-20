@@ -209,9 +209,10 @@ class BeanUxBenchmarkTest extends TestCase
         ]);
 
         $jsonPath = storage_path('framework/testing/bean-ux-semantic-benchmark.json');
-        File::delete($jsonPath);
+        $progressPath = storage_path('framework/testing/bean-ux-semantic-progress.json');
+        File::delete([$jsonPath, $progressPath]);
 
-        $exit = Artisan::call('bean:ux-benchmark', ['--days' => 7, '--json' => $jsonPath]);
+        $exit = Artisan::call('bean:ux-benchmark', ['--days' => 7, '--json' => $jsonPath, '--progress' => $progressPath]);
 
         $this->assertSame(0, $exit);
         $report = json_decode(File::get($jsonPath), true);

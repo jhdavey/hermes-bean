@@ -315,7 +315,12 @@ class BeanUxBenchmarkService
 
     private function looksLikeReferenceFollowup(string $input): bool
     {
-        return preg_match('/\b(that|it|those|them|the previous|that task|that note|that event|that reminder)\b/iu', $input) === 1;
+        $lower = mb_strtolower($input);
+        if (preg_match('/\b(that[’\']?s|that is)?\s*doesn[’\']?t make sense\b/u', $lower) === 1) {
+            return false;
+        }
+
+        return preg_match('/\b(that task|that note|that event|that reminder|that workspace|the previous (task|note|event|reminder)|complete that|delete that|edit that|update that|move that|reschedule that|add .* to that (note|task|event|reminder))\b/u', $lower) === 1;
     }
 
     private function referenceFollowupResolved(BeanQualityTrace $trace): bool

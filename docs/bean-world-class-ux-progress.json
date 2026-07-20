@@ -1,9 +1,9 @@
 {
     "goal": "Make Bean meet world-class user-experience benchmarks.",
-    "updated_at": "2026-07-20T13:44:26+00:00",
+    "updated_at": "2026-07-20T13:57:55+00:00",
     "latest_report": {
         "mode": "bean-world-class-ux-benchmark",
-        "generated_at": "2026-07-20T13:44:25+00:00",
+        "generated_at": "2026-07-20T13:57:55+00:00",
         "window_days": 7,
         "counts": {
             "runs": 6682,
@@ -160,7 +160,7 @@
                 "followup_reference_resolution_rate": 1,
                 "unnecessary_clarification_rate": 0,
                 "immediate_context_loss_rate": 0,
-                "followup_reference_samples": 165,
+                "followup_reference_samples": 1,
                 "unnecessary_clarifications": 0,
                 "immediate_context_losses": 0
             }

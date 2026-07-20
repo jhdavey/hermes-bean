@@ -294,7 +294,11 @@ class BeanQualityAuditService
 
     private function looksLikeReferenceFollowup(string $lowerUser): bool
     {
-        return preg_match('/\b(that|it|those|them|that task|that note|that event|that reminder|the previous)\b/u', $lowerUser) === 1;
+        if (preg_match('/\b(that[’\']?s|that is)?\s*doesn[’\']?t make sense\b/u', $lowerUser) === 1) {
+            return false;
+        }
+
+        return preg_match('/\b(that task|that note|that event|that reminder|that workspace|the previous (task|note|event|reminder)|complete that|delete that|edit that|update that|move that|reschedule that|add .* to that (note|task|event|reminder))\b/u', $lowerUser) === 1;
     }
 
     private function asksDate(string $lowerUser): bool
