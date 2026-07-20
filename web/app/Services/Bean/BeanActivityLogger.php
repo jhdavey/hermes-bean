@@ -16,7 +16,7 @@ class BeanActivityLogger
             'user_id' => $session->user_id,
             'workspace_id' => $session->workspace_id,
             'type' => $type,
-            'label' => $label,
+            'label' => mb_substr($label, 0, 240),
             'payload' => $payload ?: null,
         ]);
     }

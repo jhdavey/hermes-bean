@@ -32,6 +32,7 @@ file_put_contents('{$logPath}', json_encode([
     'HERMES_HOME' => getenv('HERMES_HOME'),
     'BEAN_TOOL_CONTEXT' => getenv('BEAN_TOOL_CONTEXT'),
     'BEAN_ARTISAN' => getenv('BEAN_ARTISAN'),
+    'BEAN_PHP' => getenv('BEAN_PHP'),
     'PATH' => getenv('PATH'),
 ], JSON_UNESCAPED_SLASHES).PHP_EOL, FILE_APPEND);
 echo "⚠ tirith security scanner enabled but not available — command scanning will use pattern matching only\\n";
@@ -46,6 +47,7 @@ PHP);
             'bean.hermes.provider' => 'custom',
             'bean.hermes.model' => 'gpt-test',
             'bean.hermes.base_url' => 'https://api.openai.com/v1',
+            'bean.hermes.php_binary' => 'php',
         ]);
         putenv('FAKE_HERMES_LOG');
 
@@ -85,6 +87,7 @@ PHP);
         $log = $logs->first();
         $this->assertSame($home, $log['HERMES_HOME']);
         $this->assertStringContainsString('bean-tool-context-', $log['BEAN_TOOL_CONTEXT']);
+        $this->assertSame('php', $log['BEAN_PHP']);
         $this->assertStringContainsString('/usr/bin', $log['PATH']);
         $this->assertStringContainsString('/bin', $log['PATH']);
         $this->assertNotContains('--continue', $log['argv']);
@@ -229,6 +232,43 @@ PHP);
 
         $this->assertDatabaseMissing('tasks', ['id' => $task->id]);
         $this->assertDatabaseMissing('bean_confirmation_requests', ['id' => $result['confirmation_id'], 'status' => 'pending']);
+    }
+
+    public function test_hermes_internal_failure_details_are_not_shown_to_users(): void
+    {
+        $usersPath = storage_path('framework/testing/hermes-users-'.uniqid());
+        $fakeHermes = storage_path('framework/testing/fake-hermes-error-'.uniqid().'.php');
+        File::ensureDirectoryExists(dirname($fakeHermes));
+        File::put($fakeHermes, <<<'PHP'
+#!/usr/bin/env php
+<?php
+echo "The attempt to list overdue tasks encountered a repeated error related to php-fpm configuration, dashboard tool setup, and SQLSTATE details. This internal problem should not be shown.";
+fwrite(STDERR, "session_id: fake-hermes-error-session\n");
+PHP);
+        chmod($fakeHermes, 0755);
+
+        config([
+            'bean.hermes.binary' => $fakeHermes,
+            'bean.hermes.users_path' => $usersPath,
+            'bean.hermes.provider' => 'custom',
+            'bean.hermes.model' => 'gpt-test',
+        ]);
+
+        $token = $this->apiToken('bean-hermes-sanitized-error@example.com');
+
+        $response = $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'do I have overdue tasks',
+            'client_timezone' => 'America/Chicago',
+        ])->assertOk();
+
+        $response->assertJsonPath('data.run.status', 'failed')
+            ->assertJsonPath('data.run.output', "I couldn't complete that request.")
+            ->assertJsonPath('data.run.error', null)
+            ->assertJsonFragment(['content' => "I couldn't complete that request."])
+            ->assertJsonMissing(['content' => 'The attempt to list overdue tasks encountered a repeated error related to php-fpm configuration, dashboard tool setup, and SQLSTATE details. This internal problem should not be shown.']);
+
+        $this->assertDatabaseMissing('bean_messages', ['content' => 'The attempt to list overdue tasks encountered a repeated error related to php-fpm configuration, dashboard tool setup, and SQLSTATE details. This internal problem should not be shown.']);
+        $this->assertDatabaseHas('bean_activity_events', ['label' => "I couldn't complete that request."]);
     }
 
     public function test_realtime_session_requires_openai_configuration(): void

@@ -23,5 +23,6 @@ return [
         'max_turns' => (int) env('BEAN_HERMES_MAX_TURNS', 24),
         'toolsets' => env('BEAN_HERMES_TOOLSETS', 'bean_dashboard,skills,memory,session_search,web'),
         'skills' => env('BEAN_HERMES_SKILLS', 'bean-dashboard'),
+        'php_binary' => env('BEAN_HERMES_PHP_BINARY', 'php'),
     ],
 ];

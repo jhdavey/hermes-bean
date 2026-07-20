@@ -9,11 +9,14 @@ use App\Models\BeanSession;
 use App\Models\User;
 use App\Services\Bean\Quality\BeanQualityAuditService;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\Process\Process;
 use Throwable;
 
 class HermesAgentRuntimeService
 {
+    private const USER_FACING_FAILURE = "I couldn't complete that request.";
+
     public function __construct(
         private readonly HermesUserHomeService $homes,
         private readonly BeanActivityLogger $activity,
@@ -57,6 +60,16 @@ class HermesAgentRuntimeService
             $contextPath = $this->writeToolContext($home, $user, $session, $run, $clientTimezone);
             [$assistantText, $returnedHermesSessionId] = $this->invokeHermes($home, $hermesSessionId, $content, $contextPath);
             $assistantText = trim($assistantText) !== '' ? trim($assistantText) : 'Done.';
+            $assistantTextWasSanitized = $this->looksLikeInternalFailure($assistantText);
+            if ($assistantTextWasSanitized) {
+                Log::warning('Bean Hermes assistant response contained internal failure details and was sanitized.', [
+                    'bean_run_id' => $run->id,
+                    'bean_session_id' => $session->id,
+                    'user_id' => $user->id,
+                    'response' => mb_substr($assistantText, 0, 1000),
+                ]);
+                $assistantText = self::USER_FACING_FAILURE;
+            }
             if ($returnedHermesSessionId !== null && $returnedHermesSessionId !== $hermesSessionId) {
                 $hermesSessionId = $returnedHermesSessionId;
                 $sessionMetadata = is_array($session->metadata) ? $session->metadata : [];
@@ -82,18 +95,25 @@ class HermesAgentRuntimeService
             $waiting = $run->toolCalls()->where('status', 'waiting_confirmation')->exists();
             $metadata = is_array($run->metadata) ? $run->metadata : [];
             $run->update([
-                'status' => $waiting ? 'waiting_confirmation' : 'completed',
+                'status' => $assistantTextWasSanitized ? 'failed' : ($waiting ? 'waiting_confirmation' : 'completed'),
                 'model' => $this->modelLabel(),
                 'output' => $assistantText,
                 'metadata' => [...$metadata, 'hermes_session_id' => $hermesSessionId, 'tool_calls_count' => $run->toolCalls()->count()],
                 'completed_at' => now(),
             ]);
         } catch (Throwable $exception) {
-            $assistantText = 'I ran into a problem trying to reach your Hermes agent.';
+            Log::error('Bean Hermes runtime failed.', [
+                'bean_run_id' => $run->id,
+                'bean_session_id' => $session->id,
+                'user_id' => $user->id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+            $assistantText = self::USER_FACING_FAILURE;
             $run->update([
                 'status' => 'failed',
                 'model' => $this->modelLabel(),
-                'error' => $exception->getMessage(),
+                'error' => null,
                 'output' => $assistantText,
                 'completed_at' => now(),
             ]);
@@ -103,9 +123,9 @@ class HermesAgentRuntimeService
                 'user_id' => $user->id,
                 'role' => 'assistant',
                 'content' => $assistantText,
-                'metadata' => ['runtime_driver' => 'hermes', 'error' => $exception->getMessage()],
+                'metadata' => ['runtime_driver' => 'hermes'],
             ]);
-            $this->activity->log($session, $run, 'error', $assistantText, ['runtime' => 'hermes', 'error' => $exception->getMessage()]);
+            $this->activity->log($session, $run, 'error', $assistantText, ['runtime' => 'hermes']);
         } finally {
             app(BeanQualityAuditService::class)->traceRun($run->refresh());
             $session->touch();
@@ -196,6 +216,13 @@ class HermesAgentRuntimeService
         return [$assistantText, $sessionIdFromStdout ?? $sessionIdFromStderr];
     }
 
+    private function looksLikeInternalFailure(string $text): bool
+    {
+        $lower = mb_strtolower($text);
+
+        return preg_match('/\b(sqlstate|exception|stack trace|traceback|php-fpm|artisan|database|mysql|postgres|redis|server setup|internal problem|configuration|dashboard tool|tool failed|failed to start|exited with status|no such file|permission denied|timed out|timeout|connection refused)\b/u', $lower) === 1;
+    }
+
     private function processEnv(string $home, string $contextPath): array
     {
         $path = collect([
@@ -214,7 +241,7 @@ class HermesAgentRuntimeService
             'HERMES_HOME' => $home,
             'BEAN_TOOL_CONTEXT' => $contextPath,
             'BEAN_ARTISAN' => base_path('artisan'),
-            'BEAN_PHP' => PHP_BINARY,
+            'BEAN_PHP' => (string) config('bean.hermes.php_binary', 'php'),
             'BEAN_TOOL_TIMEOUT' => '60',
             'HERMES_ACCEPT_HOOKS' => '1',
             'PATH' => $path,
