@@ -95,8 +95,14 @@ test('Bean voice mutes realtime mic while answering and only opens a short follo
     assert.match(source, /track\.enabled = Boolean\(enabled\)/);
     assert.match(source, /setBeanVoiceInputEnabled\(false\)/);
     assert.match(source, /scheduleBeanFollowUpListening/);
+    assert.match(source, /const beanAssistantSpeechMaxMuteMs = 3500/);
+    assert.match(source, /function openBeanFollowUpAfterAssistantSpeech/);
+    assert.match(source, /event\.track\.onmute = openBeanFollowUpAfterAssistantSpeech/);
+    assert.match(source, /beanRemoteAudio\.onpause = openBeanFollowUpAfterAssistantSpeech/);
     assert.match(source, /scheduleBeanAssistantSpeechFallback/);
-    assert.match(source, /const estimatedSpeechMs = Math\.min\(9000, Math\.max\(2200, String\(answer \|\| ''\)\.length \* 55\)\)/);
+    assert.match(source, /const estimatedSpeechMs = Math\.min\(beanAssistantSpeechMaxMuteMs, Math\.max\(1200, String\(answer \|\| ''\)\.length \* 28\)\)/);
+    assert.match(source, /isLikelyBeanAssistantEcho/);
+    assert.match(source, /if \(state\.bean\.mode === 'speaking'\) openBeanFollowUpAfterAssistantSpeech\(\)/);
     assert.match(source, /clearBeanAssistantSpeechFallbackTimer/);
     assert.match(source, /Listening for a follow-up…/);
     assert.match(source, /input_audio_buffer\.clear/);

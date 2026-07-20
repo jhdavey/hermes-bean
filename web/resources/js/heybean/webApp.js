@@ -236,12 +236,15 @@ export function mountHeyBeanWebApp(mount) {
     let beanRealtimeSessionPromise = null;
     const beanFollowUpWindowMs = 30000;
     const beanPostSpeechInputCooldownMs = 700;
+    const beanAssistantSpeechMaxMuteMs = 3500;
     let beanRealtimeEventQueue = [];
     let beanPendingWakeTailTimer = 0;
     let beanPendingWakeTail = '';
     let beanFollowUpTimer = 0;
     let beanAssistantSpeechFallbackTimer = 0;
     let beanVoiceInputIgnoreUntil = 0;
+    let beanLastSpokenAnswer = '';
+    let beanLastSpokenAnswerAt = 0;
     let beanEventStatusStartedAt = Date.now();
 
     boot();
@@ -4723,8 +4726,12 @@ export function mountHeyBeanWebApp(mount) {
                 const [remoteStream] = event.streams;
                 if (remoteStream) {
                     beanRemoteAudio.srcObject = remoteStream;
+                    beanRemoteAudio.onended = openBeanFollowUpAfterAssistantSpeech;
+                    beanRemoteAudio.onpause = openBeanFollowUpAfterAssistantSpeech;
                     beanRemoteAudio.play?.().catch(() => {});
                 }
+                event.track.onmute = openBeanFollowUpAfterAssistantSpeech;
+                event.track.onended = openBeanFollowUpAfterAssistantSpeech;
             };
             for (const track of beanMediaStream.getAudioTracks()) {
                 beanPeerConnection.addTrack(track, beanMediaStream);
@@ -4807,8 +4814,13 @@ export function mountHeyBeanWebApp(mount) {
         const transcript = String(payload.transcript || payload.text || payload.delta || '').trim();
         if (transcript && type.includes('transcription') && type.endsWith('completed')) {
             clearBeanPendingWakeTail();
+            if (isLikelyBeanAssistantEcho(transcript)) {
+                sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
+                return;
+            }
             if (handleBeanVoiceControl(transcript)) return;
-            if (state.bean.busy || state.bean.mode === 'speaking' || Date.now() < beanVoiceInputIgnoreUntil) {
+            if (state.bean.mode === 'speaking') openBeanFollowUpAfterAssistantSpeech();
+            if (state.bean.busy || Date.now() < beanVoiceInputIgnoreUntil) {
                 sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
                 return;
             }
@@ -4818,10 +4830,7 @@ export function mountHeyBeanWebApp(mount) {
             sendBeanVoiceTranscript(transcript);
         }
         if (type === 'response.done' || type === 'response.audio.done' || type === 'output_audio_buffer.stopped') {
-            if (state.bean.voiceActive && state.bean.mode === 'speaking') {
-                state.bean.mode = 'listening';
-                scheduleBeanFollowUpListening();
-            }
+            openBeanFollowUpAfterAssistantSpeech();
             render();
         }
     }
@@ -4895,13 +4904,29 @@ export function mountHeyBeanWebApp(mount) {
         return normalizeList(state.bean.messages).slice().reverse().find((message) => String(message.role || '').toLowerCase() === 'assistant')?.content || '';
     }
 
+    function openBeanFollowUpAfterAssistantSpeech() {
+        if (!state.bean.voiceActive || state.bean.mode !== 'speaking') return;
+        state.bean.mode = 'listening';
+        scheduleBeanFollowUpListening();
+    }
+
+    function normalizeBeanVoiceText(value) {
+        return String(value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    function isLikelyBeanAssistantEcho(transcript) {
+        if (!beanLastSpokenAnswer || Date.now() - beanLastSpokenAnswerAt > 15000) return false;
+        const spoken = normalizeBeanVoiceText(beanLastSpokenAnswer);
+        const heard = normalizeBeanVoiceText(transcript);
+        if (!spoken || !heard || heard.length < 8) return false;
+        return spoken.includes(heard) || heard.includes(spoken.slice(0, Math.min(heard.length, 80)));
+    }
+
     function scheduleBeanAssistantSpeechFallback(answer) {
         clearBeanAssistantSpeechFallbackTimer();
-        const estimatedSpeechMs = Math.min(9000, Math.max(2200, String(answer || '').length * 55));
+        const estimatedSpeechMs = Math.min(beanAssistantSpeechMaxMuteMs, Math.max(1200, String(answer || '').length * 28));
         beanAssistantSpeechFallbackTimer = window.setTimeout(() => {
-            if (!state.bean.voiceActive || state.bean.mode !== 'speaking') return;
-            state.bean.mode = 'listening';
-            scheduleBeanFollowUpListening();
+            openBeanFollowUpAfterAssistantSpeech();
             render();
         }, estimatedSpeechMs);
     }
@@ -4909,6 +4934,8 @@ export function mountHeyBeanWebApp(mount) {
     function speakBeanRealtimeAnswer(answer) {
         clearBeanFollowUpTimer();
         clearBeanAssistantSpeechFallbackTimer();
+        beanLastSpokenAnswer = String(answer || '');
+        beanLastSpokenAnswerAt = Date.now();
         setBeanVoiceInputEnabled(false);
         sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
         sendBeanRealtimeEvent({
