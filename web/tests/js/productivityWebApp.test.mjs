@@ -117,6 +117,7 @@ test('Bean wake handoff does not submit the first partial wake tail as the comma
     assert.match(source, /state\.bean\.voiceTranscript = wakeTail/);
     assert.doesNotMatch(source, /sendBeanVoiceTranscript\(wakeTail\)/);
     assert.match(source, /startBeanVoiceSession\(\{ wakeEvent: event, wakeTail \}\)/);
+    assert.match(source, /sendUserActivity/);
 });
 
 test('Bean voice handles stale page-load status and stop commands locally', () => {
@@ -137,6 +138,13 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(source, /function askBeanFromElevenLabsAgent/);
     assert.match(source, /\/bean\/messages/);
     assert.match(source, /transport: 'elevenlabs_agent'/);
+    assert.match(source, /connectionType: 'webrtc'/);
+    assert.match(source, /textOnly: false/);
+    assert.match(source, /onAudio: \(base64Audio\) => handleBeanElevenLabsAudio\(base64Audio\)/);
+    assert.match(source, /audio_playback_blocked/);
+    assert.match(source, /audio_output_detected/);
+    assert.match(source, /audio_chunk_received/);
+    assert.match(source, /voice_conversation_created/);
     assert.match(source, /isLikelyBeanAssistantEcho/);
     assert.match(source, /reason: 'assistant_speaking'/);
     assert.match(source, /beanPendingVoiceResponse/);

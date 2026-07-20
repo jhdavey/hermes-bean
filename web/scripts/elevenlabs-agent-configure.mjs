@@ -77,16 +77,19 @@ async function ensureAskBeanTool() {
 function conversationConfig(toolId) {
     return {
         turn: {
-            turnTimeout: 7,
-            initialWaitTime: 10,
-            silenceEndCallTimeout: 30,
+            turnTimeout: 12,
+            initialWaitTime: 20,
+            silenceEndCallTimeout: 90,
             turnEagerness: 'normal',
             interruptionIgnoreTerms: ['okay', 'ok', 'yes', 'yeah', 'yep', 'thanks', 'thank you', 'got it', 'understood'],
             transcribeOnDisabledInterruptions: false,
             softTimeoutConfig: {
-                timeoutSeconds: 2.5,
-                message: 'One moment.',
+                timeoutSeconds: 6,
+                message: 'Checking that.',
+                additionalSoftTimeoutMessages: [],
                 useLlmGeneratedMessage: false,
+                randomizeFillers: false,
+                maxSoftTimeoutsPerGeneration: 1,
             },
         },
         conversation: {
