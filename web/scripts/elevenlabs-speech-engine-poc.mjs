@@ -22,7 +22,6 @@ const BEAN_CLIENT_TIMEZONE = process.env.BEAN_CLIENT_TIMEZONE || 'America/New_Yo
 const PORT = Number(process.env.ELEVENLABS_SPEECH_ENGINE_POC_PORT || 3001);
 const PATH = process.env.ELEVENLABS_SPEECH_ENGINE_POC_PATH || '/ws';
 const ACK_ENABLED = process.env.BEAN_ELEVENLABS_POC_ACK_ENABLED !== 'false';
-const ACK_DELAY_MS = Number(process.env.BEAN_ELEVENLABS_POC_ACK_DELAY_MS || 650);
 const DUPLICATE_TRANSCRIPT_SUPPRESS_MS = Number(process.env.BEAN_ELEVENLABS_POC_DUPLICATE_SUPPRESS_MS || 3500);
 
 const elevenlabs = new ElevenLabsClient({ apiKey: ELEVENLABS_API_KEY });
@@ -94,10 +93,6 @@ async function askBean(state, content, signal) {
     return answer || 'Bean finished that, but I did not get a spoken answer back.';
 }
 
-function delay(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function* responseStream(state, content, transcript, signal) {
     const localFastResponse = getLocalFastVoiceResponse(content);
     if (localFastResponse) {
@@ -105,26 +100,13 @@ async function* responseStream(state, content, transcript, signal) {
         return;
     }
 
-    const answerPromise = askBean(state, content, signal);
-
     try {
         const acknowledgement = ACK_ENABLED ? chooseBeanVoiceAcknowledgement(content, transcript) : null;
-
-        if (acknowledgement && ACK_DELAY_MS > 0) {
-            const first = await Promise.race([
-                answerPromise.then((answer) => ({ type: 'answer', answer })),
-                delay(ACK_DELAY_MS).then(() => ({ type: 'acknowledgement' })),
-            ]);
-
-            if (first.type === 'answer') {
-                yield first.answer;
-                return;
-            }
-
+        if (acknowledgement) {
             yield `${acknowledgement} `;
         }
 
-        yield await answerPromise;
+        yield await askBean(state, content, signal);
     } catch (error) {
         if (signal?.aborted) return;
         console.error('[bean] request failed:', error?.message || error);
