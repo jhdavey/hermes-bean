@@ -15,7 +15,7 @@ use Throwable;
 
 class HermesAgentRuntimeService
 {
-    private const USER_FACING_FAILURE = "I couldn't complete that request.";
+    private const USER_FACING_FAILURE = 'I could not complete that request.';
 
     public function __construct(
         private readonly HermesUserHomeService $homes,

@@ -262,13 +262,13 @@ PHP);
         ])->assertOk();
 
         $response->assertJsonPath('data.run.status', 'failed')
-            ->assertJsonPath('data.run.output', "I couldn't complete that request.")
+            ->assertJsonPath('data.run.output', 'I could not complete that request.')
             ->assertJsonPath('data.run.error', null)
-            ->assertJsonFragment(['content' => "I couldn't complete that request."])
+            ->assertJsonFragment(['content' => 'I could not complete that request.'])
             ->assertJsonMissing(['content' => 'The attempt to list overdue tasks encountered a repeated error related to php-fpm configuration, dashboard tool setup, and SQLSTATE details. This internal problem should not be shown.']);
 
         $this->assertDatabaseMissing('bean_messages', ['content' => 'The attempt to list overdue tasks encountered a repeated error related to php-fpm configuration, dashboard tool setup, and SQLSTATE details. This internal problem should not be shown.']);
-        $this->assertDatabaseHas('bean_activity_events', ['label' => "I couldn't complete that request."]);
+        $this->assertDatabaseHas('bean_activity_events', ['label' => 'I could not complete that request.']);
     }
 
     public function test_realtime_session_requires_openai_configuration(): void
