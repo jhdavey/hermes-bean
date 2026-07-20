@@ -90,7 +90,9 @@ The first instrumentation milestone measures backend/run latency and voice funne
 
 ## Durable continuity system
 
-A future session must be able to resume without chat history:
+A future session must be able to resume without chat history. This is now partially automated by repo-local `AGENTS.md`: when Hermes/agent sessions are started with this repository as the project/workdir, those startup instructions tell the agent to read these docs and run the benchmark. If a new chat is not already attached to this repo, the user may still need to say “work in `/Users/joshuadavey/development/projects/hermes-bean`” or paste the goal once.
+
+Manual bootstrap remains:
 
 1. Read this file.
 2. Read `docs/bean-world-class-ux-progress.json`.
