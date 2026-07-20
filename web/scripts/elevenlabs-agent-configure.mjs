@@ -92,7 +92,14 @@ function conversationConfig(toolId) {
                 maxSoftTimeoutsPerGeneration: 1,
             },
         },
+        tts: {
+            // WebRTC/LiveKit voice sessions operate at 48 kHz. Leaving this at the
+            // Agent default (previously pcm_16000) can leave the data channel and
+            // transcript path alive while the remote audio track is silent.
+            agentOutputAudioFormat: 'pcm_48000',
+        },
         conversation: {
+            textOnly: false,
             maxDurationSeconds: 300,
             clientEvents: ['user_transcript', 'agent_response', 'interruption'],
         },

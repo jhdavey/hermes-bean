@@ -246,6 +246,8 @@ export function mountHeyBeanWebApp(mount) {
     let beanLastAudioChunkAt = 0;
     let beanLastOutputVolumeAt = 0;
     let beanAudioPlaybackBlocked = false;
+    let beanLiveKitDiagnosticsCleanup = null;
+    let beanOutputVolumeProbeTimer = 0;
     let beanEventStatusStartedAt = Date.now();
 
     boot();
@@ -4779,21 +4781,142 @@ export function mountHeyBeanWebApp(mount) {
         render();
     }
 
+    function beanElevenLabsRoom(conversation = beanElevenLabsConversation) {
+        return conversation?.connection?.getRoom?.() || conversation?.connection?.room || null;
+    }
+
+    function beanElevenLabsAudioAdapter(conversation = beanElevenLabsConversation) {
+        return conversation?.connection?.audioAdapter || null;
+    }
+
     async function resumeBeanElevenLabsAudioPlayback(reason = 'resume') {
         const conversation = beanElevenLabsConversation;
         if (!conversation) return false;
-        const room = conversation?.connection?.getRoom?.() || conversation?.connection?.room || null;
-        if (!room?.startAudio) return false;
+        const room = beanElevenLabsRoom(conversation);
+        const adapter = beanElevenLabsAudioAdapter(conversation);
+        let resumed = false;
         try {
-            await room.startAudio();
-            beanAudioPlaybackBlocked = false;
-            if (state.bean.error && /voice audio is blocked/i.test(state.bean.error)) state.bean.error = '';
-            logBeanVoiceLifecycleEvent('audio_playback_resumed', { reason, transport: 'elevenlabs_agent' });
-            return true;
+            await adapter?.inputAudioContext?.resume?.();
+            await adapter?.audioCaptureContext?.resume?.();
+            if (room?.startAudio) {
+                await room.startAudio();
+                resumed = true;
+            }
+            const elements = Array.from(adapter?.audioElements || []);
+            for (const element of elements) {
+                element.muted = false;
+                element.volume = 1;
+                try {
+                    await element.play?.();
+                    resumed = true;
+                } catch (error) {
+                    markBeanAudioPlaybackBlocked(reason, {
+                        element_paused: Boolean(element.paused),
+                        error_message: String(error?.message || error).slice(0, 160),
+                    });
+                    return false;
+                }
+            }
+            if (resumed) {
+                beanAudioPlaybackBlocked = false;
+                if (state.bean.error && /voice audio is blocked/i.test(state.bean.error)) state.bean.error = '';
+                logBeanVoiceLifecycleEvent('audio_playback_resumed', {
+                    reason,
+                    transport: 'elevenlabs_agent',
+                    audio_elements: elements.length,
+                    capture_context_state: adapter?.audioCaptureContext?.state || '',
+                });
+                return true;
+            }
+            return false;
         } catch (error) {
             markBeanAudioPlaybackBlocked(reason, { error_message: String(error?.message || error).slice(0, 160) });
             return false;
         }
+    }
+
+    function probeBeanElevenLabsOutputVolume(reason = 'probe') {
+        const now = Date.now();
+        const outputVolume = Number(beanElevenLabsConversation?.getOutputVolume?.() || 0);
+        if (outputVolume > 0.01 && now - beanLastOutputVolumeAt > 750) {
+            beanLastOutputVolumeAt = now;
+            beanAudioPlaybackBlocked = false;
+            logBeanVoiceLifecycleEvent('audio_output_detected', {
+                reason,
+                transport: 'elevenlabs_agent',
+                output_volume: Number(outputVolume.toFixed(4)),
+            });
+        }
+    }
+
+    function startBeanOutputVolumeProbe() {
+        if (beanOutputVolumeProbeTimer) return;
+        beanOutputVolumeProbeTimer = window.setInterval(() => probeBeanElevenLabsOutputVolume('interval'), 500);
+    }
+
+    function stopBeanOutputVolumeProbe() {
+        if (!beanOutputVolumeProbeTimer) return;
+        window.clearInterval(beanOutputVolumeProbeTimer);
+        beanOutputVolumeProbeTimer = 0;
+    }
+
+    function setupBeanLiveKitAudioDiagnostics(conversation) {
+        beanLiveKitDiagnosticsCleanup?.();
+        beanLiveKitDiagnosticsCleanup = null;
+        const room = beanElevenLabsRoom(conversation);
+        if (!room?.on) return;
+
+        const summarizeTrack = (track, publication, participant) => ({
+            transport: 'elevenlabs_agent',
+            track_kind: String(track?.kind || ''),
+            track_sid: String(publication?.trackSid || publication?.sid || track?.sid || '').slice(0, 80),
+            participant_identity: String(participant?.identity || '').slice(0, 80),
+            media_ready_state: String(track?.mediaStreamTrack?.readyState || ''),
+            media_muted: Boolean(track?.mediaStreamTrack?.muted),
+            audio_elements: Array.from(beanElevenLabsAudioAdapter(conversation)?.audioElements || []).length,
+        });
+        const onTrackSubscribed = (track, publication, participant) => {
+            logBeanVoiceLifecycleEvent('agent_audio_track_subscribed', summarizeTrack(track, publication, participant));
+            resumeBeanElevenLabsAudioPlayback('track_subscribed');
+            startBeanOutputVolumeProbe();
+        };
+        const onTrackSubscriptionFailed = (trackSid, participant) => {
+            logBeanVoiceLifecycleEvent('agent_audio_track_failed', {
+                transport: 'elevenlabs_agent',
+                track_sid: String(trackSid || '').slice(0, 80),
+                participant_identity: String(participant?.identity || '').slice(0, 80),
+            });
+        };
+        const onConnectionStateChanged = (connection_state) => {
+            logBeanVoiceLifecycleEvent('voice_livekit_state', {
+                transport: 'elevenlabs_agent',
+                connection_state: String(connection_state || '').slice(0, 80),
+            });
+        };
+
+        room.on('trackSubscribed', onTrackSubscribed);
+        room.on('trackSubscriptionFailed', onTrackSubscriptionFailed);
+        room.on('connectionStateChanged', onConnectionStateChanged);
+        window.setTimeout(() => {
+            const participants = Array.from(room.remoteParticipants?.values?.() || []);
+            logBeanVoiceLifecycleEvent('voice_livekit_participants', {
+                transport: 'elevenlabs_agent',
+                participant_count: participants.length,
+                identities: participants.map((participant) => String(participant?.identity || '').slice(0, 40)).join(','),
+            });
+            for (const participant of participants) {
+                const publications = Array.from(participant?.trackPublications?.values?.() || participant?.audioTrackPublications?.values?.() || []);
+                for (const publication of publications) {
+                    const track = publication?.track;
+                    if (track) onTrackSubscribed(track, publication, participant);
+                }
+            }
+        }, 0);
+        beanLiveKitDiagnosticsCleanup = () => {
+            room.off?.('trackSubscribed', onTrackSubscribed);
+            room.off?.('trackSubscriptionFailed', onTrackSubscriptionFailed);
+            room.off?.('connectionStateChanged', onConnectionStateChanged);
+        };
     }
 
     function handleBeanElevenLabsDebug(info = {}) {
@@ -4821,12 +4944,7 @@ export function mountHeyBeanWebApp(mount) {
                 bytes_base64: String(base64Audio || '').length,
             });
         }
-        const outputVolume = Number(beanElevenLabsConversation?.getOutputVolume?.() || 0);
-        if (outputVolume > 0.01 && now - beanLastOutputVolumeAt > 750) {
-            beanLastOutputVolumeAt = now;
-            beanAudioPlaybackBlocked = false;
-            logBeanVoiceLifecycleEvent('audio_output_detected', { transport: 'elevenlabs_agent', output_volume: Number(outputVolume.toFixed(4)) });
-        }
+        probeBeanElevenLabsOutputVolume('audio_chunk');
     }
 
     async function startBeanVoiceSession(options = {}) {
@@ -4873,6 +4991,7 @@ export function mountHeyBeanWebApp(mount) {
                 },
                 onConversationCreated: (conversation) => {
                     beanElevenLabsConversation = conversation;
+                    setupBeanLiveKitAudioDiagnostics(conversation);
                     conversation?.setVolume?.({ volume: 1 });
                     logBeanVoiceLifecycleEvent('voice_conversation_created', {
                         transport: 'elevenlabs_agent',
@@ -4909,6 +5028,9 @@ export function mountHeyBeanWebApp(mount) {
                 },
                 onDisconnect: (details) => {
                     const shouldReset = state.bean.voiceActive || state.bean.voiceConnecting;
+                    beanLiveKitDiagnosticsCleanup?.();
+                    beanLiveKitDiagnosticsCleanup = null;
+                    stopBeanOutputVolumeProbe();
                     beanElevenLabsConversation = null;
                     state.bean.voiceActive = false;
                     state.bean.voiceConnecting = false;
@@ -4956,6 +5078,9 @@ export function mountHeyBeanWebApp(mount) {
         clearBeanPendingVoiceResponse();
         beanVoiceRequestCount = 0;
         setBeanVoiceInputEnabled(false);
+        beanLiveKitDiagnosticsCleanup?.();
+        beanLiveKitDiagnosticsCleanup = null;
+        stopBeanOutputVolumeProbe();
         beanElevenLabsConversation?.endSession?.().catch(() => {});
         beanElevenLabsConversation = null;
         beanMediaStream?.getTracks?.().forEach((track) => track.stop());
@@ -5027,6 +5152,8 @@ export function mountHeyBeanWebApp(mount) {
             beanLastSpokenAnswer = content;
             beanLastSpokenAnswerAt = Date.now();
             logBeanVoiceLifecycleEvent('bean_response_received', { label: content.slice(0, 160), transport: 'elevenlabs_agent', agent_managed_response: true });
+            startBeanOutputVolumeProbe();
+            resumeBeanElevenLabsAudioPlayback('agent_message');
             logBeanVoiceLifecycleEvent('assistant_speech_started', { label: content.slice(0, 160), transport: 'elevenlabs_agent' });
             state.bean.messages = [...normalizeList(state.bean.messages), { role: 'assistant', content }];
             state.bean.voiceTranscript = '';
@@ -5041,6 +5168,8 @@ export function mountHeyBeanWebApp(mount) {
     function handleBeanElevenLabsMode(mode) {
         const normalizedMode = String(mode || '').toLowerCase();
         if (normalizedMode === 'speaking') {
+            startBeanOutputVolumeProbe();
+            resumeBeanElevenLabsAudioPlayback('mode_speaking');
             if (state.bean.voiceActive && !state.bean.busy) {
                 state.bean.mode = 'speaking';
                 state.bean.statusText = 'Speaking…';

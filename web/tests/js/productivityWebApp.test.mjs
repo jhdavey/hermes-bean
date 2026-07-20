@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const source = await readFile(new URL('../../resources/js/heybean/webApp.js', import.meta.url), 'utf8');
+const agentConfigSource = await readFile(new URL('../../scripts/elevenlabs-agent-configure.mjs', import.meta.url), 'utf8');
 const themeSource = await readFile(new URL('../../resources/css/heybean/theme.css', import.meta.url), 'utf8');
 const dashboardSource = await readFile(new URL('../../resources/css/heybean/dashboard.css', import.meta.url), 'utf8');
 const baseShellSource = await readFile(new URL('../../resources/css/heybean/base-shell.css', import.meta.url), 'utf8');
@@ -144,7 +145,14 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(source, /audio_playback_blocked/);
     assert.match(source, /audio_output_detected/);
     assert.match(source, /audio_chunk_received/);
+    assert.match(source, /agent_audio_track_subscribed/);
+    assert.match(source, /voice_livekit_participants/);
+    assert.match(source, /audioElements/);
+    assert.match(source, /audioCaptureContext/);
+    assert.match(source, /element\.play/);
     assert.match(source, /voice_conversation_created/);
+    assert.match(agentConfigSource, /agentOutputAudioFormat: 'pcm_48000'/);
+    assert.match(agentConfigSource, /textOnly: false/);
     assert.match(source, /isLikelyBeanAssistantEcho/);
     assert.match(source, /reason: 'assistant_speaking'/);
     assert.match(source, /beanPendingVoiceResponse/);
