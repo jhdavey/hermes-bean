@@ -47,10 +47,10 @@ There is no local deterministic Bean router. `BeanRuntimeService` always routes 
 1. `BeanRuntimeService` resolves or creates the Bean session.
 2. `HermesUserHomeService` ensures the user's isolated Hermes home, default Bean plugin, and `bean-dashboard` skill exist.
 3. `HermesAgentRuntimeService` mirrors the user message/run/activity for the UI.
-4. Laravel invokes `hermes chat --continue bean-session-{id}` with that user's `HERMES_HOME`.
+4. Laravel invokes `hermes chat` with that user's absolute `HERMES_HOME`. First turns start a fresh Hermes session; later turns use `--resume {hermes_session_id}` after Hermes returns the real session id.
 5. Hermes owns conversation history, memory, context compression, tool choice, and final response.
 6. When dashboard data is needed, Hermes calls the `bean_dashboard` plugin tool.
-7. The plugin calls Laravel's signed `bean:dashboard-tool` bridge.
+7. The plugin calls Laravel's signed `bean:dashboard-tool` bridge with an absolute signed context path and CLI `php` binary.
 8. Laravel validates scope/schema/safety, executes the action, records tool calls, and returns structured results to Hermes.
 9. Hermes confirms the result or asks for the next clarification/confirmation.
 

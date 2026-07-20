@@ -269,6 +269,48 @@ PHP);
 
         $this->assertDatabaseMissing('bean_messages', ['content' => 'The attempt to list overdue tasks encountered a repeated error related to php-fpm configuration, dashboard tool setup, and SQLSTATE details. This internal problem should not be shown.']);
         $this->assertDatabaseHas('bean_activity_events', ['label' => 'I could not complete that request.']);
+        $session = BeanSession::firstOrFail()->refresh();
+        $this->assertNull(data_get($session->metadata, 'hermes_session_id'));
+        $this->assertSame('fake-hermes-error-session', data_get($session->metadata, 'failed_hermes_session_id'));
+    }
+
+    public function test_relative_hermes_users_path_is_resolved_to_absolute_paths_for_tools(): void
+    {
+        $relativeUsersPath = 'storage/framework/testing/hermes-users-relative-'.uniqid();
+        $logPath = storage_path('framework/testing/fake-hermes-relative-env-'.uniqid().'.json');
+        $fakeHermes = storage_path('framework/testing/fake-hermes-relative-'.uniqid().'.php');
+        File::ensureDirectoryExists(dirname($fakeHermes));
+        File::put($fakeHermes, <<<PHP
+#!/usr/bin/env php
+<?php
+file_put_contents('{$logPath}', json_encode([
+    'HERMES_HOME' => getenv('HERMES_HOME'),
+    'BEAN_TOOL_CONTEXT' => getenv('BEAN_TOOL_CONTEXT'),
+], JSON_UNESCAPED_SLASHES));
+echo "OK";
+fwrite(STDERR, "session_id: fake-relative-session\\n");
+PHP);
+        chmod($fakeHermes, 0755);
+
+        config([
+            'bean.hermes.binary' => $fakeHermes,
+            'bean.hermes.users_path' => $relativeUsersPath,
+            'bean.hermes.provider' => 'custom',
+            'bean.hermes.model' => 'gpt-test',
+        ]);
+
+        $token = $this->apiToken('bean-hermes-relative-path@example.com');
+        $user = User::where('email', 'bean-hermes-relative-path@example.com')->firstOrFail();
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'check path setup',
+        ])->assertOk();
+
+        $env = json_decode(File::get($logPath), true);
+        $expectedHome = base_path($relativeUsersPath).'/'.$user->id;
+        $this->assertSame($expectedHome, $env['HERMES_HOME']);
+        $this->assertStringStartsWith($expectedHome.'/tmp/bean-tool-context-', $env['BEAN_TOOL_CONTEXT']);
+        $this->assertFileExists($env['BEAN_TOOL_CONTEXT']);
     }
 
     public function test_realtime_session_requires_openai_configuration(): void

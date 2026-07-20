@@ -8,22 +8,23 @@ Bean routes product chat through per-user Hermes agents. There is no Laravel loc
 /api/bean/messages
   → BeanRuntimeService
   → HermesAgentRuntimeService
-  → hermes chat --continue bean-session-{id}
+  → hermes chat, then hermes chat --resume {real_hermes_session_id}
 ```
 
 `HermesAgentRuntimeService` sets:
 
 ```bash
-HERMES_HOME=storage/hermes/users/{user_id}
+HERMES_HOME=/absolute/path/to/storage/hermes/users/{user_id}
 BEAN_TOOL_CONTEXT=/path/to/signed/context.json
 BEAN_ARTISAN=/path/to/artisan
+BEAN_PHP=php
 ```
 
 and invokes Hermes with the configured provider/model/toolsets/skills:
 
 ```bash
 hermes chat \
-  --continue bean-session-{id} \
+  --resume {real_hermes_session_id_after_first_turn} \
   --provider custom \
   --model gpt-4.1-mini \
   --source bean \
@@ -46,6 +47,7 @@ BEAN_HERMES_TIMEOUT_SECONDS=120
 BEAN_HERMES_MAX_TURNS=24
 BEAN_HERMES_TOOLSETS=bean_dashboard,skills,memory,session_search,web
 BEAN_HERMES_SKILLS=bean-dashboard
+BEAN_HERMES_PHP_BINARY=php
 ```
 
 `OPENAI_API_KEY` is still required by the default per-user Hermes config. Bean uses Hermes provider `custom` with `BEAN_HERMES_BASE_URL=https://api.openai.com/v1` because current Hermes installs expose OpenAI-compatible endpoints through the `custom` provider, not a literal `openai` provider. Generated Bean user homes set `agent.reasoning_effort: none` so non-reasoning fast models such as `gpt-4.1-mini` do not receive unsupported reasoning parameters.

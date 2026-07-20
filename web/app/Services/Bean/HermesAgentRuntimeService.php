@@ -69,8 +69,11 @@ class HermesAgentRuntimeService
                     'response' => mb_substr($assistantText, 0, 1000),
                 ]);
                 $assistantText = self::USER_FACING_FAILURE;
+                $this->forgetHermesSessionId($session, $returnedHermesSessionId ?? $hermesSessionId);
+                $session = $session->refresh();
+                $hermesSessionId = null;
             }
-            if ($returnedHermesSessionId !== null && $returnedHermesSessionId !== $hermesSessionId) {
+            if (! $assistantTextWasSanitized && $returnedHermesSessionId !== null && $returnedHermesSessionId !== $hermesSessionId) {
                 $hermesSessionId = $returnedHermesSessionId;
                 $sessionMetadata = is_array($session->metadata) ? $session->metadata : [];
                 $session->forceFill(['metadata' => [...$sessionMetadata, 'hermes_session_id' => $hermesSessionId]])->save();
@@ -220,7 +223,18 @@ class HermesAgentRuntimeService
     {
         $lower = mb_strtolower($text);
 
-        return preg_match('/\b(sqlstate|exception|stack trace|traceback|php-fpm|artisan|database|mysql|postgres|redis|server setup|internal problem|configuration|dashboard tool|tool failed|failed to start|exited with status|no such file|permission denied|timed out|timeout|connection refused)\b/u', $lower) === 1;
+        return preg_match('/\b(sqlstate|exception|stack trace|traceback|php-fpm|artisan|database|mysql|postgres|redis|server setup|internal problem|configuration|context issue|dashboard tool|tool failed|failed to start|exited with status|no such file|permission denied|timed out|timeout|connection refused)\b/u', $lower) === 1;
+    }
+
+    private function forgetHermesSessionId(BeanSession $session, ?string $failedHermesSessionId): void
+    {
+        $metadata = is_array($session->metadata) ? $session->metadata : [];
+        unset($metadata['hermes_session_id']);
+        if (is_string($failedHermesSessionId) && $failedHermesSessionId !== '') {
+            $metadata['failed_hermes_session_id'] = $failedHermesSessionId;
+            $metadata['failed_hermes_session_at'] = now()->toIso8601String();
+        }
+        $session->forceFill(['metadata' => $metadata])->save();
     }
 
     private function processEnv(string $home, string $contextPath): array

@@ -28,7 +28,7 @@ class ExecuteBeanDashboardTool extends Command
         $result = $bridge->execute($context, $payload);
         $this->line(json_encode($result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 
-        return ($result['ok'] ?? false) === false ? self::FAILURE : self::SUCCESS;
+        return self::SUCCESS;
     }
 
     private function readJsonFile(string $path): mixed

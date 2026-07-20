@@ -50,7 +50,10 @@ class HermesUserHomeService
 
     public function homePath(User $user): string
     {
-        return rtrim((string) config('bean.hermes.users_path'), '/').'/'.$user->id;
+        $usersPath = rtrim((string) config('bean.hermes.users_path'), '/');
+        $absoluteUsersPath = str_starts_with($usersPath, '/') ? $usersPath : base_path($usersPath);
+
+        return $absoluteUsersPath.'/'.$user->id;
     }
 
     public function deleteForUser(User $user): void
