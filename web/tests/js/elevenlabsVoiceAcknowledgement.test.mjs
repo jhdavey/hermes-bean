@@ -6,10 +6,13 @@ import {
     getLocalFastVoiceResponse,
     isDuplicateVoiceTranscript,
     isIgnorableVoiceTranscript,
+    isSimplePostHealthEcho,
 } from '../../scripts/elevenlabsVoiceAcknowledgement.mjs';
 
 test('ElevenLabs POC acknowledgements skip simple conversational turns', () => {
     assert.equal(chooseBeanVoiceAcknowledgement('Can you hear me?'), null);
+    assert.equal(chooseBeanVoiceAcknowledgement('Okay.'), null);
+    assert.equal(chooseBeanVoiceAcknowledgement('Yes.'), null);
     assert.equal(chooseBeanVoiceAcknowledgement('Stop'), null);
     assert.equal(chooseBeanVoiceAcknowledgement('Thanks'), null);
 });
@@ -72,4 +75,11 @@ test('ElevenLabs voice treats placeholder transcript revisions as ignorable', ()
     assert.equal(canonicalizeBeanVoiceTranscript(' — '), '');
     assert.equal(isIgnorableVoiceTranscript('...'), true);
     assert.equal(isIgnorableVoiceTranscript('What tasks do I have today?'), false);
+});
+
+test('ElevenLabs voice recognizes short post-health-check echoes', () => {
+    assert.equal(isSimplePostHealthEcho('Yes.'), true);
+    assert.equal(isSimplePostHealthEcho('Okay.'), true);
+    assert.equal(isSimplePostHealthEcho('Thanks'), true);
+    assert.equal(isSimplePostHealthEcho('What tasks do I have today?'), false);
 });

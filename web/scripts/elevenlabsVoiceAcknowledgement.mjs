@@ -28,13 +28,18 @@ export function canonicalizeBeanVoiceTranscript(text) {
 
     if (normalized.includes('can you hear me')) return 'can you hear me';
     if (normalized === 'do you hear me') return 'can you hear me';
-    if (/^(stop|dismiss|cancel)$/.test(normalized)) return normalized;
+    if (/^(ok|okay|yes|yeah|yep|no|nope|thanks|thank you|stop|dismiss|cancel)$/.test(normalized)) return normalized;
 
     return normalized;
 }
 
 export function isIgnorableVoiceTranscript(text) {
     return canonicalizeBeanVoiceTranscript(text) === '';
+}
+
+export function isSimplePostHealthEcho(text) {
+    const canonical = canonicalizeBeanVoiceTranscript(text);
+    return /^(ok|okay|yes|yeah|yep|no|nope|thanks|thank you)$/.test(canonical);
 }
 
 export function isDuplicateVoiceTranscript(previous, next) {
@@ -115,6 +120,8 @@ function isSimpleConversation(message) {
         /^stop\b/,
         /^dismiss\b/,
         /^cancel\b/,
+        /^ok\b/,
+        /^okay\b/,
         /^yes\b/,
         /^no\b/,
     ].some((pattern) => pattern.test(current));

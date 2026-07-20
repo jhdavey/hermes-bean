@@ -43,7 +43,8 @@ test('Bean status and expandable chat share one dynamic bordered control', () =>
     assert.match(source, /hb-bean-status/);
     assert.match(source, /hb-bean-panel-toggle/);
     assert.match(source, /aria-controls="hb-bean-chat"/);
-    assert.match(source, /panelOpen \? '\^' : 'v'/);
+    assert.match(source, /<svg class="hb-bean-panel-caret"/);
+    assert.match(source, /<path d="M1\.5 1\.5 6 6l4\.5-4\.5"><\/path>/);
     assert.match(source, /panelOpen \? beanPanelMarkup\(\) : ''/);
     assert.match(source, /hb-bean-chat-log/);
     assert.match(source, /data-bean-chat-form/);
@@ -62,6 +63,8 @@ test('Bean status and expandable chat share one dynamic bordered control', () =>
     const toggleRule = cssRuleContaining(dashboardSource, '.hb-bean-panel-toggle');
     assert.match(toggleRule, /border:\s*0/);
     assert.doesNotMatch(toggleRule, /border-left/);
+    assert.match(dashboardSource, /\.hb-bean-panel-caret\s*\{[^}]*stroke-linecap:\s*round/s);
+    assert.match(dashboardSource, /\.hb-bean-presence-open \.hb-bean-panel-caret\s*\{[^}]*rotate\(180deg\)/s);
     assert.match(dashboardSource, /\.hb-bean-summary\s*\{[^}]*display:\s*flex/s);
 });
 
@@ -139,6 +142,9 @@ test('Bean voice mutes realtime mic while answering and only opens a short follo
     assert.match(source, /scheduleBeanAssistantSpeechFallback/);
     assert.match(source, /const estimatedSpeechMs = Math\.min\(beanAssistantSpeechMaxMuteMs, Math\.max\(1200, String\(answer \|\| ''\)\.length \* 28\)\)/);
     assert.match(source, /isLikelyBeanAssistantEcho/);
+    assert.match(source, /isBeanVoiceHealthCheckAnswer/);
+    assert.match(source, /isLikelyBeanHealthCheckBackchannelEcho/);
+    assert.match(source, /reason: 'assistant_speaking'/);
     assert.match(source, /if \(state\.bean\.mode === 'speaking'\) openBeanFollowUpAfterAssistantSpeech\(\)/);
     assert.match(source, /clearBeanAssistantSpeechFallbackTimer/);
     assert.match(source, /beanPendingVoiceResponse/);

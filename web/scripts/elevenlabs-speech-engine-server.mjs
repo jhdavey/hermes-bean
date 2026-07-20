@@ -7,6 +7,7 @@ import {
     getLocalFastVoiceResponse,
     isDuplicateVoiceTranscript,
     isIgnorableVoiceTranscript,
+    isSimplePostHealthEcho,
 } from './elevenlabsVoiceAcknowledgement.mjs';
 
 const required = (name) => {
@@ -166,6 +167,7 @@ await elevenlabs.speechEngine.attach(ELEVENLABS_SPEECH_ENGINE_ID, httpServer, PA
             startedAt: Date.now(),
             lastTranscript: '',
             lastActionableTranscript: '',
+            lastLocalHealthCheckAt: 0,
             lastTranscriptAt: 0,
         });
         console.log(`[elevenlabs] session started: ${conversationId}`);
@@ -179,6 +181,7 @@ await elevenlabs.speechEngine.attach(ELEVENLABS_SPEECH_ENGINE_ID, httpServer, PA
             startedAt: Date.now(),
             lastTranscript: '',
             lastActionableTranscript: '',
+            lastLocalHealthCheckAt: 0,
             lastTranscriptAt: 0,
         };
         state.conversationId = key;
@@ -205,6 +208,14 @@ await elevenlabs.speechEngine.attach(ELEVENLABS_SPEECH_ENGINE_ID, httpServer, PA
 
         if (isIgnorableVoiceTranscript(content)) {
             console.log(`[elevenlabs] ignoring placeholder transcript: ${rawContent}`);
+            return;
+        }
+
+        const isHealthCheck = canonicalizeBeanVoiceTranscript(content) === 'can you hear me';
+        if (isHealthCheck) {
+            state.lastLocalHealthCheckAt = now;
+        } else if (state.lastLocalHealthCheckAt && now - state.lastLocalHealthCheckAt < 15000 && isSimplePostHealthEcho(content)) {
+            console.log(`[elevenlabs] ignoring post-health-check echo transcript: ${content}`);
             return;
         }
 

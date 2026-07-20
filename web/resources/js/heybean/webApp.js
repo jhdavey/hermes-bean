@@ -1836,7 +1836,9 @@ export function mountHeyBeanWebApp(mount) {
                     </button>
                     <span class="hb-bean-status" title="${escapeAttr(label)}">${escapeHtml(label)}</span>
                     <button class="hb-bean-panel-toggle" type="button" data-bean-panel aria-expanded="${panelOpen}" aria-controls="hb-bean-chat" aria-label="${panelOpen ? 'Collapse Bean chat' : 'Expand Bean chat'}">
-                        <span aria-hidden="true">${panelOpen ? '^' : 'v'}</span>
+                        <svg class="hb-bean-panel-caret" viewBox="0 0 12 8" aria-hidden="true" focusable="false">
+                            <path d="M1.5 1.5 6 6l4.5-4.5"></path>
+                        </svg>
                     </button>
                 </div>
                 ${panelOpen ? beanPanelMarkup() : ''}
@@ -4948,6 +4950,14 @@ export function mountHeyBeanWebApp(mount) {
 
         if (role === 'user') {
             clearBeanPendingWakeTail();
+            if (isLikelyBeanAssistantEcho(content) || isLikelyBeanHealthCheckBackchannelEcho(content)) {
+                logBeanVoiceLifecycleEvent('assistant_echo_ignored', { label: content.slice(0, 160), transport: 'elevenlabs_speech_engine' });
+                return;
+            }
+            if (state.bean.mode === 'speaking') {
+                logBeanVoiceLifecycleEvent('background_audio_ignored', { label: content.slice(0, 160), reason: 'assistant_speaking', transport: 'elevenlabs_speech_engine' });
+                return;
+            }
             if (handleBeanVoiceControl(content)) return;
             if (state.bean.busy || Date.now() < beanVoiceInputIgnoreUntil) {
                 logBeanVoiceLifecycleEvent('background_audio_ignored', { label: content.slice(0, 160), reason: state.bean.busy ? 'busy' : 'post_speech_cooldown', transport: 'elevenlabs_speech_engine' });
@@ -4978,6 +4988,7 @@ export function mountHeyBeanWebApp(mount) {
             clearBeanPendingVoiceResponse();
             beanLastSpokenAnswer = content;
             beanLastSpokenAnswerAt = Date.now();
+            beanEndVoiceAfterAnswer = isBeanVoiceHealthCheckAnswer(content);
             logBeanVoiceLifecycleEvent('bean_response_received', { label: content.slice(0, 160), transport: 'elevenlabs_speech_engine', recovered_from_speech_engine: true });
             logBeanVoiceLifecycleEvent('assistant_speech_started', { label: content.slice(0, 160), transport: 'elevenlabs_speech_engine' });
             state.bean.messages = [...normalizeList(state.bean.messages), { role: 'assistant', content }];
@@ -5158,11 +5169,22 @@ export function mountHeyBeanWebApp(mount) {
         return String(value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
     }
 
+    function isBeanVoiceHealthCheckAnswer(value) {
+        const normalized = normalizeBeanVoiceText(value);
+        return normalized === 'yes i can hear you' || normalized === 'yes i can hear you loud and clear';
+    }
+
+    function isLikelyBeanHealthCheckBackchannelEcho(transcript) {
+        if (!isBeanVoiceHealthCheckAnswer(beanLastSpokenAnswer) || Date.now() - beanLastSpokenAnswerAt > 15000) return false;
+        return /^(ok|okay|yes|yeah|yep|no|nope|thanks|thank you)$/u.test(normalizeBeanVoiceText(transcript));
+    }
+
     function isLikelyBeanAssistantEcho(transcript) {
         if (!beanLastSpokenAnswer || Date.now() - beanLastSpokenAnswerAt > 15000) return false;
         const spoken = normalizeBeanVoiceText(beanLastSpokenAnswer);
         const heard = normalizeBeanVoiceText(transcript);
-        if (!spoken || !heard || heard.length < 8) return false;
+        if (!spoken || !heard) return false;
+        if (heard.length < 8) return isBeanVoiceHealthCheckAnswer(beanLastSpokenAnswer) && spoken.includes(heard);
         return spoken.includes(heard) || heard.includes(spoken.slice(0, Math.min(heard.length, 80)));
     }
 
