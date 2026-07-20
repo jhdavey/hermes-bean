@@ -155,6 +155,7 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(agentConfigSource, /agentOutputAudioFormat: 'pcm_48000'/);
     assert.match(agentConfigSource, /provider: 'scribe_realtime'/);
     assert.match(agentConfigSource, /keywords: \['Hey Bean'/);
+    assert.match(agentConfigSource, /clientEvents: \['audio', 'user_transcript', 'agent_response', 'interruption'\]/);
     assert.match(agentConfigSource, /textOnly: false/);
     assert.match(source, /isLikelyBeanAssistantEcho/);
     assert.match(source, /reason: 'assistant_speaking'/);

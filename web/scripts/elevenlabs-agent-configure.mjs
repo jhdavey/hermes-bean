@@ -107,7 +107,7 @@ function conversationConfig(toolId) {
         conversation: {
             textOnly: false,
             maxDurationSeconds: 300,
-            clientEvents: ['user_transcript', 'agent_response', 'interruption'],
+            clientEvents: ['audio', 'user_transcript', 'agent_response', 'interruption'],
         },
         agent: {
             firstMessage: '',
