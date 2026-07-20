@@ -19,6 +19,7 @@ return new class extends Migration
             $table->string('label')->nullable();
             $table->json('payload')->nullable();
             $table->timestamp('occurred_at')->nullable()->index();
+            $table->unsignedBigInteger('occurred_at_ms')->nullable()->index();
             $table->timestamps();
 
             $table->index(['user_id', 'occurred_at']);

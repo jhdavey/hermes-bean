@@ -1,6 +1,6 @@
 # Bean UX Evaluation Scenario Catalog
 
-- Generated: 2026-07-20T02:07:48+00:00
+- Generated: 2026-07-20T13:14:39+00:00
 - Principle: Scenarios exercise the real Hermes Bean runtime and bean_dashboard tool bridge; no local deterministic router is allowed.
 
 ## read_overdue_tasks
@@ -73,7 +73,7 @@
 - Prompt: `Wake word, then ask: can you hear me?`
 - Execution mode: manual_or_browser_harness
 - Expected tools: 
-- Success signals: wake_detected, user_transcript_received, bean_request_sent, bean_response_received
+- Success signals: wake_detected, voice_session_started, user_transcript_received, thinking_visible, bean_request_sent, bean_response_received, wake_to_listening_p95_under_1s, speech_to_thinking_p95_under_500ms
 
 ## voice_followup_dashboard
 
@@ -81,7 +81,7 @@
 - Prompt: `After Bean answers, ask: do I have any overdue tasks?`
 - Execution mode: manual_or_browser_harness
 - Expected tools: task.list
-- Success signals: followup_window_opened, followup_transcript_received, tool_completed
+- Success signals: assistant_speech_finished, followup_window_opened, followup_transcript_received, tool_completed, followup_open_after_speech_p95_under_700ms
 
 ## voice_background_ignored
 

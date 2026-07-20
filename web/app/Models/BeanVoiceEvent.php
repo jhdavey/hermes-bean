@@ -17,6 +17,7 @@ class BeanVoiceEvent extends Model
         'label',
         'payload',
         'occurred_at',
+        'occurred_at_ms',
     ];
 
     protected function casts(): array
@@ -24,6 +25,7 @@ class BeanVoiceEvent extends Model
         return [
             'payload' => 'array',
             'occurred_at' => 'datetime',
+            'occurred_at_ms' => 'integer',
         ];
     }
 

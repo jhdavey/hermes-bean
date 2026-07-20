@@ -89,6 +89,7 @@ class BeanController extends Controller
             'label' => ['nullable', 'string', 'max:240'],
             'payload' => ['nullable', 'array'],
             'occurred_at' => ['nullable', 'date'],
+            'occurred_at_ms' => ['nullable', 'integer', 'min:0'],
         ]);
 
         $sessionId = $data['session_id'] ?? null;
@@ -110,6 +111,7 @@ class BeanController extends Controller
             'label' => isset($data['label']) ? mb_substr($data['label'], 0, 240) : null,
             'payload' => $data['payload'] ?? null,
             'occurred_at' => isset($data['occurred_at']) ? Carbon::parse($data['occurred_at']) : now(),
+            'occurred_at_ms' => $data['occurred_at_ms'] ?? null,
         ]);
 
         return response()->json(['data' => ['id' => $event->id]], 201);

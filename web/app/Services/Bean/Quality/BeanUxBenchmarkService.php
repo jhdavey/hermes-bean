@@ -144,6 +144,10 @@ class BeanUxBenchmarkService
             '- Echo/duplicate rate: '.$this->percentString($voice['echo_duplicate_rate'] ?? null),
             '- Failure wake reset rate: '.$this->percentString($voice['failure_wake_reset_rate'] ?? null),
             '- Dismiss success rate: '.$this->percentString($voice['dismiss_success_rate'] ?? null),
+            '- Wake → listening p95: '.($voice['latency_ms']['wake_to_listening_p95'] ?? 'unknown').'ms',
+            '- Speech → visible thinking p95: '.($voice['latency_ms']['speech_to_thinking_p95'] ?? 'unknown').'ms',
+            '- Speech → spoken answer p95: '.($voice['latency_ms']['speech_to_answer_started_p95'] ?? 'unknown').'ms',
+            '- Assistant speech finished → follow-up open p95: '.($voice['latency_ms']['speech_finished_to_followup_opened_p95'] ?? 'unknown').'ms',
             '',
             '## Target status',
         ];
@@ -177,6 +181,7 @@ class BeanUxBenchmarkService
 
     private function voiceMetrics(Collection $events, Collection $voiceRuns): array
     {
+        $events = $events->sortBy(fn (BeanVoiceEvent $event): int => $this->eventTimestampMs($event))->values();
         $count = fn (string $type): int => $events->where('event_type', $type)->count();
         $wakeDetected = $count('wake_detected');
         $sessionStarted = $count('voice_session_started');
@@ -193,6 +198,10 @@ class BeanUxBenchmarkService
         $dismissClosed = $count('dismiss_closed');
         $failureResponses = $events->where('event_type', 'bean_response_received')->filter(fn (BeanVoiceEvent $event): bool => (bool) data_get($event->payload, 'failed'))->count();
         $failureWakeResets = $count('failure_wake_reset');
+        $wakeToListening = $this->voiceTransitionLatencies($events, ['wake_detected'], 'voice_session_started', 'voice_client_session_id');
+        $speechToThinking = $this->voiceTransitionLatencies($events, ['user_transcript_received', 'followup_transcript_received'], 'thinking_visible', 'voice_client_turn_id');
+        $speechToAnswerStarted = $this->voiceTransitionLatencies($events, ['user_transcript_received', 'followup_transcript_received'], 'assistant_speech_started', 'voice_client_turn_id');
+        $speechFinishedToFollowup = $this->voiceTransitionLatencies($events, ['assistant_speech_finished'], 'followup_window_opened', 'voice_client_turn_id');
 
         return [
             'wake_detected' => $wakeDetected,
@@ -200,6 +209,7 @@ class BeanUxBenchmarkService
             'user_transcript_received' => $transcripts,
             'bean_request_sent' => $requests,
             'bean_response_received' => $responses,
+            'thinking_visible' => $count('thinking_visible'),
             'assistant_speech_started' => $count('assistant_speech_started'),
             'assistant_speech_finished' => $count('assistant_speech_finished'),
             'followup_window_opened' => $followupsOpened,
@@ -219,7 +229,86 @@ class BeanUxBenchmarkService
             'echo_duplicate_rate' => $this->rate($echoSubmitted, $echoSubmitted + $echoIgnored),
             'failure_wake_reset_rate' => $this->rate($failureWakeResets, $failureResponses),
             'dismiss_success_rate' => $this->rate($dismissClosed, $dismissDetected),
+            'latency_ms' => [
+                'wake_to_listening_p50' => $this->percentile($wakeToListening, 50),
+                'wake_to_listening_p95' => $this->percentile($wakeToListening, 95),
+                'speech_to_thinking_p50' => $this->percentile($speechToThinking, 50),
+                'speech_to_thinking_p95' => $this->percentile($speechToThinking, 95),
+                'speech_to_answer_started_p50' => $this->percentile($speechToAnswerStarted, 50),
+                'speech_to_answer_started_p95' => $this->percentile($speechToAnswerStarted, 95),
+                'speech_finished_to_followup_opened_p50' => $this->percentile($speechFinishedToFollowup, 50),
+                'speech_finished_to_followup_opened_p95' => $this->percentile($speechFinishedToFollowup, 95),
+            ],
         ];
+    }
+
+    private function voiceTransitionLatencies(Collection $events, array $fromTypes, string $toType, string $payloadKey): Collection
+    {
+        return $events
+            ->groupBy(fn (BeanVoiceEvent $event): string => $this->voiceCorrelationKey($event, $payloadKey))
+            ->flatMap(function (Collection $group) use ($fromTypes, $toType): array {
+                $latencies = [];
+                $fromMs = null;
+                foreach ($group->sortBy(fn (BeanVoiceEvent $event): int => $this->eventTimestampMs($event)) as $event) {
+                    $eventMs = $this->eventTimestampMs($event);
+                    if ($eventMs <= 0) {
+                        continue;
+                    }
+                    if (in_array((string) $event->event_type, $fromTypes, true)) {
+                        $fromMs = $eventMs;
+
+                        continue;
+                    }
+                    if ((string) $event->event_type === $toType && $fromMs !== null) {
+                        $latencies[] = max(0, $eventMs - $fromMs);
+                        $fromMs = null;
+                    }
+                }
+
+                return $latencies;
+            })
+            ->filter(fn ($value): bool => is_int($value))
+            ->values();
+    }
+
+    private function voiceCorrelationKey(BeanVoiceEvent $event, string $payloadKey): string
+    {
+        $payloadValue = data_get($event->payload, $payloadKey);
+        if (is_string($payloadValue) && $payloadValue !== '') {
+            return $payloadKey.':'.$payloadValue;
+        }
+        if ($payloadKey === 'voice_client_turn_id' && $event->bean_run_id) {
+            return 'run:'.$event->bean_run_id;
+        }
+        if ($event->bean_session_id) {
+            return 'session:'.$event->bean_session_id;
+        }
+
+        return 'user:'.$event->user_id;
+    }
+
+    private function eventOccurredAt(BeanVoiceEvent $event): ?Carbon
+    {
+        $value = $event->occurred_at ?: $event->created_at;
+
+        return $value ? Carbon::parse($value) : null;
+    }
+
+    private function eventTimestampMs(BeanVoiceEvent $event): int
+    {
+        if ($event->occurred_at_ms) {
+            return (int) $event->occurred_at_ms;
+        }
+        $payloadMs = data_get($event->payload, 'event_client_ms');
+        if (is_numeric($payloadMs)) {
+            return (int) $payloadMs;
+        }
+        $time = $this->eventOccurredAt($event);
+        if (! $time) {
+            return 0;
+        }
+
+        return ($time->getTimestamp() * 1000) + intdiv((int) $time->micro, 1000);
     }
 
     private function targets(): array
@@ -239,6 +328,10 @@ class BeanUxBenchmarkService
             'voice_echo_duplicate_rate' => ['operator' => '<=', 'value' => 0.01],
             'voice_failure_wake_reset_rate' => ['operator' => '>=', 'value' => 1.0],
             'voice_dismiss_success_rate' => ['operator' => '>=', 'value' => 1.0],
+            'voice_wake_to_listening_p95_ms' => ['operator' => '<=', 'value' => 1000],
+            'voice_speech_to_thinking_p95_ms' => ['operator' => '<=', 'value' => 500],
+            'voice_speech_to_answer_started_p95_ms' => ['operator' => '<=', 'value' => 7000],
+            'voice_followup_open_after_speech_p95_ms' => ['operator' => '<=', 'value' => 700],
         ];
     }
 
@@ -259,6 +352,10 @@ class BeanUxBenchmarkService
             'voice_echo_duplicate_rate' => data_get($metrics, 'voice.echo_duplicate_rate'),
             'voice_failure_wake_reset_rate' => data_get($metrics, 'voice.failure_wake_reset_rate'),
             'voice_dismiss_success_rate' => data_get($metrics, 'voice.dismiss_success_rate'),
+            'voice_wake_to_listening_p95_ms' => data_get($metrics, 'voice.latency_ms.wake_to_listening_p95'),
+            'voice_speech_to_thinking_p95_ms' => data_get($metrics, 'voice.latency_ms.speech_to_thinking_p95'),
+            'voice_speech_to_answer_started_p95_ms' => data_get($metrics, 'voice.latency_ms.speech_to_answer_started_p95'),
+            'voice_followup_open_after_speech_p95_ms' => data_get($metrics, 'voice.latency_ms.speech_finished_to_followup_opened_p95'),
         ];
         $status = [];
         foreach ($targets as $key => $target) {

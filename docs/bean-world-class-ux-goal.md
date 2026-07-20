@@ -52,6 +52,7 @@ Measured by `bean_voice_events` lifecycle events:
 wake_detected
 voice_session_started
 user_transcript_received
+thinking_visible
 bean_request_sent
 bean_response_received
 assistant_speech_started
@@ -86,7 +87,7 @@ Targets:
 - ≤3% unnecessary clarification rate.
 - ≤2% immediate context-loss rate.
 
-The first instrumentation milestone measures backend/run latency and voice funnel reliability. Follow-up/reference quality and unnecessary clarification need evaluator scenarios plus review labels as the next milestone.
+The current instrumentation measures backend/run latency plus voice funnel and voice transition latency: wake → listening, transcript → visible thinking, transcript → spoken answer, and assistant speech finished → follow-up open. Follow-up/reference semantic quality and unnecessary clarification still need evaluator scenario scoring plus review labels as the next milestone.
 
 ## Durable continuity system
 
