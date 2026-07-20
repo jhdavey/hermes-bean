@@ -34,6 +34,7 @@ file_put_contents('{$logPath}', json_encode([
     'BEAN_ARTISAN' => getenv('BEAN_ARTISAN'),
     'PATH' => getenv('PATH'),
 ], JSON_UNESCAPED_SLASHES).PHP_EOL, FILE_APPEND);
+echo "⚠ tirith security scanner enabled but not available — command scanning will use pattern matching only\\n";
 echo in_array('--resume', \$argv, true) ? "Hermes resumed this user agent.\\n" : "Hermes started this user agent.\\n";
 fwrite(STDERR, "session_id: fake-hermes-session-123\\n");
 PHP);
@@ -58,7 +59,8 @@ PHP);
 
         $response->assertJsonPath('data.run.status', 'completed')
             ->assertJsonPath('data.run.model', 'hermes:custom/gpt-test')
-            ->assertJsonFragment(['content' => 'Hermes started this user agent.']);
+            ->assertJsonFragment(['content' => 'Hermes started this user agent.'])
+            ->assertJsonMissing(['content' => '⚠ tirith security scanner enabled but not available — command scanning will use pattern matching only']);
 
         $home = $usersPath.'/'.$user->id;
         $this->assertDirectoryExists($home);

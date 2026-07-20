@@ -240,6 +240,9 @@ class HermesAgentRuntimeService
                 if ($line === '') {
                     return false;
                 }
+                if (str_starts_with($line, '⚠ tirith security scanner enabled')) {
+                    return false;
+                }
                 if (preg_match('/^(?:Session ID|session_id):\s*(\S+)/i', $line, $matches) === 1) {
                     $sessionId = $matches[1];
 
