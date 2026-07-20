@@ -10,14 +10,32 @@ class LandingPageFeatureTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_public_pages_present_the_productivity_product_and_beta_signup(): void
+    public function test_public_pages_present_the_bean_assistant_and_beta_signup(): void
     {
+        foreach ([
+            'images/bean-real-home-screen.png',
+            'images/bean-real-calendar-screen.png',
+            'images/bean-real-reminders-screen.png',
+            'images/heybean-landing-scheduling.png',
+            'images/heybean-landing-task-management.png',
+            'images/heybean-landing-daily-control.png',
+            'images/iphone16promax-template.png',
+        ] as $asset) {
+            $this->assertFileExists(public_path($asset));
+        }
+
         $this->get('/')
             ->assertOk()
             ->assertSee('Run your day with Bean', false)
-            ->assertSee('Easy calendar, task, reminder, note, and workspace management', false)
+            ->assertSee('Easy calendar, task, and reminder management with Bean', false)
+            ->assertSee('Approve sensitive changes', false)
+            ->assertSee('Ask once. Bean organizes the follow-through.', false)
+            ->assertSee('Bean is checking your calendar...', false)
+            ->assertSee('Done - dinner is on your calendar.', false)
             ->assertSee('Keep every calendar moving.', false)
             ->assertSee('Turn loose ends into managed tasks.', false)
+            ->assertSee('See the day Bean is helping you run.', false)
+            ->assertSee('images/heybean-landing-daily-control.png', false)
             ->assertSee('Get Early Access', false)
             ->assertSee(route('early-access.store'), false)
             ->assertSee('href="/pricing"', false)
