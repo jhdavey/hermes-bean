@@ -5,6 +5,7 @@ import {
     chooseBeanVoiceAcknowledgement,
     getLocalFastVoiceResponse,
     isDuplicateVoiceTranscript,
+    isIgnorableVoiceTranscript,
 } from '../../scripts/elevenlabsVoiceAcknowledgement.mjs';
 
 test('ElevenLabs POC acknowledgements skip simple conversational turns', () => {
@@ -64,4 +65,11 @@ test('ElevenLabs POC answers simple voice health checks locally', () => {
     assert.equal(getLocalFastVoiceResponse('Can you hear me?'), 'Yes — I can hear you.');
     assert.equal(getLocalFastVoiceResponse('Can you hear me? Hey, Bean, can you hear me?'), 'Yes — I can hear you.');
     assert.equal(getLocalFastVoiceResponse('What tasks do I have today?'), null);
+});
+
+test('ElevenLabs voice treats placeholder transcript revisions as ignorable', () => {
+    assert.equal(canonicalizeBeanVoiceTranscript('...'), '');
+    assert.equal(canonicalizeBeanVoiceTranscript(' — '), '');
+    assert.equal(isIgnorableVoiceTranscript('...'), true);
+    assert.equal(isIgnorableVoiceTranscript('What tasks do I have today?'), false);
 });

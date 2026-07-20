@@ -33,6 +33,10 @@ export function canonicalizeBeanVoiceTranscript(text) {
     return normalized;
 }
 
+export function isIgnorableVoiceTranscript(text) {
+    return canonicalizeBeanVoiceTranscript(text) === '';
+}
+
 export function isDuplicateVoiceTranscript(previous, next) {
     if (!previous || !next) return false;
     return canonicalizeBeanVoiceTranscript(previous) === canonicalizeBeanVoiceTranscript(next);

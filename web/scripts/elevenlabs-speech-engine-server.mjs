@@ -6,6 +6,7 @@ import {
     chooseBeanVoiceAcknowledgement,
     getLocalFastVoiceResponse,
     isDuplicateVoiceTranscript,
+    isIgnorableVoiceTranscript,
 } from './elevenlabsVoiceAcknowledgement.mjs';
 
 const required = (name) => {
@@ -24,7 +25,7 @@ const HOST = process.env.ELEVENLABS_SPEECH_ENGINE_HOST || '127.0.0.1';
 const PATH = process.env.ELEVENLABS_SPEECH_ENGINE_PATH || process.env.ELEVENLABS_SPEECH_ENGINE_POC_PATH || '/ws';
 const ACK_ENABLED = process.env.BEAN_ELEVENLABS_ACK_ENABLED !== 'false';
 const DUPLICATE_TRANSCRIPT_SUPPRESS_MS = Number(process.env.BEAN_ELEVENLABS_DUPLICATE_SUPPRESS_MS || 3500);
-const INFLIGHT_ANSWER_REUSE_MS = Number(process.env.BEAN_ELEVENLABS_INFLIGHT_REUSE_MS || 30000);
+const INFLIGHT_ANSWER_REUSE_MS = Number(process.env.BEAN_ELEVENLABS_INFLIGHT_REUSE_MS || 180000);
 const BRIDGE_REGISTRATION_RETRY_MS = Number(process.env.BEAN_ELEVENLABS_REGISTRATION_RETRY_MS || 450);
 const BRIDGE_REGISTRATION_RETRY_ATTEMPTS = Number(process.env.BEAN_ELEVENLABS_REGISTRATION_RETRY_ATTEMPTS || 4);
 
@@ -164,6 +165,7 @@ await elevenlabs.speechEngine.attach(ELEVENLABS_SPEECH_ENGINE_ID, httpServer, PA
             clientTimezone: BEAN_CLIENT_TIMEZONE,
             startedAt: Date.now(),
             lastTranscript: '',
+            lastActionableTranscript: '',
             lastTranscriptAt: 0,
         });
         console.log(`[elevenlabs] session started: ${conversationId}`);
@@ -176,24 +178,38 @@ await elevenlabs.speechEngine.attach(ELEVENLABS_SPEECH_ENGINE_ID, httpServer, PA
             clientTimezone: BEAN_CLIENT_TIMEZONE,
             startedAt: Date.now(),
             lastTranscript: '',
+            lastActionableTranscript: '',
             lastTranscriptAt: 0,
         };
         state.conversationId = key;
         beanSessions.set(key, state);
 
-        const content = latestUserMessage(transcript);
-        if (!content) return;
+        const rawContent = latestUserMessage(transcript);
+        if (!rawContent) return;
 
         const now = Date.now();
         const previousTranscript = state.lastTranscript || '';
-        const duplicate = isDuplicateVoiceTranscript(previousTranscript, content);
+        const duplicate = isDuplicateVoiceTranscript(previousTranscript, rawContent);
         const duplicateRecent = duplicate && now - (state.lastTranscriptAt || 0) < DUPLICATE_TRANSCRIPT_SUPPRESS_MS;
+        const content = isIgnorableVoiceTranscript(rawContent) && state.lastActionableTranscript
+            ? state.lastActionableTranscript
+            : rawContent;
+        const replayingPlaceholder = content !== rawContent;
 
-        state.lastTranscript = content;
+        state.lastTranscript = rawContent;
         state.lastCanonicalTranscript = canonicalizeBeanVoiceTranscript(content);
         state.lastTranscriptAt = now;
+        if (!isIgnorableVoiceTranscript(rawContent)) {
+            state.lastActionableTranscript = content;
+        }
 
-        console.log(`[elevenlabs] ${duplicateRecent ? 'replaying duplicate transcript' : 'transcript'}: ${content}`);
+        if (isIgnorableVoiceTranscript(content)) {
+            console.log(`[elevenlabs] ignoring placeholder transcript: ${rawContent}`);
+            return;
+        }
+
+        const label = replayingPlaceholder ? 'replaying previous transcript after placeholder' : (duplicateRecent ? 'replaying duplicate transcript' : 'transcript');
+        console.log(`[elevenlabs] ${label}: ${content}`);
         session.sendResponse(responseStream(state, content, transcript, signal));
     },
 
