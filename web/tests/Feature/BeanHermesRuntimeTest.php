@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\BeanActivityEvent;
 use App\Models\BeanRun;
 use App\Models\BeanSession;
+use App\Models\BeanVoiceBridgeSession;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\Bean\BeanDashboardToolBridgeService;
@@ -347,58 +348,78 @@ PHP);
         $this->assertFileExists($env['BEAN_TOOL_CONTEXT']);
     }
 
-    public function test_realtime_session_requires_openai_configuration(): void
+    public function test_elevenlabs_conversation_token_requires_speech_engine_configuration(): void
     {
-        config(['services.openai.api_key' => null]);
-        $token = $this->apiToken('bean-realtime-missing-key@example.com');
+        config([
+            'services.elevenlabs.speech_engine_enabled' => true,
+            'services.elevenlabs.api_key' => null,
+            'services.elevenlabs.speech_engine_id' => 'seng_test',
+            'services.elevenlabs.voice_bridge_secret' => 'bridge-secret',
+        ]);
+        $token = $this->apiToken('bean-elevenlabs-missing-key@example.com');
         Http::fake();
 
-        $this->withToken($token)->postJson('/api/bean/realtime/session')
+        $this->withToken($token)->postJson('/api/bean/elevenlabs/conversation-token')
             ->assertStatus(503)
-            ->assertJsonPath('message', 'OpenAI realtime is not configured.');
+            ->assertJsonPath('message', 'ElevenLabs Speech Engine is not configured.');
 
         Http::assertNothingSent();
     }
 
-    public function test_realtime_session_mints_client_secret_for_active_voice_turns(): void
+    public function test_elevenlabs_conversation_token_creates_authenticated_bridge_session(): void
     {
         config([
-            'services.openai.api_key' => 'test-openai-key',
-            'services.openai.realtime_model' => 'gpt-realtime',
-            'services.openai.realtime_voice' => 'alloy',
-            'services.openai.realtime_vad_threshold' => 0.82,
-            'services.openai.realtime_vad_prefix_padding_ms' => 250,
-            'services.openai.realtime_vad_silence_duration_ms' => 800,
+            'services.elevenlabs.speech_engine_enabled' => true,
+            'services.elevenlabs.api_key' => 'test-elevenlabs-key',
+            'services.elevenlabs.speech_engine_id' => 'seng_test',
+            'services.elevenlabs.voice_bridge_secret' => 'bridge-secret',
         ]);
-        $token = $this->apiToken('bean-realtime-client-secret@example.com');
+        $token = $this->apiToken('bean-elevenlabs-token@example.com');
 
         Http::fake(function (HttpRequest $request) {
-            $this->assertSame('https://api.openai.com/v1/realtime/client_secrets', $request->url());
-            $payload = $request->data();
-            $this->assertSame('realtime', data_get($payload, 'session.type'));
-            $this->assertSame('gpt-realtime', data_get($payload, 'session.model'));
-            $this->assertSame('alloy', data_get($payload, 'session.audio.output.voice'));
-            $this->assertSame('gpt-4o-mini-transcribe', data_get($payload, 'session.audio.input.transcription.model'));
-            $this->assertSame('en', data_get($payload, 'session.audio.input.transcription.language'));
-            $this->assertFalse((bool) data_get($payload, 'session.audio.input.turn_detection.create_response'));
-            $this->assertSame(0.82, data_get($payload, 'session.audio.input.turn_detection.threshold'));
-            $this->assertSame(250, data_get($payload, 'session.audio.input.turn_detection.prefix_padding_ms'));
-            $this->assertSame(800, data_get($payload, 'session.audio.input.turn_detection.silence_duration_ms'));
-            $this->assertStringContainsString('Always speak English', data_get($payload, 'session.instructions'));
-            $this->assertStringContainsString('Laravel is the source of truth', data_get($payload, 'session.instructions'));
+            $this->assertSame('https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=seng_test&participant_name=bean-user-1', $request->url());
+            $this->assertSame('test-elevenlabs-key', $request->header('xi-api-key')[0] ?? null);
 
-            return Http::response([
-                'value' => 'ek_test_voice_secret',
-                'expires_at' => 1234567890,
-                'session' => ['id' => 'sess_test'],
-            ], 200);
+            return Http::response(['token' => 'convai_test_token'], 200);
         });
 
-        $this->withToken($token)->postJson('/api/bean/realtime/session')
-            ->assertOk()
-            ->assertJsonPath('client_secret.value', 'ek_test_voice_secret');
+        $response = $this->withToken($token)->postJson('/api/bean/elevenlabs/conversation-token', [
+            'client_timezone' => 'America/New_York',
+        ])->assertOk()
+            ->assertJsonPath('data.token', 'convai_test_token')
+            ->assertJsonPath('data.speech_engine_id', 'seng_test')
+            ->assertJsonPath('data.transport', 'elevenlabs_speech_engine');
+
+        $bridgeSessionId = $response->json('data.bridge_session_id');
+        $this->assertNotEmpty($bridgeSessionId);
+        $this->assertDatabaseHas('bean_voice_bridge_sessions', [
+            'uuid' => $bridgeSessionId,
+            'status' => 'pending',
+            'client_timezone' => 'America/New_York',
+        ]);
+
+        $this->withToken($token)->postJson("/api/bean/elevenlabs/bridge-sessions/{$bridgeSessionId}/connect", [
+            'conversation_id' => 'conv_test_123',
+        ])->assertOk()
+            ->assertJsonPath('data.conversation_id', 'conv_test_123');
+
+        $this->assertDatabaseHas('bean_voice_bridge_sessions', [
+            'uuid' => $bridgeSessionId,
+            'conversation_id' => 'conv_test_123',
+            'status' => 'connected',
+        ]);
 
         Http::assertSentCount(1);
+    }
+
+    public function test_elevenlabs_bridge_message_requires_bridge_secret(): void
+    {
+        config(['services.elevenlabs.voice_bridge_secret' => 'bridge-secret']);
+
+        $this->postJson('/api/bean/elevenlabs/bridge/message', [
+            'conversation_id' => 'conv_test',
+            'content' => 'What tasks do I have today?',
+        ])->assertStatus(401);
     }
 
     private function signedToolContext(User $user, BeanSession $session, BeanRun $run): array

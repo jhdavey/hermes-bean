@@ -110,7 +110,9 @@ return [
         'speech_engine_id' => env('ELEVENLABS_SPEECH_ENGINE_ID'),
         'speech_engine_environment' => env('ELEVENLABS_SPEECH_ENGINE_ENVIRONMENT'),
         'speech_engine_branch_id' => env('ELEVENLABS_SPEECH_ENGINE_BRANCH_ID'),
+        'speech_engine_enabled' => (bool) env('ELEVENLABS_SPEECH_ENGINE_ENABLED', env('ELEVENLABS_SPEECH_ENGINE_POC_ENABLED', false)),
         'speech_engine_poc_enabled' => (bool) env('ELEVENLABS_SPEECH_ENGINE_POC_ENABLED', false),
+        'voice_bridge_secret' => env('ELEVENLABS_VOICE_BRIDGE_SECRET'),
     ],
 
     'google_calendar' => [

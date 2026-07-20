@@ -18,18 +18,19 @@ class BeanElevenLabsSpeechEnginePocTest extends TestCase
         $this->withToken($token)
             ->postJson('/api/bean/elevenlabs/conversation-token')
             ->assertNotFound()
-            ->assertJson(['message' => 'ElevenLabs Speech Engine POC is not enabled.']);
+            ->assertJson(['message' => 'ElevenLabs Speech Engine is not enabled.']);
 
         Http::assertNothingSent();
     }
 
     public function test_conversation_token_endpoint_mints_private_elevenlabs_webrtc_token(): void
     {
-        config()->set('services.elevenlabs.speech_engine_poc_enabled', true);
+        config()->set('services.elevenlabs.speech_engine_enabled', true);
         config()->set('services.elevenlabs.api_key', 'test-elevenlabs-key');
         config()->set('services.elevenlabs.speech_engine_id', 'seng_test123');
         config()->set('services.elevenlabs.speech_engine_environment', 'poc');
         config()->set('services.elevenlabs.speech_engine_branch_id', 'branch_test');
+        config()->set('services.elevenlabs.voice_bridge_secret', 'bridge-secret');
 
         Http::fake([
             'api.elevenlabs.io/*' => Http::response(['token' => 'webrtc-token-test'], 200),
@@ -55,9 +56,10 @@ class BeanElevenLabsSpeechEnginePocTest extends TestCase
 
     public function test_conversation_token_endpoint_hides_elevenlabs_error_details(): void
     {
-        config()->set('services.elevenlabs.speech_engine_poc_enabled', true);
+        config()->set('services.elevenlabs.speech_engine_enabled', true);
         config()->set('services.elevenlabs.api_key', 'test-elevenlabs-key');
         config()->set('services.elevenlabs.speech_engine_id', 'seng_test123');
+        config()->set('services.elevenlabs.voice_bridge_secret', 'bridge-secret');
 
         Http::fake([
             'api.elevenlabs.io/*' => Http::response(['detail' => 'private provider details'], 500),

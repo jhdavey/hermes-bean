@@ -1,3 +1,4 @@
+import { Conversation } from '@elevenlabs/client';
 import {
     appThemes,
     appThemesByKey,
@@ -231,6 +232,8 @@ export function mountHeyBeanWebApp(mount) {
     let beanMediaStream = null;
     let beanDataChannel = null;
     let beanRemoteAudio = null;
+    let beanElevenLabsConversation = null;
+    let beanElevenLabsBridgeSessionId = '';
     let beanWakeDetector = null;
     let beanRealtimeSessionCache = null;
     let beanRealtimeSessionPromise = null;
@@ -4671,6 +4674,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function setBeanVoiceInputEnabled(enabled) {
+        beanElevenLabsConversation?.setMicMuted?.(!enabled);
         beanMediaStream?.getAudioTracks?.().forEach((track) => {
             track.enabled = Boolean(enabled);
         });
@@ -4719,7 +4723,7 @@ export function mountHeyBeanWebApp(mount) {
         state.bean.statusText = 'Hey Bean heard — keep talking…';
         if (wakeTail) {
             state.bean.voiceTranscript = wakeTail;
-            scheduleBeanWakeTailStabilization(wakeTail);
+            beanPendingWakeTail = wakeTail;
         }
         beanVoiceClientSessionId = newBeanVoiceEventId('voice-session');
         beanVoiceClientTurnId = '';
@@ -4748,7 +4752,14 @@ export function mountHeyBeanWebApp(mount) {
     async function fetchBeanRealtimeSession() {
         if (beanRealtimeSessionUsable(beanRealtimeSessionCache)) return beanRealtimeSessionCache;
         if (beanRealtimeSessionPromise) return beanRealtimeSessionPromise;
-        beanRealtimeSessionPromise = api('/bean/realtime/session', { method: 'POST', body: {} })
+        beanRealtimeSessionPromise = api('/bean/elevenlabs/conversation-token', {
+            method: 'POST',
+            body: {
+                session_id: state.bean.sessionId || null,
+                workspace_id: currentWorkspaceId(),
+                ...clientTimezonePayload(),
+            },
+        })
             .then((session) => {
                 beanRealtimeSessionCache = session;
                 return session;
@@ -4761,15 +4772,12 @@ export function mountHeyBeanWebApp(mount) {
 
     function beanRealtimeSessionUsable(session) {
         if (!session) return false;
-        const clientSecret = session?.client_secret?.value || session?.client_secret || session?.value;
-        if (!clientSecret) return false;
-        const expiresAt = Number(session?.client_secret?.expires_at || session?.expires_at || 0);
-        return !expiresAt || expiresAt > Math.floor(Date.now() / 1000) + 30;
+        return Boolean(session.token && session.bridge_session_id && session.transport === 'elevenlabs_speech_engine');
     }
 
     async function startBeanVoiceSession(options = {}) {
-        if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
-            state.bean.error = 'Voice requires a browser with microphone and WebRTC support.';
+        if (!navigator.mediaDevices?.getUserMedia || !Conversation?.startSession) {
+            state.bean.error = 'Voice requires a browser with microphone support and the ElevenLabs realtime client.';
             state.bean.mode = 'error';
             state.bean.statusText = 'Voice is unavailable';
             render();
@@ -4788,62 +4796,102 @@ export function mountHeyBeanWebApp(mount) {
         try {
             const realtime = await fetchBeanRealtimeSession();
             beanRealtimeSessionCache = null;
-            const clientSecret = realtime?.client_secret?.value || realtime?.client_secret || realtime?.value;
-            if (!clientSecret) throw new Error('Realtime session did not return a client secret.');
+            if (!realtime?.token || !realtime?.bridge_session_id) throw new Error('ElevenLabs session did not return bridge credentials.');
+            state.bean.sessionId = realtime.bean_session_id || state.bean.sessionId;
+            beanElevenLabsBridgeSessionId = realtime.bridge_session_id;
 
-            beanMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            setBeanVoiceInputEnabled(true);
-            beanPeerConnection = new RTCPeerConnection();
-            beanRemoteAudio = new Audio();
-            beanRemoteAudio.autoplay = true;
-            beanPeerConnection.ontrack = (event) => {
-                const [remoteStream] = event.streams;
-                if (remoteStream) {
-                    beanRemoteAudio.srcObject = remoteStream;
-                    beanRemoteAudio.onended = openBeanFollowUpAfterAssistantSpeech;
-                    beanRemoteAudio.onpause = openBeanFollowUpAfterAssistantSpeech;
-                    beanRemoteAudio.play?.().catch(() => {});
-                }
-                event.track.onmute = openBeanFollowUpAfterAssistantSpeech;
-                event.track.onended = openBeanFollowUpAfterAssistantSpeech;
-            };
-            for (const track of beanMediaStream.getAudioTracks()) {
-                beanPeerConnection.addTrack(track, beanMediaStream);
-            }
-
-            beanDataChannel = beanPeerConnection.createDataChannel('oai-events');
-            beanDataChannel.addEventListener('message', handleBeanRealtimeEvent);
-            beanDataChannel.addEventListener('open', () => {
-                sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
-                flushBeanRealtimeEventQueue();
+            await navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+                stream.getTracks?.().forEach((track) => track.stop());
             });
 
-            const offer = await beanPeerConnection.createOffer();
-            await beanPeerConnection.setLocalDescription(offer);
-            const model = encodeURIComponent(realtime?.model || 'gpt-realtime');
-            const response = await fetch(`https://api.openai.com/v1/realtime/calls?model=${model}`, {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${clientSecret}`,
-                    'Content-Type': 'application/sdp',
-                    Accept: 'application/sdp',
+            const wakeTail = String(options?.wakeTail || '').trim();
+            let registered = false;
+            beanElevenLabsConversation = await Conversation.startSession({
+                conversationToken: realtime.token,
+                userId: state.user?.id ? `bean-user-${state.user.id}` : undefined,
+                dynamicVariables: {
+                    bean_session_id: Number(state.bean.sessionId || realtime.bean_session_id || 0),
+                    bean_bridge_session_id: realtime.bridge_session_id,
+                    bean_client_timezone: clientTimezonePayload().client_timezone || '',
                 },
-                body: offer.sdp,
-            });
-            if (!response.ok) throw new Error('Could not connect Bean voice.');
-            const answer = await response.text();
-            await beanPeerConnection.setRemoteDescription({ type: 'answer', sdp: answer });
+                overrides: {
+                    asr: { keywords: ['Hey Bean', 'HeyBean', 'tasks', 'to-do', 'todo', 'reminders', 'calendar', 'notes'] },
+                },
+                onConnect: async ({ conversationId } = {}) => {
+                    try {
+                        const connectedConversationId = conversationId || beanElevenLabsConversation?.getId?.();
+                        if (connectedConversationId && beanElevenLabsBridgeSessionId) {
+                            await api(`/bean/elevenlabs/bridge-sessions/${encodeURIComponent(beanElevenLabsBridgeSessionId)}/connect`, {
+                                method: 'POST',
+                                body: { conversation_id: connectedConversationId },
+                            });
+                            registered = true;
+                        }
+                    } catch (error) {
+                        logBeanVoiceLifecycleEvent('voice_session_error', { label: friendlyError(error, 'register Bean voice session').slice(0, 160), transport: 'elevenlabs_speech_engine' });
+                        state.bean.error = friendlyError(error, 'register Bean voice session');
+                        state.bean.mode = 'error';
+                        state.bean.statusText = 'Voice hit a problem';
+                        render();
+                        return;
+                    }
+                    state.bean.voiceActive = true;
+                    state.bean.voiceConnecting = false;
+                    beanVoiceRequestCount = 0;
+                    if (!beanVoiceClientSessionId) beanVoiceClientSessionId = newBeanVoiceEventId('voice-session');
+                    beanVoiceClientTurnId = '';
+                    logBeanVoiceLifecycleEvent('voice_session_started', {
+                        has_wake_event: Boolean(options?.wakeEvent),
+                        has_wake_tail: Boolean(wakeTail),
+                        transport: 'elevenlabs_speech_engine',
+                    });
+                    if (!state.bean.busy) {
+                        state.bean.mode = 'listening';
+                        state.bean.statusText = 'Listening — speak to Bean';
+                    }
+                    render();
 
-            state.bean.voiceActive = true;
-            state.bean.voiceConnecting = false;
-            beanVoiceRequestCount = 0;
-            if (!beanVoiceClientSessionId) beanVoiceClientSessionId = newBeanVoiceEventId('voice-session');
-            beanVoiceClientTurnId = '';
-            logBeanVoiceLifecycleEvent('voice_session_started', { has_wake_event: Boolean(options?.wakeEvent), has_wake_tail: Boolean(options?.wakeTail) });
-            if (!state.bean.busy) {
-                state.bean.mode = 'listening';
-                state.bean.statusText = 'Listening — speak to Bean';
-            }
+                    if (wakeTail && isLikelyCompleteBeanWakeTail(wakeTail)) {
+                        beanVoiceClientTurnId = newBeanVoiceEventId('voice-turn');
+                        logBeanVoiceLifecycleEvent('wake_tail_submitted', { label: wakeTail.slice(0, 160), transport: 'elevenlabs_speech_engine' });
+                        beanElevenLabsConversation?.sendUserMessage?.(wakeTail);
+                    }
+                },
+                onDisconnect: (details) => {
+                    const shouldReset = state.bean.voiceActive || state.bean.voiceConnecting;
+                    beanElevenLabsConversation = null;
+                    beanElevenLabsBridgeSessionId = '';
+                    state.bean.voiceActive = false;
+                    state.bean.voiceConnecting = false;
+                    clearBeanFollowUpTimer();
+                    clearBeanAssistantSpeechFallbackTimer();
+                    clearBeanPendingVoiceResponse();
+                    if (shouldReset) {
+                        logBeanVoiceLifecycleEvent('voice_session_closed', { transport: 'elevenlabs_speech_engine', reason: details?.reason || '' });
+                    }
+                    if (state.bean.mode !== 'privacy') {
+                        state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
+                        state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening locally for “Hey Bean”';
+                        if (state.bean.mode !== 'privacy') startBeanWakeListening();
+                    }
+                    render();
+                },
+                onError: (message, context) => {
+                    logBeanVoiceLifecycleEvent('voice_session_error', { label: String(message || '').slice(0, 160), transport: 'elevenlabs_speech_engine', context: context ? String(context).slice(0, 160) : '' });
+                    state.bean.error = String(message || 'ElevenLabs voice error.');
+                    state.bean.mode = 'error';
+                    state.bean.statusText = 'Voice hit a problem';
+                    render();
+                },
+                onMessage: (message) => handleBeanElevenLabsMessage(message),
+                onModeChange: ({ mode } = {}) => handleBeanElevenLabsMode(mode),
+                onStatusChange: ({ status } = {}) => {
+                    if (status === 'connected' && !registered) {
+                        state.bean.statusText = 'Connecting Bean voice…';
+                        render();
+                    }
+                },
+            });
         } catch (error) {
             stopBeanVoiceSession({ keepStatus: true });
             state.bean.error = friendlyError(error, 'start Bean voice');
@@ -4862,6 +4910,9 @@ export function mountHeyBeanWebApp(mount) {
         beanEndVoiceAfterAnswer = false;
         beanVoiceRequestCount = 0;
         setBeanVoiceInputEnabled(false);
+        beanElevenLabsConversation?.endSession?.().catch(() => {});
+        beanElevenLabsConversation = null;
+        beanElevenLabsBridgeSessionId = '';
         beanDataChannel?.close?.();
         beanPeerConnection?.close?.();
         beanMediaStream?.getTracks?.().forEach((track) => track.stop());
@@ -4887,6 +4938,72 @@ export function mountHeyBeanWebApp(mount) {
                 state.bean.statusText = options.statusText || 'Listening locally for “Hey Bean”';
                 startBeanWakeListening();
             }
+        }
+    }
+
+    function handleBeanElevenLabsMessage(message = {}) {
+        const role = String(message.role || message.source || '').toLowerCase();
+        const content = String(message.message || message.text || '').trim();
+        if (!content) return;
+
+        if (role === 'user') {
+            clearBeanPendingWakeTail();
+            if (handleBeanVoiceControl(content)) return;
+            if (state.bean.busy || Date.now() < beanVoiceInputIgnoreUntil) {
+                logBeanVoiceLifecycleEvent('background_audio_ignored', { label: content.slice(0, 160), reason: state.bean.busy ? 'busy' : 'post_speech_cooldown', transport: 'elevenlabs_speech_engine' });
+                return;
+            }
+            clearBeanFollowUpTimer();
+            const isFollowUpTranscript = beanVoiceRequestCount > 0 && state.bean.mode === 'listening' && state.bean.voiceActive;
+            beanVoiceClientTurnId = newBeanVoiceEventId(isFollowUpTranscript ? 'voice-followup' : 'voice-turn');
+            logBeanVoiceLifecycleEvent(isFollowUpTranscript ? 'followup_transcript_received' : 'user_transcript_received', { label: content.slice(0, 160), transport: 'elevenlabs_speech_engine' });
+            state.bean.voiceTranscript = content;
+            state.bean.messages = [...normalizeList(state.bean.messages), { role: 'user', content }];
+            beanVoiceRequestCount += 1;
+            watchPendingBeanVoiceResponse(beanVoiceClientTurnId, content);
+            logBeanVoiceLifecycleEvent('thinking_visible', { label: content.slice(0, 160), transport: 'elevenlabs_speech_engine' });
+            logBeanVoiceLifecycleEvent('bean_request_sent', { label: content.slice(0, 160), transport: 'elevenlabs_speech_engine' });
+            state.bean.busy = true;
+            state.bean.mode = 'thinking';
+            state.bean.statusText = 'Thinking…';
+            render();
+            return;
+        }
+
+        if (role === 'agent' || role === 'ai') {
+            const pendingTurnId = beanVoiceClientTurnId;
+            if (beanPendingVoiceResponse?.turnId === pendingTurnId) {
+                beanPendingVoiceResponse.resolved = true;
+            }
+            clearBeanPendingVoiceResponse();
+            beanLastSpokenAnswer = content;
+            beanLastSpokenAnswerAt = Date.now();
+            logBeanVoiceLifecycleEvent('bean_response_received', { label: content.slice(0, 160), transport: 'elevenlabs_speech_engine', recovered_from_speech_engine: true });
+            logBeanVoiceLifecycleEvent('assistant_speech_started', { label: content.slice(0, 160), transport: 'elevenlabs_speech_engine' });
+            state.bean.messages = [...normalizeList(state.bean.messages), { role: 'assistant', content }];
+            state.bean.voiceTranscript = '';
+            state.bean.busy = false;
+            state.bean.mode = 'speaking';
+            state.bean.statusText = 'Speaking…';
+            scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
+            scheduleBeanAssistantSpeechFallback(content);
+            render();
+        }
+    }
+
+    function handleBeanElevenLabsMode(mode) {
+        const normalizedMode = String(mode || '').toLowerCase();
+        if (normalizedMode === 'speaking') {
+            if (state.bean.voiceActive && !state.bean.busy) {
+                state.bean.mode = 'speaking';
+                state.bean.statusText = 'Speaking…';
+                render();
+            }
+            return;
+        }
+        if (normalizedMode === 'listening' && state.bean.mode === 'speaking') {
+            openBeanFollowUpAfterAssistantSpeech();
+            render();
         }
     }
 

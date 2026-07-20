@@ -90,13 +90,14 @@ test('Bean requests include the browser timezone for local-day task queries', ()
     assert.match(source, /\/bean\/messages', \{ method: 'POST', body: \{ session_id: sessionId, content, \.\.\.clientTimezonePayload\(\) \}/);
 });
 
-test('Bean voice starts from wake detection instead of tap-to-talk', () => {
+test('Bean voice starts from wake detection through ElevenLabs Speech Engine', () => {
     assert.doesNotMatch(source, /data-bean-voice/);
     assert.doesNotMatch(source, /Tap to talk/);
-    assert.match(source, /\/bean\/realtime\/session/);
-    assert.match(source, /navigator\.mediaDevices\.getUserMedia/);
-    assert.match(source, /new RTCPeerConnection/);
-    assert.match(source, /https:\/\/api\.openai\.com\/v1\/realtime\/calls/);
+    assert.match(source, /\/bean\/elevenlabs\/conversation-token/);
+    assert.match(source, /Conversation\.startSession/);
+    assert.match(source, /conversationToken: realtime\.token/);
+    assert.match(source, /\/bean\/elevenlabs\/bridge-sessions/);
+    assert.match(source, /transport: 'elevenlabs_speech_engine'/);
     assert.match(source, /prewarmBeanRealtimeSession/);
     assert.match(source, /beanRealtimeEventQueue/);
     assert.match(source, /flushBeanRealtimeEventQueue/);
@@ -107,7 +108,7 @@ test('Bean voice starts from wake detection instead of tap-to-talk', () => {
 
 test('Bean wake handoff does not submit the first partial wake tail as the command', () => {
     assert.match(source, /beanPendingWakeTailTimer/);
-    assert.match(source, /scheduleBeanWakeTailStabilization/);
+    assert.match(source, /beanPendingWakeTail = wakeTail/);
     assert.match(source, /isLikelyCompleteBeanWakeTail/);
     assert.match(source, /statusText = 'Hey Bean heard — keep talking…'/);
     assert.match(source, /state\.bean\.voiceTranscript = wakeTail/);
@@ -133,8 +134,8 @@ test('Bean voice mutes realtime mic while answering and only opens a short follo
     assert.match(source, /scheduleBeanFollowUpListening/);
     assert.match(source, /const beanAssistantSpeechMaxMuteMs = 3500/);
     assert.match(source, /function openBeanFollowUpAfterAssistantSpeech/);
-    assert.match(source, /event\.track\.onmute = openBeanFollowUpAfterAssistantSpeech/);
-    assert.match(source, /beanRemoteAudio\.onpause = openBeanFollowUpAfterAssistantSpeech/);
+    assert.match(source, /function handleBeanElevenLabsMode/);
+    assert.match(source, /onModeChange: \(\{ mode \} = \{\}\) => handleBeanElevenLabsMode\(mode\)/);
     assert.match(source, /scheduleBeanAssistantSpeechFallback/);
     assert.match(source, /const estimatedSpeechMs = Math\.min\(beanAssistantSpeechMaxMuteMs, Math\.max\(1200, String\(answer \|\| ''\)\.length \* 28\)\)/);
     assert.match(source, /isLikelyBeanAssistantEcho/);

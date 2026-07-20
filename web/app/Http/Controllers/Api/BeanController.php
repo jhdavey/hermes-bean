@@ -7,6 +7,7 @@ use App\Models\BeanActivityEvent;
 use App\Models\BeanConfirmationRequest;
 use App\Models\BeanRun;
 use App\Models\BeanSession;
+use App\Models\BeanVoiceBridgeSession;
 use App\Models\BeanVoiceEvent;
 use App\Rules\ClientTimezone;
 use App\Services\Bean\BeanRuntimeService;
@@ -14,6 +15,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class BeanController extends Controller
@@ -119,16 +121,44 @@ class BeanController extends Controller
 
     public function elevenLabsConversationToken(Request $request): JsonResponse
     {
-        if (! config('services.elevenlabs.speech_engine_poc_enabled')) {
-            return response()->json(['message' => 'ElevenLabs Speech Engine POC is not enabled.'], 404);
+        if (! config('services.elevenlabs.speech_engine_enabled')) {
+            return response()->json(['message' => 'ElevenLabs Speech Engine is not enabled.'], 404);
         }
+
+        $data = $request->validate([
+            'session_id' => ['nullable', 'integer', 'exists:bean_sessions,id'],
+            'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
+            'client_timezone' => ['nullable', new ClientTimezone],
+        ]);
 
         $apiKey = (string) config('services.elevenlabs.api_key');
         $speechEngineId = (string) config('services.elevenlabs.speech_engine_id');
+        $bridgeSecret = (string) config('services.elevenlabs.voice_bridge_secret');
 
-        if ($apiKey === '' || $speechEngineId === '') {
+        if ($apiKey === '' || $speechEngineId === '' || $bridgeSecret === '') {
             return response()->json(['message' => 'ElevenLabs Speech Engine is not configured.'], 503);
         }
+
+        $beanSession = null;
+        if (isset($data['session_id'])) {
+            $beanSession = BeanSession::query()
+                ->where('user_id', $request->user()->id)
+                ->where('id', $data['session_id'])
+                ->firstOrFail();
+        } else {
+            $beanSession = $this->runtime->createSession($request->user(), $data['workspace_id'] ?? null, $data['client_timezone'] ?? null);
+        }
+
+        $bridgeSession = BeanVoiceBridgeSession::create([
+            'uuid' => (string) Str::uuid(),
+            'user_id' => $request->user()->id,
+            'bean_session_id' => $beanSession->id,
+            'workspace_id' => $beanSession->workspace_id,
+            'client_timezone' => $data['client_timezone'] ?? null,
+            'status' => 'pending',
+            'metadata' => ['transport' => 'elevenlabs_speech_engine'],
+            'expires_at' => now()->addHour(),
+        ]);
 
         $query = array_filter([
             'agent_id' => $speechEngineId,
@@ -142,18 +172,96 @@ class BeanController extends Controller
             ->get('https://api.elevenlabs.io/v1/convai/conversation/token', $query);
 
         if (! $response->successful()) {
+            $bridgeSession->update(['status' => 'token_failed']);
+
             return response()->json(['message' => 'Could not create ElevenLabs conversation token.'], 502);
         }
 
         $token = (string) data_get($response->json(), 'token');
         if ($token === '') {
+            $bridgeSession->update(['status' => 'token_failed']);
+
             return response()->json(['message' => 'ElevenLabs conversation token response was empty.'], 502);
         }
 
         return response()->json(['data' => [
             'token' => $token,
             'speech_engine_id' => $speechEngineId,
+            'bridge_session_id' => $bridgeSession->uuid,
+            'bean_session_id' => $beanSession->id,
+            'transport' => 'elevenlabs_speech_engine',
         ]]);
+    }
+
+    public function connectElevenLabsBridgeSession(Request $request, string $bridgeSession): JsonResponse
+    {
+        $data = $request->validate([
+            'conversation_id' => ['required', 'string', 'max:160'],
+        ]);
+
+        $session = BeanVoiceBridgeSession::query()
+            ->where('uuid', $bridgeSession)
+            ->where('user_id', $request->user()->id)
+            ->firstOrFail();
+
+        if ($session->expires_at !== null && $session->expires_at->isPast()) {
+            return response()->json(['message' => 'ElevenLabs voice session expired.'], 410);
+        }
+
+        $session->update([
+            'conversation_id' => $data['conversation_id'],
+            'status' => 'connected',
+            'connected_at' => now(),
+        ]);
+
+        return response()->json(['data' => [
+            'bridge_session_id' => $session->uuid,
+            'conversation_id' => $session->conversation_id,
+        ]]);
+    }
+
+    public function elevenLabsBridgeMessage(Request $request): JsonResponse
+    {
+        $configuredSecret = (string) config('services.elevenlabs.voice_bridge_secret');
+        $providedSecret = (string) $request->header('X-Bean-Voice-Bridge-Secret', '');
+        if ($configuredSecret === '' || $providedSecret === '' || ! hash_equals($configuredSecret, $providedSecret)) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
+        $data = $request->validate([
+            'conversation_id' => ['required', 'string', 'max:160'],
+            'content' => ['required', 'string', 'max:8000'],
+            'client_timezone' => ['nullable', new ClientTimezone],
+        ]);
+
+        $bridgeSession = BeanVoiceBridgeSession::query()
+            ->with(['user', 'beanSession'])
+            ->where('conversation_id', $data['conversation_id'])
+            ->whereIn('status', ['connected', 'active'])
+            ->first();
+
+        if (! $bridgeSession || ($bridgeSession->expires_at !== null && $bridgeSession->expires_at->isPast())) {
+            return response()->json(['message' => 'ElevenLabs voice session is not registered.'], 404);
+        }
+
+        $bridgeSession->update([
+            'status' => 'active',
+            'last_transcript_at' => now(),
+        ]);
+
+        $result = $this->runtime->handleMessage(
+            $bridgeSession->user,
+            $data['content'],
+            $bridgeSession->bean_session_id,
+            $bridgeSession->workspace_id,
+            $data['client_timezone'] ?? $bridgeSession->client_timezone,
+        );
+
+        if (($result['session']->id ?? null) && (int) $result['session']->id !== (int) $bridgeSession->bean_session_id) {
+            $bridgeSession->update(['bean_session_id' => $result['session']->id]);
+        }
+
+        return response()->json(['data' => $result]);
     }
 
     public function realtimeSession(Request $request): JsonResponse
