@@ -168,6 +168,10 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(agentConfigSource, /Do not ask "Are you still there\?"/);
     assert.match(agentConfigSource, /clientEvents: \['audio', 'user_transcript', 'agent_response', 'interruption'\]/);
     assert.match(agentConfigSource, /textOnly: false/);
+    assert.match(source, /bean_dashboard_context: JSON\.stringify\(realtime\.dashboard_context \|\| \{\}\)/);
+    assert.match(agentConfigSource, /dashboard_context/);
+    assert.match(agentConfigSource, /answer directly from dashboard_context/);
+    assert.match(agentConfigSource, /call askBean/);
     assert.match(source, /isLikelyBeanAssistantEcho/);
     assert.match(source, /reason: 'assistant_speaking'/);
     assert.match(source, /beanPendingVoiceResponse/);

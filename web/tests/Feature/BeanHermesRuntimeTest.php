@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\BeanActivityEvent;
 use App\Models\BeanRun;
 use App\Models\BeanSession;
+use App\Models\CalendarEvent;
+use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\Bean\BeanDashboardToolBridgeService;
@@ -129,37 +131,40 @@ PHP);
             ->values();
         $voiceLog = $logs->last();
         $this->assertContains('--toolsets', $voiceLog['argv']);
-        $this->assertContains('bean_dashboard,skills', $voiceLog['argv']);
+        $this->assertContains('bean_dashboard,skills,memory,session_search,web', $voiceLog['argv']);
         $this->assertContains('--max-turns', $voiceLog['argv']);
-        $this->assertContains('10', $voiceLog['argv']);
+        $this->assertContains('24', $voiceLog['argv']);
     }
 
-    public function test_voice_task_list_today_uses_fast_scoped_dashboard_path_without_hermes(): void
+    public function test_voice_task_list_today_uses_hermes_fallback_not_a_to_do_specific_fast_path(): void
     {
         $usersPath = storage_path('framework/testing/hermes-users-'.uniqid());
-        $fakeHermesLog = storage_path('framework/testing/voice-fast-path-hermes-'.uniqid().'.log');
-        $fakeHermes = storage_path('framework/testing/fake-hermes-fast-path-'.uniqid().'.php');
+        $fakeHermesLog = storage_path('framework/testing/voice-hermes-fallback-'.uniqid().'.json');
+        $fakeHermes = storage_path('framework/testing/fake-hermes-fallback-'.uniqid().'.php');
         File::ensureDirectoryExists(dirname($fakeHermes));
         File::put($fakeHermes, <<<PHP
 #!/usr/bin/env php
 <?php
-file_put_contents('{$fakeHermesLog}', 'invoked'.PHP_EOL, FILE_APPEND);
-echo "Hermes should not be invoked for the fast path.";
+file_put_contents('{$fakeHermesLog}', json_encode(['argv' => \$argv], JSON_UNESCAPED_SLASHES).PHP_EOL, FILE_APPEND);
+echo "Hermes handled the voice task list through the generic Bean runtime.";
+fwrite(STDERR, "session_id: generic-voice-hermes-session\\n");
 PHP);
         chmod($fakeHermes, 0755);
         config([
             'bean.hermes.binary' => $fakeHermes,
             'bean.hermes.users_path' => $usersPath,
+            'bean.hermes.provider' => 'custom',
+            'bean.hermes.model' => 'gpt-test',
         ]);
 
-        $token = $this->apiToken('bean-voice-fast-path@example.com');
-        $user = User::where('email', 'bean-voice-fast-path@example.com')->firstOrFail();
+        $token = $this->apiToken('bean-voice-generic-runtime@example.com');
+        $user = User::where('email', 'bean-voice-generic-runtime@example.com')->firstOrFail();
         $session = app(BeanRuntimeService::class)->createSession($user, null, 'America/New_York');
         Task::create([
             'user_id' => $user->id,
             'workspace_id' => $session->workspace_id,
             'created_by_user_id' => $user->id,
-            'title' => 'fast voice task',
+            'title' => 'generic voice task',
             'type' => 'todo',
             'status' => 'open',
             'due_at' => now()->timezone('America/New_York')->endOfDay()->utc(),
@@ -172,12 +177,11 @@ PHP);
             'source' => 'elevenlabs_agent',
         ])->assertOk();
 
-        $response->assertJsonPath('data.run.mode', 'voice_fast_path')
-            ->assertJsonPath('data.run.model', 'voice-fast-path')
+        $response->assertJsonPath('data.run.mode', 'hermes')
+            ->assertJsonPath('data.run.model', 'hermes:custom/gpt-test')
             ->assertJsonPath('data.run.status', 'completed');
-        $this->assertStringContainsString('fast voice task', $response->json('data.run.output'));
-        $this->assertDatabaseHas('bean_tool_calls', ['bean_run_id' => $response->json('data.run.id'), 'action' => 'task.list', 'status' => 'completed']);
-        $this->assertFileDoesNotExist($fakeHermesLog);
+        $this->assertStringContainsString('Hermes handled the voice task list through the generic Bean runtime.', $response->json('data.run.output'));
+        $this->assertFileExists($fakeHermesLog);
     }
 
     public function test_bean_event_stream_includes_session_and_run_ids_for_voice_recovery(): void
@@ -435,6 +439,34 @@ PHP);
             'services.elevenlabs.agent_id' => 'agent_test',
         ]);
         $token = $this->apiToken('bean-elevenlabs-token@example.com');
+        $user = User::where('email', 'bean-elevenlabs-token@example.com')->firstOrFail();
+        $session = app(BeanRuntimeService::class)->createSession($user, null, 'America/New_York');
+        Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'context task today',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => now()->timezone('America/New_York')->endOfDay()->utc(),
+        ]);
+        Reminder::create([
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'context reminder today',
+            'status' => 'scheduled',
+            'remind_at' => now()->timezone('America/New_York')->addHour()->utc(),
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'context event today',
+            'status' => 'scheduled',
+            'starts_at' => now()->timezone('America/New_York')->addHours(2)->utc(),
+            'ends_at' => now()->timezone('America/New_York')->addHours(3)->utc(),
+        ]);
 
         Http::fake(function (HttpRequest $request) {
             $this->assertSame('https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=agent_test&participant_name=bean-user-1', $request->url());
@@ -444,11 +476,18 @@ PHP);
         });
 
         $this->withToken($token)->postJson('/api/bean/elevenlabs/conversation-token', [
+            'session_id' => $session->id,
             'client_timezone' => 'America/New_York',
         ])->assertOk()
             ->assertJsonPath('data.token', 'convai_test_token')
             ->assertJsonPath('data.agent_id', 'agent_test')
             ->assertJsonPath('data.transport', 'elevenlabs_agent')
+            ->assertJsonPath('data.bean_session_id', $session->id)
+            ->assertJsonPath('data.dashboard_context.today.tasks.0.title', 'context task today')
+            ->assertJsonPath('data.dashboard_context.today.reminders.0.title', 'context reminder today')
+            ->assertJsonPath('data.dashboard_context.today.calendar_events.0.title', 'context event today')
+            ->assertJsonPath('data.dashboard_context.policy.answer_from_context_for_read_only', true)
+            ->assertJsonPath('data.dashboard_context.policy.call_askBean_when_missing_or_mutating', true)
             ->assertJsonMissingPath('data.bridge_session_id');
 
         $this->assertDatabaseCount('bean_sessions', 1);

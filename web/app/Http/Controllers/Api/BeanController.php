@@ -10,6 +10,7 @@ use App\Models\BeanSession;
 use App\Models\BeanVoiceEvent;
 use App\Rules\ClientTimezone;
 use App\Services\Bean\BeanRuntimeService;
+use App\Services\Bean\DashboardContextBuilder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -18,7 +19,10 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class BeanController extends Controller
 {
-    public function __construct(private readonly BeanRuntimeService $runtime) {}
+    public function __construct(
+        private readonly BeanRuntimeService $runtime,
+        private readonly DashboardContextBuilder $dashboardContext,
+    ) {}
 
     public function storeSession(Request $request): JsonResponse
     {
@@ -171,6 +175,7 @@ class BeanController extends Controller
             'token' => $token,
             'agent_id' => $agentId,
             'bean_session_id' => $beanSession->id,
+            'dashboard_context' => $this->dashboardContext->build($request->user(), $beanSession, $data['client_timezone'] ?? null),
             'transport' => 'elevenlabs_agent',
         ]]);
     }

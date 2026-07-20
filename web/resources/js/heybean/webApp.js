@@ -5010,6 +5010,7 @@ export function mountHeyBeanWebApp(mount) {
                     bean_session_id: Number(state.bean.sessionId || realtime.bean_session_id || 0),
                     bean_client_timezone: clientTimezonePayload().client_timezone || '',
                     bean_workspace_id: Number(currentWorkspaceId() || 0),
+                    bean_dashboard_context: JSON.stringify(realtime.dashboard_context || {}),
                 },
                 clientTools: {
                     askBean: askBeanFromElevenLabsAgent,

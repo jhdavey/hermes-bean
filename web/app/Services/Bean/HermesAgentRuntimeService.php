@@ -172,11 +172,10 @@ class HermesAgentRuntimeService
     private function invokeHermes(string $home, ?string $sessionId, string $content, string $contextPath, ?string $source = null): array
     {
         $binary = (string) config('bean.hermes.binary', 'hermes');
-        $isVoice = $source === 'elevenlabs_agent';
-        $toolsets = (string) config($isVoice ? 'bean.hermes.voice_toolsets' : 'bean.hermes.toolsets', 'bean_dashboard,skills,memory,session_search,web');
+        $toolsets = (string) config('bean.hermes.toolsets', 'bean_dashboard,skills,memory,session_search,web');
         $skills = (string) config('bean.hermes.skills', 'bean-dashboard');
         $timeout = (int) config('bean.hermes.timeout_seconds', 120);
-        $maxTurns = (string) config($isVoice ? 'bean.hermes.voice_max_turns' : 'bean.hermes.max_turns', 24);
+        $maxTurns = (string) config('bean.hermes.max_turns', 24);
         $source = (string) config('bean.hermes.source', 'bean');
         $provider = (string) config('bean.hermes.provider', 'custom');
         $model = (string) config('bean.hermes.model', 'gpt-4.1-mini');
