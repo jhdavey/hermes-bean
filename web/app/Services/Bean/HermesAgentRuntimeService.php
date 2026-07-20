@@ -190,7 +190,10 @@ class HermesAgentRuntimeService
             throw new \RuntimeException($error);
         }
 
-        return $this->parseHermesOutput($process->getOutput());
+        [$assistantText, $sessionIdFromStdout] = $this->parseHermesOutput($process->getOutput());
+        [, $sessionIdFromStderr] = $this->parseHermesOutput($process->getErrorOutput());
+
+        return [$assistantText, $sessionIdFromStdout ?? $sessionIdFromStderr];
     }
 
     private function processEnv(string $home, string $contextPath): array
@@ -237,7 +240,7 @@ class HermesAgentRuntimeService
                 if ($line === '') {
                     return false;
                 }
-                if (preg_match('/^Session ID:\s*(\S+)/', $line, $matches) === 1) {
+                if (preg_match('/^(?:Session ID|session_id):\s*(\S+)/i', $line, $matches) === 1) {
                     $sessionId = $matches[1];
 
                     return false;

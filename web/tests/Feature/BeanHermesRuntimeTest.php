@@ -35,7 +35,7 @@ file_put_contents('{$logPath}', json_encode([
     'PATH' => getenv('PATH'),
 ], JSON_UNESCAPED_SLASHES).PHP_EOL, FILE_APPEND);
 echo in_array('--resume', \$argv, true) ? "Hermes resumed this user agent.\\n" : "Hermes started this user agent.\\n";
-echo "Session ID: fake-hermes-session-123\\n";
+fwrite(STDERR, "session_id: fake-hermes-session-123\\n");
 PHP);
         chmod($fakeHermes, 0755);
 
