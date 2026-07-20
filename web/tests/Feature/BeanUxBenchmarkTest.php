@@ -64,6 +64,17 @@ class BeanUxBenchmarkTest extends TestCase
         $session = app(BeanRuntimeService::class)->createSession($user);
         $completed = $this->runWithTool($user, $session, 'do I have overdue tasks', 'You have one overdue task.', 'completed', 4200);
         $failed = $this->runWithTool($user, $session, 'list tasks', 'I could not complete that request.', 'failed', 13000);
+        BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'status' => 'completed',
+            'mode' => 'text',
+            'input' => 'Martinez had 11 saves today',
+            'output' => 'Martinez had a strong match.',
+            'started_at' => now()->subSecond(),
+            'completed_at' => now(),
+        ]);
         BeanVoiceEvent::create([
             'user_id' => $user->id,
             'bean_session_id' => $session->id,
@@ -109,9 +120,14 @@ class BeanUxBenchmarkTest extends TestCase
         $this->assertFileExists($progressPath);
         $report = json_decode(File::get($jsonPath), true);
         $this->assertSame('bean-world-class-ux-benchmark', $report['mode']);
-        $this->assertSame(2, data_get($report, 'counts.runs'));
+        $this->assertSame(3, data_get($report, 'counts.runs'));
+        $this->assertSame(2, data_get($report, 'counts.dashboard_runs'));
+        $this->assertSame(0, data_get($report, 'counts.dashboard_ungrounded_runs'));
+        $this->assertSame(1, data_get($report, 'counts.dashboard_completed_tool_runs'));
+        $this->assertSame(1, data_get($report, 'counts.dashboard_failed_tool_runs'));
         $this->assertSame(0.5, data_get($report, 'metrics.task_success_rate'));
-        $this->assertSame(0.5, data_get($report, 'metrics.generic_failure_rate'));
+        $this->assertSame(0.3333, data_get($report, 'metrics.generic_failure_rate'));
+        $this->assertEquals(1.0, data_get($report, 'metrics.dashboard_grounded_rate'));
         $this->assertEquals(1.0, data_get($report, 'metrics.voice.first_command_capture_rate'));
         $this->assertEquals(1.0, data_get($report, 'metrics.voice.failure_wake_reset_rate'));
         $this->assertSame('fail', data_get($report, 'target_status.task_success_rate.status'));

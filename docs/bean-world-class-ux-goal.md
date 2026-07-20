@@ -33,7 +33,7 @@ Targets:
 - 0 exposed internal errors.
 - Dashboard facts must be grounded in dashboard tool results.
 
-Measured by `php artisan bean:ux-benchmark` from `bean_runs`, `bean_tool_calls`, and `bean_quality_traces`.
+Measured by `php artisan bean:ux-benchmark` from `bean_runs`, `bean_tool_calls`, and `bean_quality_traces`. Grounding means Hermes attempted the scoped dashboard tool and answered from its structured result; completed results, confirmation requests, and structured tool clarifications/errors all count as grounded because the model did consult Laravel rather than guessing. No-tool answers to private dashboard/resource prompts count as ungrounded.
 
 ### 2. Voice reliability
 

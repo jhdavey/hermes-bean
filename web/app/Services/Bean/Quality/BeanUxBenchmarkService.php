@@ -43,7 +43,10 @@ class BeanUxBenchmarkService
         $failureRuns = $runs->filter(fn (BeanRun $run): bool => $this->isFailedRun($run));
         $genericFailures = $runs->filter(fn (BeanRun $run): bool => trim((string) $run->output) === self::FAILURE_TEXT);
         $internalLeaks = $runs->filter(fn (BeanRun $run): bool => $this->containsInternalLeak((string) $run->output));
-        $dashboardUngrounded = $dashboardRuns->filter(fn (BeanRun $run): bool => $run->toolCalls->where('status', 'completed')->isEmpty());
+        $dashboardUngrounded = $dashboardRuns->filter(fn (BeanRun $run): bool => $run->toolCalls->isEmpty());
+        $dashboardCompletedToolRuns = $dashboardRuns->filter(fn (BeanRun $run): bool => $run->toolCalls->where('status', 'completed')->isNotEmpty());
+        $dashboardConfirmationRuns = $dashboardRuns->filter(fn (BeanRun $run): bool => $run->toolCalls->where('status', 'waiting_confirmation')->isNotEmpty());
+        $dashboardFailedToolRuns = $dashboardRuns->filter(fn (BeanRun $run): bool => $run->toolCalls->where('status', 'failed')->isNotEmpty());
 
         $voice = $this->voiceMetrics($voiceEvents, $voiceRuns);
         $taskSuccessRate = $this->rate($dashboardRuns->count() - $dashboardRuns->filter(fn (BeanRun $run): bool => $this->isFailedRun($run))->count(), $dashboardRuns->count());
@@ -81,6 +84,9 @@ class BeanUxBenchmarkService
                 'generic_failures' => $genericFailures->count(),
                 'internal_error_leaks' => $internalLeaks->count(),
                 'dashboard_ungrounded_runs' => $dashboardUngrounded->count(),
+                'dashboard_completed_tool_runs' => $dashboardCompletedToolRuns->count(),
+                'dashboard_confirmation_runs' => $dashboardConfirmationRuns->count(),
+                'dashboard_failed_tool_runs' => $dashboardFailedToolRuns->count(),
             ],
             'targets' => $targets,
             'metrics' => $metrics,
@@ -126,6 +132,7 @@ class BeanUxBenchmarkService
             '- Generic failure rate: '.$this->percentString($metrics['generic_failure_rate'] ?? null),
             '- Internal error leaks: '.($metrics['internal_error_leak_count'] ?? 0),
             '- Dashboard grounded rate: '.$this->percentString($metrics['dashboard_grounded_rate'] ?? null),
+            '- Dashboard tool outcomes: completed '.data_get($report, 'counts.dashboard_completed_tool_runs', 0).', confirmations '.data_get($report, 'counts.dashboard_confirmation_runs', 0).', failed/clarifying '.data_get($report, 'counts.dashboard_failed_tool_runs', 0).', no tool '.data_get($report, 'counts.dashboard_ungrounded_runs', 0),
             '- Dashboard latency p50/p95: '.($latency['dashboard_p50'] ?? 'n/a').'ms / '.($latency['dashboard_p95'] ?? 'n/a').'ms',
             '- Multi-step latency p95: '.($latency['multi_step_p95'] ?? 'n/a').'ms',
             '',
@@ -273,7 +280,7 @@ class BeanUxBenchmarkService
             return true;
         }
 
-        return preg_match('/\b(task|tasks|todo|reminder|calendar|event|events|note|notes|workspace|dashboard|overdue|today|tomorrow)\b/iu', (string) $run->input) === 1;
+        return preg_match('/\b(task|tasks|todo|reminder|reminders|calendar|event|events|note|notes|workspace|dashboard|overdue)\b/iu', (string) $run->input) === 1;
     }
 
     private function isVoiceRun(BeanRun $run): bool
