@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http';
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
-import { chooseBeanVoiceAcknowledgement } from './elevenlabsVoiceAcknowledgement.mjs';
+import {
+    canonicalizeBeanVoiceTranscript,
+    chooseBeanVoiceAcknowledgement,
+    getLocalFastVoiceResponse,
+    isDuplicateVoiceTranscript,
+} from './elevenlabsVoiceAcknowledgement.mjs';
 
 const required = (name) => {
     const value = process.env[name];
@@ -18,6 +23,7 @@ const PORT = Number(process.env.ELEVENLABS_SPEECH_ENGINE_POC_PORT || 3001);
 const PATH = process.env.ELEVENLABS_SPEECH_ENGINE_POC_PATH || '/ws';
 const ACK_ENABLED = process.env.BEAN_ELEVENLABS_POC_ACK_ENABLED !== 'false';
 const ACK_DELAY_MS = Number(process.env.BEAN_ELEVENLABS_POC_ACK_DELAY_MS || 650);
+const DUPLICATE_TRANSCRIPT_SUPPRESS_MS = Number(process.env.BEAN_ELEVENLABS_POC_DUPLICATE_SUPPRESS_MS || 3500);
 
 const elevenlabs = new ElevenLabsClient({ apiKey: ELEVENLABS_API_KEY });
 const httpServer = createServer();
@@ -93,6 +99,12 @@ function delay(ms) {
 }
 
 async function* responseStream(state, content, transcript, signal) {
+    const localFastResponse = getLocalFastVoiceResponse(content);
+    if (localFastResponse) {
+        yield localFastResponse;
+        return;
+    }
+
     const answerPromise = askBean(state, content, signal);
 
     try {
@@ -135,6 +147,18 @@ await elevenlabs.speechEngine.attach(ELEVENLABS_SPEECH_ENGINE_ID, httpServer, PA
 
         const content = latestUserMessage(transcript);
         if (!content) return;
+
+        const now = Date.now();
+        const previousTranscript = state.lastTranscript || '';
+        const duplicate = isDuplicateVoiceTranscript(previousTranscript, content);
+        if (duplicate && now - (state.lastTranscriptAt || 0) < DUPLICATE_TRANSCRIPT_SUPPRESS_MS) {
+            console.log(`[elevenlabs] suppressed duplicate transcript: ${content}`);
+            return;
+        }
+
+        state.lastTranscript = content;
+        state.lastCanonicalTranscript = canonicalizeBeanVoiceTranscript(content);
+        state.lastTranscriptAt = now;
 
         console.log(`[elevenlabs] transcript: ${content}`);
         session.sendResponse(responseStream(state, content, transcript, signal));

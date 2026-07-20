@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chooseBeanVoiceAcknowledgement } from '../../scripts/elevenlabsVoiceAcknowledgement.mjs';
+import {
+    canonicalizeBeanVoiceTranscript,
+    chooseBeanVoiceAcknowledgement,
+    getLocalFastVoiceResponse,
+    isDuplicateVoiceTranscript,
+} from '../../scripts/elevenlabsVoiceAcknowledgement.mjs';
 
 test('ElevenLabs POC acknowledgements skip simple conversational turns', () => {
     assert.equal(chooseBeanVoiceAcknowledgement('Can you hear me?'), null);
@@ -41,4 +46,22 @@ test('ElevenLabs POC acknowledgements use action wording for mutations', () => {
     assert.match(chooseBeanVoiceAcknowledgement('Create a task called test voice task.'), /task/i);
     assert.equal(chooseBeanVoiceAcknowledgement('Mark it complete.'), 'Okay, marking that complete.');
     assert.equal(chooseBeanVoiceAcknowledgement('Delete that reminder.'), 'Okay, I’ll check that first.');
+});
+
+test('ElevenLabs POC canonicalizes duplicated wake-tail health checks', () => {
+    assert.equal(canonicalizeBeanVoiceTranscript('Can you hear me?'), 'can you hear me');
+    assert.equal(
+        canonicalizeBeanVoiceTranscript('Can you hear me? Hey, Bean, can you hear me?'),
+        'can you hear me',
+    );
+    assert.equal(
+        isDuplicateVoiceTranscript('Can you hear me?', 'Can you hear me? Hey, Bean, can you hear me?'),
+        true,
+    );
+});
+
+test('ElevenLabs POC answers simple voice health checks locally', () => {
+    assert.equal(getLocalFastVoiceResponse('Can you hear me?'), 'Yes — I can hear you.');
+    assert.equal(getLocalFastVoiceResponse('Can you hear me? Hey, Bean, can you hear me?'), 'Yes — I can hear you.');
+    assert.equal(getLocalFastVoiceResponse('What tasks do I have today?'), null);
 });

@@ -9,6 +9,42 @@ function normalize(text) {
         .trim();
 }
 
+export function canonicalizeBeanVoiceTranscript(text) {
+    let normalized = normalize(text)
+        .replace(/\bhey\s+bean\b/g, ' ')
+        .replace(/\bheybean\b/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const words = normalized.split(' ').filter(Boolean);
+    if (words.length > 1 && words.length % 2 === 0) {
+        const midpoint = words.length / 2;
+        const first = words.slice(0, midpoint).join(' ');
+        const second = words.slice(midpoint).join(' ');
+        if (first === second) normalized = first;
+    }
+
+    normalized = normalized.replace(/\s+/g, ' ').trim();
+
+    if (normalized.includes('can you hear me')) return 'can you hear me';
+    if (normalized === 'do you hear me') return 'can you hear me';
+    if (/^(stop|dismiss|cancel)$/.test(normalized)) return normalized;
+
+    return normalized;
+}
+
+export function isDuplicateVoiceTranscript(previous, next) {
+    if (!previous || !next) return false;
+    return canonicalizeBeanVoiceTranscript(previous) === canonicalizeBeanVoiceTranscript(next);
+}
+
+export function getLocalFastVoiceResponse(message) {
+    const canonical = canonicalizeBeanVoiceTranscript(message);
+    if (canonical === 'can you hear me') return 'Yes — I can hear you.';
+    if (canonical === 'stop' || canonical === 'dismiss' || canonical === 'cancel') return 'Okay.';
+    return null;
+}
+
 function includesAny(text, words) {
     return words.some((word) => text.includes(word));
 }
