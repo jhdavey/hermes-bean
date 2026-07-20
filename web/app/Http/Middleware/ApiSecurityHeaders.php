@@ -26,7 +26,7 @@ class ApiSecurityHeaders
         } elseif (! $response->headers->has('Content-Security-Policy')) {
             $response->headers->set(
                 'Content-Security-Policy',
-                "default-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self' https://api.openai.com wss://api.openai.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'"
+                "default-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self' https://api.openai.com wss://api.openai.com https://api.elevenlabs.io https://*.elevenlabs.io wss://*.elevenlabs.io; img-src 'self' data:; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'"
             );
         }
 

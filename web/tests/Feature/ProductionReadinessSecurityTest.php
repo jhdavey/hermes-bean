@@ -70,7 +70,7 @@ class ProductionReadinessSecurityTest extends TestCase
 
     public function test_web_pages_receive_security_headers(): void
     {
-        $contentSecurityPolicy = "default-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self' https://api.openai.com wss://api.openai.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'";
+        $contentSecurityPolicy = "default-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self' https://api.openai.com wss://api.openai.com https://api.elevenlabs.io https://*.elevenlabs.io wss://*.elevenlabs.io; img-src 'self' data:; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'";
 
         foreach (['/', '/privacy', '/terms'] as $path) {
             $this->get($path)
