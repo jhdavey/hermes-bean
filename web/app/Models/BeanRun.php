@@ -15,8 +15,28 @@ class BeanRun extends Model
         return ['metadata' => 'array', 'started_at' => 'datetime', 'completed_at' => 'datetime'];
     }
 
-    public function session(): BelongsTo { return $this->belongsTo(BeanSession::class, 'bean_session_id'); }
-    public function user(): BelongsTo { return $this->belongsTo(User::class); }
-    public function toolCalls(): HasMany { return $this->hasMany(BeanToolCall::class); }
-    public function activityEvents(): HasMany { return $this->hasMany(BeanActivityEvent::class); }
+    public function session(): BelongsTo
+    {
+        return $this->belongsTo(BeanSession::class, 'bean_session_id');
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function toolCalls(): HasMany
+    {
+        return $this->hasMany(BeanToolCall::class);
+    }
+
+    public function activityEvents(): HasMany
+    {
+        return $this->hasMany(BeanActivityEvent::class);
+    }
+
+    public function voiceEvents(): HasMany
+    {
+        return $this->hasMany(BeanVoiceEvent::class);
+    }
 }

@@ -7,10 +7,12 @@ use App\Models\BeanActivityEvent;
 use App\Models\BeanConfirmationRequest;
 use App\Models\BeanRun;
 use App\Models\BeanSession;
+use App\Models\BeanVoiceEvent;
 use App\Rules\ClientTimezone;
 use App\Services\Bean\BeanRuntimeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -22,20 +24,23 @@ class BeanController extends Controller
     {
         $data = $request->validate([
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
-            'client_timezone' => ['nullable', new ClientTimezone()],
+            'client_timezone' => ['nullable', new ClientTimezone],
         ]);
+
         return response()->json(['data' => $this->runtime->createSession($request->user(), $data['workspace_id'] ?? null, $data['client_timezone'] ?? null)], 201);
     }
 
     public function sessions(Request $request): JsonResponse
     {
         $sessions = BeanSession::query()->where('user_id', $request->user()->id)->latest('updated_at')->limit(20)->get();
+
         return response()->json(['data' => $sessions]);
     }
 
     public function activity(Request $request, BeanSession $session): JsonResponse
     {
         abort_unless((int) $session->user_id === (int) $request->user()->id, 404);
+
         return response()->json(['data' => [
             'messages' => $session->messages()->orderBy('id')->limit(100)->get(),
             'activity' => $session->activityEvents()->orderBy('id')->limit(200)->get(),
@@ -49,8 +54,9 @@ class BeanController extends Controller
             'session_id' => ['nullable', 'integer', 'exists:bean_sessions,id'],
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'content' => ['required', 'string', 'max:8000'],
-            'client_timezone' => ['nullable', new ClientTimezone()],
+            'client_timezone' => ['nullable', new ClientTimezone],
         ]);
+
         return response()->json(['data' => $this->runtime->handleMessage($request->user(), $data['content'], $data['session_id'] ?? null, $data['workspace_id'] ?? null, $data['client_timezone'] ?? null)]);
     }
 
@@ -68,7 +74,45 @@ class BeanController extends Controller
     public function approve(Request $request, BeanConfirmationRequest $confirmation): JsonResponse
     {
         abort_unless((int) $confirmation->user_id === (int) $request->user()->id, 404);
+
         return response()->json(['data' => $this->runtime->approveConfirmation($request->user(), $confirmation->id)]);
+    }
+
+    public function voiceEvent(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'event_type' => ['required', 'string', 'max:80'],
+            'session_id' => ['nullable', 'integer', 'exists:bean_sessions,id'],
+            'run_id' => ['nullable', 'integer', 'exists:bean_runs,id'],
+            'mode' => ['nullable', 'string', 'max:40'],
+            'source' => ['nullable', 'string', 'max:80'],
+            'label' => ['nullable', 'string', 'max:240'],
+            'payload' => ['nullable', 'array'],
+            'occurred_at' => ['nullable', 'date'],
+        ]);
+
+        $sessionId = $data['session_id'] ?? null;
+        if ($sessionId !== null) {
+            abort_unless(BeanSession::query()->where('user_id', $request->user()->id)->where('id', $sessionId)->exists(), 404);
+        }
+        $runId = $data['run_id'] ?? null;
+        if ($runId !== null) {
+            abort_unless(BeanRun::query()->where('user_id', $request->user()->id)->where('id', $runId)->exists(), 404);
+        }
+
+        $event = BeanVoiceEvent::create([
+            'user_id' => $request->user()->id,
+            'bean_session_id' => $sessionId,
+            'bean_run_id' => $runId,
+            'event_type' => preg_replace('/[^a-z0-9_\.:-]/i', '_', $data['event_type']) ?: 'unknown',
+            'mode' => $data['mode'] ?? null,
+            'source' => $data['source'] ?? null,
+            'label' => isset($data['label']) ? mb_substr($data['label'], 0, 240) : null,
+            'payload' => $data['payload'] ?? null,
+            'occurred_at' => isset($data['occurred_at']) ? Carbon::parse($data['occurred_at']) : now(),
+        ]);
+
+        return response()->json(['data' => ['id' => $event->id]], 201);
     }
 
     public function realtimeSession(Request $request): JsonResponse
@@ -142,9 +186,12 @@ class BeanController extends Controller
                     echo "id: {$event->id}\n";
                     echo 'event: '.str_replace('_', '.', $event->type)."\n";
                     echo 'data: '.json_encode(['id' => $event->id, 'type' => $event->type, 'label' => $event->label, 'payload' => $event->payload, 'created_at' => optional($event->created_at)->toIso8601String()])."\n\n";
-                    @ob_flush(); @flush();
+                    @ob_flush();
+                    @flush();
                 }
-                if ($events->isNotEmpty() || $wait <= 0) break;
+                if ($events->isNotEmpty() || $wait <= 0) {
+                    break;
+                }
                 usleep(700_000);
             } while (microtime(true) < $deadline);
         }, 200, [

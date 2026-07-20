@@ -246,6 +246,7 @@ export function mountHeyBeanWebApp(mount) {
     let beanLastSpokenAnswer = '';
     let beanLastSpokenAnswerAt = 0;
     let beanEndVoiceAfterAnswer = false;
+    let beanVoiceRequestCount = 0;
     let beanEventStatusStartedAt = Date.now();
 
     boot();
@@ -445,6 +446,29 @@ export function mountHeyBeanWebApp(mount) {
             throw error;
         }
         return Object.prototype.hasOwnProperty.call(payload, 'data') ? payload.data : payload;
+    }
+
+    function logBeanVoiceLifecycleEvent(eventType, payload = {}) {
+        if (!state.token) return;
+        const body = {
+            event_type: eventType,
+            session_id: state.bean.sessionId || null,
+            run_id: payload.run_id || payload.runId || null,
+            mode: state.bean.mode || null,
+            source: payload.source || 'web_realtime',
+            label: payload.label || '',
+            payload: {
+                ...payload,
+                bean_mode: state.bean.mode || null,
+                busy: Boolean(state.bean.busy),
+                voice_active: Boolean(state.bean.voiceActive),
+                voice_connecting: Boolean(state.bean.voiceConnecting),
+            },
+            occurred_at: new Date().toISOString(),
+        };
+        delete body.payload.run_id;
+        delete body.payload.runId;
+        api('/bean/voice-events', { method: 'POST', body, keepalive: true, timeoutMs: 2500 }).catch(() => {});
     }
 
     async function apiForm(path, formData, options = {}) {
@@ -4611,8 +4635,10 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function endBeanVoiceConversationForWake(statusText = 'Listening locally for “Hey Bean”') {
+        const dismissed = /dismiss/i.test(statusText);
         sendBeanRealtimeEvent({ type: 'response.cancel' });
         stopBeanVoiceSession({ statusText });
+        if (dismissed) logBeanVoiceLifecycleEvent('dismiss_closed', { label: statusText });
         state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
         state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : statusText;
     }
@@ -4621,6 +4647,7 @@ export function mountHeyBeanWebApp(mount) {
         clearBeanFollowUpTimer();
         clearBeanAssistantSpeechFallbackTimer();
         if (!state.bean.voiceActive || state.bean.voiceConnecting) return;
+        logBeanVoiceLifecycleEvent('followup_window_opened');
         beanVoiceInputIgnoreUntil = Date.now() + beanPostSpeechInputCooldownMs;
         setBeanVoiceInputEnabled(false);
         window.setTimeout(() => {
@@ -4632,6 +4659,7 @@ export function mountHeyBeanWebApp(mount) {
         }, beanPostSpeechInputCooldownMs);
         beanFollowUpTimer = window.setTimeout(() => {
             if (!state.bean.voiceActive || state.bean.busy) return;
+            logBeanVoiceLifecycleEvent('followup_window_expired');
             endBeanVoiceConversationForWake();
             render();
         }, beanFollowUpWindowMs);
@@ -4651,6 +4679,7 @@ export function mountHeyBeanWebApp(mount) {
             state.bean.voiceTranscript = wakeTail;
             scheduleBeanWakeTailStabilization(wakeTail);
         }
+        logBeanVoiceLifecycleEvent('wake_detected', { label: wakeTail, has_wake_tail: Boolean(wakeTail), source: event?.source || 'wake_detector' });
         render();
         const voiceStart = startBeanVoiceSession({ wakeEvent: event, wakeTail });
         voiceStart?.catch?.(() => {});
@@ -4763,6 +4792,8 @@ export function mountHeyBeanWebApp(mount) {
 
             state.bean.voiceActive = true;
             state.bean.voiceConnecting = false;
+            beanVoiceRequestCount = 0;
+            logBeanVoiceLifecycleEvent('voice_session_started', { has_wake_event: Boolean(options?.wakeEvent), has_wake_tail: Boolean(options?.wakeTail) });
             if (!state.bean.busy) {
                 state.bean.mode = 'listening';
                 state.bean.statusText = 'Listening — speak to Bean';
@@ -4777,10 +4808,12 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function stopBeanVoiceSession(options = {}) {
+        const wasActive = state.bean.voiceActive || state.bean.voiceConnecting;
         clearBeanPendingWakeTail();
         clearBeanFollowUpTimer();
         clearBeanAssistantSpeechFallbackTimer();
         beanEndVoiceAfterAnswer = false;
+        beanVoiceRequestCount = 0;
         setBeanVoiceInputEnabled(false);
         beanDataChannel?.close?.();
         beanPeerConnection?.close?.();
@@ -4794,6 +4827,9 @@ export function mountHeyBeanWebApp(mount) {
         state.bean.voiceActive = false;
         state.bean.voiceConnecting = false;
         state.bean.voiceTranscript = '';
+        if (wasActive) {
+            logBeanVoiceLifecycleEvent('voice_session_closed', { keep_status: Boolean(options.keepStatus), label: options.statusText || state.bean.statusText || '' });
+        }
         if (!options.keepStatus) {
             state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
             if (state.bean.mode === 'privacy') {
@@ -4817,16 +4853,20 @@ export function mountHeyBeanWebApp(mount) {
         if (transcript && type.includes('transcription') && type.endsWith('completed')) {
             clearBeanPendingWakeTail();
             if (isLikelyBeanAssistantEcho(transcript)) {
+                logBeanVoiceLifecycleEvent('assistant_echo_ignored', { label: transcript.slice(0, 160) });
                 sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
                 return;
             }
             if (handleBeanVoiceControl(transcript)) return;
             if (state.bean.mode === 'speaking') openBeanFollowUpAfterAssistantSpeech();
             if (state.bean.busy || Date.now() < beanVoiceInputIgnoreUntil) {
+                logBeanVoiceLifecycleEvent('background_audio_ignored', { label: transcript.slice(0, 160), reason: state.bean.busy ? 'busy' : 'post_speech_cooldown' });
                 sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
                 return;
             }
             clearBeanFollowUpTimer();
+            const isFollowUpTranscript = beanVoiceRequestCount > 0 && state.bean.mode === 'listening' && state.bean.voiceActive;
+            logBeanVoiceLifecycleEvent(isFollowUpTranscript ? 'followup_transcript_received' : 'user_transcript_received', { label: transcript.slice(0, 160) });
             state.bean.voiceTranscript = transcript;
             render();
             sendBeanVoiceTranscript(transcript);
@@ -4839,6 +4879,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function handleBeanVoiceControl(transcript) {
         if (!isBeanStopCommand(transcript)) return false;
+        logBeanVoiceLifecycleEvent('dismiss_command_detected', { label: String(transcript || '').slice(0, 160) });
         state.bean.voiceTranscript = '';
         state.bean.error = '';
         endBeanVoiceConversationForWake('Dismissed — listening for “Hey Bean”');
@@ -4910,9 +4951,12 @@ export function mountHeyBeanWebApp(mount) {
     function openBeanFollowUpAfterAssistantSpeech() {
         if (!state.bean.voiceActive || state.bean.mode !== 'speaking') return;
         if (beanEndVoiceAfterAnswer) {
+            logBeanVoiceLifecycleEvent('assistant_speech_finished');
+            logBeanVoiceLifecycleEvent('failure_wake_reset');
             endBeanVoiceConversationForWake('Listening locally for “Hey Bean”');
             return;
         }
+        logBeanVoiceLifecycleEvent('assistant_speech_finished');
         state.bean.mode = 'listening';
         scheduleBeanFollowUpListening();
     }
@@ -4943,6 +4987,7 @@ export function mountHeyBeanWebApp(mount) {
         clearBeanAssistantSpeechFallbackTimer();
         beanLastSpokenAnswer = String(answer || '');
         beanLastSpokenAnswerAt = Date.now();
+        logBeanVoiceLifecycleEvent('assistant_speech_started', { label: beanLastSpokenAnswer.slice(0, 160) });
         setBeanVoiceInputEnabled(false);
         sendBeanRealtimeEvent({ type: 'input_audio_buffer.clear' });
         sendBeanRealtimeEvent({
@@ -5003,8 +5048,12 @@ export function mountHeyBeanWebApp(mount) {
         render();
         try {
             const sessionId = await ensureBeanSession();
+            logBeanVoiceLifecycleEvent('bean_request_sent', { label: String(content || '').slice(0, 160) });
+            beanVoiceRequestCount += 1;
             const data = await api('/bean/messages', { method: 'POST', body: { session_id: sessionId, content, ...clientTimezonePayload() } });
             state.bean.sessionId = data.session?.id || sessionId;
+            const runId = data.run?.id || null;
+            logBeanVoiceLifecycleEvent('bean_response_received', { run_id: runId, failed: data.run?.status === 'failed', label: String(data.run?.output || '').slice(0, 160) });
             state.bean.messages = normalizeList(data.messages);
             state.bean.activity = normalizeList(data.activity);
             state.bean.confirmations = normalizeList(data.confirmations);

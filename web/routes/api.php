@@ -72,6 +72,7 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::post('/bean/messages', [BeanController::class, 'message']);
         Route::get('/bean/runs/{run}', [BeanController::class, 'run']);
         Route::get('/bean/events', [BeanController::class, 'events']);
+        Route::post('/bean/voice-events', [BeanController::class, 'voiceEvent']);
         Route::post('/bean/confirmations/{confirmation}/approve', [BeanController::class, 'approve']);
         Route::post('/bean/realtime/session', [BeanController::class, 'realtimeSession']);
         Route::post('/issue-reports', [IssueReportController::class, 'store']);

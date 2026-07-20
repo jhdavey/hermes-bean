@@ -15,9 +15,33 @@ class BeanSession extends Model
         return ['metadata' => 'array'];
     }
 
-    public function user(): BelongsTo { return $this->belongsTo(User::class); }
-    public function workspace(): BelongsTo { return $this->belongsTo(Workspace::class); }
-    public function messages(): HasMany { return $this->hasMany(BeanMessage::class); }
-    public function runs(): HasMany { return $this->hasMany(BeanRun::class); }
-    public function activityEvents(): HasMany { return $this->hasMany(BeanActivityEvent::class); }
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function workspace(): BelongsTo
+    {
+        return $this->belongsTo(Workspace::class);
+    }
+
+    public function messages(): HasMany
+    {
+        return $this->hasMany(BeanMessage::class);
+    }
+
+    public function runs(): HasMany
+    {
+        return $this->hasMany(BeanRun::class);
+    }
+
+    public function activityEvents(): HasMany
+    {
+        return $this->hasMany(BeanActivityEvent::class);
+    }
+
+    public function voiceEvents(): HasMany
+    {
+        return $this->hasMany(BeanVoiceEvent::class);
+    }
 }

@@ -1,0 +1,381 @@
+{
+    "goal": "Make Bean meet world-class user-experience benchmarks.",
+    "updated_at": "2026-07-20T02:07:48+00:00",
+    "latest_report": {
+        "mode": "bean-world-class-ux-benchmark",
+        "generated_at": "2026-07-20T02:07:47+00:00",
+        "window_days": 7,
+        "counts": {
+            "runs": 6682,
+            "dashboard_runs": 6674,
+            "multi_step_runs": 356,
+            "voice_runs": 0,
+            "quality_traces": 6678,
+            "voice_events": 0,
+            "failed_runs": 2,
+            "generic_failures": 0,
+            "internal_error_leaks": 0,
+            "dashboard_ungrounded_runs": 515
+        },
+        "targets": {
+            "task_success_rate": {
+                "operator": ">=",
+                "value": 0.95
+            },
+            "multi_step_success_rate": {
+                "operator": ">=",
+                "value": 0.9
+            },
+            "generic_failure_rate": {
+                "operator": "<=",
+                "value": 0.02
+            },
+            "internal_error_leak_count": {
+                "operator": "<=",
+                "value": 0
+            },
+            "dashboard_grounded_rate": {
+                "operator": ">=",
+                "value": 0.95
+            },
+            "dashboard_latency_p50_ms": {
+                "operator": "<=",
+                "value": 5000
+            },
+            "dashboard_latency_p95_ms": {
+                "operator": "<=",
+                "value": 12000
+            },
+            "multi_step_latency_p95_ms": {
+                "operator": "<=",
+                "value": 20000
+            },
+            "voice_first_command_capture_rate": {
+                "operator": ">=",
+                "value": 0.98
+            },
+            "voice_followup_capture_rate": {
+                "operator": ">=",
+                "value": 0.95
+            },
+            "voice_background_false_submission_rate": {
+                "operator": "<=",
+                "value": 0.01
+            },
+            "voice_echo_duplicate_rate": {
+                "operator": "<=",
+                "value": 0.01
+            },
+            "voice_failure_wake_reset_rate": {
+                "operator": ">=",
+                "value": 1
+            },
+            "voice_dismiss_success_rate": {
+                "operator": ">=",
+                "value": 1
+            }
+        },
+        "metrics": {
+            "task_success_rate": 0.9997,
+            "multi_step_success_rate": 1,
+            "generic_failure_rate": 0,
+            "internal_error_leak_count": 0,
+            "dashboard_grounded_rate": 0.9228,
+            "latency_ms": {
+                "all_p50": 0,
+                "all_p95": 0,
+                "dashboard_p50": 0,
+                "dashboard_p95": 0,
+                "multi_step_p95": 1000
+            },
+            "voice": {
+                "wake_detected": 0,
+                "voice_session_started": 0,
+                "user_transcript_received": 0,
+                "bean_request_sent": 0,
+                "bean_response_received": 0,
+                "assistant_speech_started": 0,
+                "assistant_speech_finished": 0,
+                "followup_window_opened": 0,
+                "followup_transcript_received": 0,
+                "followup_window_expired": 0,
+                "voice_session_closed": 0,
+                "background_audio_ignored": 0,
+                "background_audio_submitted": 0,
+                "assistant_echo_ignored": 0,
+                "assistant_echo_submitted_or_duplicate": 0,
+                "dismiss_command_detected": 0,
+                "dismiss_closed": 0,
+                "voice_runs": 0,
+                "first_command_capture_rate": null,
+                "followup_capture_rate": null,
+                "background_false_submission_rate": null,
+                "echo_duplicate_rate": null,
+                "failure_wake_reset_rate": null,
+                "dismiss_success_rate": null
+            }
+        },
+        "target_status": {
+            "task_success_rate": {
+                "status": "pass",
+                "actual": 0.9997,
+                "target": ">= 0.95"
+            },
+            "multi_step_success_rate": {
+                "status": "pass",
+                "actual": 1,
+                "target": ">= 0.9"
+            },
+            "generic_failure_rate": {
+                "status": "pass",
+                "actual": 0,
+                "target": "<= 0.02"
+            },
+            "internal_error_leak_count": {
+                "status": "pass",
+                "actual": 0,
+                "target": "<= 0"
+            },
+            "dashboard_grounded_rate": {
+                "status": "fail",
+                "actual": 0.9228,
+                "target": ">= 0.95"
+            },
+            "dashboard_latency_p50_ms": {
+                "status": "pass",
+                "actual": 0,
+                "target": "<= 5000"
+            },
+            "dashboard_latency_p95_ms": {
+                "status": "pass",
+                "actual": 0,
+                "target": "<= 12000"
+            },
+            "multi_step_latency_p95_ms": {
+                "status": "pass",
+                "actual": 1000,
+                "target": "<= 20000"
+            },
+            "voice_first_command_capture_rate": {
+                "status": "unknown",
+                "actual": null,
+                "target": ">= 0.98"
+            },
+            "voice_followup_capture_rate": {
+                "status": "unknown",
+                "actual": null,
+                "target": ">= 0.95"
+            },
+            "voice_background_false_submission_rate": {
+                "status": "unknown",
+                "actual": null,
+                "target": "<= 0.01"
+            },
+            "voice_echo_duplicate_rate": {
+                "status": "unknown",
+                "actual": null,
+                "target": "<= 0.01"
+            },
+            "voice_failure_wake_reset_rate": {
+                "status": "unknown",
+                "actual": null,
+                "target": ">= 1"
+            },
+            "voice_dismiss_success_rate": {
+                "status": "unknown",
+                "actual": null,
+                "target": ">= 1"
+            }
+        },
+        "failure_clusters": {
+            "text|task.list|failed": 2
+        },
+        "quality_flag_counts": {
+            "generic_done_after_factual_question": 5,
+            "tool_completed_but_no_factual_answer": 5,
+            "external_lookup_completed_without_sources": 2,
+            "source_claim_without_external_sources": 2,
+            "workspace_question_omitted_workspace_name": 1,
+            "missing_time_after_time_tool": 1
+        },
+        "recent_problem_runs": [
+            {
+                "bean_run_id": 4064,
+                "status": "completed",
+                "mode": "text",
+                "intent": "external.lookup",
+                "actions": [
+                    "external.lookup",
+                    "note.create"
+                ],
+                "quality_flags": [
+                    "external_lookup_completed_without_sources",
+                    "source_claim_without_external_sources"
+                ],
+                "latency_ms": 0,
+                "user_message": "Go online, find sources for emergency kit supplies, and save a note.",
+                "assistant_answer": "I could not retrieve reliable external sources for that."
+            },
+            {
+                "bean_run_id": 4063,
+                "status": "completed",
+                "mode": "text",
+                "intent": "external.lookup",
+                "actions": [
+                    "external.lookup"
+                ],
+                "quality_flags": [
+                    "external_lookup_completed_without_sources",
+                    "source_claim_without_external_sources"
+                ],
+                "latency_ms": 1000,
+                "user_message": "Can you go online and find sources for home fire extinguisher maintenance?",
+                "assistant_answer": "I could not retrieve reliable external sources for that."
+            },
+            {
+                "bean_run_id": 2153,
+                "status": "failed",
+                "mode": "text",
+                "intent": null,
+                "actions": [
+                    "task.list"
+                ],
+                "quality_flags": [],
+                "latency_ms": 0,
+                "user_message": "What tasks do I have on my to do list for today?",
+                "assistant_answer": "I ran into a problem trying to do that."
+            },
+            {
+                "bean_run_id": 1221,
+                "status": "completed",
+                "mode": "text",
+                "intent": "time.now",
+                "actions": [
+                    "time.now"
+                ],
+                "quality_flags": [
+                    "missing_time_after_time_tool"
+                ],
+                "latency_ms": 0,
+                "user_message": "What is the date today?",
+                "assistant_answer": "Today's date is July 17, 2026."
+            },
+            {
+                "bean_run_id": 137,
+                "status": "completed",
+                "mode": "text",
+                "intent": "task.create",
+                "actions": [
+                    "task.create"
+                ],
+                "quality_flags": [
+                    "generic_done_after_factual_question",
+                    "tool_completed_but_no_factual_answer"
+                ],
+                "latency_ms": 0,
+                "user_message": "tell me today’s tasks",
+                "assistant_answer": "I’ll add that task. Done."
+            },
+            {
+                "bean_run_id": 85,
+                "status": "completed",
+                "mode": "text",
+                "intent": "note.search",
+                "actions": [
+                    "note.search"
+                ],
+                "quality_flags": [
+                    "generic_done_after_factual_question",
+                    "tool_completed_but_no_factual_answer"
+                ],
+                "latency_ms": 0,
+                "user_message": "Find note grill repair",
+                "assistant_answer": "I’ll search your notes. Done."
+            },
+            {
+                "bean_run_id": 71,
+                "status": "completed",
+                "mode": "text",
+                "intent": "reminder.create",
+                "actions": [
+                    "reminder.create"
+                ],
+                "quality_flags": [
+                    "generic_done_after_factual_question",
+                    "tool_completed_but_no_factual_answer"
+                ],
+                "latency_ms": 0,
+                "user_message": "Do I have reminders today?",
+                "assistant_answer": "I’ll create that reminder. Done."
+            },
+            {
+                "bean_run_id": 67,
+                "status": "completed",
+                "mode": "text",
+                "intent": "reminder.create",
+                "actions": [
+                    "reminder.create"
+                ],
+                "quality_flags": [
+                    "generic_done_after_factual_question",
+                    "tool_completed_but_no_factual_answer"
+                ],
+                "latency_ms": 0,
+                "user_message": "Any reminders today?",
+                "assistant_answer": "I’ll create that reminder. Done."
+            },
+            {
+                "bean_run_id": 48,
+                "status": "completed",
+                "mode": "text",
+                "intent": "resource.query",
+                "actions": [
+                    "resource.query"
+                ],
+                "quality_flags": [
+                    "workspace_question_omitted_workspace_name"
+                ],
+                "latency_ms": 0,
+                "user_message": "What workspace is that task in?",
+                "assistant_answer": "I found 5 matching tasks: Call mom, Call dentist, Pay the travel card, Clean outdoor grout, and Prep launch deck."
+            },
+            {
+                "bean_run_id": 31,
+                "status": "completed",
+                "mode": "text",
+                "intent": "task.create",
+                "actions": [
+                    "task.create"
+                ],
+                "quality_flags": [
+                    "generic_done_after_factual_question",
+                    "tool_completed_but_no_factual_answer"
+                ],
+                "latency_ms": 0,
+                "user_message": "Tell me today’s tasks",
+                "assistant_answer": "I’ll add that task. Done."
+            },
+            {
+                "bean_run_id": 12,
+                "status": "failed",
+                "mode": "text",
+                "intent": null,
+                "actions": [
+                    "task.list"
+                ],
+                "quality_flags": [],
+                "latency_ms": 1000,
+                "user_message": "What tasks do I have on my to do list for today?",
+                "assistant_answer": "I ran into a problem trying to do that."
+            }
+        ],
+        "guidance": "Use this as the durable Bean UX scorecard. Treat missing samples as unknown, not success."
+    },
+    "next_recommended_action": "Use php artisan bean:ux-benchmark locally or on production after each runtime/voice change; address the largest failing target cluster first.",
+    "resume_instructions": [
+        "Read docs/bean-world-class-ux-goal.md.",
+        "Read docs/bean-world-class-ux-progress.json.",
+        "Run php artisan bean:ux-benchmark --days=7.",
+        "Do not rely on chat history as the source of truth."
+    ]
+}
