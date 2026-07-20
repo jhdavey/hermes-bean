@@ -1,6 +1,6 @@
 # Bean UX Evaluation Scenario Catalog
 
-- Generated: 2026-07-20T13:14:39+00:00
+- Generated: 2026-07-20T13:44:26+00:00
 - Principle: Scenarios exercise the real Hermes Bean runtime and bean_dashboard tool bridge; no local deterministic router is allowed.
 
 ## read_overdue_tasks

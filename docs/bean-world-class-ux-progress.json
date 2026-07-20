@@ -1,9 +1,9 @@
 {
     "goal": "Make Bean meet world-class user-experience benchmarks.",
-    "updated_at": "2026-07-20T13:21:21+00:00",
+    "updated_at": "2026-07-20T13:44:26+00:00",
     "latest_report": {
         "mode": "bean-world-class-ux-benchmark",
-        "generated_at": "2026-07-20T13:14:39+00:00",
+        "generated_at": "2026-07-20T13:44:25+00:00",
         "window_days": 7,
         "counts": {
             "runs": 6682,
@@ -92,6 +92,18 @@
             "voice_followup_open_after_speech_p95_ms": {
                 "operator": "<=",
                 "value": 700
+            },
+            "followup_reference_resolution_rate": {
+                "operator": ">=",
+                "value": 0.95
+            },
+            "unnecessary_clarification_rate": {
+                "operator": "<=",
+                "value": 0.03
+            },
+            "immediate_context_loss_rate": {
+                "operator": "<=",
+                "value": 0.02
             }
         },
         "metrics": {
@@ -143,6 +155,14 @@
                     "speech_finished_to_followup_opened_p50": null,
                     "speech_finished_to_followup_opened_p95": null
                 }
+            },
+            "semantic": {
+                "followup_reference_resolution_rate": 1,
+                "unnecessary_clarification_rate": 0,
+                "immediate_context_loss_rate": 0,
+                "followup_reference_samples": 165,
+                "unnecessary_clarifications": 0,
+                "immediate_context_losses": 0
             }
         },
         "target_status": {
@@ -235,6 +255,21 @@
                 "status": "unknown",
                 "actual": null,
                 "target": "<= 700"
+            },
+            "followup_reference_resolution_rate": {
+                "status": "pass",
+                "actual": 1,
+                "target": ">= 0.95"
+            },
+            "unnecessary_clarification_rate": {
+                "status": "pass",
+                "actual": 0,
+                "target": "<= 0.03"
+            },
+            "immediate_context_loss_rate": {
+                "status": "pass",
+                "actual": 0,
+                "target": "<= 0.02"
             }
         },
         "failure_clusters": {
@@ -323,8 +358,8 @@
                     "tool_completed_but_no_factual_answer"
                 ],
                 "latency_ms": 0,
-                "user_message": "tell me today\u2019s tasks",
-                "assistant_answer": "I\u2019ll add that task. Done."
+                "user_message": "tell me today’s tasks",
+                "assistant_answer": "I’ll add that task. Done."
             },
             {
                 "bean_run_id": 85,
@@ -340,7 +375,7 @@
                 ],
                 "latency_ms": 0,
                 "user_message": "Find note grill repair",
-                "assistant_answer": "I\u2019ll search your notes. Done."
+                "assistant_answer": "I’ll search your notes. Done."
             },
             {
                 "bean_run_id": 71,
@@ -356,7 +391,7 @@
                 ],
                 "latency_ms": 0,
                 "user_message": "Do I have reminders today?",
-                "assistant_answer": "I\u2019ll create that reminder. Done."
+                "assistant_answer": "I’ll create that reminder. Done."
             },
             {
                 "bean_run_id": 67,
@@ -372,7 +407,7 @@
                 ],
                 "latency_ms": 0,
                 "user_message": "Any reminders today?",
-                "assistant_answer": "I\u2019ll create that reminder. Done."
+                "assistant_answer": "I’ll create that reminder. Done."
             },
             {
                 "bean_run_id": 48,
@@ -402,8 +437,8 @@
                     "tool_completed_but_no_factual_answer"
                 ],
                 "latency_ms": 0,
-                "user_message": "Tell me today\u2019s tasks",
-                "assistant_answer": "I\u2019ll add that task. Done."
+                "user_message": "Tell me today’s tasks",
+                "assistant_answer": "I’ll add that task. Done."
             },
             {
                 "bean_run_id": 12,
@@ -421,81 +456,11 @@
         ],
         "guidance": "Use this as the durable Bean UX scorecard. Treat missing samples as unknown, not success."
     },
-    "next_recommended_action": "Largest remaining gap is unknown real voice reliability/latency. Keep deployed telemetry live, collect real voice samples, and add an automated/manual voice scenario harness; separately monitor stale external.lookup label-length failures for recurrence.",
+    "next_recommended_action": "Use php artisan bean:ux-benchmark locally or on production after each runtime/voice change; address the largest failing target cluster first.",
     "resume_instructions": [
         "Read docs/bean-world-class-ux-goal.md.",
         "Read docs/bean-world-class-ux-progress.json.",
         "Run php artisan bean:ux-benchmark --days=7.",
         "Do not rely on chat history as the source of truth."
-    ],
-    "deployment_verification": {
-        "verified_at": "2026-07-20T13:21:21+00:00",
-        "local_commit": "d2b5daa6623fef8dd624a8985a74d0e2a6b8da6c",
-        "origin_main_commit": "d2b5daa6623fef8dd624a8985a74d0e2a6b8da6c",
-        "production_commit": "d2b5daa6623fef8dd624a8985a74d0e2a6b8da6c",
-        "production_deploy": {
-            "host": "heybean.org",
-            "current_release": "/home/forge/heybean.org/releases/73710695",
-            "migrations": [
-                "2026_07_19_215621_create_bean_voice_events: ran",
-                "2026_07_19_224836_add_occurred_at_ms_to_bean_voice_events: ran"
-            ]
-        },
-        "local_verification": [
-            "./vendor/bin/pint --dirty: pass",
-            "php artisan test: 166 passed, 1630 assertions",
-            "npm test: 11 passed",
-            "npm run build: pass",
-            "php artisan bean:ux-benchmark --days=7: pass",
-            "php artisan bean:ux-scenarios: 12 scenarios",
-            "php artisan bean:evaluate --production-smoke --recent=200: 0 flagged traces",
-            "git diff --check: pass"
-        ],
-        "production_verification": [
-            "php artisan about: production, debug off, config/routes/views cached",
-            "php artisan migrate:status: voice event migrations ran",
-            "php artisan bean:evaluate --production-smoke --recent=200: 200 traces audited, 0 flagged",
-            "php artisan bean:ux-benchmark --days=7: 3155 runs, 99.71% task success, 0.06% generic failures, voice metrics unknown pending real samples",
-            "php artisan bean:ux-scenarios: 12 scenarios",
-            "GET https://heybean.org/: 200",
-            "GET https://heybean.org/login: 200",
-            "production voice telemetry endpoint smoke: session 201, 4/4 voice events 201, occurred_at_ms recorded 4/4, temporary user/events cleaned up"
-        ]
-    },
-    "latest_production_report": {
-        "generated_at": "2026-07-20T13:16:20+00:00",
-        "window_days": 7,
-        "counts": {
-            "runs": 3155,
-            "voice_events": 0
-        },
-        "metrics": {
-            "task_success_rate": 0.9971,
-            "generic_failure_rate": 0.0006,
-            "dashboard_grounded_rate": 0.9984,
-            "voice_first_command_capture_rate": null
-        },
-        "unknown_targets": [
-            "voice_first_command_capture_rate",
-            "voice_followup_capture_rate",
-            "voice_background_false_submission_rate",
-            "voice_echo_duplicate_rate",
-            "voice_failure_wake_reset_rate",
-            "voice_dismiss_success_rate",
-            "voice_wake_to_listening_p95_ms",
-            "voice_speech_to_thinking_p95_ms",
-            "voice_speech_to_answer_started_p95_ms",
-            "voice_followup_open_after_speech_p95_ms"
-        ],
-        "failure_clusters": {
-            "text|external.lookup|failed": 7,
-            "hermes|no_tool|failed": 3
-        },
-        "quality_flag_counts": {
-            "calendar_tomorrow_missing_time_scope": 1,
-            "generic_done_after_factual_question": 1,
-            "tool_completed_but_no_factual_answer": 1,
-            "workspace_question_omitted_workspace_name": 1
-        }
-    }
+    ]
 }

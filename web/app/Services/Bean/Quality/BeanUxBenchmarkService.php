@@ -49,6 +49,7 @@ class BeanUxBenchmarkService
         $dashboardFailedToolRuns = $dashboardRuns->filter(fn (BeanRun $run): bool => $run->toolCalls->where('status', 'failed')->isNotEmpty());
 
         $voice = $this->voiceMetrics($voiceEvents, $voiceRuns);
+        $semantic = $this->semanticMetrics($traces);
         $taskSuccessRate = $this->rate($dashboardRuns->count() - $dashboardRuns->filter(fn (BeanRun $run): bool => $this->isFailedRun($run))->count(), $dashboardRuns->count());
         $multiStepSuccessRate = $this->rate($multiStepRuns->count() - $multiStepRuns->filter(fn (BeanRun $run): bool => $this->isFailedRun($run))->count(), $multiStepRuns->count());
 
@@ -67,6 +68,7 @@ class BeanUxBenchmarkService
                 'multi_step_p95' => $this->percentile($multiStepLatencies, 95),
             ],
             'voice' => $voice,
+            'semantic' => $semantic,
         ];
 
         return [
@@ -148,6 +150,11 @@ class BeanUxBenchmarkService
             '- Speech → visible thinking p95: '.($voice['latency_ms']['speech_to_thinking_p95'] ?? 'unknown').'ms',
             '- Speech → spoken answer p95: '.($voice['latency_ms']['speech_to_answer_started_p95'] ?? 'unknown').'ms',
             '- Assistant speech finished → follow-up open p95: '.($voice['latency_ms']['speech_finished_to_followup_opened_p95'] ?? 'unknown').'ms',
+            '',
+            '## Continuity semantics',
+            '- Follow-up/reference resolution: '.$this->percentString(data_get($metrics, 'semantic.followup_reference_resolution_rate')),
+            '- Unnecessary clarification rate: '.$this->percentString(data_get($metrics, 'semantic.unnecessary_clarification_rate')),
+            '- Immediate context-loss rate: '.$this->percentString(data_get($metrics, 'semantic.immediate_context_loss_rate')),
             '',
             '## Target status',
         ];
@@ -287,6 +294,47 @@ class BeanUxBenchmarkService
         return 'user:'.$event->user_id;
     }
 
+    private function semanticMetrics(Collection $traces): array
+    {
+        $followups = $traces
+            ->filter(fn (BeanQualityTrace $trace): bool => $this->looksLikeReferenceFollowup((string) $trace->user_message))
+            ->values();
+        $resolved = $followups->filter(fn (BeanQualityTrace $trace): bool => $this->referenceFollowupResolved($trace))->count();
+        $clarifications = $followups->filter(fn (BeanQualityTrace $trace): bool => in_array('unnecessary_clarification', $trace->quality_flags ?? [], true) || $this->isClarifyingAnswer((string) $trace->assistant_answer))->count();
+        $contextLosses = $followups->filter(fn (BeanQualityTrace $trace): bool => in_array('immediate_context_loss', $trace->quality_flags ?? [], true) || (! $this->referenceFollowupResolved($trace) && ($trace->tool_results_count ?? 0) === 0))->count();
+
+        return [
+            'followup_reference_resolution_rate' => $this->rate($resolved, $followups->count()),
+            'unnecessary_clarification_rate' => $this->rate($clarifications, $followups->count()),
+            'immediate_context_loss_rate' => $this->rate($contextLosses, $followups->count()),
+            'followup_reference_samples' => $followups->count(),
+            'unnecessary_clarifications' => $clarifications,
+            'immediate_context_losses' => $contextLosses,
+        ];
+    }
+
+    private function looksLikeReferenceFollowup(string $input): bool
+    {
+        return preg_match('/\b(that|it|those|them|the previous|that task|that note|that event|that reminder)\b/iu', $input) === 1;
+    }
+
+    private function referenceFollowupResolved(BeanQualityTrace $trace): bool
+    {
+        $actions = collect($trace->actions ?? [])->filter()->values();
+        $flags = $trace->quality_flags ?? [];
+
+        return $actions->isNotEmpty()
+            && ($trace->tool_results_count ?? 0) > 0
+            && ! in_array('immediate_context_loss', $flags, true)
+            && ! in_array('unnecessary_clarification', $flags, true)
+            && ! $this->isClarifyingAnswer((string) $trace->assistant_answer);
+    }
+
+    private function isClarifyingAnswer(string $answer): bool
+    {
+        return preg_match('/\b(which one|which .*\?|what .*\?|can you clarify|please clarify|did you mean|what do you mean|which note|which task)\b/iu', $answer) === 1;
+    }
+
     private function eventOccurredAt(BeanVoiceEvent $event): ?Carbon
     {
         $value = $event->occurred_at ?: $event->created_at;
@@ -332,6 +380,9 @@ class BeanUxBenchmarkService
             'voice_speech_to_thinking_p95_ms' => ['operator' => '<=', 'value' => 500],
             'voice_speech_to_answer_started_p95_ms' => ['operator' => '<=', 'value' => 7000],
             'voice_followup_open_after_speech_p95_ms' => ['operator' => '<=', 'value' => 700],
+            'followup_reference_resolution_rate' => ['operator' => '>=', 'value' => 0.95],
+            'unnecessary_clarification_rate' => ['operator' => '<=', 'value' => 0.03],
+            'immediate_context_loss_rate' => ['operator' => '<=', 'value' => 0.02],
         ];
     }
 
@@ -356,6 +407,9 @@ class BeanUxBenchmarkService
             'voice_speech_to_thinking_p95_ms' => data_get($metrics, 'voice.latency_ms.speech_to_thinking_p95'),
             'voice_speech_to_answer_started_p95_ms' => data_get($metrics, 'voice.latency_ms.speech_to_answer_started_p95'),
             'voice_followup_open_after_speech_p95_ms' => data_get($metrics, 'voice.latency_ms.speech_finished_to_followup_opened_p95'),
+            'followup_reference_resolution_rate' => data_get($metrics, 'semantic.followup_reference_resolution_rate'),
+            'unnecessary_clarification_rate' => data_get($metrics, 'semantic.unnecessary_clarification_rate'),
+            'immediate_context_loss_rate' => data_get($metrics, 'semantic.immediate_context_loss_rate'),
         ];
         $status = [];
         foreach ($targets as $key => $target) {

@@ -21,10 +21,12 @@ When a session is working in this repository and the user asks about Bean, HeyBe
    cd /home/forge/heybean.org/current
    php artisan bean:evaluate --production-smoke --recent=200
    php artisan bean:ux-benchmark --days=7
+   php artisan bean:ux-evaluate-scenarios --recent=500
    ```
 
-4. Use the largest failing benchmark cluster as the next implementation target.
-5. After every meaningful work block, update `docs/bean-world-class-ux-progress.json` by rerunning `php artisan bean:ux-benchmark` or manually recording:
+4. For voice-specific work, read `docs/bean-voice-live-sample-harness.md` before asking for or evaluating live voice samples.
+5. Use the largest failing benchmark cluster as the next implementation target.
+6. After every meaningful work block, update `docs/bean-world-class-ux-progress.json` by rerunning `php artisan bean:ux-benchmark` or manually recording:
    - timestamp
    - local commit
    - production commit if deployed

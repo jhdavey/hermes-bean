@@ -140,6 +140,17 @@ class BeanQualityLabTest extends TestCase
             'started_at' => now()->subSecond(),
             'completed_at' => now(),
         ]);
+        $contextLossRun = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $user->default_workspace_id,
+            'status' => 'completed',
+            'mode' => 'text',
+            'input' => 'Add ingredient portions to that note.',
+            'output' => 'Which note do you mean?',
+            'started_at' => now()->subSecond(),
+            'completed_at' => now(),
+        ]);
 
         $calendarRun = BeanRun::create([
             'bean_session_id' => $session->id,
@@ -189,6 +200,7 @@ class BeanQualityLabTest extends TestCase
         $workspaceTrace = app(BeanQualityAuditService::class)->traceRun($workspaceRun->fresh());
         $externalTrace = app(BeanQualityAuditService::class)->traceRun($externalRun->fresh());
         $correctionTrace = app(BeanQualityAuditService::class)->traceRun($correctionRun->fresh());
+        $contextLossTrace = app(BeanQualityAuditService::class)->traceRun($contextLossRun->fresh());
         $calendarTrace = app(BeanQualityAuditService::class)->traceRun($calendarRun->fresh());
         $groundedCreationTrace = app(BeanQualityAuditService::class)->traceRun($groundedCreationRun->fresh());
 
@@ -196,6 +208,8 @@ class BeanQualityLabTest extends TestCase
         $this->assertContains('external_lookup_completed_without_sources', $externalTrace->quality_flags);
         $this->assertContains('source_claim_without_external_sources', $externalTrace->quality_flags);
         $this->assertContains('correction_turn_without_recovery_action', $correctionTrace->quality_flags);
+        $this->assertContains('immediate_context_loss', $contextLossTrace->quality_flags);
+        $this->assertContains('unnecessary_clarification', $contextLossTrace->quality_flags);
         $this->assertContains('calendar_tomorrow_missing_time_scope', $calendarTrace->quality_flags);
         $this->assertContains('grounded_note_creation_without_external_lookup', $groundedCreationTrace->quality_flags);
     }

@@ -134,6 +134,12 @@ class BeanQualityAuditService
         if ($this->looksLikeCorrection($lowerUser) && $toolCalls->where('status', 'completed')->isEmpty()) {
             $flags[] = 'correction_turn_without_recovery_action';
         }
+        if ($this->looksLikeReferenceFollowup($lowerUser) && $toolCalls->where('status', 'completed')->isEmpty()) {
+            $flags[] = 'immediate_context_loss';
+        }
+        if ($this->looksLikeReferenceFollowup($lowerUser) && $this->isClarifyingAnswer($lowerAnswer)) {
+            $flags[] = 'unnecessary_clarification';
+        }
         if (in_array('time.now', $actions, true) && $this->asksTime($lowerUser) && ! preg_match('/\b\d{1,2}:\d{2}\s?(am|pm|utc|est|edt|cst|cdt|mst|mdt|pst|pdt)?\b/i', $answer)) {
             $flags[] = 'missing_time_after_time_tool';
         }
@@ -160,11 +166,15 @@ class BeanQualityAuditService
     private function timeLabel(Collection $toolCalls): ?string
     {
         foreach ($toolCalls as $toolCall) {
-            if (! $toolCall instanceof BeanToolCall) continue;
+            if (! $toolCall instanceof BeanToolCall) {
+                continue;
+            }
             $arguments = is_array($toolCall->arguments) ? $toolCall->arguments : [];
             $result = is_array($toolCall->result) ? $toolCall->result : [];
             $label = strtolower(trim((string) ($arguments['time_label'] ?? $result['time_label'] ?? '')));
-            if ($label !== '') return $label;
+            if ($label !== '') {
+                return $label;
+            }
         }
 
         return null;
@@ -174,19 +184,29 @@ class BeanQualityAuditService
     {
         if ($actions !== []) {
             $intent = (string) $actions[0];
+
             return $timeLabel ? $intent.'.'.$timeLabel : $intent;
         }
         $input = mb_strtolower((string) $run->input);
-        if (str_contains($input, 'time')) return 'time.now';
-        if (str_contains($input, 'overdue')) return 'overdue.query';
-        if (str_contains($input, 'today')) return 'today.query';
+        if (str_contains($input, 'time')) {
+            return 'time.now';
+        }
+        if (str_contains($input, 'overdue')) {
+            return 'overdue.query';
+        }
+        if (str_contains($input, 'today')) {
+            return 'today.query';
+        }
 
         return null;
     }
 
     private function latencyMs(BeanRun $run): ?int
     {
-        if (! $run->started_at || ! $run->completed_at) return null;
+        if (! $run->started_at || ! $run->completed_at) {
+            return null;
+        }
+
         return max(0, (int) Carbon::parse($run->started_at)->diffInMilliseconds(Carbon::parse($run->completed_at)));
     }
 
@@ -203,7 +223,9 @@ class BeanQualityAuditService
     private function isGenericNoFactAnswer(string $lowerAnswer): bool
     {
         $normalized = trim(preg_replace('/\s+/', ' ', $lowerAnswer) ?: $lowerAnswer);
-        if (in_array($normalized, ['done.', 'done', 'all done.', 'i’ll check. done.', 'i will check. done.'], true)) return true;
+        if (in_array($normalized, ['done.', 'done', 'all done.', 'i’ll check. done.', 'i will check. done.'], true)) {
+            return true;
+        }
 
         return preg_match('/\b(i[’\']?ll|i will|checking|check|retrieve|look)\b.*\bdone\.?$/u', $normalized) === 1;
     }
@@ -222,18 +244,24 @@ class BeanQualityAuditService
 
     private function isClarifyingAnswer(string $lowerAnswer): bool
     {
-        return preg_match('/\b(which one|can you clarify|please clarify|did you mean|i heard)\b/u', $lowerAnswer) === 1;
+        return preg_match('/\b(which one|which .*\?|which note|which task|what do you mean|can you clarify|please clarify|did you mean|i heard)\b/u', $lowerAnswer) === 1;
     }
 
     private function looksLikeExternalLookupQuestion(string $lowerUser): bool
     {
-        if (preg_match('/\b(time|date|today[’\']?s date|what day|current time|time is it)\b/u', $lowerUser) === 1) return false;
+        if (preg_match('/\b(time|date|today[’\']?s date|what day|current time|time is it)\b/u', $lowerUser) === 1) {
+            return false;
+        }
+
         return preg_match('/\b(go online|online|look up|lookup|search the web|search online|internet|web|source|sources|cite|citation|verify|latest|recent reviews|weather|forecast|temperature)\b/u', $lowerUser) === 1;
     }
 
     private function looksLikeSubstantivePublicNoteCreation(string $lowerUser): bool
     {
-        if (preg_match('/\b(note that|write down that|jot down that|remember that|called|titled)\b/u', $lowerUser) === 1) return false;
+        if (preg_match('/\b(note that|write down that|jot down that|remember that|called|titled)\b/u', $lowerUser) === 1) {
+            return false;
+        }
+
         return preg_match('/\b(note|notes)\b/u', $lowerUser) === 1
             && preg_match('/\b(save|create|make|add|write)\b/u', $lowerUser) === 1
             && preg_match('/\b(guide|instructions|steps|how to|how-to|recipe|research|compare|comparison|best|sources?)\b/u', $lowerUser) === 1
@@ -243,11 +271,17 @@ class BeanQualityAuditService
     private function externalLookupHasSources(Collection $toolCalls): bool
     {
         foreach ($toolCalls as $toolCall) {
-            if (! $toolCall instanceof BeanToolCall || $toolCall->action !== 'external.lookup') continue;
-            if ($toolCall->status !== 'completed') continue;
+            if (! $toolCall instanceof BeanToolCall || $toolCall->action !== 'external.lookup') {
+                continue;
+            }
+            if ($toolCall->status !== 'completed') {
+                continue;
+            }
             $result = is_array($toolCall->result) ? $toolCall->result : [];
             $sources = is_array($result['sources'] ?? null) ? $result['sources'] : [];
-            if (collect($sources)->contains(fn ($source): bool => is_array($source) && trim((string) ($source['url'] ?? $source['snippet'] ?? $source['title'] ?? '')) !== '')) return true;
+            if (collect($sources)->contains(fn ($source): bool => is_array($source) && trim((string) ($source['url'] ?? $source['snippet'] ?? $source['title'] ?? '')) !== '')) {
+                return true;
+            }
         }
 
         return false;
@@ -256,6 +290,11 @@ class BeanQualityAuditService
     private function looksLikeCorrection(string $lowerUser): bool
     {
         return preg_match('/\b(that[’\']?s not what i said|not what i said|i said|i meant)\b/u', $lowerUser) === 1;
+    }
+
+    private function looksLikeReferenceFollowup(string $lowerUser): bool
+    {
+        return preg_match('/\b(that|it|those|them|that task|that note|that event|that reminder|the previous)\b/u', $lowerUser) === 1;
     }
 
     private function asksDate(string $lowerUser): bool
@@ -279,14 +318,22 @@ class BeanQualityAuditService
     {
         $start = now()->startOfDay();
         foreach ($toolCalls as $toolCall) {
-            if (! $toolCall instanceof BeanToolCall || $toolCall->action !== 'task.list') continue;
+            if (! $toolCall instanceof BeanToolCall || $toolCall->action !== 'task.list') {
+                continue;
+            }
             $arguments = is_array($toolCall->arguments) ? $toolCall->arguments : [];
             $result = is_array($toolCall->result) ? $toolCall->result : [];
             $label = strtolower(trim((string) ($arguments['time_label'] ?? $result['time_label'] ?? '')));
-            if ($label !== 'today') continue;
+            if ($label !== 'today') {
+                continue;
+            }
             foreach (($result['items'] ?? []) as $item) {
-                if (! is_array($item) || empty($item['due_at'])) continue;
-                if (Carbon::parse((string) $item['due_at'])->lt($start)) return true;
+                if (! is_array($item) || empty($item['due_at'])) {
+                    continue;
+                }
+                if (Carbon::parse((string) $item['due_at'])->lt($start)) {
+                    return true;
+                }
             }
         }
 
@@ -304,6 +351,7 @@ class BeanQualityAuditService
             ->flatMap(function (BeanToolCall $toolCall): array {
                 $result = is_array($toolCall->result) ? $toolCall->result : [];
                 $items = is_array($result['items'] ?? null) ? $result['items'] : (is_array($result['item'] ?? null) ? [$result['item']] : []);
+
                 return collect($items)
                     ->filter(fn ($item): bool => is_array($item))
                     ->flatMap(fn (array $item): array => is_array($item['workspace_names'] ?? null) ? $item['workspace_names'] : [])
@@ -319,7 +367,9 @@ class BeanQualityAuditService
     private function voiceSuccessRate(Collection $traces): ?float
     {
         $voice = $traces->filter(fn (BeanQualityTrace $trace): bool => (bool) $trace->voice);
-        if ($voice->isEmpty()) return null;
+        if ($voice->isEmpty()) {
+            return null;
+        }
         $success = $voice->filter(fn (BeanQualityTrace $trace): bool => count($trace->quality_flags ?? []) === 0)->count();
 
         return round($success / $voice->count(), 4);

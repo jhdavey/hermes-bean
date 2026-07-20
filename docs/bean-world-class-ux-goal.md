@@ -87,7 +87,7 @@ Targets:
 - ≤3% unnecessary clarification rate.
 - ≤2% immediate context-loss rate.
 
-The current instrumentation measures backend/run latency plus voice funnel and voice transition latency: wake → listening, transcript → visible thinking, transcript → spoken answer, and assistant speech finished → follow-up open. Follow-up/reference semantic quality and unnecessary clarification still need evaluator scenario scoring plus review labels as the next milestone.
+The current instrumentation measures backend/run latency, recorded scenario pass/fail, semantic continuity labels, and voice transition latency: wake → listening, transcript → visible thinking, transcript → spoken answer, and assistant speech finished → follow-up open. Follow-up/reference semantic quality and unnecessary clarification are scored by `php artisan bean:ux-evaluate-scenarios --recent=500`; voice targets remain unknown until live/browser samples are collected.
 
 ## Durable continuity system
 
@@ -103,6 +103,7 @@ Manual bootstrap remains:
 cd web
 php artisan bean:ux-benchmark --days=7
 php artisan bean:evaluate --production-smoke --recent=200
+php artisan bean:ux-evaluate-scenarios --recent=500
 ```
 
 4. Use the benchmark report to pick the largest failing target cluster.
@@ -120,6 +121,7 @@ php artisan test
 npm test
 npm run build
 php artisan bean:ux-benchmark --days=7
+php artisan bean:ux-evaluate-scenarios --recent=500
 ```
 
 For production-safe verification:
@@ -128,6 +130,7 @@ For production-safe verification:
 cd /home/forge/heybean.org/current
 php artisan bean:evaluate --production-smoke --recent=200
 php artisan bean:ux-benchmark --days=7
+php artisan bean:ux-evaluate-scenarios --recent=500
 ```
 
 Live production probes are allowed only when safe/read-only or when test data is immediately cleaned up.
@@ -145,6 +148,7 @@ Live production probes are allowed only when safe/read-only or when test data is
 
 - Add repeatable local/staging/prod-safe UX scenarios using the real Hermes/tool loop where safe.
 - Cover common dashboard queries, CRUD, shared workspace queries, follow-up references, destructive confirmations, source lookup + note creation, voice failure recovery, background audio, and echo rejection.
+- Score recorded traces with `php artisan bean:ux-evaluate-scenarios --recent=500` and use `docs/bean-voice-live-sample-harness.md` for the manual/browser voice sample pass.
 
 ### Milestone 3 — close gaps
 

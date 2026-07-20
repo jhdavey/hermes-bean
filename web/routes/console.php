@@ -4,6 +4,7 @@ use App\Models\User;
 use App\Services\Bean\Quality\BeanQualityLabService;
 use App\Services\Bean\Quality\BeanUxBenchmarkService;
 use App\Services\Bean\Quality\BeanUxScenarioCatalogService;
+use App\Services\Bean\Quality\BeanUxScenarioEvaluationService;
 use App\Services\PlanHistoryService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Inspiring;
@@ -142,8 +143,31 @@ Artisan::command('bean:ux-scenarios {--json=} {--markdown=}', function (BeanUxSc
     return self::SUCCESS;
 })->purpose('Write the repeatable Bean UX evaluation scenario catalog');
 
+Artisan::command('bean:ux-evaluate-scenarios {--recent=500} {--json=} {--markdown=}', function (BeanUxScenarioEvaluationService $evaluation): int {
+    $recent = (int) $this->option('recent');
+    $report = $evaluation->report($recent);
+    $defaultBase = storage_path('app/bean-ux');
+    File::ensureDirectoryExists($defaultBase);
+    $stamp = now()->format('Ymd-His');
+    $jsonPath = (string) ($this->option('json') ?: $defaultBase.'/bean-ux-evaluation-'.$stamp.'.json');
+    $markdownPath = (string) ($this->option('markdown') ?: $defaultBase.'/bean-ux-evaluation-'.$stamp.'.md');
+    $evaluation->writeReport($report, $jsonPath, $markdownPath);
+
+    $this->info('Bean UX Scenario Evaluation Report');
+    $this->line('Recent runs: '.($report['recent_runs'] ?? $recent));
+    $this->line('Traces evaluated: '.($report['trace_count'] ?? 0));
+    $this->line('Follow-up/reference resolution: '.(data_get($report, 'semantic_metrics.followup_reference_resolution_rate') === null ? 'unknown' : round(data_get($report, 'semantic_metrics.followup_reference_resolution_rate') * 100, 2).'%'));
+    $this->line('Unnecessary clarification rate: '.(data_get($report, 'semantic_metrics.unnecessary_clarification_rate') === null ? 'unknown' : round(data_get($report, 'semantic_metrics.unnecessary_clarification_rate') * 100, 2).'%'));
+    $this->line('Immediate context-loss rate: '.(data_get($report, 'semantic_metrics.immediate_context_loss_rate') === null ? 'unknown' : round(data_get($report, 'semantic_metrics.immediate_context_loss_rate') * 100, 2).'%'));
+    $this->line('JSON: '.$jsonPath);
+    $this->line('Markdown: '.$markdownPath);
+
+    return self::SUCCESS;
+})->purpose('Evaluate recorded Bean UX scenarios and semantic continuity metrics');
+
 Schedule::command('plan-history:prune')->daily();
 Schedule::command('calendar-events:materialize-recurring')->daily();
 Schedule::command('reminders:send-due-notifications')->everyMinute();
 Schedule::command('bean:evaluate --production-smoke --recent=500 --json='.storage_path('app/bean-quality/latest-production-audit.json').' --markdown='.storage_path('app/bean-quality/latest-production-audit.md'))->dailyAt('03:15')->withoutOverlapping();
 Schedule::command('bean:ux-benchmark --days=7 --json='.storage_path('app/bean-ux/latest-benchmark.json').' --markdown='.storage_path('app/bean-ux/latest-benchmark.md').' --progress='.base_path('../docs/bean-world-class-ux-progress.json'))->dailyAt('03:30')->withoutOverlapping();
+Schedule::command('bean:ux-evaluate-scenarios --recent=500 --json='.storage_path('app/bean-ux/latest-scenario-evaluation.json').' --markdown='.storage_path('app/bean-ux/latest-scenario-evaluation.md'))->dailyAt('03:45')->withoutOverlapping();
