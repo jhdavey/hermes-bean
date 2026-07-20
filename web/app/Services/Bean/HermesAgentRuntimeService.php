@@ -23,7 +23,7 @@ class HermesAgentRuntimeService
         private readonly BeanTimeContext $timeContext,
     ) {}
 
-    public function handleMessage(User $user, string $content, BeanSession $session, ?string $clientTimezone = null): array
+    public function handleMessage(User $user, string $content, BeanSession $session, ?string $clientTimezone = null, ?string $source = null): array
     {
         [$home, $hermesSessionName, $hermesSessionId] = $this->homes->ensureForSession($session->refresh());
         $timeContext = $this->timeContext->forSession($session->refresh());
@@ -41,6 +41,7 @@ class HermesAgentRuntimeService
                 'hermes_session_name' => $hermesSessionName,
                 'hermes_session_id' => $hermesSessionId,
                 'client_timezone' => $timeContext['timezone'],
+                'source' => $source,
                 'time_context' => $timeContext,
             ]),
             'started_at' => now(),
@@ -58,7 +59,7 @@ class HermesAgentRuntimeService
 
         try {
             $contextPath = $this->writeToolContext($home, $user, $session, $run, $clientTimezone);
-            [$assistantText, $returnedHermesSessionId] = $this->invokeHermes($home, $hermesSessionId, $content, $contextPath);
+            [$assistantText, $returnedHermesSessionId] = $this->invokeHermes($home, $hermesSessionId, $content, $contextPath, $source);
             $assistantText = trim($assistantText) !== '' ? trim($assistantText) : 'Done.';
             $assistantTextWasSanitized = $this->looksLikeInternalFailure($assistantText);
             if ($assistantTextWasSanitized) {
@@ -168,13 +169,14 @@ class HermesAgentRuntimeService
     /**
      * @return array{0: string, 1: string|null}
      */
-    private function invokeHermes(string $home, ?string $sessionId, string $content, string $contextPath): array
+    private function invokeHermes(string $home, ?string $sessionId, string $content, string $contextPath, ?string $source = null): array
     {
         $binary = (string) config('bean.hermes.binary', 'hermes');
-        $toolsets = (string) config('bean.hermes.toolsets', 'bean_dashboard,skills,memory,session_search,web');
+        $isVoice = $source === 'elevenlabs_agent';
+        $toolsets = (string) config($isVoice ? 'bean.hermes.voice_toolsets' : 'bean.hermes.toolsets', 'bean_dashboard,skills,memory,session_search,web');
         $skills = (string) config('bean.hermes.skills', 'bean-dashboard');
         $timeout = (int) config('bean.hermes.timeout_seconds', 120);
-        $maxTurns = (string) config('bean.hermes.max_turns', 24);
+        $maxTurns = (string) config($isVoice ? 'bean.hermes.voice_max_turns' : 'bean.hermes.max_turns', 24);
         $source = (string) config('bean.hermes.source', 'bean');
         $provider = (string) config('bean.hermes.provider', 'custom');
         $model = (string) config('bean.hermes.model', 'gpt-4.1-mini');

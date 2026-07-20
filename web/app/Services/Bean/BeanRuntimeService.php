@@ -42,7 +42,7 @@ class BeanRuntimeService
         return $session->refresh();
     }
 
-    public function handleMessage(User $user, string $content, ?int $sessionId = null, ?int $workspaceId = null, ?string $clientTimezone = null): array
+    public function handleMessage(User $user, string $content, ?int $sessionId = null, ?int $workspaceId = null, ?string $clientTimezone = null, ?string $source = null): array
     {
         $session = $sessionId
             ? BeanSession::query()->where('user_id', $user->id)->findOrFail($sessionId)
@@ -70,7 +70,7 @@ class BeanRuntimeService
             }
         }
 
-        return $this->hermesRuntime->handleMessage($user, $content, $session, $clientTimezone);
+        return $this->hermesRuntime->handleMessage($user, $content, $session, $clientTimezone, $source);
     }
 
     public function approveConfirmation(User $user, int $confirmationId): array

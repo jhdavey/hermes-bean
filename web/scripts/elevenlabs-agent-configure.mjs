@@ -39,7 +39,7 @@ Critical behavior:
 - The askBean tool is the source of truth for private user data and actions. Do not invent dashboard facts.
 - When askBean returns an answer, speak that answer naturally without adding unsupported facts.
 - If askBean indicates a confirmation is needed, ask the user naturally for confirmation and use their next clear answer as part of the next askBean request.
-- Keep spoken answers concise but complete. Avoid repeated filler; ElevenLabs soft timeout may handle waiting sounds.
+- Keep spoken answers concise but complete. Do not ask "Are you still there?" or otherwise re-engage on silence; if the user is silent, wait for the platform to end the turn/session.
 `;
 
 const askBeanToolConfig = {
@@ -77,15 +77,16 @@ async function ensureAskBeanTool() {
 function conversationConfig(toolId) {
     return {
         turn: {
-            turnTimeout: 12,
+            turnTimeout: 30,
             initialWaitTime: 20,
-            silenceEndCallTimeout: 90,
+            silenceEndCallTimeout: 18,
             turnEagerness: 'normal',
+            speculativeTurn: true,
             interruptionIgnoreTerms: ['okay', 'ok', 'yes', 'yeah', 'yep', 'thanks', 'thank you', 'got it', 'understood'],
             transcribeOnDisabledInterruptions: false,
             softTimeoutConfig: {
-                timeoutSeconds: 6,
-                message: 'Checking that.',
+                timeoutSeconds: -1,
+                message: '',
                 additionalSoftTimeoutMessages: [],
                 useLlmGeneratedMessage: false,
                 randomizeFillers: false,

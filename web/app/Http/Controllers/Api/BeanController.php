@@ -55,9 +55,10 @@ class BeanController extends Controller
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'content' => ['required', 'string', 'max:8000'],
             'client_timezone' => ['nullable', new ClientTimezone],
+            'source' => ['nullable', 'string', 'in:elevenlabs_agent'],
         ]);
 
-        return response()->json(['data' => $this->runtime->handleMessage($request->user(), $data['content'], $data['session_id'] ?? null, $data['workspace_id'] ?? null, $data['client_timezone'] ?? null)]);
+        return response()->json(['data' => $this->runtime->handleMessage($request->user(), $data['content'], $data['session_id'] ?? null, $data['workspace_id'] ?? null, $data['client_timezone'] ?? null, $data['source'] ?? null)]);
     }
 
     public function run(Request $request, BeanRun $run): JsonResponse

@@ -143,6 +143,11 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(source, /textOnly: false/);
     assert.doesNotMatch(source, /overrides: \{/);
     assert.match(source, /onAudio: \(base64Audio\) => handleBeanElevenLabsAudio\(base64Audio\)/);
+    assert.match(source, /source: 'elevenlabs_agent'/);
+    assert.match(source, /voice_idle_timeout_closed/);
+    assert.match(source, /non_speech_transcript_ignored/);
+    assert.match(source, /isBeanNonSpeechTranscript/);
+    assert.match(source, /scheduleBeanVoiceIdleClose/);
     assert.match(source, /audio_playback_blocked/);
     assert.match(source, /audio_output_detected/);
     assert.match(source, /audio_chunk_received/);
@@ -155,6 +160,11 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(agentConfigSource, /agentOutputAudioFormat: 'pcm_48000'/);
     assert.match(agentConfigSource, /provider: 'scribe_realtime'/);
     assert.match(agentConfigSource, /keywords: \['Hey Bean'/);
+    assert.match(agentConfigSource, /turnTimeout: 30/);
+    assert.match(agentConfigSource, /silenceEndCallTimeout: 18/);
+    assert.match(agentConfigSource, /speculativeTurn: true/);
+    assert.match(agentConfigSource, /timeoutSeconds: -1/);
+    assert.match(agentConfigSource, /Do not ask "Are you still there\?"/);
     assert.match(agentConfigSource, /clientEvents: \['audio', 'user_transcript', 'agent_response', 'interruption'\]/);
     assert.match(agentConfigSource, /textOnly: false/);
     assert.match(source, /isLikelyBeanAssistantEcho/);

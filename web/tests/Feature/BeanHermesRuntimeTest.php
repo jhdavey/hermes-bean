@@ -115,6 +115,23 @@ PHP);
         $resumeLog = $logs->last();
         $this->assertContains('--resume', $resumeLog['argv']);
         $this->assertContains('fake-hermes-session-123', $resumeLog['argv']);
+
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'session_id' => $session->id,
+            'content' => 'what is on my dashboard today',
+            'client_timezone' => 'America/Chicago',
+            'source' => 'elevenlabs_agent',
+        ])->assertOk();
+
+        $logs = collect(preg_split('/\R/', trim(File::get($logPath))) ?: [])
+            ->filter()
+            ->map(fn (string $line): array => json_decode($line, true))
+            ->values();
+        $voiceLog = $logs->last();
+        $this->assertContains('--toolsets', $voiceLog['argv']);
+        $this->assertContains('bean_dashboard,skills', $voiceLog['argv']);
+        $this->assertContains('--max-turns', $voiceLog['argv']);
+        $this->assertContains('10', $voiceLog['argv']);
     }
 
     public function test_bean_event_stream_includes_session_and_run_ids_for_voice_recovery(): void
