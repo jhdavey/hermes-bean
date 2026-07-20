@@ -107,6 +107,9 @@ test('Bean voice mutes realtime mic while answering and only opens a short follo
     assert.match(source, /Listening for a follow-up…/);
     assert.match(source, /input_audio_buffer\.clear/);
     assert.match(source, /Date\.now\(\) < beanVoiceInputIgnoreUntil/);
+    assert.match(source, /beanEndVoiceAfterAnswer/);
+    assert.match(source, /data\.run\?\.status === 'failed'/);
+    assert.match(source, /endBeanVoiceConversationForWake\('Listening locally for “Hey Bean”'\)/);
     assert.match(source, /endBeanVoiceConversationForWake\(\)/);
 });
 

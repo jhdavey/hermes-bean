@@ -245,6 +245,7 @@ export function mountHeyBeanWebApp(mount) {
     let beanVoiceInputIgnoreUntil = 0;
     let beanLastSpokenAnswer = '';
     let beanLastSpokenAnswerAt = 0;
+    let beanEndVoiceAfterAnswer = false;
     let beanEventStatusStartedAt = Date.now();
 
     boot();
@@ -4779,6 +4780,7 @@ export function mountHeyBeanWebApp(mount) {
         clearBeanPendingWakeTail();
         clearBeanFollowUpTimer();
         clearBeanAssistantSpeechFallbackTimer();
+        beanEndVoiceAfterAnswer = false;
         setBeanVoiceInputEnabled(false);
         beanDataChannel?.close?.();
         beanPeerConnection?.close?.();
@@ -4881,6 +4883,7 @@ export function mountHeyBeanWebApp(mount) {
             state.bean.voiceTranscript = '';
             scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
             const answer = latestBeanAssistantMessage();
+            beanEndVoiceAfterAnswer = data.run?.status === 'failed' || normalizeBeanVoiceText(answer) === normalizeBeanVoiceText('I could not complete that request.');
             if (answer) {
                 speakBeanRealtimeAnswer(answer);
                 state.bean.mode = 'speaking';
@@ -4906,6 +4909,10 @@ export function mountHeyBeanWebApp(mount) {
 
     function openBeanFollowUpAfterAssistantSpeech() {
         if (!state.bean.voiceActive || state.bean.mode !== 'speaking') return;
+        if (beanEndVoiceAfterAnswer) {
+            endBeanVoiceConversationForWake('Listening locally for “Hey Bean”');
+            return;
+        }
         state.bean.mode = 'listening';
         scheduleBeanFollowUpListening();
     }
