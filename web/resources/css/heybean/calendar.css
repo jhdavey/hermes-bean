@@ -348,8 +348,10 @@
 }
 
 .hb-month-all-day-event {
+    width: fit-content;
     min-width: 0;
     max-width: 100%;
+    justify-self: start;
     overflow: hidden;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -391,7 +393,10 @@
 }
 
 .hb-month-event {
+    width: fit-content;
     min-width: 0;
+    max-width: 100%;
+    justify-self: start;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     align-items: start;

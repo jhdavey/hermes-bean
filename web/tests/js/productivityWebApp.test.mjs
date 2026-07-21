@@ -6,6 +6,7 @@ const source = await readFile(new URL('../../resources/js/heybean/webApp.js', im
 const agentConfigSource = await readFile(new URL('../../scripts/elevenlabs-agent-configure.mjs', import.meta.url), 'utf8');
 const themeSource = await readFile(new URL('../../resources/css/heybean/theme.css', import.meta.url), 'utf8');
 const dashboardSource = await readFile(new URL('../../resources/css/heybean/dashboard.css', import.meta.url), 'utf8');
+const calendarSource = await readFile(new URL('../../resources/css/heybean/calendar.css', import.meta.url), 'utf8');
 const baseShellSource = await readFile(new URL('../../resources/css/heybean/base-shell.css', import.meta.url), 'utf8');
 
 function cssRuleContaining(sourceText, selector) {
@@ -46,6 +47,12 @@ test('command center includes a date-scoped plain-text sticky note with autosave
     assert.doesNotMatch(cssRuleContaining(dashboardSource, '.hb-daily-sticky-note'), /--hb-warning/);
     assert.doesNotMatch(source, /['"]Autosaves['"]/);
     assert.doesNotMatch(source, /data-daily-sticky-note[^>]*contenteditable/);
+});
+
+test('month event pills fit their text without exceeding the date cell', () => {
+    assert.match(calendarSource, /\.hb-month-event\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;[^}]*justify-self:\s*start;/s);
+    assert.match(calendarSource, /\.hb-month-all-day-event\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;[^}]*justify-self:\s*start;/s);
+    assert.match(calendarSource, /\.hb-month-event-title\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s);
 });
 
 test('Bean assistant presence is web-first and uses the Laravel Bean runtime', () => {
