@@ -118,7 +118,9 @@ class _NotesViewState extends State<_NotesView> {
   void _selectNote(BeanNote? note) {
     final noteFormats = _noteFormatsFromMetadata(note?.metadata);
     final normalizedBody = _normalizeCheckedCheckboxMarkers(
-      note?.plainText ?? _plainTextFromHtml(note?.bodyHtml),
+      note?.bodyMarkdown ??
+          note?.plainText ??
+          _plainTextFromHtml(note?.bodyHtml),
     );
     _selectedId = note?.id;
     _editingFolderId = note?.folderId;

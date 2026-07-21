@@ -54,6 +54,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onThemeModeChanged,
     required this.onCommandCenterLabelChanged,
     required this.onPreferredMapAppChanged,
+    required this.onTimezoneChanged,
     required this.launchExternalUrl,
     required this.stripePaymentHandler,
     required this.onBillingChanged,
@@ -213,6 +214,7 @@ class _CommandCenterContent extends StatelessWidget {
   final Future<void> Function(String themeModeKey) onThemeModeChanged;
   final Future<void> Function(String label) onCommandCenterLabelChanged;
   final Future<void> Function(String preferredMapApp) onPreferredMapAppChanged;
+  final Future<void> Function(String timezone) onTimezoneChanged;
   final ExternalUrlLauncher launchExternalUrl;
   final StripePaymentHandler stripePaymentHandler;
   final Future<void> Function() onBillingChanged;
@@ -233,6 +235,7 @@ class _CommandCenterContent extends StatelessWidget {
         noteLimit > 0;
     final selectedPanel = switch (selectedDestination) {
       _HomeDestination.today => _TodayHomeView(
+        apiClient: apiClient,
         user: user,
         tasks: calendarTasks,
         calendar: calendar,
@@ -348,6 +351,7 @@ class _CommandCenterContent extends StatelessWidget {
         onThemeModeChanged: onThemeModeChanged,
         onCommandCenterLabelChanged: onCommandCenterLabelChanged,
         onPreferredMapAppChanged: onPreferredMapAppChanged,
+        onTimezoneChanged: onTimezoneChanged,
         onWorkspacesChanged: onWorkspacesChanged,
         error: error,
         onErrorDismissed: onErrorDismissed,

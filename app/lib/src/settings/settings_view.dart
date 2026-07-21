@@ -20,6 +20,7 @@ class _SettingsView extends StatelessWidget {
     required this.onThemeModeChanged,
     required this.onCommandCenterLabelChanged,
     required this.onPreferredMapAppChanged,
+    required this.onTimezoneChanged,
     required this.onWorkspacesChanged,
     this.error,
     this.onErrorDismissed,
@@ -44,6 +45,7 @@ class _SettingsView extends StatelessWidget {
   final Future<void> Function(String themeModeKey) onThemeModeChanged;
   final Future<void> Function(String label) onCommandCenterLabelChanged;
   final Future<void> Function(String preferredMapApp) onPreferredMapAppChanged;
+  final Future<void> Function(String timezone) onTimezoneChanged;
   final Future<void> Function() onWorkspacesChanged;
   final String? error;
   final VoidCallback? onErrorDismissed;
@@ -103,6 +105,10 @@ class _SettingsView extends StatelessWidget {
             _MapPreferencesCard(
               preferredMapApp: user.preferredMapApp,
               onChanged: onPreferredMapAppChanged,
+            ),
+            _TimezonePreferencesCard(
+              timezone: user.timezone,
+              onChanged: onTimezoneChanged,
             ),
             const SizedBox(height: 8),
             _WorkspacesSettingsCard(
@@ -1530,6 +1536,164 @@ class _MapPreferencesCardState extends State<_MapPreferencesCard> {
 }
 
 String _normalizedMapApp(String value) => value == 'apple' ? 'apple' : 'google';
+
+class _TimezonePreferencesCard extends StatefulWidget {
+  const _TimezonePreferencesCard({
+    required this.timezone,
+    required this.onChanged,
+  });
+
+  final String? timezone;
+  final Future<void> Function(String timezone) onChanged;
+
+  @override
+  State<_TimezonePreferencesCard> createState() =>
+      _TimezonePreferencesCardState();
+}
+
+class _TimezonePreferencesCardState extends State<_TimezonePreferencesCard> {
+  late final TextEditingController _controller;
+  bool _saving = false;
+  String? _message;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.timezone ?? '');
+  }
+
+  @override
+  void didUpdateWidget(covariant _TimezonePreferencesCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_saving && widget.timezone != oldWidget.timezone) {
+      _controller.text = widget.timezone ?? '';
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _useDeviceTimezone() async {
+    final timezone = await _deviceIanaTimezone();
+    if (timezone == null || timezone.isEmpty) return;
+    _controller.text = timezone;
+    await _save();
+  }
+
+  Future<void> _save() async {
+    final timezone = _controller.text.trim();
+    if (timezone.isEmpty || _saving) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+      _message = null;
+    });
+    try {
+      await widget.onChanged(timezone);
+      if (mounted) setState(() => _message = 'Timezone saved.');
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () =>
+              _error = beanFriendlyErrorMessage(error, action: 'save timezone'),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('timezone-preferences-card'),
+    margin: const EdgeInsets.only(top: 4),
+    padding: const EdgeInsets.only(top: 14, bottom: 12),
+    decoration: _sectionDividerDecoration(),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.schedule_rounded, color: HeyBeanTheme.muted),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Timezone',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Bean uses this for all due dates, reminders, events, and voice answers.',
+                    style: TextStyle(
+                      color: HeyBeanTheme.muted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                key: const Key('timezone-input'),
+                controller: _controller,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => unawaited(_save()),
+                decoration: const InputDecoration(
+                  labelText: 'IANA timezone',
+                  hintText: 'America/New_York',
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              key: const Key('timezone-use-device-action'),
+              onPressed: _saving ? null : () => unawaited(_useDeviceTimezone()),
+              child: const Text('Device'),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              key: const Key('timezone-save-action'),
+              onPressed: _saving ? null : () => unawaited(_save()),
+              child: _saving
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Save'),
+            ),
+          ],
+        ),
+        if (_message != null || _error != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            _error ?? _message!,
+            key: const Key('timezone-save-status'),
+            style: TextStyle(
+              color: _error == null
+                  ? HeyBeanTheme.muted
+                  : const Color(0xFFB42318),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ],
+    ),
+  );
+}
 
 class _WorkspacesSettingsCard extends StatefulWidget {
   const _WorkspacesSettingsCard({

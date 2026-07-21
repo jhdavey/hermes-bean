@@ -55,6 +55,7 @@ class BeanApiClient {
     required String email,
     required String password,
     String? passwordConfirmation,
+    String? clientTimezone,
   }) async {
     final data = await _sendJson(
       'POST',
@@ -64,6 +65,7 @@ class BeanApiClient {
         'email': email,
         'password': password,
         'password_confirmation': passwordConfirmation ?? password,
+        if (clientTimezone != null) 'client_timezone': clientTimezone,
       },
       authenticated: false,
     );
@@ -250,6 +252,7 @@ class BeanApiClient {
     String? themeMode,
     String? commandCenterLabel,
     String? preferredMapApp,
+    String? timezone,
     BeanNotificationPreferences? notificationPreferences,
   }) async {
     final data = await _sendJson(
@@ -263,6 +266,7 @@ class BeanApiClient {
         if (commandCenterLabel != null)
           'command_center_label': commandCenterLabel,
         if (preferredMapApp != null) 'preferred_map_app': preferredMapApp,
+        if (timezone != null) 'timezone': timezone,
         if (notificationPreferences != null)
           'notification_preferences': notificationPreferences.toJson(),
       },
@@ -505,6 +509,37 @@ class BeanApiClient {
     await _sendJson('DELETE', '/note-folders/$folderId');
   }
 
+  Future<BeanDailyStickyNote> getDailyStickyNote({
+    required String date,
+    int? workspaceId,
+  }) async {
+    final data = await _sendJson(
+      'GET',
+      _pathWithQuery('/daily-sticky-note', {
+        'date': date,
+        if (workspaceId != null) 'workspace_id': workspaceId.toString(),
+      }),
+    );
+    return BeanDailyStickyNote.fromJson(_expectMap(data['data']));
+  }
+
+  Future<BeanDailyStickyNote> updateDailyStickyNote({
+    required String date,
+    required String content,
+    int? workspaceId,
+  }) async {
+    final data = await _sendJson(
+      'PUT',
+      '/daily-sticky-note',
+      body: {
+        'date': date,
+        'content': content,
+        if (workspaceId != null) 'workspace_id': workspaceId,
+      },
+    );
+    return BeanDailyStickyNote.fromJson(_expectMap(data['data']));
+  }
+
   Future<List<BeanNote>> listNotes() async {
     final data = await _sendJson('GET', '/notes');
     return _expectList(
@@ -516,6 +551,7 @@ class BeanApiClient {
     String title = 'New Note',
     String bodyHtml = '',
     String plainText = '',
+    String? bodyMarkdown,
     int? folderId,
     bool isPinned = false,
     Map<String, Object?>? metadata,
@@ -526,8 +562,10 @@ class BeanApiClient {
       '/notes',
       body: {
         'title': _sanitizeVisibleText(title),
-        'body_html': _sanitizeVisibleText(bodyHtml),
-        'plain_text': _sanitizeVisibleText(plainText),
+        'body_markdown': _sanitizeVisibleText(
+          bodyMarkdown ??
+              (plainText.isNotEmpty ? plainText : _plainTextFromHtml(bodyHtml)),
+        ),
         'note_folder_id': folderId,
         'is_pinned': isPinned,
         if (metadata != null) 'metadata': metadata,
@@ -543,6 +581,7 @@ class BeanApiClient {
     String? title,
     String? bodyHtml,
     String? plainText,
+    String? bodyMarkdown,
     int? folderId,
     bool clearFolder = false,
     bool? isPinned,
@@ -554,8 +593,10 @@ class BeanApiClient {
       '/notes/$noteId',
       body: {
         if (title != null) 'title': _sanitizeVisibleText(title),
-        if (bodyHtml != null) 'body_html': _sanitizeVisibleText(bodyHtml),
-        if (plainText != null) 'plain_text': _sanitizeVisibleText(plainText),
+        if (bodyMarkdown != null || plainText != null || bodyHtml != null)
+          'body_markdown': _sanitizeVisibleText(
+            bodyMarkdown ?? plainText ?? _plainTextFromHtml(bodyHtml),
+          ),
         if (folderId != null || clearFolder) 'note_folder_id': folderId,
         if (isPinned != null) 'is_pinned': isPinned,
         if (metadata != null) 'metadata': metadata,
@@ -1058,6 +1099,7 @@ class BeanApiClient {
     required String content,
     int? sessionId,
     int? workspaceId,
+    String? clientTimezone,
   }) async {
     final data = await _sendJson(
       'POST',
@@ -1066,14 +1108,27 @@ class BeanApiClient {
         'content': content,
         if (sessionId != null) 'session_id': sessionId,
         if (workspaceId != null) 'workspace_id': workspaceId,
+        if (clientTimezone != null) 'client_timezone': clientTimezone,
       },
     );
     return BeanAssistantTurn.fromJson(_expectMap(data['data']));
   }
 
-  Future<BeanRealtimeSession> createBeanRealtimeSession() async {
-    final data = await _sendJson('POST', '/bean/realtime/session');
-    return BeanRealtimeSession.fromJson(data);
+  Future<BeanRealtimeSession> createBeanRealtimeSession({
+    int? sessionId,
+    int? workspaceId,
+    String? clientTimezone,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/bean/elevenlabs/conversation-token',
+      body: {
+        if (sessionId != null) 'session_id': sessionId,
+        if (workspaceId != null) 'workspace_id': workspaceId,
+        if (clientTimezone != null) 'client_timezone': clientTimezone,
+      },
+    );
+    return BeanRealtimeSession.fromJson(_expectMap(data['data']));
   }
 
   BeanAuthResult _rememberAuth(BeanAuthResult result) {
@@ -1300,12 +1355,22 @@ class BeanRealtimeSession {
     this.expiresAt,
     this.model,
     this.voice,
+    this.token,
+    this.agentId,
+    this.beanSessionId,
+    this.transport,
+    this.dashboardContext = const {},
   });
 
   final String? clientSecret;
   final int? expiresAt;
   final String? model;
   final String? voice;
+  final String? token;
+  final String? agentId;
+  final int? beanSessionId;
+  final String? transport;
+  final Map<String, Object?> dashboardContext;
 
   factory BeanRealtimeSession.fromJson(Map<String, Object?> json) {
     final secret = _expectMapOrNull(json['client_secret']);
@@ -1314,6 +1379,17 @@ class BeanRealtimeSession {
       expiresAt: _readIntOrNull(secret?['expires_at']),
       model: _readString(json['model']),
       voice: _readString(json['voice']),
+      token: _readString(json['token']),
+      agentId: _readString(json['agent_id'] ?? json['agentId']),
+      beanSessionId: _readIntOrNull(
+        json['bean_session_id'] ?? json['beanSessionId'],
+      ),
+      transport: _readString(json['transport']),
+      dashboardContext:
+          _expectMapOrNull(
+            json['dashboard_context'] ?? json['dashboardContext'],
+          ) ??
+          const {},
     );
   }
 }
@@ -1740,6 +1816,7 @@ class BeanUser {
     this.themeMode = 'auto',
     this.commandCenterLabel = 'Command Center',
     this.preferredMapApp = 'google',
+    this.timezone,
     this.defaultWorkspaceId,
     this.personalWorkspace,
     this.activeWorkspace,
@@ -1761,6 +1838,7 @@ class BeanUser {
   final String themeMode;
   final String commandCenterLabel;
   final String preferredMapApp;
+  final String? timezone;
   final int? defaultWorkspaceId;
   final BeanWorkspace? personalWorkspace;
   final BeanWorkspace? activeWorkspace;
@@ -1781,6 +1859,7 @@ class BeanUser {
     String? themeMode,
     String? commandCenterLabel,
     String? preferredMapApp,
+    String? timezone,
     int? defaultWorkspaceId,
     BeanWorkspace? personalWorkspace,
     BeanWorkspace? activeWorkspace,
@@ -1802,6 +1881,7 @@ class BeanUser {
     themeMode: themeMode ?? this.themeMode,
     commandCenterLabel: commandCenterLabel ?? this.commandCenterLabel,
     preferredMapApp: preferredMapApp ?? this.preferredMapApp,
+    timezone: timezone ?? this.timezone,
     defaultWorkspaceId: defaultWorkspaceId ?? this.defaultWorkspaceId,
     personalWorkspace: personalWorkspace ?? this.personalWorkspace,
     activeWorkspace: activeWorkspace ?? this.activeWorkspace,
@@ -1841,6 +1921,7 @@ class BeanUser {
       json['preferred_map_app'] ?? json['preferredMapApp'],
       'google',
     ),
+    timezone: _readString(json['timezone']),
     defaultWorkspaceId: _readIntOrNull(json['default_workspace_id']),
     personalWorkspace: json['personal_workspace'] is Map<String, Object?>
         ? BeanWorkspace.fromJson(_expectMap(json['personal_workspace']))
@@ -2407,6 +2488,25 @@ class ExternalCalendarImportResult {
 
 typedef AppleCalendarImportResult = ExternalCalendarImportResult;
 
+class BeanDailyStickyNote {
+  const BeanDailyStickyNote({
+    required this.date,
+    this.content = '',
+    this.updatedAt,
+  });
+
+  final String date;
+  final String content;
+  final String? updatedAt;
+
+  factory BeanDailyStickyNote.fromJson(Map<String, Object?> json) =>
+      BeanDailyStickyNote(
+        date: _expectString(json['date']),
+        content: _readString(json['content']) ?? '',
+        updatedAt: _readString(json['updated_at'] ?? json['updatedAt']),
+      );
+}
+
 class BeanNoteFolder {
   const BeanNoteFolder({required this.id, required this.name, this.sortOrder});
 
@@ -2427,6 +2527,7 @@ class BeanNote {
     required this.title,
     this.bodyHtml,
     this.plainText,
+    this.bodyMarkdown,
     this.folderId,
     this.isPinned = false,
     this.updatedAt,
@@ -2439,6 +2540,7 @@ class BeanNote {
   final String title;
   final String? bodyHtml;
   final String? plainText;
+  final String? bodyMarkdown;
   final int? folderId;
   final bool isPinned;
   final String? updatedAt;
@@ -2451,6 +2553,9 @@ class BeanNote {
     title: _readVisibleString(json['title']) ?? 'New Note',
     bodyHtml: _readVisibleString(json['body_html'] ?? json['bodyHtml']),
     plainText: _readVisibleString(json['plain_text'] ?? json['plainText']),
+    bodyMarkdown: _readVisibleString(
+      json['body_markdown'] ?? json['bodyMarkdown'],
+    ),
     folderId: _readIntOrNull(
       json['note_folder_id'] ?? json['noteFolderId'] ?? json['folder_id'],
     ),
@@ -2470,6 +2575,7 @@ class BeanNote {
     String? title,
     String? bodyHtml,
     String? plainText,
+    String? bodyMarkdown,
     int? folderId,
     bool clearFolder = false,
     bool? isPinned,
@@ -2482,6 +2588,7 @@ class BeanNote {
     title: title ?? this.title,
     bodyHtml: bodyHtml ?? this.bodyHtml,
     plainText: plainText ?? this.plainText,
+    bodyMarkdown: bodyMarkdown ?? this.bodyMarkdown,
     folderId: clearFolder ? null : folderId ?? this.folderId,
     isPinned: isPinned ?? this.isPinned,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -2992,6 +3099,24 @@ String _sanitizeVisibleText(String value) {
         RegExp('[\u{FFFD}\u{FE0E}\u{FE0F}\u{200B}-\u{200F}]', unicode: true),
         '',
       );
+}
+
+String _plainTextFromHtml(String? value) {
+  final text = value ?? '';
+  if (text.isEmpty) return '';
+  return text
+      .replaceAll(RegExp(r'<\s*br\s*/?\s*>', caseSensitive: false), '\n')
+      .replaceAll(
+        RegExp(r'</\s*(p|div|li|h[1-6])\s*>', caseSensitive: false),
+        '\n',
+      )
+      .replaceAll(RegExp(r'<[^>]+>'), '')
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .trim();
 }
 
 bool _readBool(Object? value) {

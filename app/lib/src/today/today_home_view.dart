@@ -2,6 +2,7 @@ part of '../../main.dart';
 
 class _TodayHomeView extends StatelessWidget {
   const _TodayHomeView({
+    required this.apiClient,
     required this.user,
     required this.tasks,
     required this.calendar,
@@ -29,6 +30,7 @@ class _TodayHomeView extends StatelessWidget {
   });
 
   final BeanUser user;
+  final BeanApiClient apiClient;
   final List<BeanTask> tasks;
   final List<BeanCalendarEvent> calendar;
   final bool loading;
@@ -183,6 +185,12 @@ class _TodayHomeView extends StatelessWidget {
               ),
             ],
           ],
+        ),
+        const SizedBox(height: 16),
+        _DailyStickyNoteCard(
+          apiClient: apiClient,
+          selectedDay: selectedDay,
+          workspaceId: user.activeWorkspace?.numericId,
         ),
         const SizedBox(height: 16),
         Column(
@@ -345,6 +353,182 @@ class _TodayHomeView extends StatelessWidget {
     );
   }
 }
+
+class _DailyStickyNoteCard extends StatefulWidget {
+  const _DailyStickyNoteCard({
+    required this.apiClient,
+    required this.selectedDay,
+    required this.workspaceId,
+  });
+
+  final BeanApiClient apiClient;
+  final DateTime selectedDay;
+  final int? workspaceId;
+
+  @override
+  State<_DailyStickyNoteCard> createState() => _DailyStickyNoteCardState();
+}
+
+class _DailyStickyNoteCardState extends State<_DailyStickyNoteCard> {
+  final TextEditingController _controller = TextEditingController();
+  Timer? _autosaveTimer;
+  String? _loadedKey;
+  bool _loading = false;
+  bool _saving = false;
+  String? _status;
+
+  String get _dateKey => _yyyyMmDd(widget.selectedDay);
+  String get _noteKey => '$_dateKey:${widget.workspaceId ?? ''}';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _DailyStickyNoteCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_noteKey != _loadedKey) {
+      _autosaveTimer?.cancel();
+      _load();
+    }
+  }
+
+  @override
+  void dispose() {
+    _autosaveTimer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final key = _noteKey;
+    setState(() {
+      _loading = true;
+      _status = null;
+    });
+    try {
+      final note = await widget.apiClient.getDailyStickyNote(
+        date: _dateKey,
+        workspaceId: widget.workspaceId,
+      );
+      if (!mounted || key != _noteKey) return;
+      _controller.text = note.content;
+      setState(() {
+        _loadedKey = key;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted || key != _noteKey) return;
+      setState(() {
+        _loadedKey = key;
+        _loading = false;
+        _status = beanFriendlyErrorMessage(error, action: 'load sticky note');
+      });
+    }
+  }
+
+  void _scheduleSave() {
+    if (_loading) return;
+    setState(() => _status = 'Saving...');
+    _autosaveTimer?.cancel();
+    _autosaveTimer = Timer(
+      const Duration(milliseconds: 500),
+      () => unawaited(_save()),
+    );
+  }
+
+  Future<void> _save() async {
+    if (_saving || _loading) return;
+    final key = _noteKey;
+    setState(() => _saving = true);
+    try {
+      await widget.apiClient.updateDailyStickyNote(
+        date: _dateKey,
+        content: _controller.text,
+        workspaceId: widget.workspaceId,
+      );
+      if (!mounted || key != _noteKey) return;
+      setState(() => _status = 'Saved');
+    } catch (error) {
+      if (!mounted || key != _noteKey) return;
+      setState(
+        () => _status = beanFriendlyErrorMessage(
+          error,
+          action: 'save sticky note',
+        ),
+      );
+    } finally {
+      if (mounted && key == _noteKey) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => _ShellCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.sticky_note_2_rounded, color: HeyBeanTheme.accentStrong),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _SectionTitle(
+                icon: Icons.sticky_note_2_rounded,
+                title: 'Daily sticky note',
+                subtitle:
+                    'Quick scratchpad for ${_yyyyMmDd(widget.selectedDay)}',
+                infoKey: const Key('daily-sticky-note-info'),
+                infoTitle: 'Daily sticky note',
+                infoBullets: const [
+                  'One lightweight scratch note per day and workspace.',
+                  'Autosaves while you type.',
+                  'Use it for rough notes that do not need a full note file.',
+                ],
+              ),
+            ),
+            if (_saving || _loading)
+              const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          key: const Key('daily-sticky-note-input'),
+          controller: _controller,
+          enabled: !_loading,
+          minLines: 3,
+          maxLines: 6,
+          onChanged: (_) => _scheduleSave(),
+          decoration: const InputDecoration(
+            hintText: 'Jot down quick notes for today...',
+            alignLabelWithHint: true,
+          ),
+        ),
+        if (_status != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            _status!,
+            key: const Key('daily-sticky-note-status'),
+            style: TextStyle(
+              color: HeyBeanTheme.muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
+String _yyyyMmDd(DateTime date) =>
+    '${date.year.toString().padLeft(4, '0')}-'
+    '${date.month.toString().padLeft(2, '0')}-'
+    '${date.day.toString().padLeft(2, '0')}';
 
 class _CriticalTaskBadge extends StatelessWidget {
   const _CriticalTaskBadge({

@@ -82,6 +82,7 @@ void main() {
     final turn = await client.sendBeanMessage(
       content: 'Create task call mom',
       sessionId: 42,
+      clientTimezone: 'America/New_York',
     );
 
     expect(requests.single.method, 'POST');
@@ -90,9 +91,82 @@ void main() {
     expect(requests.single.body, {
       'content': 'Create task call mom',
       'session_id': 42,
+      'client_timezone': 'America/New_York',
     });
     expect(turn.session.id, 42);
     expect(turn.run.status, 'completed');
     expect(turn.messages.last.content, 'I’ll add that task. Done.');
+  });
+
+  test('Flutter notes use Laravel markdown contract', () async {
+    final requests = <BeanApiRequest>[];
+    final client = BeanApiClient(
+      baseUrl: Uri.parse('https://example.test/api'),
+      bearerToken: 'test-token',
+      transport: (request) async {
+        requests.add(request);
+        return BeanApiResponse(
+          200,
+          jsonEncode({
+            'data': {
+              'id': 11,
+              'title': 'Plan',
+              'body_markdown': '# Plan\n- [ ] ship flutter',
+              'plain_text': null,
+            },
+          }),
+        );
+      },
+    );
+
+    final note = await client.createNote(
+      title: 'Plan',
+      bodyMarkdown: '# Plan\n- [ ] ship flutter',
+    );
+
+    expect(requests.single.path, '/notes');
+    expect(
+      requests.single.body?['body_markdown'],
+      '# Plan\n- [ ] ship flutter',
+    );
+    expect(requests.single.body?.containsKey('body_html'), isFalse);
+    expect(requests.single.body?.containsKey('plain_text'), isFalse);
+    expect(note.bodyMarkdown, '# Plan\n- [ ] ship flutter');
+  });
+
+  test('daily sticky note client matches Laravel endpoint', () async {
+    final requests = <BeanApiRequest>[];
+    final client = BeanApiClient(
+      baseUrl: Uri.parse('https://example.test/api'),
+      bearerToken: 'test-token',
+      transport: (request) async {
+        requests.add(request);
+        return BeanApiResponse(
+          200,
+          jsonEncode({
+            'data': {
+              'date': '2026-07-21',
+              'content': 'today scratchpad',
+              'updated_at': '2026-07-21T12:00:00Z',
+            },
+          }),
+        );
+      },
+    );
+
+    final note = await client.updateDailyStickyNote(
+      date: '2026-07-21',
+      content: 'today scratchpad',
+      workspaceId: 5,
+    );
+
+    expect(requests.single.method, 'PUT');
+    expect(requests.single.path, '/daily-sticky-note');
+    expect(requests.single.body, {
+      'date': '2026-07-21',
+      'content': 'today scratchpad',
+      'workspace_id': 5,
+    });
+    expect(note.content, 'today scratchpad');
   });
 }

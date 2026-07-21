@@ -1057,10 +1057,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     String password,
     String themeModeKey,
   ) async {
+    final timezone = await _deviceIanaTimezone();
     final auth = await widget.apiClient.register(
       name: name,
       email: email,
       password: password,
+      clientTimezone: timezone,
     );
     await widget.tokenStore.saveRememberMe(true);
     await widget.tokenStore.saveToken(auth.token);
@@ -1240,6 +1242,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         content: content.trim(),
         sessionId: _beanAssistantSessionId,
         workspaceId: _activeWorkspaceId(),
+        clientTimezone: _user?.timezone,
       );
       if (!mounted) return;
       setState(() {
@@ -2456,6 +2459,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         title: title,
         bodyHtml: bodyHtml,
         plainText: plainText,
+        bodyMarkdown: plainText,
         folderId: folderId,
         isPinned: isPinned ?? false,
         metadata: metadata,
@@ -2544,6 +2548,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         title: pending.title,
         bodyHtml: pending.bodyHtml,
         plainText: pending.plainText,
+        bodyMarkdown: pending.plainText,
         folderId: pending.folderId,
         clearFolder: pending.clearFolder,
         isPinned: pending.isPinned,
@@ -3522,6 +3527,41 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
+  Future<void> _updateTimezone(String timezone) async {
+    if (_busy) return;
+    final normalized = timezone.trim();
+    if (normalized.isEmpty) return;
+    final previousUser = _user;
+    setState(() {
+      _busy = true;
+      _error = null;
+      if (previousUser != null) {
+        _user = previousUser.copyWith(timezone: normalized);
+      }
+    });
+    try {
+      final updatedUser = await widget.apiClient.updateMe(timezone: normalized);
+      if (!mounted) return;
+      _applyUserTheme(updatedUser);
+      setState(() {
+        _user = updatedUser;
+        _busy = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _user = previousUser;
+        _busy = false;
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'update your timezone',
+        );
+      });
+      rethrow;
+    }
+  }
+
   Future<void> _logout() async {
     if (_busy) return;
     final authGeneration = ++_authGeneration;
@@ -4054,6 +4094,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     onThemeModeChanged: _updateThemeMode,
     onCommandCenterLabelChanged: _updateCommandCenterLabel,
     onPreferredMapAppChanged: _updatePreferredMapApp,
+    onTimezoneChanged: _updateTimezone,
     launchExternalUrl: widget.launchExternalUrl,
     stripePaymentHandler: widget.stripePaymentHandler,
     onBillingChanged: () =>

@@ -19,9 +19,58 @@ class _BeanAssistantPanel extends StatefulWidget {
 
 class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
   final TextEditingController _controller = TextEditingController();
+  final speech_to_text.SpeechToText _speech = speech_to_text.SpeechToText();
+  final FlutterTts _tts = FlutterTts();
+  bool _speechReady = false;
+  bool _listening = false;
+  String? _spokenAssistantMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_initVoice());
+  }
+
+  @override
+  void didUpdateWidget(covariant _BeanAssistantPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final lastAssistant = widget.messages.reversed
+        .where((message) => message.role == 'assistant')
+        .map((message) => message.content.trim())
+        .where((message) => message.isNotEmpty)
+        .firstOrNull;
+    if (lastAssistant != null && lastAssistant != _spokenAssistantMessage) {
+      _spokenAssistantMessage = lastAssistant;
+      unawaited(_speakAssistant(lastAssistant));
+    }
+  }
+
+  Future<void> _speakAssistant(String message) async {
+    try {
+      await _tts.speak(message);
+    } on MissingPluginException {
+      // Widget tests and unsupported platforms can still use the text panel.
+    } on PlatformException {
+      // Speech output is best-effort; the Laravel runtime response remains canonical.
+    }
+  }
+
+  Future<void> _initVoice() async {
+    try {
+      _speechReady = await _speech.initialize();
+      await _tts.setSpeechRate(0.48);
+      await _tts.setVolume(1.0);
+      await _tts.setPitch(1.0);
+      if (mounted) setState(() {});
+    } catch (_) {
+      _speechReady = false;
+    }
+  }
 
   @override
   void dispose() {
+    unawaited(_speech.stop());
+    unawaited(_tts.stop());
     _controller.dispose();
     super.dispose();
   }
@@ -31,6 +80,44 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
     if (text.isEmpty || widget.sending) return;
     _controller.clear();
     await widget.onSend(text);
+  }
+
+  Future<void> _toggleVoiceInput() async {
+    if (!_speechReady) await _initVoice();
+    if (!_speechReady) return;
+    if (_listening) {
+      await _speech.stop();
+      if (mounted) setState(() => _listening = false);
+      return;
+    }
+    setState(() => _listening = true);
+    await _speech.listen(
+      listenOptions: speech_to_text.SpeechListenOptions(
+        listenMode: speech_to_text.ListenMode.confirmation,
+        partialResults: true,
+      ),
+      onResult: (result) {
+        final recognized = result.recognizedWords.trim();
+        if (recognized.isEmpty) return;
+        final command = _stripHeyBeanWakePhrase(recognized);
+        _controller.text = command;
+        _controller.selection = TextSelection.collapsed(offset: command.length);
+        if (result.finalResult && command.isNotEmpty) {
+          setState(() => _listening = false);
+          unawaited(_send());
+        }
+      },
+    );
+  }
+
+  String _stripHeyBeanWakePhrase(String value) {
+    final trimmed = value.trim();
+    return trimmed
+        .replaceFirst(
+          RegExp(r'^hey\s+bean[,.!?:;\s-]*', caseSensitive: false),
+          '',
+        )
+        .trim();
   }
 
   @override
@@ -182,6 +269,21 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
                         ),
                       ),
                       const SizedBox(width: 10),
+                      IconButton.filledTonal(
+                        key: const Key('bean-assistant-voice-input'),
+                        onPressed: widget.sending
+                            ? null
+                            : () => unawaited(_toggleVoiceInput()),
+                        tooltip: _listening
+                            ? 'Stop listening'
+                            : 'Speak to Bean',
+                        icon: Icon(
+                          _listening
+                              ? Icons.mic_rounded
+                              : Icons.mic_none_rounded,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
                       FilledButton(
                         key: const Key('bean-assistant-send'),
                         onPressed: widget.sending ? null : _send,

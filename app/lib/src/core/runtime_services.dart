@@ -55,6 +55,20 @@ final Uri _enterpriseContactUrl = Uri.parse(
 const String _beanGreenCategoryColor = '#34C759';
 const double _beanBottomMenuSurfaceInset = 36;
 
+Future<String?> _deviceIanaTimezone() async {
+  try {
+    final timezone = await FlutterTimezone.getLocalTimezone();
+    final trimmed = timezone.identifier.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
 class _HeyBeanRuntimeServices {
   static BeanApiClient? apiClient;
   static ExternalUrlLauncher launchExternalUrl = _defaultLaunchExternalUrl;
