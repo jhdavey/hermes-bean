@@ -4,29 +4,6 @@
     inherits: false;
 }
 
-.public-nav-identity {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-}
-
-.public-brand {
-    flex: 0 0 auto;
-    color: #111827;
-    font-size: 20px;
-    font-weight: 850;
-    letter-spacing: -.04em;
-    line-height: 1;
-    text-decoration: none;
-}
-
-.public-brand:focus-visible {
-    outline: 2px solid rgba(82, 168, 105, .62);
-    outline-offset: 4px;
-    border-radius: 4px;
-}
-
 .public-bean-presence {
     --public-bean-accent: 82, 168, 105;
     --public-bean-ring-angle: 0deg;
@@ -208,14 +185,6 @@
 }
 
 @media (max-width: 620px) {
-    .public-nav-identity {
-        gap: 9px;
-    }
-
-    .public-brand {
-        font-size: 18px;
-    }
-
     .public-bean-status {
         max-width: 132px;
     }
@@ -226,10 +195,6 @@
 }
 
 @media (max-width: 390px) {
-    .public-brand {
-        display: none;
-    }
-
     .public-bean-control {
         padding-right: 10px;
     }

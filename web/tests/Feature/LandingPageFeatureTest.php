@@ -47,6 +47,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('images/heybean-landing-daily-control.png', false)
             ->assertSee('Create your free beta account', false)
             ->assertSee('Create Free Account', false)
+            ->assertDontSee('class="public-brand"', false)
             ->assertSee('href="/register"', false)
             ->assertSee('href="/#how-it-works"', false)
             ->assertSee('href="/#features"', false)
