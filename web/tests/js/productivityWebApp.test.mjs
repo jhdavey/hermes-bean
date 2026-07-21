@@ -27,6 +27,16 @@ test('browser app retains direct productivity resources and command center', () 
     assert.match(source, /\/admin\/dashboard\/summary/);
 });
 
+test('command center includes a date-scoped plain-text sticky note with autosave', () => {
+    assert.match(source, /function dailyStickyNoteMarkup/);
+    assert.match(source, /data-daily-sticky-note/);
+    assert.match(source, /data-sticky-note-date="\$\{escapeAttr\(date\)\}"/);
+    assert.match(source, /method: 'PUT',[\s\S]*?body,[\s\S]*?keepalive:/);
+    assert.match(source, /flushAllDailyStickyNoteAutosaves\(\{ keepalive: true \}\)/);
+    assert.match(dashboardSource, /\.hb-daily-sticky-note[\s\S]*?border-top:\s*1px solid var\(--hb-border\)/);
+    assert.doesNotMatch(source, /data-daily-sticky-note[^>]*contenteditable/);
+});
+
 test('Bean assistant presence is web-first and uses the Laravel Bean runtime', () => {
     assert.match(source, /function beanPresenceMarkup/);
     assert.match(source, /data-bean-toggle/);
@@ -77,6 +87,8 @@ test('top navigation, productivity pages, and notes use the simplified surfaces'
     assert.match(source, /<section class="hb-card-pad hb-board-card" data-tour-target="reminders-view">/);
     assert.match(source, /<header class="hb-board-heading"><h2>Tasks<\/h2><\/header>/);
     assert.match(source, /<header class="hb-board-heading"><h2>Reminders<\/h2><\/header>/);
+    assert.match(source, /data-reminder-filter="scheduled"[^>]*>Active<\/button>/);
+    assert.match(source, /data-reminder-filter="completed"[^>]*>Done<\/button>/);
     assert.doesNotMatch(source, /sectionTitle\(icons\.tasks, 'Tasks'/);
     assert.doesNotMatch(source, /sectionTitle\(icons\.reminders, 'Reminders'/);
     assert.match(dashboardSource, /\.hb-board-card > \.hb-tabs[\s\S]*?border:\s*0/);

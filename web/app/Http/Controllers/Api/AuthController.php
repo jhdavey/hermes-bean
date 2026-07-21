@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\CalendarEvent;
+use App\Models\DailyStickyNote;
 use App\Models\EarlyAccessSignup;
 use App\Models\EventCategory;
 use App\Models\GoogleCalendarConnection;
@@ -237,6 +238,7 @@ class AuthController extends Controller
             'tasks' => Task::where('user_id', $user->id)->orderBy('id')->get(),
             'reminders' => Reminder::where('user_id', $user->id)->orderBy('id')->get(),
             'calendar_events' => CalendarEvent::where('user_id', $user->id)->orderBy('id')->get(),
+            'daily_sticky_notes' => DailyStickyNote::where('user_id', $user->id)->orderBy('note_date')->get(),
             'event_categories' => EventCategory::where('user_id', $user->id)->orderBy('id')->get(),
             'google_calendar' => GoogleCalendarConnection::where('user_id', $user->id)->get([
                 'id',

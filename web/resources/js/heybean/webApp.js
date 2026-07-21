@@ -85,6 +85,10 @@ export function mountHeyBeanWebApp(mount) {
         calendar: [],
         noteFolders: [],
         notes: [],
+        dailyStickyNotes: new Map(),
+        dailyStickyNoteLoadedKeys: new Set(),
+        dailyStickyNoteLoadingKeys: new Set(),
+        dailyStickyNoteStatuses: new Map(),
         selectedNoteId: '',
         selectedNoteFolderId: 'all',
         noteFoldersEditing: false,
@@ -225,6 +229,10 @@ export function mountHeyBeanWebApp(mount) {
     const pendingNoteSaveBodies = new Map();
     const pendingNoteFolderNames = new Set();
     const noteAutosaveDelay = 300;
+    const dailyStickyNoteAutosaveTimers = new Map();
+    const dailyStickyNoteSaveInFlight = new Set();
+    const pendingDailyStickyNoteBodies = new Map();
+    const dailyStickyNoteAutosaveDelay = 500;
     let workspaceSwitchGeneration = 0;
     let beanEventAbort = null;
     let beanEventLastId = 0;
@@ -277,7 +285,10 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function bindNoteAutosaveTeardown() {
-        window.addEventListener('pagehide', () => flushAllNoteAutosaves({ keepalive: true }));
+        window.addEventListener('pagehide', () => {
+            flushAllNoteAutosaves({ keepalive: true });
+            flushAllDailyStickyNoteAutosaves({ keepalive: true });
+        });
     }
 
     async function loadSubscriptionPage() {
@@ -1971,8 +1982,8 @@ export function mountHeyBeanWebApp(mount) {
             <section class="hb-card-pad hb-board-card" data-tour-target="reminders-view">
                 <header class="hb-board-heading"><h2>Reminders</h2></header>
                 <div class="hb-tabs">
-                    <button class="hb-chip" type="button" data-reminder-filter="scheduled" aria-pressed="${!completed}">Scheduled</button>
-                    <button class="hb-chip" type="button" data-reminder-filter="completed" aria-pressed="${completed}">Completed</button>
+                    <button class="hb-chip" type="button" data-reminder-filter="scheduled" aria-pressed="${!completed}">Active</button>
+                    <button class="hb-chip" type="button" data-reminder-filter="completed" aria-pressed="${completed}">Done</button>
                 </div>
                 ${state.dashboardDataLoading && !items.length ? dashboardLoadingMarkup('Loading reminders...') : dayBoardMarkup(items, 'reminder', completed ? 'No completed reminders' : 'No scheduled reminders')}
             </section>`;
@@ -3088,7 +3099,27 @@ export function mountHeyBeanWebApp(mount) {
                 <div class="hb-command-center-agenda" data-tour-target="command-center-agenda">
                     ${loading ? dashboardLoadingMarkup('Loading today...') : commandCenterAgendaMarkup(items)}
                 </div>
+                ${dailyStickyNoteMarkup()}
             </section>`;
+    }
+
+    function dailyStickyNoteMarkup() {
+        const date = state.selectedDay;
+        const workspaceId = currentWorkspaceId();
+        const key = dailyStickyNoteKey(date, workspaceId);
+        const loaded = state.dailyStickyNoteLoadedKeys.has(key);
+        const loading = state.dailyStickyNoteLoadingKeys.has(key) || !loaded;
+        const content = state.dailyStickyNotes.get(key) || '';
+        const status = state.dailyStickyNoteStatuses.get(key) || (loading ? 'Loading…' : 'Autosaves');
+        const dateLabel = dayLabel(parseLocalDate(date));
+        return `
+            <div class="hb-daily-sticky-note ${loading ? 'hb-daily-sticky-note-loading' : ''}" data-daily-sticky-note-shell>
+                <div class="hb-daily-sticky-note-head">
+                    <label for="hb-daily-sticky-note">Sticky note</label>
+                    <span role="status" aria-live="polite" data-daily-sticky-note-status>${escapeHtml(status)}</span>
+                </div>
+                <textarea id="hb-daily-sticky-note" data-daily-sticky-note data-sticky-note-key="${escapeAttr(key)}" data-sticky-note-date="${escapeAttr(date)}" data-sticky-note-workspace="${escapeAttr(workspaceId)}" maxlength="12000" aria-label="${escapeAttr(`Sticky note for ${dateLabel}`)}" placeholder="Quick note for ${escapeAttr(dateLabel)}…" ${loading ? 'disabled' : ''}>${escapeHtml(content)}</textarea>
+            </div>`;
     }
 
     function commandCenterAgendaMarkup(items) {
@@ -5485,6 +5516,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function bindSignedInActions() {
         bindBeanActions();
+        bindDailyStickyNoteActions();
         mount.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => {
             state.selected = button.dataset.nav;
             state.error = '';
@@ -5876,6 +5908,130 @@ export function mountHeyBeanWebApp(mount) {
             if (queued?.timer) window.clearTimeout(queued.timer);
             if (queued?.body) saveNotePayload(id, queued.body, options);
         });
+    }
+
+    function dailyStickyNoteKey(date = state.selectedDay, workspaceId = currentWorkspaceId()) {
+        return `${String(workspaceId || 'none')}:${String(date || '')}`;
+    }
+
+    function bindDailyStickyNoteActions() {
+        const textarea = mount.querySelector('[data-daily-sticky-note]');
+        if (!textarea) return;
+        textarea.addEventListener('input', () => scheduleDailyStickyNoteAutosave(textarea));
+        textarea.addEventListener('blur', () => flushDailyStickyNoteAutosave(textarea.dataset.stickyNoteKey));
+        ensureDailyStickyNoteLoaded(
+            textarea.dataset.stickyNoteDate,
+            textarea.dataset.stickyNoteWorkspace,
+        );
+    }
+
+    async function ensureDailyStickyNoteLoaded(date, workspaceId) {
+        const key = dailyStickyNoteKey(date, workspaceId);
+        if (!date || !workspaceId || state.dailyStickyNoteLoadedKeys.has(key) || state.dailyStickyNoteLoadingKeys.has(key)) return;
+        state.dailyStickyNoteLoadingKeys.add(key);
+        try {
+            const note = await api(workspaceScopedPath(`/daily-sticky-note?date=${encodeURIComponent(date)}`, workspaceId));
+            state.dailyStickyNotes.set(key, String(note?.content || ''));
+            state.dailyStickyNoteLoadedKeys.add(key);
+            state.dailyStickyNoteStatuses.set(key, note?.updated_at ? 'Saved' : 'Autosaves');
+            updateDailyStickyNoteDom(key);
+        } catch (error) {
+            state.dailyStickyNoteStatuses.set(key, 'Couldn’t load');
+            setDailyStickyNoteStatus(key, 'Couldn’t load');
+        } finally {
+            state.dailyStickyNoteLoadingKeys.delete(key);
+        }
+    }
+
+    function updateDailyStickyNoteDom(key) {
+        const textarea = mount.querySelector('[data-daily-sticky-note]');
+        if (!textarea || textarea.dataset.stickyNoteKey !== key) return;
+        textarea.value = state.dailyStickyNotes.get(key) || '';
+        textarea.disabled = false;
+        textarea.closest('[data-daily-sticky-note-shell]')?.classList.remove('hb-daily-sticky-note-loading');
+        setDailyStickyNoteStatus(key, state.dailyStickyNoteStatuses.get(key) || 'Autosaves');
+    }
+
+    function scheduleDailyStickyNoteAutosave(textarea, immediate = false) {
+        const key = textarea?.dataset?.stickyNoteKey;
+        const date = textarea?.dataset?.stickyNoteDate;
+        const workspaceId = textarea?.dataset?.stickyNoteWorkspace;
+        if (!key || !date || !workspaceId) return;
+        const body = {
+            date,
+            content: String(textarea.value || '').slice(0, 12000),
+            workspace_id: Number(workspaceId),
+        };
+        state.dailyStickyNotes.set(key, body.content);
+        setDailyStickyNoteStatus(key, 'Saving…');
+        const queued = dailyStickyNoteAutosaveTimers.get(key);
+        if (queued?.timer) window.clearTimeout(queued.timer);
+        const timer = window.setTimeout(
+            () => saveDailyStickyNotePayload(key, body),
+            immediate ? 1 : dailyStickyNoteAutosaveDelay,
+        );
+        dailyStickyNoteAutosaveTimers.set(key, { timer, body });
+    }
+
+    function flushDailyStickyNoteAutosave(key, options = {}) {
+        if (!key) return;
+        const queued = dailyStickyNoteAutosaveTimers.get(key);
+        if (queued?.timer) window.clearTimeout(queued.timer);
+        if (queued?.body) saveDailyStickyNotePayload(key, queued.body, options);
+    }
+
+    function flushAllDailyStickyNoteAutosaves(options = {}) {
+        dailyStickyNoteAutosaveTimers.forEach((queued, key) => {
+            if (queued?.timer) window.clearTimeout(queued.timer);
+            if (queued?.body) saveDailyStickyNotePayload(key, queued.body, options);
+        });
+    }
+
+    async function saveDailyStickyNotePayload(key, body, options = {}) {
+        if (!key || !body) return;
+        dailyStickyNoteAutosaveTimers.delete(key);
+        if (dailyStickyNoteSaveInFlight.has(key) && !options.keepalive) {
+            pendingDailyStickyNoteBodies.set(key, body);
+            return;
+        }
+        dailyStickyNoteSaveInFlight.add(key);
+        let saveFailed = false;
+        try {
+            const note = await api('/daily-sticky-note', {
+                method: 'PUT',
+                body,
+                keepalive: options.keepalive === true,
+            });
+            if (state.dailyStickyNotes.get(key) === body.content) {
+                state.dailyStickyNotes.set(key, String(note?.content || ''));
+            }
+            state.dailyStickyNoteLoadedKeys.add(key);
+        } catch (error) {
+            saveFailed = true;
+        } finally {
+            dailyStickyNoteSaveInFlight.delete(key);
+            const pendingBody = pendingDailyStickyNoteBodies.get(key);
+            pendingDailyStickyNoteBodies.delete(key);
+            if (pendingBody) {
+                setDailyStickyNoteStatus(key, 'Saving…');
+                saveDailyStickyNotePayload(key, pendingBody);
+            } else if (saveFailed && !options.keepalive) {
+                setDailyStickyNoteStatus(key, 'Couldn’t save');
+                const timer = window.setTimeout(() => saveDailyStickyNotePayload(key, body), 3000);
+                dailyStickyNoteAutosaveTimers.set(key, { timer, body });
+            } else if (!saveFailed) {
+                const newerSaveQueued = dailyStickyNoteAutosaveTimers.has(key)
+                    || state.dailyStickyNotes.get(key) !== body.content;
+                setDailyStickyNoteStatus(key, newerSaveQueued ? 'Saving…' : 'Saved');
+            }
+        }
+    }
+
+    function setDailyStickyNoteStatus(key, text) {
+        state.dailyStickyNoteStatuses.set(key, text);
+        const textarea = mount.querySelector('[data-daily-sticky-note]');
+        const status = mount.querySelector('[data-daily-sticky-note-status]');
+        if (textarea?.dataset?.stickyNoteKey === key && status) status.textContent = text;
     }
 
     function setNoteSaveStatus(text) {

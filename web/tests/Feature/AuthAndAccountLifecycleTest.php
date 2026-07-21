@@ -334,11 +334,23 @@ class AuthAndAccountLifecycleTest extends TestCase
             'type' => 'todo',
         ])->assertCreated();
 
+        $this->withToken($aliceToken)->putJson('/api/daily-sticky-note', [
+            'date' => '2026-07-20',
+            'content' => 'Alice private sticky note',
+        ])->assertOk();
+
+        $this->withToken($bobToken)->putJson('/api/daily-sticky-note', [
+            'date' => '2026-07-20',
+            'content' => 'Bob private sticky note',
+        ])->assertOk();
+
         $this->withToken($aliceToken)->getJson('/api/account/export')
             ->assertOk()
             ->assertJsonPath('data.user.email', 'alice@example.com')
             ->assertJsonFragment(['title' => 'Export Alice task'])
-            ->assertJsonMissing(['title' => 'Bob private task']);
+            ->assertJsonFragment(['content' => 'Alice private sticky note'])
+            ->assertJsonMissing(['title' => 'Bob private task'])
+            ->assertJsonMissing(['content' => 'Bob private sticky note']);
 
         $aliceId = User::where('email', 'alice@example.com')->value('id');
         $alicePersonalWorkspaceId = Workspace::where('personal_owner_user_id', $aliceId)->value('id');
@@ -354,9 +366,11 @@ class AuthAndAccountLifecycleTest extends TestCase
         $this->assertDatabaseMissing('workspaces', ['id' => $alicePersonalWorkspaceId]);
         $this->assertDatabaseMissing('workspace_memberships', ['workspace_id' => $alicePersonalWorkspaceId]);
         $this->assertDatabaseMissing('tasks', ['user_id' => $aliceId]);
+        $this->assertDatabaseMissing('daily_sticky_notes', ['user_id' => $aliceId]);
         $this->assertDirectoryDoesNotExist($usersPath.'/'.$aliceId);
         $this->assertDatabaseHas('users', ['email' => 'bob@example.com']);
         $this->assertDatabaseHas('tasks', ['title' => 'Bob private task']);
+        $this->assertDatabaseHas('daily_sticky_notes', ['content' => 'Bob private sticky note']);
     }
 
     private function registerToken(string $email): string

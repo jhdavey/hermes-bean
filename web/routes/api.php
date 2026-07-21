@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\BeanController;
 use App\Http\Controllers\Api\BillingController;
 use App\Http\Controllers\Api\CouponCodeController;
 use App\Http\Controllers\Api\DashboardChangeController;
+use App\Http\Controllers\Api\DailyStickyNoteController;
 use App\Http\Controllers\Api\DomainResourceController;
 use App\Http\Controllers\Api\ExternalCalendarController;
 use App\Http\Controllers\Api\GoogleCalendarController;
@@ -62,6 +63,8 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::patch('/workspaces/{workspace}/google-calendars', [WorkspaceController::class, 'calendars']);
 
         Route::get('/today', [TodaySummaryController::class, 'show']);
+        Route::get('/daily-sticky-note', [DailyStickyNoteController::class, 'show']);
+        Route::put('/daily-sticky-note', [DailyStickyNoteController::class, 'update']);
         Route::get('/places/autocomplete', [PlaceController::class, 'autocomplete']);
         Route::get('/places/details', [PlaceController::class, 'details']);
         Route::get('/places/static-map', [PlaceController::class, 'staticMap']);
