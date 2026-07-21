@@ -21,6 +21,7 @@ class LandingBeanTest extends TestCase
             $response->assertOk()
                 ->assertSee('data-public-bean', false)
                 ->assertSee('Tap to enable')
+                ->assertSee('AI voice · audio processed by ElevenLabs')
                 ->assertSee('assets/publicBean-', false)
                 ->assertDontSee('data-bean-panel', false)
                 ->assertDontSee('hb-bean-chat', false);
@@ -81,6 +82,45 @@ class LandingBeanTest extends TestCase
 
         $this->assertSame('landing-hermes-session-1', session('landing_bean.hermes_session_id'));
         $this->assertTrue(Str::isUuid((string) session('landing_bean.visitor_id')));
+        $this->assertSame(1, session('landing_bean.turn_count'));
+    }
+
+    public function test_landing_message_enforces_a_session_turn_cap(): void
+    {
+        config(['bean.landing.max_visitor_turns' => 1]);
+        $this->mock(LandingBeanRuntimeService::class, function ($mock): void {
+            $mock->shouldReceive('respond')->once()->andReturn([
+                'answer' => 'Here is the first part of the tour.',
+                'hermes_session_id' => 'landing-session',
+            ]);
+        });
+
+        $this->postJson('/bean/landing/messages', ['content' => 'Give me a tour'])->assertOk();
+        $this->postJson('/bean/landing/messages', ['content' => 'Keep going'])
+            ->assertStatus(429)
+            ->assertJsonPath('message', 'That is the end of this Bean demo. You can explore the page or create an account to continue.');
+    }
+
+    public function test_landing_conversation_requires_valid_turnstile_when_configured(): void
+    {
+        config([
+            'services.elevenlabs.agent_enabled' => true,
+            'services.elevenlabs.api_key' => 'landing-test-key',
+            'services.elevenlabs.landing_agent_id' => 'landing-agent',
+            'services.turnstile.secret_key' => 'turnstile-secret',
+        ]);
+        Http::fake([
+            'https://challenges.cloudflare.com/turnstile/*' => Http::response([
+                'success' => true,
+                'hostname' => 'localhost',
+            ]),
+            'https://api.elevenlabs.io/*' => Http::response(['token' => 'verified-token']),
+        ]);
+
+        $this->postJson('/bean/landing/conversation-token', [
+            'turnstile_token' => 'valid-human-token',
+            'page_path' => '/',
+        ])->assertOk()->assertJsonPath('data.token', 'verified-token');
     }
 
     public function test_landing_runtime_creates_an_isolated_tool_free_hermes_home(): void
@@ -105,8 +145,9 @@ class LandingBeanTest extends TestCase
             $this->assertSame('public-session-1', $result['hermes_session_id']);
             $this->assertFileExists($home.'/skills/heybean-guide/SKILL.md');
             $this->assertStringNotContainsString('bean_dashboard', File::get($home.'/config.yaml'));
+            $this->assertStringNotContainsString('session_search', File::get($home.'/config.yaml'));
             $this->assertStringContainsString('memory_enabled: false', File::get($home.'/config.yaml'));
-            $this->assertStringContainsString('whether they would like you to explain how the app works', strtolower(File::get($home.'/skills/heybean-guide/SKILL.md')));
+            $this->assertStringContainsString('how Bean works, explore the features or pricing, or take a quick tour', File::get($home.'/skills/heybean-guide/SKILL.md'));
             touch($home.'/.last-used', now()->subHours(3)->timestamp);
             $this->assertSame(1, app(LandingBeanRuntimeService::class)->pruneInactive(2));
             $this->assertDirectoryDoesNotExist($home);

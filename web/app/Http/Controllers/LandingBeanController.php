@@ -7,6 +7,7 @@ use App\Services\Bean\LandingBeanRuntimeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class LandingBeanController extends Controller
@@ -22,7 +23,11 @@ class LandingBeanController extends Controller
         $data = $request->validate([
             'client_timezone' => ['nullable', new ClientTimezone],
             'page_path' => ['nullable', 'string', 'max:160', 'regex:/^\/[A-Za-z0-9_\-\/]*$/'],
+            'turnstile_token' => ['nullable', 'string', 'max:2048'],
         ]);
+        if (! $this->passesHumanVerification($request, $data['turnstile_token'] ?? null)) {
+            return response()->json(['message' => 'Please complete the verification to talk with Bean.'], 422);
+        }
         $apiKey = (string) config('services.elevenlabs.api_key');
         $agentId = (string) config('services.elevenlabs.landing_agent_id');
 
@@ -51,6 +56,14 @@ class LandingBeanController extends Controller
             return response()->json(['message' => 'Bean voice returned an empty session.'], 502);
         }
 
+        $request->session()->put('landing_bean.turn_count', 0);
+        $request->session()->put('landing_bean.started_at', now()->timestamp);
+        $request->session()->forget('landing_bean.hermes_session_id');
+        Log::info('Landing Bean demo session issued.', [
+            'visitor_id_hash' => hash('sha256', $visitorId),
+            'page_path' => $data['page_path'] ?? '/',
+        ]);
+
         return response()->json(['data' => [
             'token' => $token,
             'agent_id' => $agentId,
@@ -63,11 +76,20 @@ class LandingBeanController extends Controller
 
     public function message(Request $request): JsonResponse
     {
+        $maxTurns = max(1, (int) config('bean.landing.max_visitor_turns', 20));
+        $turnCount = max(0, (int) $request->session()->get('landing_bean.turn_count', 0));
+        if ($turnCount >= $maxTurns) {
+            return response()->json([
+                'message' => 'That is the end of this Bean demo. You can explore the page or create an account to continue.',
+            ], 429);
+        }
+
         $data = $request->validate([
-            'content' => ['required', 'string', 'max:1200'],
+            'content' => ['required', 'string', 'max:500'],
             'page_path' => ['nullable', 'string', 'max:160', 'regex:/^\/[A-Za-z0-9_\-\/]*$/'],
         ]);
         $visitorId = $this->visitorId($request);
+        $request->session()->put('landing_bean.turn_count', $turnCount + 1);
         $result = $this->runtime->respond(
             $visitorId,
             $request->session()->get('landing_bean.hermes_session_id'),
@@ -81,7 +103,38 @@ class LandingBeanController extends Controller
             $request->session()->forget('landing_bean.hermes_session_id');
         }
 
+        Log::info('Landing Bean demo turn completed.', [
+            'visitor_id_hash' => hash('sha256', $visitorId),
+            'turn' => $turnCount + 1,
+            'max_turns' => $maxTurns,
+            'page_path' => $data['page_path'] ?? '/',
+        ]);
+
         return response()->json(['data' => ['answer' => $result['answer']]]);
+    }
+
+    private function passesHumanVerification(Request $request, ?string $token): bool
+    {
+        $secret = trim((string) config('services.turnstile.secret_key'));
+        if ($secret === '') {
+            return true;
+        }
+        if (! is_string($token) || trim($token) === '') {
+            return false;
+        }
+
+        $response = Http::asForm()->timeout(8)->post('https://challenges.cloudflare.com/turnstile/v0/siteverify', [
+            'secret' => $secret,
+            'response' => $token,
+            'remoteip' => $request->ip(),
+        ]);
+        if (! $response->successful() || ! $response->json('success')) {
+            return false;
+        }
+
+        $hostname = trim((string) $response->json('hostname'));
+
+        return $hostname === '' || hash_equals(strtolower($request->getHost()), strtolower($hostname));
     }
 
     private function visitorId(Request $request): string

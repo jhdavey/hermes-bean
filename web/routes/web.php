@@ -36,10 +36,10 @@ Route::view('/support', 'legal.support')->name('support');
 Route::view('/account-deletion', 'legal.account-deletion')->name('account-deletion');
 
 Route::post('/bean/landing/conversation-token', [LandingBeanController::class, 'conversationToken'])
-    ->middleware('throttle:12,1')
+    ->middleware('throttle:landing-bean-sessions')
     ->name('bean.landing.conversation-token');
 Route::post('/bean/landing/messages', [LandingBeanController::class, 'message'])
-    ->middleware('throttle:30,1')
+    ->middleware('throttle:landing-bean-messages')
     ->name('bean.landing.messages');
 
 Route::get('/reset-password/{token}', function (Request $request, string $token) {

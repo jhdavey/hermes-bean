@@ -18,6 +18,8 @@ test('public pages expose a compact Bean control without the authenticated chat 
 });
 
 test('landing Bean enables the microphone, listens for the wake phrase, and starts ElevenLabs voice', () => {
+    assert.match(source, /let enabled = false/);
+    assert.doesNotMatch(source, /localStorage\.getItem|localStorage\.setItem/);
     assert.match(source, /navigator\.mediaDevices\.getUserMedia\(\{ audio: true \}\)/);
     assert.match(source, /Just say “Hey Bean…”/);
     assert.match(source, /window\.SpeechRecognition/);
@@ -52,7 +54,21 @@ test('landing voice uses a dedicated ElevenLabs agent configuration and public H
     assert.match(agentConfig, /askLandingBean/);
     assert.match(agentConfig, /isolated public Hermes Bean runtime/);
     assert.match(agentConfig, /firstMessage:\s*''/);
+    assert.match(agentConfig, /llm:\s*landingLlm/);
+    assert.match(agentConfig, /reasoningEffort:\s*'none'/);
+    assert.match(agentConfig, /maxDurationSeconds/);
+    assert.match(agentConfig, /dailyLimit:\s*dailyConversationLimit/);
+    assert.match(agentConfig, /enableAuth:\s*true/);
+    assert.match(agentConfig, /promptInjection:\s*\{ isEnabled: true \}/);
+    assert.match(agentConfig, /recordVoice:\s*false/);
     assert.doesNotMatch(agentConfig, /dashboard_context|bean_dashboard/);
+});
+
+test('landing Bean supports optional bot verification without exposing a secret', () => {
+    assert.match(navigation, /data-turnstile-site-key/);
+    assert.match(source, /getTurnstileToken/);
+    assert.match(source, /challenges\.cloudflare\.com\/turnstile/);
+    assert.doesNotMatch(navigation, /TURNSTILE_SECRET|secret_key/);
 });
 
 test('landing Bean uses the stationary app-style border tracing indicator', () => {

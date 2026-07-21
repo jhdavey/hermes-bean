@@ -111,6 +111,11 @@ return [
         'landing_agent_branch_id' => env('ELEVENLABS_LANDING_AGENT_BRANCH_ID'),
     ],
 
+    'turnstile' => [
+        'site_key' => env('CLOUDFLARE_TURNSTILE_SITE_KEY'),
+        'secret_key' => env('CLOUDFLARE_TURNSTILE_SECRET_KEY'),
+    ],
+
     'google_calendar' => [
         'client_id' => env('GOOGLE_CALENDAR_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CALENDAR_CLIENT_SECRET'),

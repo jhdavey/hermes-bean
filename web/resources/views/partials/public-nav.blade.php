@@ -6,12 +6,17 @@
         data-csrf-token="{{ csrf_token() }}"
         data-conversation-token-url="{{ route('bean.landing.conversation-token') }}"
         data-message-url="{{ route('bean.landing.messages') }}"
+        data-turnstile-site-key="{{ config('services.turnstile.site_key') }}"
     >
         <span class="public-bean-ring" aria-hidden="true"></span>
-        <button class="public-bean-control" type="button" data-public-bean-toggle aria-pressed="false" aria-label="Enable landing page Bean">
+        <button class="public-bean-control" type="button" data-public-bean-toggle aria-pressed="false" aria-label="Enable landing page Bean" aria-describedby="public-bean-disclosure">
             <span class="public-bean-icon"><img src="{{ asset('images/bean-logo.png') }}" alt="Bean"></span>
-            <span class="public-bean-status" data-public-bean-status aria-live="polite">Tap to enable</span>
+            <span class="public-bean-copy">
+                <span class="public-bean-status" data-public-bean-status aria-live="polite">Tap to enable</span>
+                <span class="public-bean-disclosure" id="public-bean-disclosure">AI voice · audio processed by ElevenLabs</span>
+            </span>
         </button>
+        <span class="public-bean-turnstile" data-public-bean-turnstile hidden></span>
     </div>
     <nav class="navlinks" aria-label="Primary navigation">
         <a href="/pricing">Pricing</a>

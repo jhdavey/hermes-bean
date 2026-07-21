@@ -1,9 +1,9 @@
 import { Conversation } from '@elevenlabs/client';
 import '../css/public-bean.css';
 
-const ENABLED_KEY = 'heybean.publicBean.enabled';
 const WAKE_PHRASE = 'Hey Bean';
 const IDLE_CLOSE_MS = 30000;
+let turnstileScriptPromise = null;
 
 document.querySelectorAll('[data-public-bean]').forEach((root) => mountPublicBean(root));
 
@@ -12,7 +12,8 @@ function mountPublicBean(root) {
     const status = root.querySelector('[data-public-bean-status]');
     if (!button || !status) return;
 
-    let enabled = localStorage.getItem(ENABLED_KEY) === 'true';
+    // Public Bean is intentionally opt-in on every page load.
+    let enabled = false;
     let wakeDetector = null;
     let conversation = null;
     let starting = false;
@@ -67,7 +68,6 @@ function mountPublicBean(root) {
         lifecycleRevision += 1;
         enabled = false;
         starting = false;
-        localStorage.setItem(ENABLED_KEY, 'false');
         setStatus('disabled', 'Tap to enable');
         stopWakeListening();
         await stopVoiceConversation();
@@ -108,7 +108,6 @@ function mountPublicBean(root) {
         const revision = ++lifecycleRevision;
         starting = true;
         enabled = true;
-        localStorage.setItem(ENABLED_KEY, 'true');
         setStatus('starting', 'Enabling microphone…');
         try {
             if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone is unavailable.');
@@ -122,7 +121,6 @@ function mountPublicBean(root) {
             enabled = false;
             starting = false;
             lifecycleRevision += 1;
-            localStorage.setItem(ENABLED_KEY, 'false');
             setStatus('error', 'Tap to allow microphone');
         } finally {
             if (lifecycleRevision === revision) starting = false;
@@ -137,18 +135,20 @@ function mountPublicBean(root) {
         setStatus('connecting', 'Hey Bean heard…');
         try {
             await startVoiceConversation(tail, revision);
-        } catch (_) {
+        } catch (error) {
             if (!isCurrentLifecycle(revision)) return;
             await stopVoiceConversation();
-            setStatus('error', 'Bean could not connect');
+            setStatus('error', error?.status === 429 ? 'Demo limit reached' : 'Bean could not connect');
             window.setTimeout(() => restartWakeListening(), 1500);
         }
     }
 
     async function startVoiceConversation(wakeTail, revision) {
+        const turnstileToken = await getTurnstileToken(root);
         const session = await postJson(root.dataset.conversationTokenUrl, {
             client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
             page_path: window.location.pathname,
+            turnstile_token: turnstileToken,
         });
         if (!isCurrentLifecycle(revision)) return;
         if (!session?.token) throw new Error('Bean voice did not return a token.');
@@ -169,11 +169,15 @@ function mountPublicBean(root) {
                     if (!content) return 'I did not hear a complete question.';
                     setStatus('thinking', 'Thinking…');
                     lastActivityAt = Date.now();
-                    const response = await postJson(root.dataset.messageUrl, {
-                        content,
-                        page_path: window.location.pathname,
-                    });
-                    return String(response?.answer || 'I am having trouble answering right now.');
+                    try {
+                        const response = await postJson(root.dataset.messageUrl, {
+                            content,
+                            page_path: window.location.pathname,
+                        });
+                        return String(response?.answer || 'I am having trouble answering right now.');
+                    } catch (error) {
+                        return String(error?.publicMessage || 'I am having trouble answering right now.');
+                    }
                 },
             },
             onConnect: () => {
@@ -240,8 +244,7 @@ function mountPublicBean(root) {
         stopVoiceConversation();
     }, { once: true });
 
-    if (enabled) restartWakeListening();
-    else setStatus('disabled', 'Tap to enable');
+    setStatus('disabled', 'Tap to enable');
 
     async function postJson(url, body) {
         const response = await fetch(url, {
@@ -255,9 +258,66 @@ function mountPublicBean(root) {
             body: JSON.stringify(body),
         });
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(payload.message || 'Bean request failed.');
+        if (!response.ok) {
+            const error = new Error(payload.message || 'Bean request failed.');
+            error.status = response.status;
+            error.publicMessage = payload.message;
+            throw error;
+        }
         return payload.data || payload;
     }
+}
+
+async function getTurnstileToken(root) {
+    const siteKey = String(root.dataset.turnstileSiteKey || '').trim();
+    if (!siteKey) return null;
+
+    await loadTurnstile();
+    const container = root.querySelector('[data-public-bean-turnstile]');
+    if (!container || !window.turnstile) throw new Error('Human verification is unavailable.');
+
+    return new Promise((resolve, reject) => {
+        container.hidden = false;
+        let widgetId = null;
+        widgetId = window.turnstile.render(container, {
+            sitekey: siteKey,
+            execution: 'execute',
+            appearance: 'interaction-only',
+            callback: (token) => {
+                container.hidden = true;
+                if (widgetId !== null) window.turnstile.remove(widgetId);
+                resolve(token);
+            },
+            'error-callback': () => {
+                container.hidden = true;
+                if (widgetId !== null) window.turnstile.remove(widgetId);
+                reject(new Error('Human verification failed.'));
+            },
+            'expired-callback': () => {
+                container.hidden = true;
+                if (widgetId !== null) window.turnstile.remove(widgetId);
+                reject(new Error('Human verification expired.'));
+            },
+        });
+        window.turnstile.execute(widgetId);
+    });
+}
+
+function loadTurnstile() {
+    if (window.turnstile) return Promise.resolve();
+    if (turnstileScriptPromise) return turnstileScriptPromise;
+
+    turnstileScriptPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+        script.async = true;
+        script.defer = true;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('Human verification could not load.'));
+        document.head.appendChild(script);
+    });
+
+    return turnstileScriptPromise;
 }
 
 async function createWakeDetector(phrase, onWake, onError) {

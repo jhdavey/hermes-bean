@@ -40,7 +40,12 @@ ELEVENLABS_AGENT_ENVIRONMENT=
 ELEVENLABS_AGENT_BRANCH_ID=
 ELEVENLABS_AGENT_NAME="HeyBean Voice Agent"
 ELEVENLABS_LANDING_AGENT_NAME="HeyBean Landing Guide"
+ELEVENLABS_LANDING_LLM=gpt-5-nano
+CLOUDFLARE_TURNSTILE_SITE_KEY=...
+CLOUDFLARE_TURNSTILE_SECRET_KEY=...
 ```
+
+The landing guide is disabled on every page load and requires an explicit visitor click before requesting microphone access. Its default cost and abuse envelope is an eight-minute conversation with at most 20 meaningful visitor turns, 3 sessions per browser per hour, 6 per browser per day, and 150 landing sessions globally per day. All values are configurable through the `BEAN_LANDING_*` environment variables documented in `.env.example`.
 
 ## Configure/update the ElevenLabs Agent
 
@@ -61,6 +66,8 @@ The script creates or updates:
 If no `ELEVENLABS_AGENT_ID` is present, the script creates a new agent and prints the id. Put that id in `.env` as `ELEVENLABS_AGENT_ID`, enable `ELEVENLABS_AGENT_ENABLED=true`, then cache Laravel config.
 
 The landing command creates or updates a separate `askLandingBean` client tool and public voice agent. If no `ELEVENLABS_LANDING_AGENT_ID` is present, save the printed id in `.env` under that name before caching Laravel config. The public runtime deliberately has no `bean_dashboard` tool and cannot access authenticated data.
+
+The landing command also applies the provider-side controls: authentication-only conversation tokens, GPT-5 Nano with reasoning disabled, a concurrency and daily call cap with bursting disabled, focus and prompt-injection guardrails, no voice recording, and zero-day transcript/audio retention. Laravel independently applies session, IP, global, message, and per-conversation turn limits. Configure both Cloudflare Turnstile keys to require a managed bot challenge before Laravel mints an ElevenLabs token.
 
 ## Removed legacy voice paths
 
