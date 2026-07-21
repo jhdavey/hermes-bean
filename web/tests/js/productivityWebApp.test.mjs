@@ -75,6 +75,10 @@ test('notes use a WYSIWYG Markdown editor with the complete formatting toolbar',
     assert.match(source, /getMarkdown\(\)/);
     assert.match(source, /addImageBlobHook/);
     assert.match(notesSource, /\.hb-note-markdown-editor \.toastui-editor-toolbar/);
+    assert.match(notesSource, /\.hb-note-markdown-editor \.toastui-editor-contents\s*\{[^}]*font-weight:\s*400;/s);
+    assert.match(notesSource, /\.hb-note-markdown-editor \.toastui-editor-contents strong,[\s\S]*?font-weight:\s*700;/);
+    assert.match(notesSource, /\.hb-note-editor-toolbar\s*\{[^}]*z-index:\s*30;/s);
+    assert.match(notesSource, /\.hb-note-markdown-editor\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*1;/s);
     assert.doesNotMatch(source, /document\.execCommand/);
     assert.doesNotMatch(source, /body_html|body_delta|data-note-command/);
 });
