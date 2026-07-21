@@ -220,6 +220,13 @@ test('Bean local wake mode only uses local wake detectors', () => {
     assert.match(source, /HeyBeanLocalWakeDetector/);
     assert.match(source, /processLocally/);
     assert.match(source, /Listening locally for “Hey Bean”/);
+    assert.match(source, /beanWakeListeningStarting/);
+    assert.match(source, /if \(beanWakeDetector \|\| beanWakeListeningStarting \|\| state\.bean\.voiceActive \|\| state\.bean\.voiceConnecting\) return/);
+    assert.match(source, /function browserLocalSpeechWakeFactory/);
+    assert.match(source, /const scheduleRecognitionRestart =/);
+    assert.match(source, /restartDelay = Math\.min\(2000/);
+    assert.match(source, /if \(Date\.now\(\) - lastRecognitionStartedAt > 5000\) restartDelay = 250/);
+    assert.doesNotMatch(source, /window\.setTimeout\(startRecognition, 250\)/);
     assert.doesNotMatch(source, /webkitSpeechRecognition/);
 });
 

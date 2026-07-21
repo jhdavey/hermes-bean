@@ -231,6 +231,7 @@ export function mountHeyBeanWebApp(mount) {
     let beanMediaStream = null;
     let beanElevenLabsConversation = null;
     let beanWakeDetector = null;
+    let beanWakeListeningStarting = false;
     let beanRealtimeSessionCache = null;
     let beanRealtimeSessionPromise = null;
     let beanPendingWakeTailTimer = 0;
@@ -4466,9 +4467,11 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     async function startBeanWakeListening() {
-        stopBeanWakeListening();
+        if (beanWakeDetector || beanWakeListeningStarting || state.bean.voiceActive || state.bean.voiceConnecting) return;
+        beanWakeListeningStarting = true;
         const wakeFactory = resolveBeanWakeFactory();
         if (!wakeFactory?.create) {
+            beanWakeListeningStarting = false;
             state.bean.statusText = 'On — local wake is unavailable in this browser';
             state.bean.error = 'This browser does not expose a verified local wake-word detector. Privacy mode is still off, but Bean cannot start from “Hey Bean” until a local detector is available.';
             render();
@@ -4490,6 +4493,8 @@ export function mountHeyBeanWebApp(mount) {
             state.bean.error = friendlyError(error, 'start local wake detection');
             state.bean.statusText = 'On — local wake unavailable';
             render();
+        } finally {
+            beanWakeListeningStarting = false;
         }
     }
 
@@ -4518,9 +4523,18 @@ export function mountHeyBeanWebApp(mount) {
                 let recognition = null;
                 let stopped = true;
                 let restartTimer = 0;
+                let restartDelay = 250;
+                let lastRecognitionStartedAt = 0;
                 let wakeTriggered = false;
                 let wakeTimer = 0;
                 let lastWakeTranscript = '';
+
+                const scheduleRecognitionRestart = (delay = restartDelay) => {
+                    if (stopped) return;
+                    window.clearTimeout(restartTimer);
+                    restartTimer = window.setTimeout(startRecognition, delay);
+                    restartDelay = Math.min(2000, Math.round(Math.max(restartDelay, delay) * 1.6));
+                };
 
                 const fireWake = () => {
                     if (wakeTriggered) return;
@@ -4534,6 +4548,7 @@ export function mountHeyBeanWebApp(mount) {
                     if (stopped) return;
                     window.clearTimeout(restartTimer);
                     recognition = new Recognition();
+                    lastRecognitionStartedAt = Date.now();
                     recognition.lang = language;
                     recognition.continuous = true;
                     recognition.interimResults = true;
@@ -4544,6 +4559,7 @@ export function mountHeyBeanWebApp(mount) {
                             .map((result) => result?.[0]?.transcript || '')
                             .join(' ');
                         lastWakeTranscript = transcript;
+                        restartDelay = 250;
                         if (!normalizeWakeTranscript(transcript).includes(normalizedPhrase)) return;
                         const tail = extractBeanWakeTail(transcript, phrase);
                         if (tail) {
@@ -4565,13 +4581,16 @@ export function mountHeyBeanWebApp(mount) {
                         }
                     };
                     recognition.onend = () => {
+                        recognition = null;
                         if (stopped) return;
-                        restartTimer = window.setTimeout(startRecognition, 250);
+                        if (Date.now() - lastRecognitionStartedAt > 5000) restartDelay = 250;
+                        scheduleRecognitionRestart();
                     };
                     try {
                         recognition.start();
                     } catch (_) {
-                        restartTimer = window.setTimeout(startRecognition, 500);
+                        recognition = null;
+                        scheduleRecognitionRestart(500);
                     }
                 };
 
@@ -4706,6 +4725,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function stopBeanWakeListening() {
+        beanWakeListeningStarting = false;
         beanWakeDetector?.stop?.();
         beanWakeDetector = null;
     }
