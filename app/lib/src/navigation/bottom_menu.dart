@@ -64,11 +64,13 @@ class _HeyBeanBottomMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
-    final dockBottomPadding = bottomInset > 0 ? bottomInset + 4 : 8.0;
+    final dockBottomPadding = bottomInset > 0
+        ? math.max(12.0, bottomInset * .36)
+        : 8.0;
     final status = _effectiveStatus();
     final statusVisible = status.visible;
     final statusHeight = statusVisible ? 46.0 : 0.0;
-    final navHeight = 66.0 + dockBottomPadding;
+    final navHeight = 64.0 + dockBottomPadding;
 
     return SizedBox(
       key: const Key('heybean-bottom-menu'),
