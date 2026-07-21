@@ -28,6 +28,9 @@
 
     <main class="wrap hero">
         <div class="hero-icons" aria-label="HeyBean tools">
+            <span class="hero-icon bean" aria-label="Bean">
+                <img src="{{ asset('images/bean-logo.png') }}" alt="">
+            </span>
             <span class="hero-icon" aria-label="Calendar">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="3"/></svg>
             </span>

@@ -21,7 +21,7 @@ class LandingBeanTest extends TestCase
             $response->assertOk()
                 ->assertSee('data-public-bean', false)
                 ->assertSee('Tap to enable')
-                ->assertSee('AI voice · audio processed by ElevenLabs')
+                ->assertDontSee('audio processed by ElevenLabs')
                 ->assertSee('assets/publicBean-', false)
                 ->assertDontSee('data-bean-panel', false)
                 ->assertDontSee('hb-bean-chat', false);

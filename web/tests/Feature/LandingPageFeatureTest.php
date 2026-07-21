@@ -12,6 +12,7 @@ class LandingPageFeatureTest extends TestCase
     public function test_public_pages_present_the_bean_assistant_and_beta_signup(): void
     {
         foreach ([
+            'images/bean-logo.png',
             'images/bean-real-home-screen.png',
             'images/bean-real-calendar-screen.png',
             'images/bean-real-reminders-screen.png',
@@ -29,6 +30,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('meta name="description" content="HeyBean helps busy professionals and parents organize calendars, tasks, reminders, and everyday follow-through across work and home."', false)
             ->assertSee('HeyBean is currently in beta.', false)
             ->assertSee('AI EXECUTIVE ASSISTANCE FOR REAL LIFE', false)
+            ->assertSee('class="hero-icon bean"', false)
             ->assertSee('Stop carrying every detail yourself.', false)
             ->assertSee('AI executive assistant for busy professionals and parents', false)
             ->assertSee('Built for people balancing a career, a household, and everything between them.', false)
