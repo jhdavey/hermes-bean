@@ -22,6 +22,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use League\CommonMark\GithubFlavoredMarkdownConverter;
 
 class DomainResourceService
 {
@@ -663,15 +664,14 @@ class DomainResourceService
 
     private function normalizedNoteAttributes(array $attributes, ?Note $existing = null): array
     {
-        $hasBodyHtml = array_key_exists('body_html', $attributes);
-        $hasPlainText = array_key_exists('plain_text', $attributes);
-        $bodyHtml = $hasBodyHtml ? (string) ($attributes['body_html'] ?? '') : (string) ($existing?->body_html ?? '');
-        $plainText = $hasPlainText ? (string) ($attributes['plain_text'] ?? '') : '';
-        if ($plainText === '' && $bodyHtml !== '') {
-            $plainText = trim(html_entity_decode(strip_tags(str_replace(['</div>', '</p>', '<br>', '<br/>', '<br />'], "\n", $bodyHtml)), ENT_QUOTES | ENT_HTML5));
-        }
-        if ($hasBodyHtml && ! $hasPlainText) {
-            $attributes['plain_text'] = preg_replace("/\n{3,}/", "\n\n", $plainText) ?: '';
+        $hasMarkdown = array_key_exists('body_markdown', $attributes);
+        $markdown = $hasMarkdown
+            ? (string) ($attributes['body_markdown'] ?? '')
+            : (string) ($existing?->body_markdown ?? '');
+        $plainText = (string) ($existing?->plain_text ?? '');
+        if ($hasMarkdown) {
+            $attributes['body_markdown'] = $markdown;
+            $attributes['plain_text'] = $plainText = $this->markdownToPlainText($markdown);
         }
         if (! array_key_exists('title', $attributes) || blank($attributes['title'])) {
             $source = trim((string) ($attributes['plain_text'] ?? $plainText));
@@ -679,6 +679,29 @@ class DomainResourceService
             $attributes['title'] = $firstLine !== '' ? str($firstLine)->limit(80, '')->toString() : ($existing?->title ?? 'New Note');
         }
         return $attributes;
+    }
+
+    private function markdownToPlainText(string $markdown): string
+    {
+        if (trim($markdown) === '') return '';
+
+        $converter = new GithubFlavoredMarkdownConverter([
+            'allow_unsafe_links' => false,
+            'html_input' => 'strip',
+        ]);
+        $html = (string) $converter->convert($markdown);
+        $html = preg_replace_callback(
+            '/<img\b[^>]*\balt=(?:"([^"]*)"|\'([^\']*)\')[^>]*>/iu',
+            fn (array $matches): string => html_entity_decode((string) ($matches[1] ?? $matches[2] ?? ''), ENT_QUOTES | ENT_HTML5),
+            $html,
+        ) ?: $html;
+        $html = preg_replace('/<\/(?:td|th)>/iu', "\t", $html) ?: $html;
+        $html = preg_replace('/<(?:br|hr)\b[^>]*>|<\/(?:p|div|h[1-6]|li|blockquote|pre|tr)>/iu', "\n", $html) ?: $html;
+        $plainText = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5);
+        $plainText = preg_replace("/[ \t]+\n/", "\n", $plainText) ?: $plainText;
+        $plainText = preg_replace("/\n{3,}/", "\n\n", $plainText) ?: $plainText;
+
+        return trim($plainText);
     }
 
     private function additionalNotesForSync(int $workspaceId, array $syncToWorkspaceIds): int

@@ -160,9 +160,7 @@ class DomainResourceController extends Controller
         $workspace = $this->workspace($request);
         $validated = $request->validate([
             'title' => ['nullable', 'string', 'max:255'],
-            'body_html' => ['nullable', 'string'],
-            'plain_text' => ['nullable', 'string'],
-            'body_delta' => ['nullable', 'array'],
+            'body_markdown' => ['nullable', 'string'],
             'note_folder_id' => ['nullable', Rule::exists('note_folders', 'id')->where('workspace_id', $workspace->id)],
             'is_pinned' => ['nullable', 'boolean'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
@@ -185,9 +183,7 @@ class DomainResourceController extends Controller
         $model = $this->scoped(Note::query(), $request, false)->findOrFail($note);
         $validated = $request->validate([
             'title' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'body_html' => ['sometimes', 'nullable', 'string'],
-            'plain_text' => ['sometimes', 'nullable', 'string'],
-            'body_delta' => ['sometimes', 'nullable', 'array'],
+            'body_markdown' => ['sometimes', 'nullable', 'string'],
             'note_folder_id' => ['sometimes', 'nullable', Rule::exists('note_folders', 'id')->where('workspace_id', $model->workspace_id)],
             'is_pinned' => ['sometimes', 'boolean'],
             'sort_order' => ['sometimes', 'nullable', 'integer', 'min:0'],
@@ -641,31 +637,6 @@ class DomainResourceController extends Controller
                     ->orWhere('plain_text', 'like', '%'.$escapedTerm.'%');
             }
         });
-    }
-
-    /**
-     * @param  array<string, mixed>  $attributes
-     * @return array<string, mixed>
-     */
-    private function normalizedNoteAttributes(array $attributes, ?Note $existing = null): array
-    {
-        $hasBodyHtml = array_key_exists('body_html', $attributes);
-        $hasPlainText = array_key_exists('plain_text', $attributes);
-        $bodyHtml = $hasBodyHtml ? (string) ($attributes['body_html'] ?? '') : (string) ($existing?->body_html ?? '');
-        $plainText = $hasPlainText ? (string) ($attributes['plain_text'] ?? '') : '';
-        if ($plainText === '' && $bodyHtml !== '') {
-            $plainText = trim(html_entity_decode(strip_tags(str_replace(['</div>', '</p>', '<br>', '<br/>', '<br />'], "\n", $bodyHtml)), ENT_QUOTES | ENT_HTML5));
-        }
-        if ($hasBodyHtml && ! $hasPlainText) {
-            $attributes['plain_text'] = preg_replace("/\n{3,}/", "\n\n", $plainText) ?: '';
-        }
-        if (! array_key_exists('title', $attributes) || blank($attributes['title'])) {
-            $source = trim((string) ($attributes['plain_text'] ?? $plainText));
-            $firstLine = trim((string) strtok($source, "\n"));
-            $attributes['title'] = $firstLine !== '' ? str($firstLine)->limit(80, '')->toString() : ($existing?->title ?? 'New Note');
-        }
-
-        return $attributes;
     }
 
     private function scoped($query, Request $request, bool $useRequestWorkspace = true)

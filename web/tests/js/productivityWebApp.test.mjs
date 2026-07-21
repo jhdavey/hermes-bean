@@ -3,10 +3,12 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const source = await readFile(new URL('../../resources/js/heybean/webApp.js', import.meta.url), 'utf8');
+const noteEditorSource = await readFile(new URL('../../resources/js/heybean/noteMarkdownEditor.js', import.meta.url), 'utf8');
 const agentConfigSource = await readFile(new URL('../../scripts/elevenlabs-agent-configure.mjs', import.meta.url), 'utf8');
 const themeSource = await readFile(new URL('../../resources/css/heybean/theme.css', import.meta.url), 'utf8');
 const dashboardSource = await readFile(new URL('../../resources/css/heybean/dashboard.css', import.meta.url), 'utf8');
 const calendarSource = await readFile(new URL('../../resources/css/heybean/calendar.css', import.meta.url), 'utf8');
+const notesSource = await readFile(new URL('../../resources/css/heybean/notes.css', import.meta.url), 'utf8');
 const baseShellSource = await readFile(new URL('../../resources/css/heybean/base-shell.css', import.meta.url), 'utf8');
 
 function cssRuleContaining(sourceText, selector) {
@@ -53,6 +55,28 @@ test('month event pills fit their text without exceeding the date cell', () => {
     assert.match(calendarSource, /\.hb-month-event\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;[^}]*justify-self:\s*start;/s);
     assert.match(calendarSource, /\.hb-month-all-day-event\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;[^}]*justify-self:\s*start;/s);
     assert.match(calendarSource, /\.hb-month-event-title\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s);
+});
+
+test('notes use a WYSIWYG Markdown editor with the complete formatting toolbar', () => {
+    assert.match(source, /import\('\.\/noteMarkdownEditor\.js'\)/);
+    assert.match(noteEditorSource, /import Editor from '@toast-ui\/editor'/);
+    assert.match(source, /initialEditType:\s*'wysiwyg'/);
+    assert.match(source, /hideModeSwitch:\s*true/);
+    for (const group of [
+        "['heading', 'bold', 'italic', 'strike']",
+        "['hr', 'quote']",
+        "['ul', 'ol', 'task', 'indent', 'outdent']",
+        "['table', 'image', 'link']",
+        "['code', 'codeblock']",
+    ]) {
+        assert.ok(source.includes(group), `missing Markdown toolbar group: ${group}`);
+    }
+    assert.match(source, /body_markdown:\s*markdown/);
+    assert.match(source, /getMarkdown\(\)/);
+    assert.match(source, /addImageBlobHook/);
+    assert.match(notesSource, /\.hb-note-markdown-editor \.toastui-editor-toolbar/);
+    assert.doesNotMatch(source, /document\.execCommand/);
+    assert.doesNotMatch(source, /body_html|body_delta|data-note-command/);
 });
 
 test('Bean assistant presence is web-first and uses the Laravel Bean runtime', () => {

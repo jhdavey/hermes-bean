@@ -36,7 +36,7 @@ class DashboardChangeFeedTest extends TestCase
 
         $noteId = $this->withToken($token)->postJson('/api/notes', [
             'title' => 'Realtime note',
-            'plain_text' => 'Notes should refresh the dashboard too.',
+            'body_markdown' => 'Notes should refresh the dashboard too.',
         ])->assertCreated()->json('data.id');
 
         $this->withToken($token)->getJson('/api/dashboard-changes?after=0&wait=0')

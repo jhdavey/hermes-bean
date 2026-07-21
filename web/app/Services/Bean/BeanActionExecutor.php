@@ -95,7 +95,7 @@ class BeanActionExecutor
                 'note.list' => $this->listResources(Note::class, $run, 'updated_at', $arguments),
                 'note.search' => $this->searchResources(Note::class, $run, $arguments, ['title', 'plain_text']),
                 'note.create' => $this->createNote($run, $arguments),
-                'note.update' => $this->updateResource(Note::class, $run, $arguments, ['title', 'body_html', 'plain_text', 'body_delta', 'is_pinned', 'metadata']),
+                'note.update' => $this->updateResource(Note::class, $run, $this->normalizedNoteArguments($arguments), ['title', 'body_markdown', 'is_pinned', 'metadata']),
                 'note.delete' => $this->deleteResource(Note::class, $run, $arguments),
                 default => ['ok' => false, 'error' => "Unsupported Bean action: {$action}"],
             };
@@ -731,13 +731,13 @@ class BeanActionExecutor
 
     private function createNote(BeanRun $run, array $args): array
     {
-        $plain = trim((string) ($args['plain_text'] ?? $args['body'] ?? $args['content'] ?? ''));
-        if ($plain === '') {
+        $markdown = trim((string) ($args['body_markdown'] ?? $args['plain_text'] ?? $args['body'] ?? $args['content'] ?? ''));
+        if ($markdown === '') {
             return ['ok' => false, 'error' => 'I need note content before I can create that note.'];
         }
 
         $groundedLookup = $this->latestExternalLookupResult($run);
-        $title = trim((string) ($args['title'] ?? '')) ?: (str($plain)->limit(80, '')->toString());
+        $title = trim((string) ($args['title'] ?? ''));
         $metadata = $this->metadata($args);
         if ($groundedLookup !== null && (($args['grounded_from'] ?? null) === 'external.lookup' || ($args['source_action'] ?? null) === 'external.lookup')) {
             $metadata['grounded_from'] = 'external.lookup';
@@ -748,17 +748,28 @@ class BeanActionExecutor
                 'confidence' => $groundedLookup['confidence'] ?? null,
             ];
         }
-        $note = $this->domainResources->createNote($this->user($run), [
+        $noteAttributes = [
             'workspace_id' => $this->workspaceId($run),
-            'title' => $title,
-            'plain_text' => $plain,
-            'body_html' => $args['body_html'] ?? nl2br(e($plain)),
-            'body_delta' => $args['body_delta'] ?? null,
+            'body_markdown' => $markdown,
             'note_folder_id' => $args['note_folder_id'] ?? null,
             'is_pinned' => $args['is_pinned'] ?? null,
             'metadata' => $metadata,
-        ]);
+        ];
+        if ($title !== '') $noteAttributes['title'] = $title;
+        $note = $this->domainResources->createNote($this->user($run), $noteAttributes);
         return ['ok' => true, 'resource_type' => 'note', 'item' => $this->summary($note, $this->workspaceIds($run), $this->timeContext->forRun($run)), 'grounded_from' => $metadata['grounded_from'] ?? null, 'evidence' => $metadata['external_evidence'] ?? null];
+    }
+
+    private function normalizedNoteArguments(array $arguments): array
+    {
+        if (array_key_exists('body_markdown', $arguments)) return $arguments;
+        foreach (['plain_text', 'body', 'content'] as $field) {
+            if (! array_key_exists($field, $arguments)) continue;
+            $arguments['body_markdown'] = (string) ($arguments[$field] ?? '');
+            break;
+        }
+
+        return $arguments;
     }
 
     private function updateResource(string $class, BeanRun $run, array $args, array $allowed): array

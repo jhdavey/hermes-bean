@@ -47,7 +47,6 @@
 .hb-select,
 .hb-profile-workspace select,
 .hb-role-select,
-.hb-note-body,
 .hb-note-title-input {
     font-weight: 600;
 }
@@ -75,9 +74,7 @@
 .hb-section-title h2,
 .hb-auth-title h1,
 .hb-subscribe-hero h1,
-.hb-subscribe-plan h2,
-.hb-note-body h1,
-.hb-note-body h2 {
+.hb-subscribe-plan h2 {
     font-weight: 900;
 }
 

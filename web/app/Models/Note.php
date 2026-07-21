@@ -16,9 +16,8 @@ class Note extends Model
         'created_by_user_id',
         'note_folder_id',
         'title',
-        'body_html',
+        'body_markdown',
         'plain_text',
-        'body_delta',
         'is_pinned',
         'sort_order',
         'metadata',
@@ -26,7 +25,7 @@ class Note extends Model
 
     protected function casts(): array
     {
-        return ['body_delta' => 'array', 'is_pinned' => 'boolean', 'sort_order' => 'integer', 'metadata' => 'array'];
+        return ['is_pinned' => 'boolean', 'sort_order' => 'integer', 'metadata' => 'array'];
     }
 
     public function folder(): BelongsTo

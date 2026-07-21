@@ -224,6 +224,10 @@ export function mountHeyBeanWebApp(mount) {
     let deferredDashboardRenderTimer = 0;
     let dashboardRefreshGeneration = 0;
     let localResourceSequence = -1;
+    let activeNoteMarkdownEditor = null;
+    let activeNoteMarkdownEditorId = '';
+    let noteSaveStatusFadeTimer = 0;
+    let noteMarkdownEditorConstructorPromise = null;
     const noteAutosaveTimers = new Map();
     const noteSaveInFlight = new Set();
     const pendingNoteSaveBodies = new Map();
@@ -1079,124 +1083,6 @@ export function mountHeyBeanWebApp(mount) {
         return new Set(source.map((id) => String(id)));
     }
 
-    function notePlainTextFromHtml(html) {
-        const div = document.createElement('div');
-        div.innerHTML = String(html || '').replace(/<br\s*\/?>/gi, '\n');
-        return noteBodyPlainText(div).trim();
-    }
-
-    function noteBodyPlainText(bodyNode) {
-        if (!bodyNode) return '';
-        const nodes = bodyNode.childNodes?.length ? Array.from(bodyNode.childNodes) : [bodyNode];
-        return nodes
-            .map(noteNodePlainText)
-            .join('\n')
-            .replace(/\u00a0/g, ' ')
-            .replace(/\n{3,}/g, '\n\n')
-            .replace(/\n+$/g, '');
-    }
-
-    function noteNodePlainText(node) {
-        if (!node) return '';
-        if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
-        if (node.nodeType !== Node.ELEMENT_NODE) return '';
-        const element = node;
-        if (element.matches?.('.hb-note-checkbox-marker')) {
-            return element.classList.contains('hb-note-checkbox-marker-checked') ? '☑ ' : '☐ ';
-        }
-        if (element.matches?.('.hb-note-bullet-marker')) return '• ';
-        if (element.tagName === 'BR') return '\n';
-        if (element.tagName === 'HR') return '---';
-        return Array.from(element.childNodes || []).map(noteNodePlainText).join('');
-    }
-
-    function noteTextToHtml(text) {
-        const lines = String(text || '').split('\n');
-        return lines.map((line) => {
-            const escaped = escapeHtml(line || '');
-            const markerMatch = line.match(/^(\s*)(☐|☑|•)\s?(.*)$/);
-            if (markerMatch) {
-                const [, indent, marker, rest] = markerMatch;
-                const checked = marker === '☑';
-                const bullet = marker === '•';
-                const normalizedIndent = indent.replaceAll('\t', '  ').slice(0, 10);
-                const indentMarkup = normalizedIndent
-                    ? `<span class="hb-note-line-indent" contenteditable="false" aria-hidden="true">${escapeHtml(normalizedIndent)}</span>`
-                    : '';
-                const visualMarker = bullet
-                    ? '<span class="hb-note-bullet-marker" contenteditable="false" aria-hidden="true">•</span>'
-                    : `<span class="hb-note-checkbox-marker ${checked ? 'hb-note-checkbox-marker-checked' : ''}" contenteditable="false" role="checkbox" aria-checked="${checked}">${checked ? '✓' : ''}</span>`;
-                return `<div class="hb-note-list-line">${indentMarkup}${visualMarker}<span class="hb-note-line-content">${escapeHtml(rest || '')}</span></div>`;
-            }
-            return `<div class="hb-note-text-line">${escaped || '<br>'}</div>`;
-        }).join('');
-    }
-
-    function noteTextLineAt(text, offset) {
-        const safeOffset = Math.max(0, Math.min(Number(offset) || 0, text.length));
-        const before = text.lastIndexOf('\n', Math.max(0, safeOffset - 1));
-        const after = text.indexOf('\n', safeOffset);
-        const start = before === -1 ? 0 : before + 1;
-        const end = after === -1 ? text.length : after;
-        return { start, end, text: text.slice(start, end) };
-    }
-
-    function noteLineMarker(line) {
-        const match = String(line || '').match(/^(\s*)(☐|☑|•)(\s?)/);
-        if (!match) return null;
-        const marker = `${match[2]} `;
-        return {
-            indent: match[1] || '',
-            marker,
-            start: match[1].length,
-            end: match[1].length + match[2].length + (match[3] ? 1 : 0),
-        };
-    }
-
-    function editableTextOffset(root) {
-        const selection = window.getSelection();
-        if (!root || !selection?.rangeCount) return 0;
-        const range = selection.getRangeAt(0);
-        if (!root.contains(range.endContainer)) return noteBodyPlainText(root).length;
-        const clone = range.cloneRange();
-        clone.selectNodeContents(root);
-        clone.setEnd(range.endContainer, range.endOffset);
-        return clone.toString().length;
-    }
-
-    function setEditableTextOffset(root, offset) {
-        if (!root) return;
-        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-        let remaining = Math.max(0, Number(offset) || 0);
-        let node = walker.nextNode();
-        while (node) {
-            const length = node.textContent.length;
-            if (remaining <= length) {
-                const range = document.createRange();
-                range.setStart(node, remaining);
-                range.collapse(true);
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(range);
-                return;
-            }
-            remaining -= length;
-            node = walker.nextNode();
-        }
-        const range = document.createRange();
-        range.selectNodeContents(root);
-        range.collapse(false);
-        const selection = window.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(range);
-    }
-
-    function replaceNoteBodyText(bodyNode, text, caretOffset = null) {
-        if (!bodyNode) return;
-        bodyNode.innerHTML = noteTextToHtml(text);
-        setEditableTextOffset(bodyNode, caretOffset ?? text.length);
-    }
-
     function mergeById(...lists) {
         const merged = new Map();
         lists.flatMap(normalizeList).forEach((item, index) => {
@@ -1208,6 +1094,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function render() {
+        destroyActiveNoteMarkdownEditor();
         deferredDashboardRenderPending = false;
         window.clearTimeout(deferredDashboardRenderTimer);
         deferredDashboardRenderTimer = 0;
@@ -2134,15 +2021,7 @@ export function mountHeyBeanWebApp(mount) {
                             ${state.noteFolders.map((folder) => `<option value="${escapeAttr(folder.id)}" ${String(folder.id) === String(folderId) ? 'selected' : ''}>${escapeHtml(folder.name)}</option>`).join('')}
                         </select>
                     </label>
-                    <span class="hb-note-toolbar-divider"></span>
-                    ${noteCommandButton('formatBlock', 'h1', 'H1', locked, 'Heading 1')}
-                    ${noteCommandButton('bold', '', 'B', locked, 'Bold')}
-                    ${noteCommandButton('italic', '', 'I', locked, 'Italic')}
-                    ${noteCommandButton('checkbox', '', '☐', locked, 'Toggle checklist item')}
-                    ${noteCommandButton('bullet', '', '•', locked, 'Bulleted line')}
-                    ${noteCommandButton('outdent', '', icons.indentDecrease, locked, 'Decrease indent', true)}
-                    ${noteCommandButton('indent', '', icons.indentIncrease, locked, 'Increase indent', true)}
-                    ${noteCommandButton('insertHorizontalRule', '', '---', locked, 'Divider')}
+                    <span class="hb-note-save-state" aria-live="polite"></span>
                     <details class="hb-note-actions-menu">
                         <summary aria-label="Note actions" title="Note actions">${icons.moreVertical}</summary>
                         <div class="hb-note-actions-popover" role="menu">
@@ -2162,15 +2041,10 @@ export function mountHeyBeanWebApp(mount) {
                 </div>
                 ${locked ? `<div class="hb-note-lock-banner">${icons.lock}<span>Locked notes are read-only until you unlock them from the note menu.</span></div>` : ''}
                 <input class="hb-note-title-input" name="title" value="${escapeAttr(note.title || '')}" placeholder="New Note" autocomplete="off" ${locked ? 'readonly' : ''}>
-                <div class="hb-note-body" contenteditable="${locked ? 'false' : 'true'}" data-note-body spellcheck="true" data-note-locked="${locked ? 'true' : 'false'}">${note.body_html || note.bodyHtml || noteTextToHtml(note.plain_text || note.plainText || '')}</div>
+                <div class="hb-note-markdown-editor" data-note-markdown-editor></div>
+                <textarea class="hb-note-markdown-source" data-note-markdown-source hidden>${escapeHtml(note.body_markdown || note.bodyMarkdown || '')}</textarea>
                 <input type="hidden" name="metadata" value="${escapeAttr(JSON.stringify(metadata))}">
             </form>`;
-    }
-
-    function noteCommandButton(command, value, label, disabled = false, title = '', htmlLabel = false) {
-        const accessibleTitle = title || label;
-        const content = htmlLabel ? label : escapeHtml(label);
-        return `<button class="hb-note-format-button" type="button" data-note-command="${escapeAttr(command)}" data-note-command-value="${escapeAttr(value)}" aria-label="${escapeAttr(accessibleTitle)}" title="${escapeAttr(accessibleTitle)}" ${disabled ? 'disabled' : ''}>${content}</button>`;
     }
 
     function notesEmptyEditorMarkup() {
@@ -5660,10 +5534,6 @@ export function mountHeyBeanWebApp(mount) {
         mount.querySelectorAll('[data-delete-note-folder]').forEach((button) => button.addEventListener('click', () => deleteNoteFolder(button.dataset.deleteNoteFolder)));
         mount.querySelectorAll('[data-move-note-folder]').forEach((button) => button.addEventListener('click', () => moveNoteFolder(button.dataset.moveNoteFolder)));
         mount.querySelectorAll('[data-note-sync-workspace]').forEach((input) => input.addEventListener('change', () => updateNoteWorkspaceSync(input.closest('[data-note-editor]'))));
-        mount.querySelectorAll('[data-note-command]').forEach((button) => {
-            button.addEventListener('pointerdown', (event) => event.preventDefault());
-            button.addEventListener('click', () => execNoteCommand(button.dataset.noteCommand, button.dataset.noteCommandValue));
-        });
         bindNoteEditorAutosave();
         mount.querySelector('[data-open-issue-report]')?.addEventListener('click', () => openModal('issue-report'));
         mount.querySelectorAll('[data-edit-task]').forEach((button) => button.addEventListener('click', () => openModal('task', findById(state.tasks, button.dataset.editTask))));
@@ -5752,8 +5622,7 @@ export function mountHeyBeanWebApp(mount) {
         try {
             const body = {
                 title: 'New Note',
-                body_html: '',
-                plain_text: '',
+                body_markdown: '',
                 note_folder_id: /^\d+$/.test(String(state.selectedNoteFolderId || '')) ? Number(state.selectedNoteFolderId) : null,
             };
             const note = await api(workspaceScopedPath('/notes'), { method: 'POST', body });
@@ -5871,24 +5740,131 @@ export function mountHeyBeanWebApp(mount) {
             flushNoteAutosave(form);
         });
         const note = findById(state.notes, form.dataset.noteEditor);
+        mountNoteMarkdownEditor(form, note);
         if (noteIsLocked(note)) return;
         form.querySelector('[name="title"]')?.addEventListener('input', () => scheduleNoteAutosave(form));
+        form.querySelector('[name="title"]')?.addEventListener('blur', () => flushNoteAutosave(form));
         form.querySelector('[name="note_folder_id"]')?.addEventListener('change', () => scheduleNoteAutosave(form, true));
-        const body = form.querySelector('[data-note-body]');
-        body?.addEventListener('input', () => scheduleNoteAutosave(form));
-        body?.addEventListener('blur', () => flushNoteAutosave(form));
-        body?.addEventListener('keydown', (event) => handleNoteBodyKeydown(event, form));
-        body?.addEventListener('click', (event) => handleNoteBodyClick(event, form));
+    }
+
+    async function mountNoteMarkdownEditor(form, note) {
+        const host = form.querySelector('[data-note-markdown-editor]');
+        const source = form.querySelector('[data-note-markdown-source]');
+        if (!host || !note) return;
+        const initialValue = source?.value || '';
+        const locked = noteIsLocked(note);
+        host.setAttribute('aria-busy', 'true');
+        let Editor;
+        try {
+            noteMarkdownEditorConstructorPromise ??= import('./noteMarkdownEditor.js').then((module) => module.default);
+            Editor = await noteMarkdownEditorConstructorPromise;
+        } catch (_) {
+            if (form.isConnected) host.innerHTML = '<p class="hb-note-editor-load-error">The editor could not load. Refresh and try again.</p>';
+            return;
+        }
+        if (!form.isConnected || String(form.dataset.noteEditor || '') !== String(note.id)) return;
+        host.removeAttribute('aria-busy');
+        activeNoteMarkdownEditorId = String(note.id);
+
+        if (locked) {
+            activeNoteMarkdownEditor = Editor.factory({
+                el: host,
+                viewer: true,
+                initialValue,
+                usageStatistics: false,
+            });
+            return;
+        }
+
+        let ready = false;
+        const editor = new Editor({
+            el: host,
+            initialValue,
+            initialEditType: 'wysiwyg',
+            height: 'auto',
+            minHeight: '420px',
+            hideModeSwitch: true,
+            usageStatistics: false,
+            useCommandShortcut: true,
+            extendedAutolinks: true,
+            placeholder: 'Start writing…',
+            toolbarItems: [
+                ['heading', 'bold', 'italic', 'strike'],
+                ['hr', 'quote'],
+                ['ul', 'ol', 'task', 'indent', 'outdent'],
+                ['table', 'image', 'link'],
+                ['code', 'codeblock'],
+            ],
+            events: {
+                change: () => {
+                    if (ready) scheduleNoteAutosave(form);
+                },
+                blur: () => {
+                    if (ready) flushNoteAutosave(form);
+                },
+            },
+            hooks: {
+                addImageBlobHook: (blob, callback) => embedNoteImage(blob, callback),
+            },
+        });
+        activeNoteMarkdownEditor = editor;
+        labelNoteToolbarOverflow(host);
+        ready = true;
+    }
+
+    function labelNoteToolbarOverflow(host) {
+        const labelButton = () => {
+            const button = host.querySelector('.toastui-editor-toolbar-icons.more');
+            if (!button) return false;
+            button.setAttribute('aria-label', 'More formatting');
+            button.setAttribute('title', 'More formatting');
+            return true;
+        };
+        labelButton();
+        const observer = new MutationObserver(() => {
+            labelButton();
+        });
+        observer.observe(host, { childList: true, subtree: true });
+        window.setTimeout(() => observer.disconnect(), 2000);
+    }
+
+    function destroyActiveNoteMarkdownEditor() {
+        activeNoteMarkdownEditor?.destroy?.();
+        activeNoteMarkdownEditor = null;
+        activeNoteMarkdownEditorId = '';
+    }
+
+    function embedNoteImage(blob, callback) {
+        if (!String(blob?.type || '').startsWith('image/')) {
+            window.alert('Choose an image file to add it to this note.');
+            return;
+        }
+        if (blob.size > 5 * 1024 * 1024) {
+            window.alert('Images in notes must be 5 MB or smaller.');
+            return;
+        }
+        const reader = new FileReader();
+        reader.addEventListener('load', () => callback(String(reader.result || ''), blob.name || 'Image'));
+        reader.readAsDataURL(blob);
+    }
+
+    function activeNotePlainText() {
+        const editorRoot = activeNoteMarkdownEditor?.getEditorElements?.().wwEditor;
+        return String(editorRoot?.innerText || editorRoot?.textContent || '')
+            .replace(/\u00a0/g, ' ')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
     }
 
     function notePayloadFromForm(form) {
-        const bodyNode = form.querySelector('[data-note-body]');
-        const bodyHtml = bodyNode?.innerHTML || '';
-        const plainText = noteBodyPlainText(bodyNode);
+        const source = form.querySelector('[data-note-markdown-source]');
+        const noteId = String(form.dataset.noteEditor || '');
+        const markdown = activeNoteMarkdownEditorId === noteId && activeNoteMarkdownEditor?.getMarkdown
+            ? activeNoteMarkdownEditor.getMarkdown()
+            : String(source?.value || '');
         return {
             title: String(form.elements.title?.value || '').trim() || 'New Note',
-            body_html: bodyHtml,
-            plain_text: plainText,
+            body_markdown: markdown,
             note_folder_id: form.elements.note_folder_id?.value ? Number(form.elements.note_folder_id.value) : null,
         };
     }
@@ -5901,9 +5877,11 @@ export function mountHeyBeanWebApp(mount) {
         state.notes = normalizeNotes(upsertById(state.notes, {
             ...note,
             ...body,
+            plain_text: activeNotePlainText(),
             noteFolderId: body.note_folder_id,
         }));
         saveDashboardCache();
+        setNoteSaveStatus(id, 'Saving…');
         const queued = noteAutosaveTimers.get(String(id));
         if (queued?.timer) window.clearTimeout(queued.timer);
         const timer = window.setTimeout(() => saveNotePayload(id, body), immediate ? 1 : noteAutosaveDelay);
@@ -6070,9 +6048,19 @@ export function mountHeyBeanWebApp(mount) {
         dailyStickyNoteStatusFadeTimers.set(key, timer);
     }
 
-    function setNoteSaveStatus(text) {
+    function setNoteSaveStatus(id, text) {
+        const form = mount.querySelector('[data-note-editor]');
+        if (String(form?.dataset.noteEditor || '') !== String(id || '')) return;
         const status = mount.querySelector('.hb-note-save-state');
-        if (status) status.textContent = text;
+        if (!status) return;
+        window.clearTimeout(noteSaveStatusFadeTimer);
+        status.textContent = text;
+        status.classList.toggle('hb-note-save-state-visible', Boolean(text));
+        status.classList.toggle('hb-note-save-state-error', text === 'Retrying…');
+        if (text !== 'Saved') return;
+        noteSaveStatusFadeTimer = window.setTimeout(() => {
+            status.classList.remove('hb-note-save-state-visible');
+        }, 2500);
     }
 
     async function saveNotePayload(id, body, options = {}) {
@@ -6085,6 +6073,7 @@ export function mountHeyBeanWebApp(mount) {
         noteSaveInFlight.add(String(id));
         state.notesSaving = true;
         state.error = '';
+        setNoteSaveStatus(id, 'Saving…');
         let saveFailed = false;
         try {
             const note = await api(`/notes/${encodeURIComponent(id)}`, {
@@ -6110,8 +6099,11 @@ export function mountHeyBeanWebApp(mount) {
             if (pendingBody) {
                 saveNotePayload(id, pendingBody);
             } else if (saveFailed && !options.keepalive) {
+                setNoteSaveStatus(id, 'Retrying…');
                 const timer = window.setTimeout(() => saveNotePayload(id, body), 3000);
                 noteAutosaveTimers.set(String(id), { timer, body });
+            } else if (!saveFailed) {
+                setNoteSaveStatus(id, 'Saved');
             }
         }
     }
@@ -6216,122 +6208,6 @@ export function mountHeyBeanWebApp(mount) {
             state.error = friendlyError(error, 'delete that folder');
             render();
         }
-    }
-
-    function execNoteCommand(command, value = '') {
-        const form = mount.querySelector('[data-note-editor]');
-        const note = findById(state.notes, form?.dataset?.noteEditor);
-        if (noteIsLocked(note)) return;
-        const body = mount.querySelector('[data-note-body]');
-        if (command === 'checkbox') {
-            toggleCurrentNoteCheckboxLine(body);
-            if (form) scheduleNoteAutosave(form, true);
-            return;
-        }
-        if (command === 'bullet') {
-            updateCurrentNoteLine(body, '• ');
-            if (form) scheduleNoteAutosave(form, true);
-            return;
-        }
-        if (command === 'indent' || command === 'outdent') {
-            indentCurrentNoteLine(body, command === 'indent' ? 1 : -1);
-            if (form) scheduleNoteAutosave(form, true);
-            return;
-        }
-        body?.focus();
-        document.execCommand(command, false, value || null);
-        if (form) scheduleNoteAutosave(form, true);
-    }
-
-    function handleNoteBodyKeydown(event, form) {
-        if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
-        const body = event.currentTarget;
-        const text = noteBodyPlainText(body);
-        const offset = editableTextOffset(body);
-        const line = noteTextLineAt(text, offset);
-        const marker = noteLineMarker(line.text);
-        const indentation = (line.text.match(/^\s*/) || [''])[0];
-        const prefix = marker ? `${marker.indent}${marker.marker}` : indentation;
-        if (!prefix) return;
-        event.preventDefault();
-        if (marker && line.text.slice(marker.end).trim() === '') {
-            const nextText = `${text.slice(0, line.start)}${marker.indent}${text.slice(line.end)}`;
-            replaceNoteBodyText(body, nextText, line.start + marker.indent.length);
-            scheduleNoteAutosave(form, true);
-            return;
-        }
-        const nextText = `${text.slice(0, offset)}\n${prefix}${text.slice(offset)}`;
-        replaceNoteBodyText(body, nextText, offset + 1 + prefix.length);
-        scheduleNoteAutosave(form);
-    }
-
-    function handleNoteBodyClick(event, form) {
-        const marker = event.target.closest?.('.hb-note-checkbox-marker');
-        if (!marker) return;
-        event.preventDefault();
-        const body = form.querySelector('[data-note-body]');
-        const text = noteBodyPlainText(body);
-        const row = marker.closest('div');
-        const rows = Array.from(body.children);
-        const rowIndex = Math.max(0, rows.indexOf(row));
-        let lineStart = 0;
-        for (let index = 0; index < rowIndex; index += 1) {
-            lineStart += noteNodePlainText(rows[index]).length + 1;
-        }
-        const line = noteTextLineAt(text, lineStart);
-        const current = noteLineMarker(line.text);
-        if (!current || !current.marker.startsWith('☐') && !current.marker.startsWith('☑')) return;
-        const checked = current.marker.startsWith('☑');
-        const replacement = checked ? '☐ ' : '☑ ';
-        const markerStart = line.start + current.start;
-        const markerEnd = line.start + current.end;
-        const nextText = `${text.slice(0, markerStart)}${replacement}${text.slice(markerEnd)}`;
-        replaceNoteBodyText(body, nextText, markerStart + replacement.length);
-        scheduleNoteAutosave(form, true);
-    }
-
-    function updateCurrentNoteLine(body, prefix) {
-        if (!body) return;
-        const text = noteBodyPlainText(body);
-        const offset = editableTextOffset(body);
-        const line = noteTextLineAt(text, offset);
-        const marker = noteLineMarker(line.text);
-        const indentation = (line.text.match(/^\s*/) || [''])[0];
-        const markerStart = line.start + (marker ? marker.start : indentation.length);
-        const markerEnd = line.start + (marker ? marker.end : indentation.length);
-        const nextText = `${text.slice(0, markerStart)}${prefix}${text.slice(markerEnd)}`;
-        replaceNoteBodyText(body, nextText, markerStart + prefix.length);
-    }
-
-    function toggleCurrentNoteCheckboxLine(body) {
-        if (!body) return;
-        const text = noteBodyPlainText(body);
-        const offset = editableTextOffset(body);
-        const line = noteTextLineAt(text, offset);
-        const marker = noteLineMarker(line.text);
-        if (marker && (marker.marker.startsWith('☐') || marker.marker.startsWith('☑'))) {
-            const markerStart = line.start + marker.start;
-            const markerEnd = line.start + marker.end;
-            const nextText = `${text.slice(0, markerStart)}${text.slice(markerEnd)}`;
-            replaceNoteBodyText(body, nextText, markerStart);
-            return;
-        }
-        updateCurrentNoteLine(body, '☐ ');
-    }
-
-    function indentCurrentNoteLine(body, amount) {
-        if (!body) return;
-        const text = noteBodyPlainText(body);
-        const offset = editableTextOffset(body);
-        const line = noteTextLineAt(text, offset);
-        const indentMatch = line.text.match(/^\s*/) || [''];
-        const currentIndent = indentMatch[0] || '';
-        const nextIndent = amount > 0
-            ? `${currentIndent}  `
-            : currentIndent.slice(0, Math.max(0, currentIndent.length - 2));
-        const nextText = `${text.slice(0, line.start)}${nextIndent}${line.text.slice(currentIndent.length)}${text.slice(line.end)}`;
-        const delta = nextIndent.length - currentIndent.length;
-        replaceNoteBodyText(body, nextText, Math.max(line.start + nextIndent.length, offset + delta));
     }
 
     function toggleTaskDetails(id) {

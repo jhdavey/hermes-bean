@@ -474,38 +474,6 @@
     padding-left: 44px;
 }
 
-.hb-note-pin-active {
-    background: rgba(var(--hb-accent-rgb), .18);
-    color: var(--hb-accent-strong);
-}
-
-.hb-note-toolbar-divider {
-    width: 1px;
-    height: 28px;
-    background: var(--hb-border);
-}
-
-.hb-note-format-button {
-    min-width: 30px;
-    height: 30px;
-    border: 1px solid var(--hb-border);
-    border-radius: var(--hb-control-radius);
-    background: var(--hb-surface);
-    color: var(--hb-text);
-    font-weight: 700;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
-}
-
-.hb-note-format-button svg {
-    width: 16px;
-    height: 16px;
-    display: block;
-}
-
-.hb-note-format-button:disabled,
 .hb-note-folder-select:disabled {
     cursor: not-allowed;
     opacity: .52;
@@ -516,12 +484,21 @@
     color: var(--hb-muted);
     font-size: 12px;
     font-weight: 700;
+    opacity: 0;
+    transition: opacity 180ms ease-out;
+}
+
+.hb-note-save-state-visible {
+    opacity: 1;
+}
+
+.hb-note-save-state-error {
+    color: var(--hb-warning);
 }
 
 .hb-note-actions-menu {
     position: relative;
     flex: 0 0 auto;
-    margin-left: auto;
 }
 
 .hb-note-actions-menu summary {
@@ -637,82 +614,217 @@
     opacity: .94;
 }
 
-.hb-note-body {
-    min-height: 420px;
-    outline: 0;
-    color: var(--hb-text);
-    font-size: 18px;
-    line-height: 1.58;
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
-}
-
-.hb-note-body > div {
-    min-height: 1.58em;
-}
-
-.hb-note-list-line {
-    display: flex;
-    align-items: baseline;
-    min-height: 1.58em;
-}
-
-.hb-note-line-indent {
-    flex: 0 0 auto;
-    white-space: pre;
-}
-
-.hb-note-line-content {
+.hb-note-markdown-editor {
     min-width: 0;
-    white-space: pre-wrap;
-}
-
-.hb-note-body h1 {
-    margin: 0 0 10px;
+    min-height: 420px;
     color: var(--hb-text);
-    font-size: 1.45em;
-    font-weight: 900;
-    line-height: 1.18;
 }
 
-.hb-note-body hr {
-    height: 1px;
+.hb-note-markdown-editor[aria-busy="true"] {
+    background:
+        linear-gradient(90deg, transparent, rgba(var(--hb-accent-rgb), .08), transparent)
+        0 0 / 220% 100%;
+    animation: hb-note-editor-loading 1.2s ease-in-out infinite;
+}
+
+.hb-note-editor-load-error {
+    margin: 0;
+    border: 1px solid color-mix(in srgb, var(--hb-destructive) 45%, transparent);
+    border-radius: 14px;
+    padding: 14px 16px;
+    color: var(--hb-destructive);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+@keyframes hb-note-editor-loading {
+    to { background-position: -220% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hb-note-markdown-editor[aria-busy="true"] {
+        animation: none;
+    }
+}
+
+.hb-note-markdown-editor .toastui-editor-defaultUI {
+    overflow: visible;
     border: 0;
-    background: var(--hb-border);
-    margin: 14px 0;
+    border-radius: 0;
+    background: transparent;
 }
 
-.hb-note-checkbox-marker,
-.hb-note-bullet-marker {
-    box-sizing: border-box;
-    display: inline-grid;
-    flex: 0 0 18px;
-    place-items: center;
-    align-self: baseline;
-    margin-right: 8px;
+.hb-note-markdown-editor .toastui-editor-toolbar {
+    min-height: 46px;
+    height: auto;
+    border: 1px solid var(--hb-border);
+    border-radius: 16px;
+    padding: 5px 8px;
+    background: var(--hb-surface2);
 }
 
-.hb-note-checkbox-marker {
-    width: 18px;
-    height: 18px;
-    border: 1.6px solid var(--hb-muted);
-    border-radius: 5px;
-    color: transparent;
-    font-size: 13px;
-    font-weight: 900;
-    line-height: 1;
+.hb-note-markdown-editor .toastui-editor-defaultUI-toolbar {
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
 }
 
-.hb-note-checkbox-marker-checked {
-    border-color: var(--hb-accent-strong);
-    background: var(--hb-accent);
-    color: var(--hb-accent-ink);
+.hb-note-markdown-editor .toastui-editor-toolbar-group {
+    margin: 0 8px 0 0;
 }
 
-.hb-note-bullet-marker {
-    width: 18px;
+.hb-note-markdown-editor .toastui-editor-toolbar-divider {
+    background-color: var(--hb-border);
+}
+
+.hb-note-markdown-editor .toastui-editor-toolbar-icons {
+    border-color: transparent;
+    border-radius: 8px;
+    background-color: transparent;
+}
+
+.hb-note-markdown-editor .toastui-editor-toolbar-icons:hover,
+.hb-note-markdown-editor .toastui-editor-toolbar-icons.active {
+    border-color: rgba(var(--hb-accent-rgb), .35);
+    background-color: rgba(var(--hb-accent-rgb), .14);
+}
+
+.hb-note-markdown-editor .toastui-editor-main,
+.hb-note-markdown-editor .toastui-editor-ww-container {
+    background: transparent;
+}
+
+.hb-note-markdown-editor .toastui-editor-main {
+    min-height: 420px;
+}
+
+.hb-note-markdown-editor .toastui-editor-ww-container {
+    overflow: visible;
+}
+
+.hb-note-markdown-editor .toastui-editor-contents {
+    min-height: 420px;
+    padding: 26px 2px 56px;
     color: var(--hb-text);
-    font-weight: 900;
+    font-family: inherit;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.68;
+    overflow-wrap: anywhere;
+}
+
+.hb-note-markdown-editor .toastui-editor-contents p,
+.hb-note-markdown-editor .toastui-editor-contents li,
+.hb-note-markdown-editor .toastui-editor-contents blockquote,
+.hb-note-markdown-editor .toastui-editor-contents td,
+.hb-note-markdown-editor .toastui-editor-contents th {
+    color: var(--hb-text);
+    font-size: inherit;
+    line-height: inherit;
+}
+
+.hb-note-markdown-editor .toastui-editor-contents h1,
+.hb-note-markdown-editor .toastui-editor-contents h2,
+.hb-note-markdown-editor .toastui-editor-contents h3,
+.hb-note-markdown-editor .toastui-editor-contents h4,
+.hb-note-markdown-editor .toastui-editor-contents h5,
+.hb-note-markdown-editor .toastui-editor-contents h6 {
+    border-bottom: 0;
+    color: var(--hb-text);
+    font-family: inherit;
+    font-weight: 800;
+    letter-spacing: -.018em;
+}
+
+.hb-note-markdown-editor .toastui-editor-contents h1 {
+    font-size: 1.8em;
+}
+
+.hb-note-markdown-editor .toastui-editor-contents h2 {
+    font-size: 1.5em;
+}
+
+.hb-note-markdown-editor .toastui-editor-contents h3 {
+    font-size: 1.28em;
+}
+
+.hb-note-markdown-editor .toastui-editor-contents blockquote {
+    border-left: 3px solid var(--hb-accent-strong);
+    background: var(--hb-surface-soft);
+}
+
+.hb-note-markdown-editor .toastui-editor-contents code {
+    border: 1px solid var(--hb-border);
+    border-radius: 6px;
+    background: var(--hb-surface-soft);
+    color: var(--hb-text);
+}
+
+.hb-note-markdown-editor .toastui-editor-contents pre {
+    border: 1px solid var(--hb-border);
+    border-radius: 14px;
+    background: var(--hb-surface-soft);
+}
+
+.hb-note-markdown-editor .toastui-editor-contents pre code {
+    border: 0;
+    background: transparent;
+}
+
+.hb-note-markdown-editor .toastui-editor-contents hr {
+    border: 0;
+    border-top: 1px solid var(--hb-border);
+}
+
+.hb-note-markdown-editor .toastui-editor-contents a {
+    color: var(--hb-accent-strong);
+}
+
+.hb-note-markdown-editor .toastui-editor-contents table,
+.hb-note-markdown-editor .toastui-editor-contents th,
+.hb-note-markdown-editor .toastui-editor-contents td {
+    border-color: var(--hb-border);
+}
+
+.hb-note-markdown-editor .toastui-editor-contents th {
+    background: var(--hb-surface-soft);
+}
+
+.hb-note-markdown-editor .toastui-editor-contents img {
+    max-width: 100%;
+    border-radius: 14px;
+}
+
+.hb-note-markdown-editor .toastui-editor-popup,
+.hb-note-markdown-editor .toastui-editor-context-menu,
+.hb-note-markdown-editor .toastui-editor-dropdown-toolbar {
+    border-color: var(--hb-border);
+    background: var(--hb-surface);
+    color: var(--hb-text);
+    box-shadow: var(--hb-shadow);
+}
+
+.hb-note-markdown-editor .toastui-editor-popup input,
+.hb-note-markdown-editor .toastui-editor-popup select {
+    border-color: var(--hb-border);
+    background: var(--hb-surface2);
+    color: var(--hb-text);
+}
+
+.hb-note-markdown-editor .toastui-editor-popup-add-heading ul,
+.hb-note-markdown-editor .toastui-editor-popup-body,
+.hb-note-markdown-editor .toastui-editor-popup-body label {
+    color: var(--hb-text);
+}
+
+.hb-note-markdown-editor .toastui-editor-popup-add-heading li:hover,
+.hb-note-markdown-editor .toastui-editor-popup-add-heading li.active,
+.hb-note-markdown-editor .toastui-editor-context-menu li:hover {
+    background: rgba(var(--hb-accent-rgb), .14);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-note-markdown-editor .toastui-editor-toolbar-icons {
+    filter: invert(.9) hue-rotate(180deg);
 }
 
 .hb-note-workspace-menu {
@@ -764,19 +876,12 @@
 }
 
 .hb-note-editor-locked .hb-note-title-input,
-.hb-note-editor-locked .hb-note-body {
+.hb-note-editor-locked .hb-note-markdown-editor {
     cursor: default;
 }
 
-.hb-note-body h1,
-.hb-note-body h2 {
-    letter-spacing: 0;
-}
-
-.hb-note-body hr {
-    border: 0;
-    border-top: 1px solid var(--hb-border);
-    margin: 22px 0;
+.hb-note-editor-locked .hb-note-markdown-editor .toastui-editor-contents {
+    padding-top: 8px;
 }
 
 .hb-notes-empty-editor {

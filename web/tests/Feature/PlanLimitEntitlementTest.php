@@ -194,7 +194,7 @@ class PlanLimitEntitlementTest extends TestCase
         for ($i = 1; $i <= 10; $i++) {
             $this->withToken($baseToken)->postJson('/api/notes', [
                 'title' => "Base note {$i}",
-                'plain_text' => 'Base users can write up to ten notes.',
+                'body_markdown' => 'Base users can write up to ten notes.',
                 'note_folder_id' => $baseFolder['id'],
             ])
                 ->assertCreated()
@@ -203,7 +203,7 @@ class PlanLimitEntitlementTest extends TestCase
 
         $this->withToken($baseToken)->postJson('/api/notes', [
             'title' => 'Eleventh note',
-            'plain_text' => 'Base users need to upgrade after ten notes.',
+            'body_markdown' => 'Base users need to upgrade after ten notes.',
             'note_folder_id' => $baseFolder['id'],
         ])
             ->assertStatus(402)
@@ -217,7 +217,7 @@ class PlanLimitEntitlementTest extends TestCase
 
         $this->withToken($premiumToken)->postJson('/api/notes', [
             'title' => 'Premium note',
-            'plain_text' => 'Premium users can write notes.',
+            'body_markdown' => 'Premium users can write notes.',
             'note_folder_id' => $folder['id'],
         ])
             ->assertCreated()
@@ -319,7 +319,7 @@ class PlanLimitEntitlementTest extends TestCase
 
         $this->withToken($token)->postJson('/api/notes', [
             'title' => 'Admin note',
-            'plain_text' => 'Admin accounts can use Notes without a paid plan.',
+            'body_markdown' => 'Admin accounts can use Notes without a paid plan.',
             'note_folder_id' => $folder['id'],
         ])
             ->assertCreated()

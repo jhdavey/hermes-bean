@@ -18,6 +18,10 @@
     },
     "dependencies": {
         "@elevenlabs/client": "^1.15.1",
-        "@elevenlabs/elevenlabs-js": "^2.58.0"
+        "@elevenlabs/elevenlabs-js": "^2.58.0",
+        "@toast-ui/editor": "^3.2.2"
+    },
+    "overrides": {
+        "dompurify": "3.4.12"
     }
 }
