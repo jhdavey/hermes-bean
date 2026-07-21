@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\BeanUsageRecord;
 use App\Services\Bean\LandingBeanRuntimeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
@@ -123,6 +124,56 @@ class LandingBeanTest extends TestCase
             'turnstile_token' => 'valid-human-token',
             'page_path' => '/',
         ])->assertOk()->assertJsonPath('data.token', 'verified-token');
+    }
+
+    public function test_landing_voice_lifecycle_records_public_elevenlabs_usage(): void
+    {
+        config([
+            'services.elevenlabs.agent_enabled' => true,
+            'services.elevenlabs.api_key' => 'landing-test-key',
+            'services.elevenlabs.landing_agent_id' => 'landing-agent',
+            'bean.usage.elevenlabs_agent_cost_per_minute_usd' => 0.08,
+            'bean.usage.elevenlabs_agent_credits_per_minute' => 10000 / 15,
+        ]);
+        Http::fake([
+            'https://api.elevenlabs.io/*' => Http::response(['token' => 'landing-meter-token']),
+        ]);
+        $startedAt = now();
+
+        $this->postJson('/bean/landing/conversation-token', [
+            'client_timezone' => 'America/New_York',
+            'page_path' => '/pricing',
+        ])->assertOk();
+
+        $this->postJson('/bean/landing/voice-events', [
+            'event_type' => 'voice_session_started',
+            'client_session_id' => 'landing-client-session-1',
+            'page_path' => '/pricing',
+            'source' => 'landing_page',
+            'payload' => ['transport' => 'elevenlabs_agent'],
+            'occurred_at' => $startedAt->toIso8601String(),
+            'occurred_at_ms' => 10_000,
+        ])->assertCreated();
+
+        $this->postJson('/bean/landing/voice-events', [
+            'event_type' => 'voice_session_closed',
+            'client_session_id' => 'landing-client-session-1',
+            'page_path' => '/pricing',
+            'source' => 'landing_page',
+            'payload' => ['transport' => 'elevenlabs_agent', 'reason' => 'client_idle_timeout'],
+            'occurred_at' => $startedAt->copy()->addSeconds(60)->toIso8601String(),
+            'occurred_at_ms' => 70_000,
+        ])->assertCreated();
+
+        $usage = BeanUsageRecord::where('provider', 'elevenlabs')->where('source', 'landing_page')->firstOrFail();
+        $this->assertNull($usage->user_id);
+        $this->assertSame('landing_conversational_ai_agent', $usage->service);
+        $this->assertSame('voice_session', $usage->usage_type);
+        $this->assertSame(60.0, $usage->quantity);
+        $this->assertEqualsWithDelta(666.67, $usage->credits, 0.1);
+        $this->assertEqualsWithDelta(0.08, $usage->estimated_cost_usd, 0.0001);
+        $this->assertSame('public_landing', $usage->metadata['segment'] ?? null);
+        $this->assertSame('/pricing', $usage->metadata['page_path'] ?? null);
     }
 
     public function test_landing_runtime_creates_an_isolated_tool_free_hermes_home(): void

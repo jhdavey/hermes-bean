@@ -37,6 +37,9 @@ Route::post('/bean/landing/conversation-token', [LandingBeanController::class, '
 Route::post('/bean/landing/messages', [LandingBeanController::class, 'message'])
     ->middleware('throttle:landing-bean-messages')
     ->name('bean.landing.messages');
+Route::post('/bean/landing/voice-events', [LandingBeanController::class, 'voiceEvent'])
+    ->middleware('throttle:landing-bean-messages')
+    ->name('bean.landing.voice-events');
 
 Route::get('/reset-password/{token}', function (Request $request, string $token) {
     return view('auth.reset-password', [

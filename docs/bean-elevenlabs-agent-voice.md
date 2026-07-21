@@ -45,7 +45,7 @@ CLOUDFLARE_TURNSTILE_SITE_KEY=...
 CLOUDFLARE_TURNSTILE_SECRET_KEY=...
 ```
 
-The landing guide is disabled on every page load and requires an explicit visitor click before requesting microphone access. Its default cost and abuse envelope is an eight-minute conversation with at most 20 meaningful visitor turns, 3 sessions per browser per hour, 6 per browser per day, and 150 landing sessions globally per day. All values are configurable through the `BEAN_LANDING_*` environment variables documented in `.env.example`.
+The landing guide is disabled on every page load and requires an explicit visitor click before requesting microphone access. Enabling the mic starts only local wake detection; ElevenLabs usage begins when the wake phrase starts a ConvAI/WebRTC session. Its default cost and abuse envelope is a 60-second conversation with 5-second initial/silence waits, at most 20 meaningful visitor turns, 3 sessions per browser per hour, 6 per browser per day, and 150 landing sessions globally per day. All values are configurable through the `BEAN_LANDING_*` environment variables documented in `.env.example`.
 
 ## Cost controls and metering
 
@@ -60,7 +60,7 @@ A conversation longer than 60 seconds is not blocked at the app level, but it be
 
 Usage is persisted in `bean_usage_records`:
 
-- `provider=elevenlabs`, `usage_type=voice_session`: elapsed seconds between `voice_session_started` and `voice_session_closed`, estimated credits, and estimated USD cost.
+- `provider=elevenlabs`, `usage_type=voice_session`: elapsed seconds between `voice_session_started` and `voice_session_closed`, estimated credits, and estimated USD cost. Product-app records use `source=elevenlabs_agent`; public landing records use `source=landing_page` and `service=landing_conversational_ai_agent` so admin can separate landing usage from signed-in app usage.
 - `provider=openai`, `usage_type=llm_tokens`: Bean/Hermes run token estimates and estimated USD cost. These are marked `is_estimate=true` because Hermes does not currently expose exact provider token usage back to Laravel.
 
 The admin dashboard summary exposes `ai_usage.today`, `ai_usage.week`, and `ai_usage.month` with OpenAI tokens/cost, ElevenLabs voice seconds/minutes/credits/cost, source breakdowns, and top users.

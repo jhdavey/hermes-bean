@@ -3,16 +3,21 @@
 namespace App\Http\Controllers;
 
 use App\Rules\ClientTimezone;
+use App\Services\Bean\BeanUsageMeterService;
 use App\Services\Bean\LandingBeanRuntimeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class LandingBeanController extends Controller
 {
-    public function __construct(private readonly LandingBeanRuntimeService $runtime) {}
+    public function __construct(
+        private readonly LandingBeanRuntimeService $runtime,
+        private readonly BeanUsageMeterService $usageMeter,
+    ) {}
 
     public function conversationToken(Request $request): JsonResponse
     {
@@ -72,6 +77,63 @@ class LandingBeanController extends Controller
             'page_path' => $data['page_path'] ?? '/',
             'transport' => 'elevenlabs_agent',
         ]]);
+    }
+
+    public function voiceEvent(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'event_type' => ['required', 'string', 'max:80'],
+            'client_session_id' => ['required', 'string', 'max:160'],
+            'page_path' => ['nullable', 'string', 'max:160', 'regex:/^\/[A-Za-z0-9_\-\/]*$/'],
+            'source' => ['nullable', 'string', 'max:80'],
+            'payload' => ['nullable', 'array'],
+            'occurred_at' => ['nullable', 'date'],
+            'occurred_at_ms' => ['nullable', 'integer', 'min:0'],
+        ]);
+
+        $eventType = preg_replace('/[^a-z0-9_\.:-]/i', '_', $data['event_type']) ?: 'unknown';
+        $clientSessionId = preg_replace('/[^a-z0-9_\.:-]/i', '_', $data['client_session_id']) ?: 'unknown';
+        $occurredAt = isset($data['occurred_at']) ? Carbon::parse($data['occurred_at']) : now();
+        $occurredAtMs = $data['occurred_at_ms'] ?? null;
+        $payload = $data['payload'] ?? [];
+        $pagePath = $data['page_path'] ?? '/';
+        $visitorId = $this->visitorId($request);
+        $landingSessionId = substr(hash('sha256', $visitorId), 0, 20);
+        $sessionKey = 'landing_bean.voice_sessions.'.$clientSessionId;
+
+        if ($eventType === 'voice_session_started') {
+            $request->session()->put($sessionKey, [
+                'started_at' => $occurredAt->toIso8601String(),
+                'started_at_ms' => $occurredAtMs,
+                'page_path' => $pagePath,
+                'payload' => $payload,
+            ]);
+
+            return response()->json(['data' => ['tracked' => true]], 201);
+        }
+
+        if (in_array($eventType, ['voice_session_closed', 'voice_idle_timeout_closed', 'dismiss_closed'], true)) {
+            $started = $request->session()->get($sessionKey);
+            if (is_array($started)) {
+                $startedAt = Carbon::parse((string) ($started['started_at'] ?? $occurredAt->toIso8601String()));
+                $startedAtMs = isset($started['started_at_ms']) ? (int) $started['started_at_ms'] : null;
+                $mergedPayload = array_merge(is_array($started['payload'] ?? null) ? $started['payload'] : [], $payload);
+                $this->usageMeter->recordLandingElevenLabsVoiceSession(
+                    $landingSessionId,
+                    $clientSessionId,
+                    $startedAt,
+                    $occurredAt,
+                    $startedAtMs,
+                    $occurredAtMs,
+                    $eventType,
+                    $pagePath ?: (string) ($started['page_path'] ?? '/'),
+                    $mergedPayload,
+                );
+                $request->session()->forget($sessionKey);
+            }
+        }
+
+        return response()->json(['data' => ['tracked' => true]], 201);
     }
 
     public function message(Request $request): JsonResponse

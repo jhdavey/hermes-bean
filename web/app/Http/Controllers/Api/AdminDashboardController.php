@@ -329,6 +329,8 @@ class AdminDashboardController extends Controller
             ->get();
         $openAi = $records->where('provider', 'openai');
         $elevenLabs = $records->where('provider', 'elevenlabs');
+        $landingRecords = $records->filter(fn (BeanUsageRecord $record): bool => $this->isLandingUsageRecord($record));
+        $productRecords = $records->reject(fn (BeanUsageRecord $record): bool => $this->isLandingUsageRecord($record));
 
         return [
             'records' => $records->count(),
@@ -354,6 +356,12 @@ class AdminDashboardController extends Controller
                 'voice_minutes' => round(((float) $elevenLabs->where('usage_type', 'voice_session')->sum('quantity')) / 60, 2),
                 'credits' => round((float) $elevenLabs->sum('credits'), 1),
                 'estimated_cost_usd' => round((float) $elevenLabs->sum('estimated_cost_usd'), 4),
+            ],
+            'product_app' => $this->usageSegmentMetrics($productRecords),
+            'landing_page' => $this->usageSegmentMetrics($landingRecords),
+            'segments' => [
+                'product_app' => $this->usageSegmentMetrics($productRecords),
+                'landing_page' => $this->usageSegmentMetrics($landingRecords),
             ],
             'by_source' => $records->groupBy(fn (BeanUsageRecord $record): string => (string) ($record->source ?: 'unknown'))
                 ->map(fn ($sourceRecords): array => [
@@ -393,9 +401,56 @@ class AdminDashboardController extends Controller
             'estimated_cost_usd' => 0,
             'openai' => ['requests' => 0, 'input_tokens' => 0, 'output_tokens' => 0, 'total_tokens' => 0, 'estimated_cost_usd' => 0, 'by_model' => []],
             'elevenlabs' => ['sessions' => 0, 'voice_seconds' => 0, 'voice_minutes' => 0, 'credits' => 0, 'estimated_cost_usd' => 0],
+            'product_app' => $this->emptyUsageSegment(),
+            'landing_page' => $this->emptyUsageSegment(),
+            'segments' => ['product_app' => $this->emptyUsageSegment(), 'landing_page' => $this->emptyUsageSegment()],
             'by_source' => [],
             'top_users' => [],
         ];
+    }
+
+    private function emptyUsageSegment(): array
+    {
+        return [
+            'records' => 0,
+            'estimated_cost_usd' => 0,
+            'openai' => ['requests' => 0, 'total_tokens' => 0, 'estimated_cost_usd' => 0],
+            'elevenlabs' => ['sessions' => 0, 'voice_seconds' => 0, 'voice_minutes' => 0, 'credits' => 0, 'estimated_cost_usd' => 0],
+        ];
+    }
+
+    private function usageSegmentMetrics($records): array
+    {
+        $openAi = $records->where('provider', 'openai');
+        $elevenLabsVoice = $records->where('provider', 'elevenlabs')->where('usage_type', 'voice_session');
+        $voiceSeconds = (float) $elevenLabsVoice->sum('quantity');
+
+        return [
+            'records' => $records->count(),
+            'estimated_cost_usd' => round((float) $records->sum('estimated_cost_usd'), 4),
+            'openai' => [
+                'requests' => $openAi->count(),
+                'total_tokens' => (int) $openAi->sum('total_tokens'),
+                'estimated_cost_usd' => round((float) $openAi->sum('estimated_cost_usd'), 4),
+            ],
+            'elevenlabs' => [
+                'sessions' => $elevenLabsVoice->count(),
+                'voice_seconds' => round($voiceSeconds, 1),
+                'voice_minutes' => round($voiceSeconds / 60, 2),
+                'credits' => round((float) $elevenLabsVoice->sum('credits'), 1),
+                'estimated_cost_usd' => round((float) $elevenLabsVoice->sum('estimated_cost_usd'), 4),
+            ],
+        ];
+    }
+
+    private function isLandingUsageRecord(BeanUsageRecord $record): bool
+    {
+        $source = (string) ($record->source ?: '');
+        $service = (string) ($record->service ?: '');
+
+        return $source === 'landing_page'
+            || str_contains($service, 'landing')
+            || data_get($record->metadata, 'segment') === 'public_landing';
     }
 
     private function aiUsagePricingAssumptions(): array

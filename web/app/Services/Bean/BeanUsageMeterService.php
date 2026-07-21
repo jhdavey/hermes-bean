@@ -124,6 +124,80 @@ class BeanUsageMeterService
         );
     }
 
+    public function recordLandingElevenLabsVoiceSession(
+        string $landingSessionId,
+        string $clientSessionId,
+        Carbon $startedAt,
+        Carbon $endedAt,
+        ?int $startedAtMs = null,
+        ?int $endedAtMs = null,
+        string $closeEventType = 'voice_session_closed',
+        string $pagePath = '/',
+        array $payload = []
+    ): ?BeanUsageRecord {
+        $durationSeconds = 0.0;
+        if ($startedAtMs !== null && $endedAtMs !== null && $endedAtMs >= $startedAtMs) {
+            $durationSeconds = max(0, ($endedAtMs - $startedAtMs) / 1000);
+        }
+        if ($durationSeconds <= 0) {
+            $durationSeconds = max(0, $startedAt->floatDiffInSeconds($endedAt));
+        }
+        if ($durationSeconds <= 0) {
+            return null;
+        }
+
+        $conversationId = $this->payloadConversationId($payload);
+        $externalId = $conversationId ?: 'landing-voice-'.$landingSessionId.'-'.$clientSessionId;
+        $costPerMinute = (float) config('bean.usage.elevenlabs_agent_cost_per_minute_usd', 0.08);
+        $creditsPerMinute = (float) config('bean.usage.elevenlabs_agent_credits_per_minute', 10000 / 15);
+        $minutes = $durationSeconds / 60;
+
+        return BeanUsageRecord::updateOrCreate(
+            [
+                'provider' => 'elevenlabs',
+                'usage_type' => 'voice_session',
+                'external_id' => $externalId,
+            ],
+            [
+                'user_id' => null,
+                'workspace_id' => null,
+                'bean_session_id' => null,
+                'bean_run_id' => null,
+                'bean_voice_event_id' => null,
+                'service' => 'landing_conversational_ai_agent',
+                'model' => null,
+                'source' => 'landing_page',
+                'unit' => 'seconds',
+                'quantity' => round($durationSeconds, 4),
+                'input_tokens' => 0,
+                'output_tokens' => 0,
+                'total_tokens' => 0,
+                'credits' => round($minutes * $creditsPerMinute, 4),
+                'estimated_cost_usd' => round($minutes * $costPerMinute, 6),
+                'is_estimate' => true,
+                'metadata' => [
+                    'segment' => 'public_landing',
+                    'estimation_method' => 'landing_voice_session_elapsed_seconds_times_configured_agent_rate',
+                    'landing_session_id' => $landingSessionId,
+                    'client_session_id' => $clientSessionId,
+                    'conversation_id' => $conversationId,
+                    'close_event_type' => $closeEventType,
+                    'page_path' => $pagePath,
+                    'started_at' => $startedAt->toIso8601String(),
+                    'closed_at' => $endedAt->toIso8601String(),
+                    'started_at_ms' => $startedAtMs,
+                    'closed_at_ms' => $endedAtMs,
+                    'max_duration_seconds_configured' => (int) config('bean.usage.elevenlabs_max_duration_seconds', 60),
+                    'silence_timeout_seconds_configured' => (int) config('bean.usage.elevenlabs_silence_timeout_seconds', 5),
+                    'cost_per_minute_usd' => $costPerMinute,
+                    'credits_per_minute' => $creditsPerMinute,
+                    'actual_provider_usage_available' => false,
+                ],
+                'recorded_at' => $endedAt,
+            ]
+        );
+    }
+
     private function matchingVoiceStartEvent(BeanVoiceEvent $closeEvent): ?BeanVoiceEvent
     {
         $conversationId = $this->conversationId($closeEvent);
@@ -154,6 +228,15 @@ class BeanUsageMeterService
         $value = data_get($event->payload, 'conversation_id')
             ?? data_get($event->payload, 'conversationId')
             ?? data_get($event->payload, 'elevenlabs_conversation_id');
+
+        return is_string($value) && trim($value) !== '' ? trim($value) : null;
+    }
+
+    private function payloadConversationId(array $payload): ?string
+    {
+        $value = data_get($payload, 'conversation_id')
+            ?? data_get($payload, 'conversationId')
+            ?? data_get($payload, 'elevenlabs_conversation_id');
 
         return is_string($value) && trim($value) !== '' ? trim($value) : null;
     }

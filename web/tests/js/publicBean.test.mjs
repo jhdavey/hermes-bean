@@ -28,9 +28,12 @@ test('landing Bean enables the microphone, listens for the wake phrase, and star
     assert.match(source, /Conversation\.startSession/);
     assert.match(source, /conversationToken:\s*session\.token/);
     assert.match(source, /sendUserMessage\?\.\(wakeTail \|\| WAKE_PHRASE\)/);
+    assert.match(source, /const IDLE_CLOSE_MS = 5000/);
     assert.match(source, /askLandingBean/);
     assert.match(source, /root\.dataset\.conversationTokenUrl/);
     assert.match(source, /root\.dataset\.messageUrl/);
+    assert.match(source, /root\.dataset\.voiceEventUrl/);
+    assert.match(navigation, /data-voice-event-url/);
 
     const sessionAssignment = source.indexOf('conversation = nextConversation');
     const wakeSubmission = source.indexOf('conversation.sendUserMessage?.(wakeTail || WAKE_PHRASE)');
@@ -46,7 +49,7 @@ test('landing Bean can be disabled while wake or voice startup is still pending'
 
     const disableBody = source.match(/const disable = async \(\) => \{([\s\S]*?)\n    \};/)?.[1] || '';
     assert.ok(disableBody.indexOf("setStatus('disabled', 'Tap to enable')") >= 0);
-    assert.ok(disableBody.indexOf("setStatus('disabled', 'Tap to enable')") < disableBody.indexOf('await stopVoiceConversation()'));
+    assert.ok(disableBody.indexOf("setStatus('disabled', 'Tap to enable')") < disableBody.indexOf("await stopVoiceConversation('disabled')"));
 });
 
 test('landing voice uses a dedicated ElevenLabs agent configuration and public Hermes tool', () => {
@@ -58,6 +61,8 @@ test('landing voice uses a dedicated ElevenLabs agent configuration and public H
     assert.match(agentConfig, /gpt-4\.1-nano/);
     assert.doesNotMatch(agentConfig, /reasoningEffort|thinkingBudget/);
     assert.match(agentConfig, /maxDurationSeconds/);
+    assert.match(agentConfig, /env\.ELEVENLABS_MAX_DURATION_SECONDS \|\| 60/);
+    assert.match(agentConfig, /silenceEndCallTimeout:\s*silenceEndCallSeconds/);
     assert.match(agentConfig, /dailyLimit:\s*dailyConversationLimit/);
     assert.match(agentConfig, /enableAuth:\s*true/);
     assert.match(agentConfig, /promptInjection:\s*\{ isEnabled: true \}/);

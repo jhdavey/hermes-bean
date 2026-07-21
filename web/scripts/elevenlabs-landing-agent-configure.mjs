@@ -25,7 +25,10 @@ const TOOL_NAME = 'askLandingBean';
 const AGENT_NAME = env.ELEVENLABS_LANDING_AGENT_NAME || 'HeyBean Landing Guide';
 const timezone = env.BEAN_CLIENT_TIMEZONE || 'America/New_York';
 const landingLlm = env.ELEVENLABS_LANDING_LLM || 'gpt-4.1-nano';
-const maxDurationSeconds = Number(env.BEAN_LANDING_MAX_DURATION_SECONDS || 480);
+const maxDurationSeconds = Number(env.BEAN_LANDING_MAX_DURATION_SECONDS || env.ELEVENLABS_MAX_DURATION_SECONDS || 60);
+const initialWaitSeconds = Number(env.BEAN_LANDING_INITIAL_WAIT_SECONDS || env.ELEVENLABS_INITIAL_WAIT_SECONDS || env.ELEVENLABS_SILENCE_TIMEOUT_SECONDS || 5);
+const silenceEndCallSeconds = Number(env.BEAN_LANDING_SILENCE_END_CALL_SECONDS || env.ELEVENLABS_SILENCE_END_CALL_SECONDS || env.ELEVENLABS_SILENCE_TIMEOUT_SECONDS || 5);
+const turnTimeoutSeconds = Number(env.BEAN_LANDING_TURN_TIMEOUT_SECONDS || env.ELEVENLABS_TURN_TIMEOUT_SECONDS || 15);
 const dailyConversationLimit = Number(env.BEAN_LANDING_GLOBAL_SESSIONS_PER_DAY || 150);
 const concurrencyLimit = Number(env.BEAN_LANDING_CONCURRENCY_LIMIT || 8);
 
@@ -88,9 +91,9 @@ async function ensureTool() {
 function conversationConfig(toolId) {
     return {
         turn: {
-            turnTimeout: 20,
-            initialWaitTime: 15,
-            silenceEndCallTimeout: 12,
+            turnTimeout: turnTimeoutSeconds,
+            initialWaitTime: initialWaitSeconds,
+            silenceEndCallTimeout: silenceEndCallSeconds,
             turnEagerness: 'normal',
             speculativeTurn: true,
             interruptionIgnoreTerms: ['okay', 'ok', 'thanks', 'thank you', 'got it'],

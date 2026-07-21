@@ -60,6 +60,21 @@ class AdminDashboardTest extends TestCase
             'is_estimate' => true,
             'recorded_at' => now(),
         ]);
+        BeanUsageRecord::create([
+            'user_id' => null,
+            'provider' => 'elevenlabs',
+            'service' => 'landing_conversational_ai_agent',
+            'usage_type' => 'voice_session',
+            'source' => 'landing_page',
+            'external_id' => 'test-landing-elevenlabs-usage',
+            'unit' => 'seconds',
+            'quantity' => 30,
+            'credits' => 333.33,
+            'estimated_cost_usd' => 0.04,
+            'is_estimate' => true,
+            'metadata' => ['segment' => 'public_landing'],
+            'recorded_at' => now(),
+        ]);
         PageViewEvent::create([
             'path' => '/',
             'visitor_key' => 'dashboard-test-visitor',
@@ -84,7 +99,10 @@ class AdminDashboardTest extends TestCase
             ->assertJsonPath('data.user_growth_range', 'last_7_days')
             ->assertJsonPath('data.traffic.page_views_today', 1)
             ->assertJsonPath('data.ai_usage.month.openai.total_tokens', 150)
-            ->assertJsonPath('data.ai_usage.month.elevenlabs.voice_seconds', 60)
+            ->assertJsonPath('data.ai_usage.month.elevenlabs.voice_seconds', 90)
+            ->assertJsonPath('data.ai_usage.month.product_app.elevenlabs.voice_seconds', 60)
+            ->assertJsonPath('data.ai_usage.month.landing_page.elevenlabs.voice_seconds', 30)
+            ->assertJsonPath('data.ai_usage.month.by_source.landing_page.voice_seconds', 30)
             ->assertJsonPath('data.ai_usage.pricing_assumptions.elevenlabs_max_duration_seconds', 60)
             ->assertJsonPath('data.ai_usage.pricing_assumptions.elevenlabs_silence_timeout_seconds', 5)
             ->assertJsonPath('data.bean_quality.status', 'watch')

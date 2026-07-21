@@ -2,7 +2,7 @@ import { Conversation } from '@elevenlabs/client';
 import '../css/public-bean.css';
 
 const WAKE_PHRASE = 'Hey Bean';
-const IDLE_CLOSE_MS = 30000;
+const IDLE_CLOSE_MS = 5000;
 let turnstileScriptPromise = null;
 
 document.querySelectorAll('[data-public-bean]').forEach((root) => mountPublicBean(root));
@@ -23,6 +23,9 @@ function mountPublicBean(root) {
     let lifecycleRevision = 0;
     let lastVoiceMode = '';
     let pendingNavigation = null;
+    let landingVoiceClientSessionId = '';
+    let landingVoiceStartedAtMs = 0;
+    let landingVoiceCloseLogged = true;
 
     const isCurrentLifecycle = (revision) => enabled && lifecycleRevision === revision;
 
@@ -49,7 +52,7 @@ function mountPublicBean(root) {
                 scheduleIdleClose();
                 return;
             }
-            stopVoiceConversation().finally(() => restartWakeListening());
+            stopVoiceConversation('client_idle_timeout').finally(() => restartWakeListening());
         }, IDLE_CLOSE_MS);
     };
 
@@ -58,12 +61,13 @@ function mountPublicBean(root) {
         wakeDetector = null;
     };
 
-    const stopVoiceConversation = async () => {
+    const stopVoiceConversation = async (reason = 'client_stop') => {
         stopIdleTimer();
+        const activeConversation = conversation;
+        if (voiceActive || activeConversation) logLandingVoiceClosed(reason);
         voiceActive = false;
         lastVoiceMode = '';
         pendingNavigation = null;
-        const activeConversation = conversation;
         conversation = null;
         await activeConversation?.endSession?.().catch(() => {});
     };
@@ -74,7 +78,7 @@ function mountPublicBean(root) {
         starting = false;
         setStatus('disabled', 'Tap to enable');
         stopWakeListening();
-        await stopVoiceConversation();
+        await stopVoiceConversation('disabled');
     };
 
     const restartWakeListening = async () => {
@@ -141,10 +145,64 @@ function mountPublicBean(root) {
             await startVoiceConversation(tail, revision);
         } catch (error) {
             if (!isCurrentLifecycle(revision)) return;
-            await stopVoiceConversation();
+            await stopVoiceConversation('connect_error');
             setStatus('error', error?.status === 429 ? 'Demo limit reached' : 'Bean could not connect');
             window.setTimeout(() => restartWakeListening(), 1500);
         }
+    }
+
+    function newLandingVoiceEventId(prefix = 'landing-voice') {
+        return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+
+    function conversationIdentifier(activeConversation) {
+        const candidate = activeConversation?.conversationId
+            || activeConversation?.conversation_id
+            || activeConversation?.id
+            || activeConversation?.conversation?.id;
+
+        return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : null;
+    }
+
+    function logLandingVoiceEvent(eventType, payload = {}, options = {}) {
+        const url = root.dataset.voiceEventUrl;
+        if (!url || !landingVoiceClientSessionId) return;
+        const occurredAtMs = Date.now();
+        fetch(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            keepalive: options.keepalive === true,
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': root.dataset.csrfToken,
+            },
+            body: JSON.stringify({
+                event_type: eventType,
+                client_session_id: landingVoiceClientSessionId,
+                page_path: window.location.pathname,
+                source: 'landing_page',
+                payload: {
+                    ...payload,
+                    transport: 'elevenlabs_agent',
+                    event_client_ms: occurredAtMs,
+                    voice_active: Boolean(voiceActive),
+                    voice_mode: lastVoiceMode || null,
+                },
+                occurred_at: new Date(occurredAtMs).toISOString(),
+                occurred_at_ms: occurredAtMs,
+            }),
+        }).catch(() => {});
+    }
+
+    function logLandingVoiceClosed(reason = 'client_stop') {
+        if (!landingVoiceClientSessionId || landingVoiceCloseLogged) return;
+        landingVoiceCloseLogged = true;
+        logLandingVoiceEvent('voice_session_closed', {
+            reason,
+            conversation_id: conversationIdentifier(conversation),
+            started_event_client_ms: landingVoiceStartedAtMs || null,
+        }, { keepalive: true });
     }
 
     async function startVoiceConversation(wakeTail, revision) {
@@ -156,6 +214,11 @@ function mountPublicBean(root) {
         });
         if (!isCurrentLifecycle(revision)) return;
         if (!session?.token) throw new Error('Bean voice did not return a token.');
+
+        landingVoiceClientSessionId = newLandingVoiceEventId();
+        landingVoiceStartedAtMs = 0;
+        landingVoiceCloseLogged = false;
+        const voiceClientSessionId = landingVoiceClientSessionId;
 
         const nextConversation = await Conversation.startSession({
             conversationToken: session.token,
@@ -190,16 +253,26 @@ function mountPublicBean(root) {
                 voiceActive = true;
                 lastVoiceMode = '';
                 pendingNavigation = null;
+                landingVoiceStartedAtMs = Date.now();
+                landingVoiceCloseLogged = false;
                 lastActivityAt = Date.now();
+                logLandingVoiceEvent('voice_session_started', {
+                    has_wake_tail: Boolean(wakeTail),
+                    conversation_id: conversationIdentifier(conversation),
+                });
                 setStatus('listening', 'Listening…');
             },
-            onDisconnect: () => {
+            onDisconnect: (details) => {
                 if (!isCurrentLifecycle(revision)) return;
+                if (landingVoiceClientSessionId !== voiceClientSessionId) return;
+                logLandingVoiceClosed(details?.reason || 'provider_disconnect');
                 voiceActive = false;
                 conversation = null;
                 lastVoiceMode = '';
                 pendingNavigation = null;
                 stopIdleTimer();
+                landingVoiceClientSessionId = '';
+                landingVoiceStartedAtMs = 0;
                 restartWakeListening();
             },
             onError: () => {
@@ -261,7 +334,7 @@ function mountPublicBean(root) {
 
     window.addEventListener('pagehide', () => {
         stopWakeListening();
-        stopVoiceConversation();
+        stopVoiceConversation('pagehide');
     }, { once: true });
 
     setStatus('disabled', 'Tap to enable');

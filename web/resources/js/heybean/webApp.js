@@ -2219,6 +2219,10 @@ export function mountHeyBeanWebApp(mount) {
         const assumptions = aiUsage.pricing_assumptions || aiUsage.pricingAssumptions || {};
         const openAiMonth = month.openai || {};
         const elevenMonth = month.elevenlabs || {};
+        const productAppMonth = month.product_app || month.productApp || month.segments?.product_app || month.segments?.productApp || {};
+        const landingMonth = month.landing_page || month.landingPage || month.segments?.landing_page || month.segments?.landingPage || {};
+        const productVoice = productAppMonth.elevenlabs || {};
+        const landingVoice = landingMonth.elevenlabs || {};
         const topUsers = normalizeList(month.top_users || month.topUsers);
         const modelRows = Object.entries(openAiMonth.by_model || openAiMonth.byModel || {}).slice(0, 3);
         return `
@@ -2233,9 +2237,15 @@ export function mountHeyBeanWebApp(mount) {
                     ${adminHealthMetricMarkup('OpenAI tokens', formatCompactNumber(openAiMonth.total_tokens || openAiMonth.totalTokens || 0))}
                     ${adminHealthMetricMarkup('OpenAI requests', openAiMonth.requests || 0)}
                     ${adminHealthMetricMarkup('Voice minutes', formatDuration(elevenMonth.voice_seconds || elevenMonth.voiceSeconds || 0))}
+                    ${adminHealthMetricMarkup('App voice', formatDuration(productVoice.voice_seconds || productVoice.voiceSeconds || 0))}
+                    ${adminHealthMetricMarkup('Landing voice', formatDuration(landingVoice.voice_seconds || landingVoice.voiceSeconds || 0))}
                     ${adminHealthMetricMarkup('Eleven credits', formatCompactNumber(elevenMonth.credits || 0))}
                 </div>
                 <p class="hb-admin-health-note">Assumes ElevenLabs ${formatCurrency(assumptions.elevenlabs_agent_cost_per_minute_usd || assumptions.elevenlabsAgentCostPerMinuteUsd || 0.08)}/min, ${formatCompactNumber(assumptions.elevenlabs_agent_credits_per_minute || assumptions.elevenlabsAgentCreditsPerMinute || 0)} credits/min, ${escapeHtml(assumptions.elevenlabs_max_duration_seconds || assumptions.elevenlabsMaxDurationSeconds || 60)}s max sessions, and ${escapeHtml(assumptions.elevenlabs_silence_timeout_seconds || assumptions.elevenlabsSilenceTimeoutSeconds || 5)}s silence timeout. OpenAI token counts are estimated until exact provider usage is exposed by the runtime.</p>
+                <div class="hb-admin-mini-list hb-admin-source-list">
+                    <span><strong>Product app</strong><small>${escapeHtml(formatCurrency(productAppMonth.estimated_cost_usd || productAppMonth.estimatedCostUsd || 0))} · ${escapeHtml(formatDuration(productVoice.voice_seconds || productVoice.voiceSeconds || 0))} voice</small></span>
+                    <span><strong>Landing page</strong><small>${escapeHtml(formatCurrency(landingMonth.estimated_cost_usd || landingMonth.estimatedCostUsd || 0))} · ${escapeHtml(formatDuration(landingVoice.voice_seconds || landingVoice.voiceSeconds || 0))} voice</small></span>
+                </div>
                 <div class="hb-admin-mini-list">
                     ${(modelRows.length ? modelRows : [['No OpenAI usage yet', { total_tokens: 0, estimated_cost_usd: 0 }]]).map(([model, metrics]) => `<span><strong>${escapeHtml(model)}</strong><small>${escapeHtml(formatCompactNumber(metrics.total_tokens || metrics.totalTokens || 0))} tokens · ${escapeHtml(formatCurrency(metrics.estimated_cost_usd || metrics.estimatedCostUsd || 0))}</small></span>`).join('')}
                 </div>

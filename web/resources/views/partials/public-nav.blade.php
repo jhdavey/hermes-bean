@@ -6,6 +6,7 @@
         data-csrf-token="{{ csrf_token() }}"
         data-conversation-token-url="{{ route('bean.landing.conversation-token') }}"
         data-message-url="{{ route('bean.landing.messages') }}"
+        data-voice-event-url="{{ route('bean.landing.voice-events') }}"
         data-turnstile-site-key="{{ config('services.turnstile.site_key') }}"
     >
         <span class="public-bean-ring" aria-hidden="true"></span>
