@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:heybean_app/bean_api_client.dart';
 import 'package:heybean_app/main.dart';
@@ -134,6 +135,37 @@ void main() {
     expect(find.textContaining('Could not load your account'), findsNothing);
   });
 
+  testWidgets('login continues when native token persistence is unavailable', (
+    tester,
+  ) async {
+    final api = _LoginApiClient();
+    await tester.pumpWidget(
+      HeyBeanApp(
+        apiClient: api,
+        tokenStore: _FailingPersistTokenStore(),
+        launchExternalUrl: (_) async => true,
+        updateAppIconBadge: (_) async {},
+        stripePaymentHandler: _TestStripePaymentHandler(),
+      ),
+    );
+    await _pumpUntilFound(tester, find.byKey(const Key('login-card')));
+
+    await tester.enterText(
+      find.byKey(const Key('auth-email')),
+      'taylor@example.test',
+    );
+    await tester.enterText(find.byKey(const Key('auth-password')), 'secret');
+    await tester.tap(find.byKey(const Key('remember-me-checkbox')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('auth-submit')));
+    await _pumpUntilFound(tester, find.byKey(const Key('command-center-home')));
+
+    expect(api.loginCalls, 1);
+    expect(find.byKey(const Key('login-card')), findsNothing);
+    expect(find.textContaining('Could not sign you in'), findsNothing);
+    expect(find.textContaining('That cannot be opened'), findsNothing);
+  });
+
   test('restored screens retain forms, sheets, and modal editors', () {
     final sources = [
       File('lib/src/calendar/title_time_editor.dart').readAsStringSync(),
@@ -194,6 +226,39 @@ class _TestTokenStore implements AuthTokenStore {
 
   @override
   Future<void> saveToken(String value) async => token = value;
+}
+
+class _FailingPersistTokenStore implements AuthTokenStore {
+  @override
+  Future<void> clearToken() async {}
+
+  @override
+  Future<bool> loadRememberMe() async => false;
+
+  @override
+  Future<String?> loadToken() async => null;
+
+  @override
+  Future<void> saveRememberMe(bool rememberMe) async {}
+
+  @override
+  Future<void> saveToken(String value) async {
+    throw MissingPluginException('flutter_secure_storage unavailable');
+  }
+}
+
+class _LoginApiClient extends _DashboardApiClient {
+  int loginCalls = 0;
+
+  @override
+  Future<BeanAuthResult> login({
+    required String email,
+    required String password,
+  }) async {
+    loginCalls++;
+    bearerToken = 'test-token';
+    return BeanAuthResult(token: 'test-token', user: await me());
+  }
 }
 
 class _DashboardBootstrapFailingApiClient extends _DashboardApiClient {

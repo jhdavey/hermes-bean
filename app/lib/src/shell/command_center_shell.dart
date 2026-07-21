@@ -703,7 +703,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _bootstrap() async {
     await _loadCalendarPreferences();
-    final rememberedToken = await widget.tokenStore.loadToken();
+    String? rememberedToken;
+    try {
+      rememberedToken = await widget.tokenStore.loadToken();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'HeyBean saved sign-in unavailable: ${error.runtimeType}: $error\n$stackTrace',
+      );
+    }
     widget.apiClient.bearerToken ??= rememberedToken;
     if (widget.apiClient.bearerToken == null) {
       _stopDashboardChangePolling();
@@ -936,6 +943,27 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _cacheCurrentDashboardSnapshot();
   }
 
+  Future<bool> _persistAuthTokenForActiveSession({
+    required String token,
+    required bool rememberMe,
+  }) async {
+    try {
+      if (rememberMe) {
+        await widget.tokenStore.saveRememberMe(true);
+        await widget.tokenStore.saveToken(token);
+      } else {
+        await widget.tokenStore.saveRememberMe(false);
+        await widget.tokenStore.clearToken();
+      }
+      return true;
+    } catch (error, stackTrace) {
+      debugPrint(
+        'HeyBean auth token persistence failed: ${error.runtimeType}: $error\n$stackTrace',
+      );
+      return false;
+    }
+  }
+
   Future<void> _login(
     String email,
     String password, {
@@ -951,13 +979,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         email: email,
         password: password,
       );
-      if (rememberMe) {
-        await widget.tokenStore.saveRememberMe(true);
-        await widget.tokenStore.saveToken(auth.token);
-      } else {
-        await widget.tokenStore.saveRememberMe(false);
-        await widget.tokenStore.clearToken();
-      }
+      await _persistAuthTokenForActiveSession(
+        token: auth.token,
+        rememberMe: rememberMe,
+      );
       await _loadSignedIn(knownUser: auth.user);
     } catch (error) {
       setState(
@@ -1084,8 +1109,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       password: password,
       clientTimezone: timezone,
     );
-    await widget.tokenStore.saveRememberMe(true);
-    await widget.tokenStore.saveToken(auth.token);
+    await _persistAuthTokenForActiveSession(
+      token: auth.token,
+      rememberMe: true,
+    );
     if (!mounted) return auth;
     final normalizedThemeModeKey = heyBeanThemeModeForKey(themeModeKey).key;
     var user = auth.user;
