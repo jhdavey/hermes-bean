@@ -190,6 +190,8 @@ test('Bean wake handoff does not submit the first partial wake tail as the comma
     assert.match(source, /statusText = 'Hey Bean heard — keep talking…'/);
     assert.match(source, /state\.bean\.voiceTranscript = wakeTail/);
     assert.doesNotMatch(source, /sendBeanVoiceTranscript\(wakeTail\)/);
+    assert.doesNotMatch(source, /wake_tail_direct_fallback_request_sent/);
+    assert.doesNotMatch(source, /source: 'wake_tail_direct_fallback'/);
     assert.match(source, /startBeanVoiceSession\(\{ wakeEvent: event, wakeTail \}\)/);
     assert.match(source, /submitCompleteBeanWakeTail\(wakeTail\)/);
     assert.match(source, /sendUserActivity/);
@@ -235,8 +237,8 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(agentConfigSource, /provider: 'scribe_realtime'/);
     assert.match(agentConfigSource, /keywords: \['Hey Bean'/);
     assert.match(agentConfigSource, /voiceMaxDurationSeconds = Number\(env\.ELEVENLABS_MAX_DURATION_SECONDS \|\| 60\)/);
-    assert.match(agentConfigSource, /voiceInitialWaitSeconds = Number\(env\.ELEVENLABS_INITIAL_WAIT_SECONDS \|\| env\.ELEVENLABS_SILENCE_TIMEOUT_SECONDS \|\| 5\)/);
-    assert.match(agentConfigSource, /voiceSilenceEndCallSeconds = Number\(env\.ELEVENLABS_SILENCE_END_CALL_SECONDS \|\| 12\)/);
+    assert.match(agentConfigSource, /voiceInitialWaitSeconds = Number\(env\.ELEVENLABS_INITIAL_WAIT_SECONDS \|\| env\.ELEVENLABS_SILENCE_TIMEOUT_SECONDS \|\| 9\)/);
+    assert.match(agentConfigSource, /voiceSilenceEndCallSeconds = Number\(env\.ELEVENLABS_SILENCE_END_CALL_SECONDS \|\| 15\)/);
     assert.match(agentConfigSource, /turnTimeout: voiceTurnTimeoutSeconds/);
     assert.match(agentConfigSource, /initialWaitTime: voiceInitialWaitSeconds/);
     assert.match(agentConfigSource, /silenceEndCallTimeout: voiceSilenceEndCallSeconds/);
@@ -260,8 +262,8 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(source, /resolvePendingBeanVoiceResponseFromActivity/);
     assert.match(source, /voice_request_error/);
     assert.match(source, /voice_request_timed_out/);
-    assert.match(source, /const beanVoiceInitialIdleCloseMs = 5000/);
-    assert.match(source, /const beanVoiceFollowUpIdleCloseMs = 12000/);
+    assert.match(source, /const beanVoiceInitialIdleCloseMs = 9000/);
+    assert.match(source, /const beanVoiceFollowUpIdleCloseMs = 15000/);
     assert.match(source, /function markBeanVoiceActivity/);
     assert.match(source, /beanVoiceRequestCount > 0 \? beanVoiceFollowUpIdleCloseMs : beanVoiceInitialIdleCloseMs/);
     assert.match(source, /elapsedSinceActivity < idleCloseMs/);

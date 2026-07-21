@@ -47,10 +47,10 @@ return [
 
     'usage' => [
         'elevenlabs_max_duration_seconds' => (int) env('ELEVENLABS_MAX_DURATION_SECONDS', 60),
-        'elevenlabs_silence_timeout_seconds' => (int) env('ELEVENLABS_SILENCE_TIMEOUT_SECONDS', 5),
-        'elevenlabs_initial_wait_seconds' => (int) env('ELEVENLABS_INITIAL_WAIT_SECONDS', env('ELEVENLABS_SILENCE_TIMEOUT_SECONDS', 5)),
-        'elevenlabs_silence_end_call_seconds' => (int) env('ELEVENLABS_SILENCE_END_CALL_SECONDS', 12),
-        'elevenlabs_followup_idle_close_seconds' => (int) env('ELEVENLABS_FOLLOWUP_IDLE_CLOSE_SECONDS', 12),
+        'elevenlabs_silence_timeout_seconds' => (int) env('ELEVENLABS_SILENCE_TIMEOUT_SECONDS', 9),
+        'elevenlabs_initial_wait_seconds' => (int) env('ELEVENLABS_INITIAL_WAIT_SECONDS', env('ELEVENLABS_SILENCE_TIMEOUT_SECONDS', 9)),
+        'elevenlabs_silence_end_call_seconds' => (int) env('ELEVENLABS_SILENCE_END_CALL_SECONDS', 15),
+        'elevenlabs_followup_idle_close_seconds' => (int) env('ELEVENLABS_FOLLOWUP_IDLE_CLOSE_SECONDS', 15),
         'elevenlabs_agent_cost_per_minute_usd' => (float) env('ELEVENLABS_AGENT_COST_PER_MINUTE_USD', 0.08),
         'elevenlabs_agent_credits_per_minute' => (float) env('ELEVENLABS_AGENT_CREDITS_PER_MINUTE', 10000 / 15),
         'openai_model_prices' => [

@@ -2,7 +2,7 @@ import { Conversation } from '@elevenlabs/client';
 import '../css/public-bean.css';
 
 const WAKE_PHRASE = 'Hey Bean';
-const IDLE_CLOSE_MS = 5000;
+const IDLE_CLOSE_MS = 9000;
 let turnstileScriptPromise = null;
 
 document.querySelectorAll('[data-public-bean]').forEach((root) => mountPublicBean(root));

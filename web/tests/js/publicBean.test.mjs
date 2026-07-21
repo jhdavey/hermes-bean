@@ -28,7 +28,7 @@ test('landing Bean enables the microphone, listens for the wake phrase, and star
     assert.match(source, /Conversation\.startSession/);
     assert.match(source, /conversationToken:\s*session\.token/);
     assert.match(source, /sendUserMessage\?\.\(wakeTail \|\| WAKE_PHRASE\)/);
-    assert.match(source, /const IDLE_CLOSE_MS = 5000/);
+    assert.match(source, /const IDLE_CLOSE_MS = 9000/);
     assert.match(source, /askLandingBean/);
     assert.match(source, /root\.dataset\.conversationTokenUrl/);
     assert.match(source, /root\.dataset\.messageUrl/);

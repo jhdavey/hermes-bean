@@ -252,8 +252,8 @@ export function mountHeyBeanWebApp(mount) {
     let beanSubmittedWakeTail = '';
     let beanPendingVoiceResponseTimer = 0;
     let beanPendingVoiceResponse = null;
-    const beanVoiceInitialIdleCloseMs = 5000;
-    const beanVoiceFollowUpIdleCloseMs = 12000;
+    const beanVoiceInitialIdleCloseMs = 9000;
+    const beanVoiceFollowUpIdleCloseMs = 15000;
     let beanVoiceIdleTimer = 0;
     let beanLastVoiceActivityAt = 0;
     let beanVoiceInputIgnoreUntil = 0;
@@ -5060,11 +5060,6 @@ export function mountHeyBeanWebApp(mount) {
         logBeanVoiceLifecycleEvent('wake_tail_submitted', { label: content.slice(0, 160), transport: 'elevenlabs_agent' });
         beanElevenLabsConversation?.sendUserMessage?.(content);
         beanElevenLabsConversation?.sendUserActivity?.();
-        window.setTimeout(() => {
-            if (!state.bean.voiceActive || state.bean.busy || beanVoiceRequestCount > 0 || beanPendingVoiceResponse) return;
-            logBeanVoiceLifecycleEvent('wake_tail_direct_fallback_request_sent', { label: content.slice(0, 160), transport: 'elevenlabs_agent' });
-            askBeanFromElevenLabsAgent({ message: content, source: 'wake_tail_direct_fallback' }).catch(() => {});
-        }, 2500);
         return true;
     }
 
