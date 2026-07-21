@@ -179,6 +179,12 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(source, /resolvePendingBeanVoiceResponseFromActivity/);
     assert.match(source, /voice_request_error/);
     assert.match(source, /voice_request_timed_out/);
+    assert.match(source, /const beanVoiceIdleCloseMs = 18000/);
+    assert.match(source, /function markBeanVoiceActivity/);
+    assert.match(source, /elapsedSinceActivity < beanVoiceIdleCloseMs/);
+    assert.match(source, /scheduleBeanVoiceIdleClose\(`\$\{reason\}_after_activity`\)/);
+    assert.match(source, /markBeanVoiceActivity\(\);\n\s*logBeanVoiceLifecycleEvent\('bean_response_received'/);
+    assert.match(source, /markBeanVoiceActivity\(\);\n\s*beanLastSpokenAnswer = content/);
     assert.match(source, /const voiceOwnsStatus = state\.bean\.voiceActive/);
     assert.match(source, /payloadMode === 'wake_listening' \|\| event\.label === 'Done'/);
     assert.doesNotMatch(source, /input_audio_buffer\.clear/);

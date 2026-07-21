@@ -237,7 +237,9 @@ export function mountHeyBeanWebApp(mount) {
     let beanPendingWakeTail = '';
     let beanPendingVoiceResponseTimer = 0;
     let beanPendingVoiceResponse = null;
+    const beanVoiceIdleCloseMs = 18000;
     let beanVoiceIdleTimer = 0;
+    let beanLastVoiceActivityAt = 0;
     let beanVoiceInputIgnoreUntil = 0;
     let beanLastSpokenAnswer = '';
     let beanLastSpokenAnswerAt = 0;
@@ -4664,15 +4666,27 @@ export function mountHeyBeanWebApp(mount) {
         beanVoiceIdleTimer = 0;
     }
 
+    function markBeanVoiceActivity() {
+        beanLastVoiceActivityAt = Date.now();
+    }
+
     function scheduleBeanVoiceIdleClose(reason = 'idle_timeout') {
         clearBeanVoiceIdleTimer();
         if (!state.bean.voiceActive || state.bean.busy) return;
+        const startedAt = Date.now();
+        if (!beanLastVoiceActivityAt) beanLastVoiceActivityAt = startedAt;
         beanVoiceIdleTimer = window.setTimeout(() => {
+            beanVoiceIdleTimer = 0;
             if (!state.bean.voiceActive || state.bean.busy) return;
+            const elapsedSinceActivity = Date.now() - Math.max(beanLastVoiceActivityAt, startedAt);
+            if (elapsedSinceActivity < beanVoiceIdleCloseMs) {
+                scheduleBeanVoiceIdleClose(`${reason}_after_activity`);
+                return;
+            }
             logBeanVoiceLifecycleEvent('voice_idle_timeout_closed', { reason, transport: 'elevenlabs_agent' });
             endBeanVoiceConversationForWake('Listening locally for “Hey Bean”');
             render();
-        }, 18000);
+        }, beanVoiceIdleCloseMs);
     }
 
     function isBeanNonSpeechTranscript(value) {
@@ -4759,6 +4773,7 @@ export function mountHeyBeanWebApp(mount) {
         const content = String(parameters.message || parameters.content || parameters.request || '').trim();
         if (!content) return 'I did not receive a Bean request.';
 
+        markBeanVoiceActivity();
         const turnId = newBeanVoiceEventId('voice-agent-tool');
         beanVoiceClientTurnId = turnId;
         beanVoiceRequestCount += 1;
@@ -4783,6 +4798,7 @@ export function mountHeyBeanWebApp(mount) {
             state.bean.confirmations = normalizeList(data.confirmations);
             scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
             const answer = latestBeanAssistantMessage() || String(data.run?.output || '').trim() || 'Bean finished that.';
+            markBeanVoiceActivity();
             logBeanVoiceLifecycleEvent('bean_response_received', { run_id: data.run?.id || null, failed: data.run?.status === 'failed', label: answer.slice(0, 160), transport: 'elevenlabs_agent', tool: 'askBean' });
             clearBeanPendingVoiceResponse();
             render();
@@ -4965,6 +4981,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function handleBeanElevenLabsAudio(base64Audio) {
         const now = Date.now();
+        markBeanVoiceActivity();
         if (now - beanLastAudioChunkAt > 750) {
             beanLastAudioChunkAt = now;
             logBeanVoiceLifecycleEvent('audio_chunk_received', {
@@ -5027,6 +5044,7 @@ export function mountHeyBeanWebApp(mount) {
                 onConnect: async () => {
                     state.bean.voiceActive = true;
                     state.bean.voiceConnecting = false;
+                    markBeanVoiceActivity();
                     beanVoiceRequestCount = 0;
                     if (!beanVoiceClientSessionId) beanVoiceClientSessionId = newBeanVoiceEventId('voice-session');
                     beanVoiceClientTurnId = '';
@@ -5123,6 +5141,7 @@ export function mountHeyBeanWebApp(mount) {
         beanVoiceClientTurnId = '';
         beanLastAudioChunkAt = 0;
         beanLastOutputVolumeAt = 0;
+        beanLastVoiceActivityAt = 0;
         beanAudioPlaybackBlocked = false;
         if (!options.keepStatus) {
             state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
@@ -5141,6 +5160,7 @@ export function mountHeyBeanWebApp(mount) {
         if (!content) return;
 
         if (role === 'user') {
+            markBeanVoiceActivity();
             clearBeanPendingWakeTail();
             clearBeanVoiceIdleTimer();
             if (isBeanNonSpeechTranscript(content)) {
@@ -5183,6 +5203,7 @@ export function mountHeyBeanWebApp(mount) {
                 beanPendingVoiceResponse.resolved = true;
             }
             clearBeanPendingVoiceResponse();
+            markBeanVoiceActivity();
             beanLastSpokenAnswer = content;
             beanLastSpokenAnswerAt = Date.now();
             logBeanVoiceLifecycleEvent('bean_response_received', { label: content.slice(0, 160), transport: 'elevenlabs_agent', agent_managed_response: true });
@@ -5202,6 +5223,7 @@ export function mountHeyBeanWebApp(mount) {
     function handleBeanElevenLabsMode(mode) {
         const normalizedMode = String(mode || '').toLowerCase();
         if (normalizedMode === 'speaking') {
+            markBeanVoiceActivity();
             clearBeanVoiceIdleTimer();
             startBeanOutputVolumeProbe();
             resumeBeanElevenLabsAudioPlayback('mode_speaking');
@@ -5214,6 +5236,7 @@ export function mountHeyBeanWebApp(mount) {
         }
         if (normalizedMode === 'listening') {
             if (state.bean.voiceActive) {
+                markBeanVoiceActivity();
                 state.bean.mode = 'listening';
                 state.bean.statusText = 'Listening — speak to Bean';
                 scheduleBeanVoiceIdleClose('mode_listening');
@@ -7991,6 +8014,7 @@ export function mountHeyBeanWebApp(mount) {
         beanPendingVoiceResponse.resolved = true;
         window.clearTimeout(beanPendingVoiceResponseTimer);
         beanPendingVoiceResponseTimer = 0;
+        markBeanVoiceActivity();
         state.bean.busy = false;
         state.bean.error = '';
         state.bean.voiceTranscript = '';
