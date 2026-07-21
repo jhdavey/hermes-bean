@@ -1270,6 +1270,119 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
+  Future<BeanRealtimeSession> _createElevenLabsBeanSession() =>
+      widget.apiClient.createBeanRealtimeSession(
+        sessionId: _beanAssistantSessionId,
+        workspaceId: _activeWorkspaceId(),
+        clientTimezone: _user?.timezone,
+      );
+
+  void _applyElevenLabsBeanSession(BeanRealtimeSession realtime) {
+    final sessionId = realtime.beanSessionId;
+    if (sessionId == null || sessionId <= 0) return;
+    setState(() => _beanAssistantSessionId = sessionId);
+  }
+
+  Future<void> _recordBeanVoiceEvent(
+    String eventType, {
+    String? label,
+    Map<String, Object?>? payload,
+  }) async {
+    try {
+      await widget.apiClient.recordBeanVoiceEvent(
+        eventType: eventType,
+        sessionId: _beanAssistantSessionId,
+        mode: 'mobile_elevenlabs',
+        source: 'flutter_elevenlabs_agent',
+        label: label,
+        payload: payload,
+      );
+    } catch (_) {
+      // Voice telemetry should never make the assistant UI unusable.
+    }
+  }
+
+  Future<String> _askBeanFromElevenLabsAgent(
+    Map<String, dynamic> parameters,
+  ) async {
+    final content =
+        [parameters['message'], parameters['content'], parameters['request']]
+            .map((value) => value?.toString().trim() ?? '')
+            .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+    if (content.isEmpty) return 'I did not receive a Bean request.';
+
+    if (mounted) {
+      setState(() {
+        _beanAssistantSending = true;
+        _beanAssistantError = null;
+        _beanAssistantMessages = [
+          ..._beanAssistantMessages,
+          BeanAssistantMessage(role: 'user', content: content),
+        ];
+      });
+    }
+
+    await _recordBeanVoiceEvent(
+      'bean_request_sent',
+      label: content,
+      payload: {'transport': 'elevenlabs_agent', 'tool': 'askBean'},
+    );
+
+    try {
+      final turn = await widget.apiClient.sendBeanMessage(
+        content: content,
+        sessionId: _beanAssistantSessionId,
+        workspaceId: _activeWorkspaceId(),
+        clientTimezone: _user?.timezone,
+        source: 'elevenlabs_agent',
+      );
+      final answer = turn.messages.reversed
+          .where((message) => message.role == 'assistant')
+          .map((message) => message.content.trim())
+          .firstWhere((message) => message.isNotEmpty, orElse: () => '');
+      if (mounted) {
+        setState(() {
+          _beanAssistantSessionId = turn.session.id;
+          _beanAssistantMessages = turn.messages;
+          _beanAssistantConfirmations = turn.confirmations;
+          _beanAssistantSending = false;
+        });
+        unawaited(_refreshSignedInViews(showLoading: false));
+      }
+      await _recordBeanVoiceEvent(
+        'bean_response_received',
+        label: answer,
+        payload: {
+          'transport': 'elevenlabs_agent',
+          'tool': 'askBean',
+          'run_id': turn.run.id,
+          'failed': turn.run.status == 'failed',
+        },
+      );
+      return answer.isNotEmpty ? answer : 'Bean finished that.';
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _beanAssistantSending = false;
+          _beanAssistantError = beanFriendlyErrorMessage(
+            error,
+            action: 'message Bean',
+          );
+        });
+      }
+      await _recordBeanVoiceEvent(
+        'voice_request_error',
+        label: content,
+        payload: {
+          'transport': 'elevenlabs_agent',
+          'tool': 'askBean',
+          'error': error.toString(),
+        },
+      );
+      return 'I hit a problem checking Bean. Please try that again.';
+    }
+  }
+
   Future<void> _approveBeanConfirmation(
     BeanAssistantConfirmation confirmation,
   ) async {
@@ -3914,6 +4027,13 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                 error: _beanAssistantError,
                 onSend: _sendBeanAssistantMessage,
                 onConfirm: _approveBeanConfirmation,
+                onCreateElevenLabsSession: _createElevenLabsBeanSession,
+                onElevenLabsSessionReady: _applyElevenLabsBeanSession,
+                onAskBeanFromElevenLabsAgent: _askBeanFromElevenLabsAgent,
+                onVoiceEvent: _recordBeanVoiceEvent,
+                userId: _user?.id,
+                workspaceId: _activeWorkspaceId(),
+                clientTimezone: _user?.timezone,
               ),
             if (_onboardingTourVisible)
               _OnboardingTourOverlay(

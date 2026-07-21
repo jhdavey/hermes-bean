@@ -35,12 +35,20 @@ Laravel web is the source of truth for the current HeyBean MVP. This audit focus
 - Bean assistant panel now renders pending confirmations and can approve them through Laravel.
 - Flutter registration seeds timezone with `flutter_timezone` where available.
 - `BeanApiClient.createBeanRealtimeSession()` now maps to `/bean/elevenlabs/conversation-token` and parses the current token/dashboard-context response for future native ElevenLabs mobile work.
-- Bean assistant panel now has a mic button for mobile voice input using native speech recognition and speaks Bean responses using native TTS. This preserves the existing mobile panel style and routes the recognized text through Laravel `/bean/messages`.
-- Android/iOS microphone/speech permissions added.
+- Initial mobile pass added a mic button with native STT/TTS over Laravel `/bean/messages`; the follow-up below replaces that production voice path with ElevenLabs Agent audio.
+- Android/iOS microphone permissions added.
+
+**Follow-up implementation — ElevenLabs audio parity**
+
+- Flutter now uses the native ElevenLabs Agents Flutter SDK (`elevenlabs_agents`, LiveKit/WebRTC) for Bean voice audio instead of device STT/TTS.
+- The mic button mints the same Laravel `/bean/elevenlabs/conversation-token` payload as web, then starts an ElevenLabs Agent conversation with `bean_session_id`, `bean_client_timezone`, `bean_workspace_id`, and serialized `bean_dashboard_context` dynamic variables.
+- The Flutter ElevenLabs client registers the same `askBean` client tool. Tool calls route back through Laravel `/bean/messages` with `source: elevenlabs_agent`, update the Bean panel/activity/confirmations, refresh dashboard data, and return Laravel's answer to ElevenLabs for speech.
+- Flutter records mobile ElevenLabs lifecycle telemetry through `/bean/voice-events` with `source: flutter_elevenlabs_agent`.
+- Legacy Flutter voice dependencies (`speech_to_text`, `flutter_tts`) were removed from the production voice path.
 
 **Mobile-context note**
 
-- This implements functional mobile Bean voice without trying to run the browser-only ElevenLabs WebRTC JS client inside Flutter. A future deeper slice can replace native TTS/STT with a native ElevenLabs/LiveKit client if we choose that transport for mobile.
+- The web app still owns local wake-word mode around the ElevenLabs session. Flutter now uses the same ElevenLabs Agent/token/tool system for active mic sessions, but starts from the mobile mic button rather than a browser wake-listening loop.
 
 ### Daily sticky notes
 
@@ -111,7 +119,7 @@ Current settings exposed through `/auth/me` include:
 
 - `dart format lib test` passed.
 - `flutter analyze` passed with no issues.
-- `flutter test` passed: 11 tests.
+- `flutter test` passed: 12 tests.
 - `./gradlew assembleDebug -PallowDebugReleaseSigning=true` passed.
 - `flutter build ios --simulator --no-codesign` passed.
 

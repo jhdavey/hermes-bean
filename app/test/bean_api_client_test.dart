@@ -232,4 +232,48 @@ void main() {
     expect(requests[3].path, '/bean/confirmations/3/approve');
     expect(approved.run.status, 'completed');
   });
+
+  test('ElevenLabs conversation token uses Laravel Agent endpoint', () async {
+    final requests = <BeanApiRequest>[];
+    final client = BeanApiClient(
+      baseUrl: Uri.parse('https://example.test/api'),
+      bearerToken: 'test-token',
+      transport: (request) async {
+        requests.add(request);
+        return BeanApiResponse(
+          200,
+          jsonEncode({
+            'data': {
+              'token': 'convai_test_token',
+              'agent_id': 'agent_test',
+              'bean_session_id': 44,
+              'transport': 'elevenlabs_agent',
+              'dashboard_context': {
+                'timezone': 'America/New_York',
+                'today': {'date': '2026-07-21'},
+              },
+            },
+          }),
+        );
+      },
+    );
+
+    final realtime = await client.createBeanRealtimeSession(
+      sessionId: 44,
+      workspaceId: 9,
+      clientTimezone: 'America/New_York',
+    );
+
+    expect(requests.single.path, '/bean/elevenlabs/conversation-token');
+    expect(requests.single.body, {
+      'session_id': 44,
+      'workspace_id': 9,
+      'client_timezone': 'America/New_York',
+    });
+    expect(realtime.token, 'convai_test_token');
+    expect(realtime.agentId, 'agent_test');
+    expect(realtime.beanSessionId, 44);
+    expect(realtime.transport, 'elevenlabs_agent');
+    expect(realtime.dashboardContext['timezone'], 'America/New_York');
+  });
 }
