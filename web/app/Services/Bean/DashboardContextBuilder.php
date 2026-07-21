@@ -13,6 +13,8 @@ use Illuminate\Support\Collection;
 
 class DashboardContextBuilder
 {
+    private const UPCOMING_HORIZON_DAYS = 31;
+
     public function __construct(
         private readonly WorkspaceService $workspaces,
         private readonly BeanTimeContext $timeContext,
@@ -21,9 +23,7 @@ class DashboardContextBuilder
     /** @return array<string, mixed> */
     public function build(User $user, BeanSession $session, ?string $clientTimezone = null): array
     {
-        $context = $clientTimezone !== null
-            ? $this->timeContext->forClientTimezone($clientTimezone)
-            : $this->timeContext->forSession($session);
+        $context = $this->timeContext->forUser($user, $clientTimezone);
         $localNow = $this->timeContext->localNow($context);
         $today = $localNow->toDateString();
         $tomorrow = $localNow->copy()->addDay()->toDateString();
@@ -59,10 +59,10 @@ class DashboardContextBuilder
                 'calendar_events' => $this->eventsForDay($workspaceIds, $workspaceMap, $context, $tomorrow),
             ],
             'upcoming' => [
-                'horizon_days' => 14,
-                'tasks' => $this->upcomingTasks($workspaceIds, $workspaceMap, $context, 14),
-                'reminders' => $this->upcomingReminders($workspaceIds, $workspaceMap, $context, 14),
-                'calendar_events' => $this->upcomingEvents($workspaceIds, $workspaceMap, $context, 14),
+                'horizon_days' => self::UPCOMING_HORIZON_DAYS,
+                'tasks' => $this->upcomingTasks($workspaceIds, $workspaceMap, $context, self::UPCOMING_HORIZON_DAYS),
+                'reminders' => $this->upcomingReminders($workspaceIds, $workspaceMap, $context, self::UPCOMING_HORIZON_DAYS),
+                'calendar_events' => $this->upcomingEvents($workspaceIds, $workspaceMap, $context, self::UPCOMING_HORIZON_DAYS),
             ],
             'overdue' => [
                 'tasks' => $this->overdueTasks($workspaceIds, $workspaceMap, $context),
@@ -81,7 +81,6 @@ class DashboardContextBuilder
             ->where('status', Task::STATUS_OPEN)
             ->whereBetween('due_at', [$start, $end])
             ->orderBy('due_at')
-            ->limit(8)
             ->get()
             ->map(fn (Task $task): array => $this->taskSummary($task, $workspaceMap, $context))
             ->values()
@@ -99,7 +98,6 @@ class DashboardContextBuilder
             ->whereNotNull('due_at')
             ->where('due_at', '<', $todayStart)
             ->orderBy('due_at')
-            ->limit(8)
             ->get()
             ->map(fn (Task $task): array => $this->taskSummary($task, $workspaceMap, $context))
             ->values()
@@ -117,7 +115,6 @@ class DashboardContextBuilder
             ->where('status', Task::STATUS_OPEN)
             ->whereBetween('due_at', [$start, $end])
             ->orderBy('due_at')
-            ->limit(20)
             ->get()
             ->map(fn (Task $task): array => $this->taskSummary($task, $workspaceMap, $context))
             ->values()
@@ -134,7 +131,6 @@ class DashboardContextBuilder
             ->where('status', 'scheduled')
             ->whereBetween('remind_at', [$start, $end])
             ->orderBy('remind_at')
-            ->limit(8)
             ->get()
             ->map(fn (Reminder $reminder): array => $this->reminderSummary($reminder, $workspaceMap, $context))
             ->values()
@@ -152,7 +148,6 @@ class DashboardContextBuilder
             ->where('status', 'scheduled')
             ->whereBetween('remind_at', [$start, $end])
             ->orderBy('remind_at')
-            ->limit(20)
             ->get()
             ->map(fn (Reminder $reminder): array => $this->reminderSummary($reminder, $workspaceMap, $context))
             ->values()
@@ -172,7 +167,6 @@ class DashboardContextBuilder
                 $query->whereNull('ends_at')->orWhere('ends_at', '>=', $start);
             })
             ->orderBy('starts_at')
-            ->limit(8)
             ->get()
             ->map(fn (CalendarEvent $event): array => $this->eventSummary($event, $workspaceMap, $context))
             ->values()
@@ -193,7 +187,6 @@ class DashboardContextBuilder
                 $query->whereNull('ends_at')->orWhere('ends_at', '>=', $start);
             })
             ->orderBy('starts_at')
-            ->limit(30)
             ->get()
             ->map(fn (CalendarEvent $event): array => $this->eventSummary($event, $workspaceMap, $context))
             ->values()

@@ -31,9 +31,19 @@ test('command center includes a date-scoped plain-text sticky note with autosave
     assert.match(source, /function dailyStickyNoteMarkup/);
     assert.match(source, /data-daily-sticky-note/);
     assert.match(source, /data-sticky-note-date="\$\{escapeAttr\(date\)\}"/);
+    assert.match(source, /placeholder="Sticky Note"/);
+    assert.match(source, /data-daily-sticky-note-status/);
+    assert.match(source, /setDailyStickyNoteStatus\(key, 'Saving'\)/);
+    assert.match(source, /setDailyStickyNoteStatus\(key, newerSaveQueued \? 'Saving' : 'Saved'\)/);
+    assert.match(source, /}, 10000\)/);
     assert.match(source, /method: 'PUT',[\s\S]*?body,[\s\S]*?keepalive:/);
     assert.match(source, /flushAllDailyStickyNoteAutosaves\(\{ keepalive: true \}\)/);
     assert.match(dashboardSource, /\.hb-daily-sticky-note[\s\S]*?border-top:\s*1px solid var\(--hb-border\)/);
+    assert.match(cssRuleContaining(dashboardSource, '.hb-daily-sticky-note'), /background:\s*var\(--hb-surface\)/);
+    assert.match(cssRuleContaining(dashboardSource, '.hb-daily-sticky-note'), /min-height:\s*165px/);
+    assert.match(cssRuleContaining(dashboardSource, '.hb-daily-sticky-note textarea'), /border:\s*0/);
+    assert.doesNotMatch(cssRuleContaining(dashboardSource, '.hb-daily-sticky-note'), /--hb-warning/);
+    assert.doesNotMatch(source, /['"]Autosaves['"]/);
     assert.doesNotMatch(source, /data-daily-sticky-note[^>]*contenteditable/);
 });
 
@@ -104,8 +114,10 @@ test('top navigation, productivity pages, and notes use the simplified surfaces'
     assert.doesNotMatch(source, />Unfiled</);
 });
 
-test('Bean requests include the browser timezone for local-day task queries', () => {
+test('Bean requests include the canonical user timezone for local-day task queries', () => {
     assert.match(source, /function clientTimezonePayload/);
+    assert.match(source, /function userTimezone/);
+    assert.match(source, /state\.user\?\.timezone/);
     assert.match(source, /Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/);
     assert.match(source, /client_timezone: timezone/);
     assert.match(source, /\/bean\/sessions', \{ method: 'POST', body: \{ workspace_id: currentWorkspaceId\(\), \.\.\.clientTimezonePayload\(\) \}/);

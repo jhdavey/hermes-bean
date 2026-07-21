@@ -4,6 +4,7 @@ namespace App\Services\Bean;
 
 use App\Models\BeanRun;
 use App\Models\BeanSession;
+use App\Models\User;
 use Illuminate\Support\Carbon;
 use Throwable;
 
@@ -20,14 +21,48 @@ class BeanTimeContext
     }
 
     /** @return array{timezone:string,timezone_source:string,now_utc:string,local_now:string,local_date:string} */
+    public function forUser(User $user, ?string $fallbackClientTimezone = null): array
+    {
+        $timezone = $this->normalizeTimezone((string) ($user->timezone ?? ''));
+        if ($timezone !== null) {
+            return $this->snapshot($timezone, 'user');
+        }
+
+        $fallback = $this->normalizeTimezone($fallbackClientTimezone);
+        if ($fallback !== null) {
+            return $this->snapshot($fallback, 'browser');
+        }
+
+        return $this->forClientTimezone(null, 'app_default');
+    }
+
+    public function rememberUserTimezoneIfMissing(User $user, ?string $clientTimezone): ?string
+    {
+        $existing = $this->normalizeTimezone((string) ($user->timezone ?? ''));
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        $timezone = $this->normalizeTimezone($clientTimezone);
+        if ($timezone === null) {
+            return null;
+        }
+
+        $user->forceFill(['timezone' => $timezone])->save();
+
+        return $timezone;
+    }
+
+    /** @return array{timezone:string,timezone_source:string,now_utc:string,local_now:string,local_date:string} */
     public function forSession(BeanSession $session): array
     {
         $metadata = is_array($session->metadata) ? $session->metadata : [];
-        $timezone = $this->normalizeTimezone((string) data_get($metadata, 'client_timezone', ''));
+        $clientTimezone = (string) data_get($metadata, 'client_timezone', '');
+        if ($session->user) {
+            return $this->forUser($session->user, $clientTimezone);
+        }
 
-        return $timezone !== null
-            ? $this->snapshot($timezone, 'browser')
-            : $this->forClientTimezone(null, 'app_default');
+        return $this->forClientTimezone($clientTimezone ?: null, 'browser');
     }
 
     /** @return array{timezone:string,timezone_source:string,now_utc:string,local_now:string,local_date:string} */
@@ -53,9 +88,8 @@ class BeanTimeContext
             }
         }
 
-        $timezone = $this->normalizeTimezone((string) data_get($metadata, 'client_timezone', ''));
-        if ($timezone !== null) {
-            return $this->snapshot($timezone, 'browser');
+        if ($run->user) {
+            return $this->forUser($run->user, (string) data_get($metadata, 'client_timezone', ''));
         }
 
         return $run->session ? $this->forSession($run->session) : $this->forClientTimezone(null, 'app_default');

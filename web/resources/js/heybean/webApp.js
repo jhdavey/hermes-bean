@@ -426,13 +426,21 @@ export function mountHeyBeanWebApp(mount) {
         }
     }
 
-    function clientTimezonePayload() {
+    function browserTimezone() {
         try {
-            const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-            return timezone ? { client_timezone: timezone } : {};
+            return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
         } catch (error) {
-            return {};
+            return '';
         }
+    }
+
+    function userTimezone() {
+        return String(state.user?.timezone || state.user?.time_zone || state.user?.timeZone || browserTimezone() || '').trim();
+    }
+
+    function clientTimezonePayload() {
+        const timezone = userTimezone();
+        return timezone ? { client_timezone: timezone } : {};
     }
 
     async function api(path, options = {}) {
@@ -4315,11 +4323,20 @@ export function mountHeyBeanWebApp(mount) {
 
     function profileModalMarkup() {
         const preferredMapApp = String(state.user?.preferred_map_app || state.user?.preferredMapApp || 'google') === 'apple' ? 'apple' : 'google';
+        const timezone = userTimezone();
+        const detectedTimezone = browserTimezone();
         return `
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true">
                 <form class="hb-card hb-modal hb-form" data-modal-form="profile">
                     ${sectionTitle(icons.user, 'Account settings', '')}
                     ${labelInput('Email', 'email', 'email', state.user?.email || '', 'required')}
+                    <label class="hb-label">Timezone
+                        <input class="hb-input" name="timezone" value="${escapeAttr(timezone)}" placeholder="America/New_York" autocomplete="off" list="hb-timezone-options" required>
+                        <datalist id="hb-timezone-options">
+                            ${Array.from(new Set([detectedTimezone, 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'UTC'].filter(Boolean))).map((zone) => `<option value="${escapeAttr(zone)}"></option>`).join('')}
+                        </datalist>
+                        <small>Used as the single source of truth for Bean, reminders, tasks, and calendar times.</small>
+                    </label>
                     <label class="hb-label">Preferred maps app<select class="hb-select" name="preferredMapApp">
                         <option value="google" ${preferredMapApp === 'google' ? 'selected' : ''}>Google Maps</option>
                         <option value="apple" ${preferredMapApp === 'apple' ? 'selected' : ''}>Apple Maps</option>
@@ -5470,6 +5487,7 @@ export function mountHeyBeanWebApp(mount) {
             ...(data.plan ? { plan: data.plan } : {}),
             billing_interval: normalizedBillingInterval(data.billing_interval || state.selectedBillingInterval),
             theme_mode: ['light', 'dark', 'auto'].includes(data.theme_mode) ? data.theme_mode : 'light',
+            ...(browserTimezone() ? { timezone: browserTimezone() } : {}),
         };
     }
 
@@ -6898,6 +6916,7 @@ export function mountHeyBeanWebApp(mount) {
                     body: {
                         email: data.email,
                         preferred_map_app: data.preferredMapApp === 'apple' ? 'apple' : 'google',
+                        timezone: String(data.timezone || '').trim(),
                     },
                 });
             } else if (kind === 'issue-report') {

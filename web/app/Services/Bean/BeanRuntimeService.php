@@ -22,7 +22,9 @@ class BeanRuntimeService
     public function createSession(User $user, ?int $workspaceId = null, ?string $clientTimezone = null): BeanSession
     {
         $workspace = app(WorkspaceService::class)->resolveWorkspace($user, $workspaceId);
-        $timezone = $this->timeContext->normalizeTimezone($clientTimezone);
+        $timezone = $this->timeContext->rememberUserTimezoneIfMissing($user, $clientTimezone)
+            ?: $this->timeContext->normalizeTimezone($clientTimezone);
+        $timeContext = $this->timeContext->forUser($user->refresh(), $timezone);
         $session = BeanSession::create([
             'user_id' => $user->id,
             'workspace_id' => $workspace->id,
@@ -31,8 +33,8 @@ class BeanRuntimeService
             'metadata' => array_filter([
                 'privacy_mode' => true,
                 'wake_phrase' => 'Hey Bean',
-                'client_timezone' => $timezone,
-                'timezone_source' => $timezone !== null ? 'browser' : 'app_default',
+                'client_timezone' => $timeContext['timezone'],
+                'timezone_source' => $timeContext['timezone_source'],
                 'runtime_driver' => 'hermes',
             ]),
         ]);
@@ -49,10 +51,12 @@ class BeanRuntimeService
             : $this->createSession($user, $workspaceId, $clientTimezone);
 
         if ($clientTimezone !== null && $sessionId) {
-            $timezone = $this->timeContext->normalizeTimezone($clientTimezone);
+            $timezone = $this->timeContext->rememberUserTimezoneIfMissing($user, $clientTimezone)
+                ?: $this->timeContext->normalizeTimezone($clientTimezone);
             if ($timezone !== null) {
+                $timeContext = $this->timeContext->forUser($user->refresh(), $timezone);
                 $metadata = is_array($session->metadata) ? $session->metadata : [];
-                $session->forceFill(['metadata' => [...$metadata, 'client_timezone' => $timezone, 'timezone_source' => 'browser']])->save();
+                $session->forceFill(['metadata' => [...$metadata, 'client_timezone' => $timeContext['timezone'], 'timezone_source' => $timeContext['timezone_source']]])->save();
                 $session = $session->refresh();
             }
         }

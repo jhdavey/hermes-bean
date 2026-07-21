@@ -11,6 +11,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Services\Bean\BeanDashboardToolBridgeService;
 use App\Services\Bean\BeanRuntimeService;
+use App\Services\Bean\DashboardContextBuilder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Carbon;
@@ -538,6 +539,7 @@ PHP);
         $token = $this->apiToken('bean-elevenlabs-token@example.com');
         $user = User::where('email', 'bean-elevenlabs-token@example.com')->firstOrFail();
         $session = app(BeanRuntimeService::class)->createSession($user, null, 'America/New_York');
+        $this->assertSame('America/New_York', $user->refresh()->timezone);
         Task::create([
             'user_id' => $user->id,
             'workspace_id' => $session->workspace_id,
@@ -592,7 +594,8 @@ PHP);
             ->assertJsonPath('data.dashboard_context.today.tasks.0.title', 'context task today')
             ->assertJsonPath('data.dashboard_context.today.reminders.0.title', 'context reminder today')
             ->assertJsonPath('data.dashboard_context.today.calendar_events.0.title', 'context event today')
-            ->assertJsonPath('data.dashboard_context.upcoming.horizon_days', 14)
+            ->assertJsonPath('data.dashboard_context.timezone', 'America/New_York')
+            ->assertJsonPath('data.dashboard_context.upcoming.horizon_days', 31)
             ->assertJsonPath('data.dashboard_context.upcoming.calendar_events.1.title', 'context event this Saturday')
             ->assertJsonPath('data.dashboard_context.upcoming.calendar_events.1.starts_at_local', now()->timezone('America/New_York')->next(Carbon::SATURDAY)->setTime(12, 0)->toIso8601String())
             ->assertJsonPath('data.dashboard_context.policy.answer_from_context_for_read_only', true)
@@ -601,6 +604,75 @@ PHP);
 
         $this->assertDatabaseCount('bean_sessions', 1);
         Http::assertSentCount(1);
+    }
+
+    public function test_dashboard_context_uses_user_timezone_and_does_not_cap_time_sensitive_resources(): void
+    {
+        $this->apiToken('bean-dashboard-context-unlimited@example.com');
+        $user = User::where('email', 'bean-dashboard-context-unlimited@example.com')->firstOrFail();
+        $user->forceFill(['timezone' => 'America/Los_Angeles'])->save();
+        $session = app(BeanRuntimeService::class)->createSession($user->refresh(), null, 'America/New_York');
+        $workspaceId = $session->workspace_id;
+        $today = now('UTC')->timezone('America/Los_Angeles');
+
+        foreach (range(1, 9) as $index) {
+            Task::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspaceId,
+                'created_by_user_id' => $user->id,
+                'title' => "context today task {$index}",
+                'type' => 'todo',
+                'status' => 'open',
+                'due_at' => $today->copy()->setTime(20, 0)->addMinutes($index)->utc(),
+            ]);
+            Reminder::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspaceId,
+                'created_by_user_id' => $user->id,
+                'title' => "context today reminder {$index}",
+                'status' => 'scheduled',
+                'remind_at' => $today->copy()->setTime(21, 0)->addMinutes($index)->utc(),
+            ]);
+            CalendarEvent::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspaceId,
+                'created_by_user_id' => $user->id,
+                'title' => "context today event {$index}",
+                'status' => 'scheduled',
+                'starts_at' => $today->copy()->setTime(22, 0)->addMinutes($index)->utc(),
+                'ends_at' => $today->copy()->setTime(23, 0)->addMinutes($index)->utc(),
+            ]);
+            Task::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspaceId,
+                'created_by_user_id' => $user->id,
+                'title' => "context overdue task {$index}",
+                'type' => 'todo',
+                'status' => 'open',
+                'due_at' => $today->copy()->subDay()->setTime(17, 0)->addMinutes($index)->utc(),
+            ]);
+        }
+
+        foreach (range(1, 21) as $index) {
+            Reminder::create([
+                'user_id' => $user->id,
+                'workspace_id' => $workspaceId,
+                'created_by_user_id' => $user->id,
+                'title' => "context upcoming reminder {$index}",
+                'status' => 'scheduled',
+                'remind_at' => $today->copy()->addDays(($index % 31) + 1)->setTime(9, 0)->utc(),
+            ]);
+        }
+
+        $context = app(DashboardContextBuilder::class)->build($user->refresh(), $session, 'America/New_York');
+
+        $this->assertSame('America/Los_Angeles', $context['timezone']);
+        $this->assertSame(31, $context['upcoming']['horizon_days']);
+        $this->assertCount(9, $context['today']['tasks']);
+        $this->assertCount(9, $context['today']['reminders']);
+        $this->assertCount(9, $context['today']['calendar_events']);
+        $this->assertCount(9, $context['overdue']['tasks']);
+        $this->assertGreaterThanOrEqual(21, count($context['upcoming']['reminders']));
     }
 
     private function signedToolContext(User $user, BeanSession $session, BeanRun $run): array

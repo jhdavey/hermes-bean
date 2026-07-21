@@ -14,6 +14,7 @@ use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\ResetPasswordLink;
+use App\Rules\ClientTimezone;
 use App\Services\Bean\HermesUserHomeService;
 use App\Services\CouponCodeService;
 use App\Services\PlanLimitService;
@@ -83,6 +84,7 @@ class AuthController extends Controller
             'plan' => ['sometimes', 'nullable', Rule::in(['base', 'premium', 'pro'])],
             'billing_interval' => ['sometimes', 'nullable', Rule::in(['monthly', 'yearly'])],
             'theme_mode' => ['sometimes', 'string', Rule::in(self::THEME_MODE_KEYS)],
+            'timezone' => ['sometimes', 'nullable', new ClientTimezone],
         ]);
 
         $user = DB::transaction(function () use ($data): User {
@@ -92,6 +94,7 @@ class AuthController extends Controller
                 'password' => Hash::make($data['password']),
                 'subscription_tier' => 'base',
                 'theme_mode' => $data['theme_mode'] ?? 'light',
+                'timezone' => $data['timezone'] ?? null,
                 'onboard_complete' => true,
             ]);
 
@@ -194,12 +197,13 @@ class AuthController extends Controller
             'theme_mode' => ['sometimes', 'string', Rule::in(self::THEME_MODE_KEYS)],
             'command_center_label' => ['sometimes', 'required', 'string', 'max:80'],
             'preferred_map_app' => ['sometimes', 'string', Rule::in(self::MAP_APP_KEYS)],
+            'timezone' => ['sometimes', 'nullable', new ClientTimezone],
             'notification_preferences' => ['sometimes', 'array'],
             'notification_preferences.reminder_push' => ['sometimes', 'boolean'],
             'notification_preferences.reminder_email' => ['sometimes', 'boolean'],
         ]);
 
-        $userData = collect($data)->only(['name', 'email', 'theme', 'theme_mode', 'command_center_label', 'preferred_map_app'])->all();
+        $userData = collect($data)->only(['name', 'email', 'theme', 'theme_mode', 'command_center_label', 'preferred_map_app', 'timezone'])->all();
         if (array_key_exists('notification_preferences', $data)) {
             $planLimits = app(PlanLimitService::class);
             if (($data['notification_preferences']['reminder_email'] ?? false) && ! $planLimits->canUseEmailReminders($user)) {

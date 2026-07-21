@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'email', 'password', 'onboard_complete', 'is_admin', 'subscription_tier', 'default_workspace_id', 'notification_preferences', 'theme', 'theme_mode', 'command_center_label', 'preferred_map_app', 'stripe_customer_id', 'stripe_subscription_id', 'stripe_subscription_item_id', 'stripe_price_id', 'subscription_status', 'subscription_current_period_end', 'base_comp_expires_at', 'base_comp_source_coupon_code_id', 'subscription_trial_ends_at', 'subscription_cancel_at_period_end'])]
+#[Fillable(['name', 'email', 'password', 'onboard_complete', 'is_admin', 'subscription_tier', 'default_workspace_id', 'notification_preferences', 'theme', 'theme_mode', 'command_center_label', 'preferred_map_app', 'timezone', 'stripe_customer_id', 'stripe_subscription_id', 'stripe_subscription_item_id', 'stripe_price_id', 'subscription_status', 'subscription_current_period_end', 'base_comp_expires_at', 'base_comp_source_coupon_code_id', 'subscription_trial_ends_at', 'subscription_cancel_at_period_end'])]
 #[Hidden(['password', 'remember_token', 'stripe_customer_id', 'stripe_subscription_id', 'stripe_subscription_item_id', 'stripe_price_id'])]
 class User extends Authenticatable implements MustVerifyEmail
 {
