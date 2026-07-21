@@ -93,6 +93,10 @@ void main() {
       );
 
       expect(find.byKey(const Key('bean-assistant-button')), findsOneWidget);
+      expect(
+        find.byKey(const Key('bean-assistant-button-logo')),
+        findsOneWidget,
+      );
       expect(find.byKey(const Key('bean-assistant-status')), findsOneWidget);
       await tester.tap(find.byKey(const Key('bean-assistant-button')));
       await _pumpUntilFound(
@@ -133,6 +137,11 @@ void main() {
     expect(find.byKey(const Key('command-center-home')), findsOneWidget);
     expect(find.byKey(const Key('login-card')), findsNothing);
     expect(find.textContaining('Could not load your account'), findsNothing);
+    expect(
+      find.textContaining('Could not load your latest dashboard data'),
+      findsNothing,
+    );
+    expect(find.textContaining('unreadable response'), findsNothing);
   });
 
   testWidgets('login continues when native token persistence is unavailable', (

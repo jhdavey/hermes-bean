@@ -247,11 +247,19 @@ class _CommandCenterFab extends StatelessWidget {
                   ),
                 ],
               ),
-              child: Icon(
-                Icons.spa_rounded,
-                size: 30,
-                color: highlighted ? activeColor : HeyBeanTheme.muted,
-                semanticLabel: 'Bean assistant',
+              child: Semantics(
+                label: 'Bean assistant',
+                image: true,
+                child: Padding(
+                  padding: const EdgeInsets.all(13),
+                  child: Image.asset(
+                    HeyBeanTheme.isDark
+                        ? 'assets/images/bean/bean-logo-white-overlay.png'
+                        : 'assets/images/bean/bean-logo.png',
+                    key: const Key('bean-assistant-button-logo'),
+                    fit: BoxFit.contain,
+                  ),
+                ),
               ),
             ),
           ),

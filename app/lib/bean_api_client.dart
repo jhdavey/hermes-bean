@@ -2725,7 +2725,7 @@ class BeanTask {
   factory BeanTask.fromJson(Map<String, Object?> json) {
     final metadata = _expectMapOrNull(json['metadata']);
     return BeanTask(
-      id: _expectInt(json['id']),
+      id: _readIntOrNull(json['id']) ?? 0,
       title: _readTitle(json),
       status: _canonicalTaskStatus(json['status']),
       dueAt: _readString(json['due_at'] ?? json['dueAt']),
@@ -2816,7 +2816,7 @@ class BeanReminder {
   factory BeanReminder.fromJson(Map<String, Object?> json) {
     final metadata = _expectMapOrNull(json['metadata']);
     return BeanReminder(
-      id: _expectInt(json['id']),
+      id: _readIntOrNull(json['id']) ?? 0,
       title: _readTitle(json),
       dueAt: _readString(json['due_at'] ?? json['remind_at'] ?? json['dueAt']),
       category:
@@ -2830,9 +2830,9 @@ class BeanReminder {
       ),
       status: _canonicalReminderStatus(json['status']),
       completedAt: _readString(json['completed_at'] ?? json['completedAt']),
-      calendarEventId: json['calendar_event_id'] == null
-          ? null
-          : _expectInt(json['calendar_event_id']),
+      calendarEventId: _readIntOrNull(
+        json['calendar_event_id'] ?? json['calendarEventId'],
+      ),
       metadata: metadata,
       workspaceId: _readIntOrNull(json['workspace_id']),
       linkedWorkspaceIds: _expectList(
@@ -2889,9 +2889,9 @@ class BeanEventCategory {
 
   factory BeanEventCategory.fromJson(Map<String, Object?> json) =>
       BeanEventCategory(
-        id: _expectInt(json['id']),
-        name: _expectString(json['name']),
-        color: (json['color'] as String?) ?? '#34C759',
+        id: _readIntOrNull(json['id']) ?? 0,
+        name: _readVisibleString(json['name']) ?? 'Category',
+        color: _readString(json['color']) ?? '#34C759',
         workspaceId: _readIntOrNull(json['workspace_id']),
         linkedWorkspaceIds: _expectList(
           json['linked_workspace_ids'] ?? const [],
@@ -3000,7 +3000,7 @@ class BeanCalendarEvent {
             if (parsedAllDay != null) 'all_day': parsedAllDay,
           };
     return BeanCalendarEvent(
-      id: _expectInt(json['id']),
+      id: _readIntOrNull(json['id']) ?? 0,
       title: _readTitle(json),
       workspaceId: _readIntOrNull(json['workspace_id']),
       linkedWorkspaceIds: _expectList(
@@ -3084,10 +3084,15 @@ Map<String, Object?>? _expectMapOrNull(Object? value) {
   if (value is String) {
     final trimmed = value.trim();
     if (trimmed.isEmpty || trimmed == 'null') return null;
-    final decoded = jsonDecode(trimmed);
-    return _expectMap(decoded);
+    try {
+      final decoded = jsonDecode(trimmed);
+      return _expectMap(decoded);
+    } catch (_) {
+      return null;
+    }
   }
-  return _expectMap(value);
+  if (value is Map) return _expectMap(value);
+  return null;
 }
 
 List<Object?> _expectList(Object? value) {
@@ -3137,21 +3142,21 @@ String _expectString(Object? value) {
 }
 
 String _canonicalReminderStatus(Object? value) {
-  final status = _expectString(value);
-  if (status == 'scheduled' || status == 'completed') return status;
-  throw FormatException('Expected canonical reminder status, got $status');
+  final status = _readString(value)?.trim().toLowerCase();
+  if (status == 'completed' || status == 'done') return 'completed';
+  return 'scheduled';
 }
 
 String _canonicalTaskStatus(Object? value) {
-  final status = _expectString(value);
-  if (status == 'open' || status == 'completed') return status;
-  throw FormatException('Expected canonical task status, got $status');
+  final status = _readString(value)?.trim().toLowerCase();
+  if (status == 'completed' || status == 'done') return 'completed';
+  return 'open';
 }
 
 String _canonicalCalendarStatus(Object? value) {
-  final status = _expectString(value);
-  if (status == 'scheduled' || status == 'cancelled') return status;
-  throw FormatException('Expected canonical calendar status, got $status');
+  final status = _readString(value)?.trim().toLowerCase();
+  if (status == 'cancelled' || status == 'canceled') return 'cancelled';
+  return 'scheduled';
 }
 
 String _readStringOrDefault(Object? value, String fallback) {

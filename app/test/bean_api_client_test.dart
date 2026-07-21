@@ -104,6 +104,48 @@ void main() {
     expect(event.recurrence, '131415');
   });
 
+  test('dashboard resource parsers tolerate stale mixed profile data', () {
+    final task = BeanTask.fromJson({
+      'id': '7',
+      'title': 'Mixed task',
+      'status': 'archived',
+      'metadata': 'not json',
+      'linked_workspace_ids': ['1', 2],
+    });
+    final reminder = BeanReminder.fromJson({
+      'id': '8',
+      'title': 'Mixed reminder',
+      'status': null,
+      'calendar_event_id': '99',
+      'metadata': 123,
+    });
+    final event = BeanCalendarEvent.fromJson({
+      'id': '9',
+      'title': 'Mixed event',
+      'status': 'deleted',
+      'metadata': 'not json',
+      'all_day': 'yes',
+    });
+    final category = BeanEventCategory.fromJson({
+      'id': '10',
+      'name': 123,
+      'color': 456,
+    });
+
+    expect(task.id, 7);
+    expect(task.status, 'open');
+    expect(task.metadata, isNull);
+    expect(reminder.id, 8);
+    expect(reminder.status, 'scheduled');
+    expect(reminder.calendarEventId, 99);
+    expect(event.id, 9);
+    expect(event.status, 'scheduled');
+    expect(event.metadata?['all_day'], isTrue);
+    expect(category.id, 10);
+    expect(category.name, '123');
+    expect(category.color, '456');
+  });
+
   test('Flutter Bean API client posts messages to Laravel runtime', () async {
     final requests = <BeanApiRequest>[];
     final client = BeanApiClient(

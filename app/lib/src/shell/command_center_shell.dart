@@ -768,6 +768,21 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
+  Future<T> _dashboardResourceOrFallback<T>({
+    required String name,
+    required Future<T> Function() load,
+    required T fallback,
+  }) async {
+    try {
+      return await load();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'HeyBean dashboard $name load failed: ${error.runtimeType}: $error\n$stackTrace',
+      );
+      return fallback;
+    }
+  }
+
   Future<void> _loadSignedIn({
     BeanUser? knownUser,
     bool launchedFromRememberedToken = false,
@@ -833,40 +848,43 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         ),
       );
 
-      try {
-        final results = await Future.wait<Object>([
-          widget.apiClient.listTasks(),
-          widget.apiClient.listReminders(),
-          widget.apiClient.listCalendarEvents(skipExternalSync: true),
-          widget.apiClient.listEventCategories(),
-        ]);
-        if (!_isCurrentAuthGeneration(authGeneration)) return;
-        setState(() {
-          _tasks = _tasksWithPendingWrites(results[0] as List<BeanTask>);
-          _reminders = _remindersWithPendingWrites(
-            results[1] as List<BeanReminder>,
-          );
-          _calendar = _calendarEventsForDashboardState(
-            listed: results[2] as List<BeanCalendarEvent>,
-            summary: const [],
-          );
-          _eventCategories = results[3] as List<BeanEventCategory>;
-          _dashboardDataLoading = false;
-          _error = null;
-        });
-      } catch (error, stackTrace) {
-        debugPrint(
-          'HeyBean dashboard bootstrap failed: ${error.runtimeType}: $error\n$stackTrace',
+      final results = await Future.wait<Object>([
+        _dashboardResourceOrFallback<List<BeanTask>>(
+          name: 'tasks',
+          load: widget.apiClient.listTasks,
+          fallback: _tasks,
+        ),
+        _dashboardResourceOrFallback<List<BeanReminder>>(
+          name: 'reminders',
+          load: widget.apiClient.listReminders,
+          fallback: _reminders,
+        ),
+        _dashboardResourceOrFallback<List<BeanCalendarEvent>>(
+          name: 'calendar events',
+          load: () =>
+              widget.apiClient.listCalendarEvents(skipExternalSync: true),
+          fallback: _calendar,
+        ),
+        _dashboardResourceOrFallback<List<BeanEventCategory>>(
+          name: 'event categories',
+          load: widget.apiClient.listEventCategories,
+          fallback: _eventCategories,
+        ),
+      ]);
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
+      setState(() {
+        _tasks = _tasksWithPendingWrites(results[0] as List<BeanTask>);
+        _reminders = _remindersWithPendingWrites(
+          results[1] as List<BeanReminder>,
         );
-        if (!_isCurrentAuthGeneration(authGeneration)) return;
-        setState(() {
-          _dashboardDataLoading = false;
-          _error = beanFriendlyErrorMessage(
-            error,
-            action: 'load your latest dashboard data',
-          );
-        });
-      }
+        _calendar = _calendarEventsForDashboardState(
+          listed: results[2] as List<BeanCalendarEvent>,
+          summary: const [],
+        );
+        _eventCategories = results[3] as List<BeanEventCategory>;
+        _dashboardDataLoading = false;
+        _error = null;
+      });
       _syncReminderNotifications();
       unawaited(_pushNotifications.registerForUser(widget.apiClient));
       _cacheCurrentDashboardSnapshot();
@@ -1792,79 +1810,98 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final refreshGeneration = ++_dashboardRefreshGeneration;
     final dataVersion = _dashboardDataVersion;
     if (showLoading) setState(() => _dashboardDataLoading = true);
-    try {
-      final results = await Future.wait<Object>([
-        widget.apiClient.listTasks(),
-        widget.apiClient.listReminders(),
-        widget.apiClient.listCalendarEvents(skipExternalSync: true),
-        _notesEnabled
-            ? widget.apiClient.listNoteFolders()
-            : Future<Object>.value(const <BeanNoteFolder>[]),
-        _notesEnabled
-            ? widget.apiClient.listNotes()
-            : Future<Object>.value(const <BeanNote>[]),
-        widget.apiClient.listPastTasks(),
-        widget.apiClient.listEventCategories(),
-        _syncGoogleCalendarIfConnected(syncConnected: false),
-        _outlookCalendarStatusOrFallback(fallback: _outlookCalendarStatus),
-      ]);
-      if (!mounted ||
-          _phase != _AuthPhase.signedIn ||
-          authGeneration != _authGeneration ||
-          refreshGeneration != _dashboardRefreshGeneration ||
-          dataVersion != _dashboardDataVersion) {
-        return;
-      }
-      final tasks = _tasksWithPendingWrites(results[0] as List<BeanTask>);
-      final reminders = _remindersWithPendingWrites(
-        results[1] as List<BeanReminder>,
-      );
-      final calendar = _calendarEventsForDashboardState(
-        listed: results[2] as List<BeanCalendarEvent>,
-        summary: const [],
-      );
-      setState(() {
-        _tasks = _dashboardListForMutationRefresh(
-          refreshed: tasks,
-          current: _tasks,
-          showLoading: showLoading,
-          deletedIds: _activePendingTaskDeleteIds(),
-          idFor: (task) => task.id,
-        );
-        _reminders = _dashboardListForMutationRefresh(
-          refreshed: reminders,
-          current: _reminders,
-          showLoading: showLoading,
-          deletedIds: _activePendingReminderDeleteIds(),
-          idFor: (reminder) => reminder.id,
-        );
-        _calendar = _dashboardListForMutationRefresh(
-          refreshed: calendar,
-          current: _calendar,
-          showLoading: showLoading,
-          deletedIds: _activePendingCalendarEventDeleteIds(),
-          idFor: (event) => event.id,
-        );
-        _noteFolders = _sortedNoteFolders(results[3] as List<BeanNoteFolder>);
-        _notes = _notesWithLocalDrafts(results[4] as List<BeanNote>);
-        _pastTasks = _tasksWithPendingWrites(results[5] as List<BeanTask>);
-        _eventCategories = results[6] as List<BeanEventCategory>;
-        _googleCalendarStatus = results[7] as GoogleCalendarSyncStatus;
-        _outlookCalendarStatus = results[8] as GoogleCalendarSyncStatus;
-        _dashboardDataLoading = false;
-        _error = null;
-      });
-      _syncReminderNotifications();
-      _cacheCurrentDashboardSnapshot();
-      _resumeLocalNoteDrafts();
-    } catch (_) {
-      if (!mounted ||
-          authGeneration != _authGeneration ||
-          refreshGeneration != _dashboardRefreshGeneration) {
-        return;
-      }
-      setState(() => _dashboardDataLoading = false);
+    final results = await Future.wait<Object>([
+      _dashboardResourceOrFallback<List<BeanTask>>(
+        name: 'tasks refresh',
+        load: widget.apiClient.listTasks,
+        fallback: _tasks,
+      ),
+      _dashboardResourceOrFallback<List<BeanReminder>>(
+        name: 'reminders refresh',
+        load: widget.apiClient.listReminders,
+        fallback: _reminders,
+      ),
+      _dashboardResourceOrFallback<List<BeanCalendarEvent>>(
+        name: 'calendar refresh',
+        load: () => widget.apiClient.listCalendarEvents(skipExternalSync: true),
+        fallback: _calendar,
+      ),
+      _notesEnabled
+          ? _dashboardResourceOrFallback<List<BeanNoteFolder>>(
+              name: 'note folders refresh',
+              load: widget.apiClient.listNoteFolders,
+              fallback: _noteFolders,
+            )
+          : Future<Object>.value(const <BeanNoteFolder>[]),
+      _notesEnabled
+          ? _dashboardResourceOrFallback<List<BeanNote>>(
+              name: 'notes refresh',
+              load: widget.apiClient.listNotes,
+              fallback: _notes,
+            )
+          : Future<Object>.value(const <BeanNote>[]),
+      _dashboardResourceOrFallback<List<BeanTask>>(
+        name: 'past tasks refresh',
+        load: widget.apiClient.listPastTasks,
+        fallback: _pastTasks,
+      ),
+      _dashboardResourceOrFallback<List<BeanEventCategory>>(
+        name: 'event categories refresh',
+        load: widget.apiClient.listEventCategories,
+        fallback: _eventCategories,
+      ),
+      _syncGoogleCalendarIfConnected(syncConnected: false),
+      _outlookCalendarStatusOrFallback(fallback: _outlookCalendarStatus),
+    ]);
+    if (!mounted ||
+        _phase != _AuthPhase.signedIn ||
+        authGeneration != _authGeneration ||
+        refreshGeneration != _dashboardRefreshGeneration ||
+        dataVersion != _dashboardDataVersion) {
+      return;
     }
+    final tasks = _tasksWithPendingWrites(results[0] as List<BeanTask>);
+    final reminders = _remindersWithPendingWrites(
+      results[1] as List<BeanReminder>,
+    );
+    final calendar = _calendarEventsForDashboardState(
+      listed: results[2] as List<BeanCalendarEvent>,
+      summary: const [],
+    );
+    setState(() {
+      _tasks = _dashboardListForMutationRefresh(
+        refreshed: tasks,
+        current: _tasks,
+        showLoading: showLoading,
+        deletedIds: _activePendingTaskDeleteIds(),
+        idFor: (task) => task.id,
+      );
+      _reminders = _dashboardListForMutationRefresh(
+        refreshed: reminders,
+        current: _reminders,
+        showLoading: showLoading,
+        deletedIds: _activePendingReminderDeleteIds(),
+        idFor: (reminder) => reminder.id,
+      );
+      _calendar = _dashboardListForMutationRefresh(
+        refreshed: calendar,
+        current: _calendar,
+        showLoading: showLoading,
+        deletedIds: _activePendingCalendarEventDeleteIds(),
+        idFor: (event) => event.id,
+      );
+      _noteFolders = _sortedNoteFolders(results[3] as List<BeanNoteFolder>);
+      _notes = _notesWithLocalDrafts(results[4] as List<BeanNote>);
+      _pastTasks = _tasksWithPendingWrites(results[5] as List<BeanTask>);
+      _eventCategories = results[6] as List<BeanEventCategory>;
+      _googleCalendarStatus = results[7] as GoogleCalendarSyncStatus;
+      _outlookCalendarStatus = results[8] as GoogleCalendarSyncStatus;
+      _dashboardDataLoading = false;
+      _error = null;
+    });
+    _syncReminderNotifications();
+    _cacheCurrentDashboardSnapshot();
+    _resumeLocalNoteDrafts();
   }
 
   Future<void> _refreshWorkspaceDataFromServer({
