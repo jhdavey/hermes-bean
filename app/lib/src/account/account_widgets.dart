@@ -65,6 +65,7 @@ class _AccountCard extends StatelessWidget {
   const _AccountCard({
     required this.onDeleteAccount,
     required this.onSignOut,
+    required this.onExportAccount,
     required this.launchExternalUrl,
     this.showLegalLinks = true,
     this.beforeAccountActions,
@@ -72,6 +73,7 @@ class _AccountCard extends StatelessWidget {
 
   final Future<void> Function() onDeleteAccount;
   final Future<void> Function() onSignOut;
+  final Future<void> Function() onExportAccount;
   final ExternalUrlLauncher launchExternalUrl;
   final bool showLegalLinks;
   final Widget? beforeAccountActions;
@@ -108,6 +110,12 @@ class _AccountCard extends StatelessWidget {
               onPressed: onSignOut,
               icon: Icon(Icons.logout_rounded),
               label: Text('Sign out'),
+            ),
+            OutlinedButton.icon(
+              key: const Key('export-account-action'),
+              onPressed: onExportAccount,
+              icon: Icon(Icons.download_rounded),
+              label: Text('Export data'),
             ),
             TextButton.icon(
               key: const Key('delete-account-action'),

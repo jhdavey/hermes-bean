@@ -3,15 +3,19 @@ part of '../../main.dart';
 class _BeanAssistantPanel extends StatefulWidget {
   const _BeanAssistantPanel({
     required this.messages,
+    required this.confirmations,
     required this.sending,
     required this.error,
     required this.onSend,
+    required this.onConfirm,
   });
 
   final List<BeanAssistantMessage> messages;
+  final List<BeanAssistantConfirmation> confirmations;
   final bool sending;
   final String? error;
-  final Future<void> Function(String message) onSend;
+  final Future<void> Function(String message, {String? source}) onSend;
+  final Future<void> Function(BeanAssistantConfirmation confirmation) onConfirm;
 
   @override
   State<_BeanAssistantPanel> createState() => _BeanAssistantPanelState();
@@ -82,6 +86,13 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
     await widget.onSend(text);
   }
 
+  Future<void> _sendVoiceCommand() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty || widget.sending) return;
+    _controller.clear();
+    await widget.onSend(text, source: 'flutter_native_voice');
+  }
+
   Future<void> _toggleVoiceInput() async {
     if (!_speechReady) await _initVoice();
     if (!_speechReady) return;
@@ -104,7 +115,7 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
         _controller.selection = TextSelection.collapsed(offset: command.length);
         if (result.finalResult && command.isNotEmpty) {
           setState(() => _listening = false);
-          unawaited(_send());
+          unawaited(_sendVoiceCommand());
         }
       },
     );
@@ -234,6 +245,42 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
                             ),
                     ),
                   ),
+                  if (widget.confirmations.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    for (final confirmation in widget.confirmations)
+                      Container(
+                        key: Key('bean-confirmation-${confirmation.id}'),
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: _quietSurfaceDecoration(radius: 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              confirmation.summary ?? confirmation.action,
+                              style: TextStyle(
+                                color: HeyBeanTheme.text,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: FilledButton(
+                                key: Key('bean-confirm-${confirmation.id}'),
+                                onPressed: widget.sending
+                                    ? null
+                                    : () => unawaited(
+                                        widget.onConfirm(confirmation),
+                                      ),
+                                child: const Text('Approve'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                   if (widget.error != null) ...[
                     const SizedBox(height: 10),
                     Text(

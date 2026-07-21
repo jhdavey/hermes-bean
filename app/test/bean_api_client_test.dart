@@ -169,4 +169,67 @@ void main() {
     });
     expect(note.content, 'today scratchpad');
   });
+
+  test('Bean assistant lifecycle methods match Laravel routes', () async {
+    final requests = <BeanApiRequest>[];
+    final client = BeanApiClient(
+      baseUrl: Uri.parse('https://example.test/api'),
+      bearerToken: 'test-token',
+      transport: (request) async {
+        requests.add(request);
+        final data = switch (request.path) {
+          '/bean/sessions' => {
+            'data': {'id': 44},
+          },
+          '/bean/sessions/44/activity' => {
+            'data': {
+              'messages': [
+                {'id': 1, 'role': 'assistant', 'content': 'Ready'},
+              ],
+              'activity': [
+                {'id': 2, 'type': 'tool_call'},
+              ],
+              'confirmations': [
+                {'id': 3, 'action': 'task.delete', 'status': 'pending'},
+              ],
+            },
+          },
+          '/bean/confirmations/3/approve' => {
+            'data': {
+              'session': {'id': 44},
+              'run': {'id': 5, 'status': 'completed'},
+              'messages': [],
+              'confirmations': [],
+            },
+          },
+          _ => {'data': {}},
+        };
+        return BeanApiResponse(200, jsonEncode(data));
+      },
+    );
+
+    final session = await client.createBeanSession(
+      workspaceId: 9,
+      clientTimezone: 'America/New_York',
+    );
+    final activity = await client.getBeanSessionActivity(session.id);
+    await client.recordBeanVoiceEvent(
+      eventType: 'voice_started',
+      sessionId: session.id,
+      source: 'flutter_native',
+    );
+    final approved = await client.approveBeanConfirmation(3);
+
+    expect(requests[0].path, '/bean/sessions');
+    expect(requests[0].body, {
+      'workspace_id': 9,
+      'client_timezone': 'America/New_York',
+    });
+    expect(requests[1].path, '/bean/sessions/44/activity');
+    expect(activity.confirmations.single.action, 'task.delete');
+    expect(requests[2].path, '/bean/voice-events');
+    expect(requests[2].body?['event_type'], 'voice_started');
+    expect(requests[3].path, '/bean/confirmations/3/approve');
+    expect(approved.run.status, 'completed');
+  });
 }

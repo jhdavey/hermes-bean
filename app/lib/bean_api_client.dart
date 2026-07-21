@@ -1100,6 +1100,7 @@ class BeanApiClient {
     int? sessionId,
     int? workspaceId,
     String? clientTimezone,
+    String? source,
   }) async {
     final data = await _sendJson(
       'POST',
@@ -1110,6 +1111,58 @@ class BeanApiClient {
         if (workspaceId != null) 'workspace_id': workspaceId,
         if (clientTimezone != null) 'client_timezone': clientTimezone,
       },
+    );
+    return BeanAssistantTurn.fromJson(_expectMap(data['data']));
+  }
+
+  Future<BeanAssistantSession> createBeanSession({
+    int? workspaceId,
+    String? clientTimezone,
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/bean/sessions',
+      body: {
+        if (workspaceId != null) 'workspace_id': workspaceId,
+        if (clientTimezone != null) 'client_timezone': clientTimezone,
+      },
+    );
+    return BeanAssistantSession.fromJson(_expectMap(data['data']));
+  }
+
+  Future<BeanAssistantActivity> getBeanSessionActivity(int sessionId) async {
+    final data = await _sendJson('GET', '/bean/sessions/$sessionId/activity');
+    return BeanAssistantActivity.fromJson(_expectMap(data['data']));
+  }
+
+  Future<void> recordBeanVoiceEvent({
+    required String eventType,
+    int? sessionId,
+    int? runId,
+    String? mode,
+    String? source,
+    String? label,
+    Map<String, Object?>? payload,
+  }) async {
+    await _sendJson(
+      'POST',
+      '/bean/voice-events',
+      body: {
+        'event_type': eventType,
+        if (sessionId != null) 'session_id': sessionId,
+        if (runId != null) 'run_id': runId,
+        if (mode != null) 'mode': mode,
+        if (source != null) 'source': source,
+        if (label != null) 'label': label,
+        if (payload != null) 'payload': payload,
+      },
+    );
+  }
+
+  Future<BeanAssistantTurn> approveBeanConfirmation(int confirmationId) async {
+    final data = await _sendJson(
+      'POST',
+      '/bean/confirmations/$confirmationId/approve',
     );
     return BeanAssistantTurn.fromJson(_expectMap(data['data']));
   }
@@ -1276,6 +1329,33 @@ class BeanAssistantTurn {
         messages: _expectList(json['messages'] ?? const [])
             .map((value) => BeanAssistantMessage.fromJson(_expectMap(value)))
             .toList(),
+        confirmations: _expectList(json['confirmations'] ?? const [])
+            .map(
+              (value) => BeanAssistantConfirmation.fromJson(_expectMap(value)),
+            )
+            .toList(),
+      );
+}
+
+class BeanAssistantActivity {
+  const BeanAssistantActivity({
+    this.messages = const [],
+    this.activity = const [],
+    this.confirmations = const [],
+  });
+
+  final List<BeanAssistantMessage> messages;
+  final List<Map<String, Object?>> activity;
+  final List<BeanAssistantConfirmation> confirmations;
+
+  factory BeanAssistantActivity.fromJson(Map<String, Object?> json) =>
+      BeanAssistantActivity(
+        messages: _expectList(json['messages'] ?? const [])
+            .map((value) => BeanAssistantMessage.fromJson(_expectMap(value)))
+            .toList(),
+        activity: _expectList(
+          json['activity'] ?? const [],
+        ).map((value) => _expectMap(value)).toList(),
         confirmations: _expectList(json['confirmations'] ?? const [])
             .map(
               (value) => BeanAssistantConfirmation.fromJson(_expectMap(value)),

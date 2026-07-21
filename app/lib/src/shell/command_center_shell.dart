@@ -92,6 +92,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int? _beanAssistantSessionId;
   String? _beanAssistantError;
   List<BeanAssistantMessage> _beanAssistantMessages = const [];
+  List<BeanAssistantConfirmation> _beanAssistantConfirmations = const [];
 
   void _applyUserTheme(BeanUser? user) {
     widget.onThemeChanged(user?.theme ?? 'green');
@@ -158,6 +159,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanAssistantSessionId = null;
     _beanAssistantError = null;
     _beanAssistantMessages = const [];
+    _beanAssistantConfirmations = const [];
   }
 
   void _rememberPendingTaskWrite(BeanTask task, int mutationVersion) {
@@ -1227,7 +1229,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     });
   }
 
-  Future<void> _sendBeanAssistantMessage(String content) async {
+  Future<void> _sendBeanAssistantMessage(
+    String content, {
+    String? source,
+  }) async {
     if (_beanAssistantSending || content.trim().isEmpty) return;
     setState(() {
       _beanAssistantSending = true;
@@ -1243,11 +1248,13 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         sessionId: _beanAssistantSessionId,
         workspaceId: _activeWorkspaceId(),
         clientTimezone: _user?.timezone,
+        source: source,
       );
       if (!mounted) return;
       setState(() {
         _beanAssistantSessionId = turn.session.id;
         _beanAssistantMessages = turn.messages;
+        _beanAssistantConfirmations = turn.confirmations;
         _beanAssistantSending = false;
       });
       unawaited(_refreshSignedInViews(showLoading: false));
@@ -1258,6 +1265,38 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         _beanAssistantError = beanFriendlyErrorMessage(
           error,
           action: 'message Bean',
+        );
+      });
+    }
+  }
+
+  Future<void> _approveBeanConfirmation(
+    BeanAssistantConfirmation confirmation,
+  ) async {
+    if (_beanAssistantSending) return;
+    setState(() {
+      _beanAssistantSending = true;
+      _beanAssistantError = null;
+    });
+    try {
+      final turn = await widget.apiClient.approveBeanConfirmation(
+        confirmation.id,
+      );
+      if (!mounted) return;
+      setState(() {
+        _beanAssistantSessionId = turn.session.id;
+        _beanAssistantMessages = turn.messages;
+        _beanAssistantConfirmations = turn.confirmations;
+        _beanAssistantSending = false;
+      });
+      unawaited(_refreshSignedInViews(showLoading: false));
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _beanAssistantSending = false;
+        _beanAssistantError = beanFriendlyErrorMessage(
+          error,
+          action: 'approve that Bean action',
         );
       });
     }
@@ -3248,6 +3287,23 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     );
   }
 
+  Future<void> _exportAccountData() async {
+    try {
+      final exported = await widget.apiClient.exportAccount();
+      final encoded = const JsonEncoder.withIndent('  ').convert(exported);
+      await Clipboard.setData(ClipboardData(text: encoded));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Account export copied to clipboard.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = beanFriendlyErrorMessage(error, action: 'export your account');
+      });
+    }
+  }
+
   Future<void> _updateAccountEmail(String email) async {
     final trimmedEmail = email.trim();
     if (trimmedEmail.isEmpty || _busy) return;
@@ -3853,9 +3909,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             if (_beanAssistantOpen)
               _BeanAssistantPanel(
                 messages: _beanAssistantMessages,
+                confirmations: _beanAssistantConfirmations,
                 sending: _beanAssistantSending,
                 error: _beanAssistantError,
                 onSend: _sendBeanAssistantMessage,
+                onConfirm: _approveBeanConfirmation,
               ),
             if (_onboardingTourVisible)
               _OnboardingTourOverlay(
@@ -4088,6 +4146,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     onEventCategoryDeleted: _deleteEventCategory,
     onDeleteAccount: _deleteAccount,
     onSignOut: _logout,
+    onExportAccount: _exportAccountData,
     onAccountEmailChanged: _updateAccountEmail,
     onNotificationPreferencesChanged: _updateNotificationPreferences,
     onThemeChanged: _updateTheme,
@@ -4095,6 +4154,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     onCommandCenterLabelChanged: _updateCommandCenterLabel,
     onPreferredMapAppChanged: _updatePreferredMapApp,
     onTimezoneChanged: _updateTimezone,
+    eventCategoriesForSettings: _eventCategories,
+    onSettingsEventCategorySaved: _saveEventCategory,
+    onSettingsEventCategoryDeleted: _deleteEventCategory,
     launchExternalUrl: widget.launchExternalUrl,
     stripePaymentHandler: widget.stripePaymentHandler,
     onBillingChanged: () =>

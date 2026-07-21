@@ -48,6 +48,7 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onEventCategoryDeleted,
     required this.onDeleteAccount,
     required this.onSignOut,
+    required this.onExportAccount,
     required this.onAccountEmailChanged,
     required this.onNotificationPreferencesChanged,
     required this.onThemeChanged,
@@ -55,6 +56,9 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onCommandCenterLabelChanged,
     required this.onPreferredMapAppChanged,
     required this.onTimezoneChanged,
+    required this.eventCategoriesForSettings,
+    required this.onSettingsEventCategorySaved,
+    required this.onSettingsEventCategoryDeleted,
     required this.launchExternalUrl,
     required this.stripePaymentHandler,
     required this.onBillingChanged,
@@ -207,6 +211,7 @@ class _CommandCenterContent extends StatelessWidget {
   onEventCategoryDeleted;
   final Future<void> Function() onDeleteAccount;
   final Future<void> Function() onSignOut;
+  final Future<void> Function() onExportAccount;
   final Future<void> Function(String email) onAccountEmailChanged;
   final Future<void> Function(BeanNotificationPreferences preferences)
   onNotificationPreferencesChanged;
@@ -215,6 +220,18 @@ class _CommandCenterContent extends StatelessWidget {
   final Future<void> Function(String label) onCommandCenterLabelChanged;
   final Future<void> Function(String preferredMapApp) onPreferredMapAppChanged;
   final Future<void> Function(String timezone) onTimezoneChanged;
+  final List<BeanEventCategory> eventCategoriesForSettings;
+  final Future<BeanEventCategory> Function({
+    BeanEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onSettingsEventCategorySaved;
+  final Future<void> Function(
+    BeanEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onSettingsEventCategoryDeleted;
   final ExternalUrlLauncher launchExternalUrl;
   final StripePaymentHandler stripePaymentHandler;
   final Future<void> Function() onBillingChanged;
@@ -339,12 +356,16 @@ class _CommandCenterContent extends StatelessWidget {
         user: user,
         onBillingChanged: onBillingChanged,
         googleCalendarStatus: googleCalendarStatus,
+        eventCategories: eventCategoriesForSettings,
+        onEventCategorySaved: onSettingsEventCategorySaved,
+        onEventCategoryDeleted: onSettingsEventCategoryDeleted,
         calendarStartHour: calendarStartHour,
         calendarEndHour: calendarEndHour,
         onCalendarStartHourChanged: onCalendarStartHourChanged,
         onCalendarEndHourChanged: onCalendarEndHourChanged,
         onDeleteAccount: onDeleteAccount,
         onSignOut: onSignOut,
+        onExportAccount: onExportAccount,
         onAccountEmailChanged: onAccountEmailChanged,
         onNotificationPreferencesChanged: onNotificationPreferencesChanged,
         onThemeChanged: onThemeChanged,

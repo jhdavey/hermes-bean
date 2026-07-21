@@ -8,12 +8,16 @@ class _SettingsView extends StatelessWidget {
     required this.user,
     required this.onBillingChanged,
     this.googleCalendarStatus,
+    required this.eventCategories,
+    required this.onEventCategorySaved,
+    required this.onEventCategoryDeleted,
     required this.calendarStartHour,
     required this.calendarEndHour,
     required this.onCalendarStartHourChanged,
     required this.onCalendarEndHourChanged,
     required this.onDeleteAccount,
     required this.onSignOut,
+    required this.onExportAccount,
     required this.onAccountEmailChanged,
     required this.onNotificationPreferencesChanged,
     required this.onThemeChanged,
@@ -32,12 +36,25 @@ class _SettingsView extends StatelessWidget {
   final BeanUser user;
   final Future<void> Function() onBillingChanged;
   final GoogleCalendarSyncStatus? googleCalendarStatus;
+  final List<BeanEventCategory> eventCategories;
+  final Future<BeanEventCategory> Function({
+    BeanEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onEventCategorySaved;
+  final Future<void> Function(
+    BeanEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onEventCategoryDeleted;
   final int calendarStartHour;
   final int calendarEndHour;
   final ValueChanged<int> onCalendarStartHourChanged;
   final ValueChanged<int> onCalendarEndHourChanged;
   final Future<void> Function() onDeleteAccount;
   final Future<void> Function() onSignOut;
+  final Future<void> Function() onExportAccount;
   final Future<void> Function(String email) onAccountEmailChanged;
   final Future<void> Function(BeanNotificationPreferences preferences)
   onNotificationPreferencesChanged;
@@ -110,6 +127,11 @@ class _SettingsView extends StatelessWidget {
               timezone: user.timezone,
               onChanged: onTimezoneChanged,
             ),
+            _CategoriesSettingsCard(
+              categories: eventCategories,
+              onSaved: onEventCategorySaved,
+              onDeleted: onEventCategoryDeleted,
+            ),
             const SizedBox(height: 8),
             _WorkspacesSettingsCard(
               apiClient: apiClient,
@@ -140,6 +162,7 @@ class _SettingsView extends StatelessWidget {
       _AccountCard(
         onDeleteAccount: onDeleteAccount,
         onSignOut: onSignOut,
+        onExportAccount: onExportAccount,
         launchExternalUrl: launchExternalUrl,
         showLegalLinks: false,
         beforeAccountActions: _BillingSettingsCard(
@@ -1536,6 +1559,206 @@ class _MapPreferencesCardState extends State<_MapPreferencesCard> {
 }
 
 String _normalizedMapApp(String value) => value == 'apple' ? 'apple' : 'google';
+
+class _CategoriesSettingsCard extends StatefulWidget {
+  const _CategoriesSettingsCard({
+    required this.categories,
+    required this.onSaved,
+    required this.onDeleted,
+  });
+
+  final List<BeanEventCategory> categories;
+  final Future<BeanEventCategory> Function({
+    BeanEventCategory? category,
+    required String name,
+    required String color,
+  })
+  onSaved;
+  final Future<void> Function(
+    BeanEventCategory category, {
+    List<Object> deleteFromWorkspaceIds,
+  })
+  onDeleted;
+
+  @override
+  State<_CategoriesSettingsCard> createState() =>
+      _CategoriesSettingsCardState();
+}
+
+class _CategoriesSettingsCardState extends State<_CategoriesSettingsCard> {
+  static const _colors = <({String value, String label})>[
+    (value: _beanGreenCategoryColor, label: 'Green'),
+    (value: '#007AFF', label: 'Blue'),
+    (value: '#FF9500', label: 'Orange'),
+    (value: '#AF52DE', label: 'Purple'),
+    (value: '#FF3B30', label: 'Red'),
+  ];
+
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _editCategory([BeanEventCategory? category]) async {
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (context) => _EventCategoryCreateDialog(
+        initialColor: category?.color ?? _themeCategoryColorHex(),
+        initialName: category?.name,
+        editing: category != null,
+        colors: _colors,
+      ),
+    );
+    if (result == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.onSaved(
+        category: category,
+        name: result['name'] ?? category?.name ?? '',
+        color: result['color'] ?? category?.color ?? _themeCategoryColorHex(),
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () =>
+              _error = beanFriendlyErrorMessage(error, action: 'save category'),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _deleteCategory(BeanEventCategory category) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete category?'),
+        content: Text(
+          'This removes "${category.name}" from existing events, tasks, and reminders.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.onDeleted(category);
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _error = beanFriendlyErrorMessage(
+            error,
+            action: 'delete category',
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('categories-settings-card'),
+    margin: const EdgeInsets.only(top: 4),
+    padding: const EdgeInsets.only(top: 14, bottom: 12),
+    decoration: _sectionDividerDecoration(),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.sell_outlined, color: HeyBeanTheme.muted),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Categories',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Manage the colors Bean uses for events, tasks, and reminders.',
+                    style: TextStyle(
+                      color: HeyBeanTheme.muted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            FilledButton.icon(
+              key: const Key('settings-add-category-action'),
+              onPressed: _busy ? null : () => unawaited(_editCategory()),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add'),
+            ),
+          ],
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            _error!,
+            key: const Key('settings-category-error'),
+            style: const TextStyle(
+              color: Color(0xFFB42318),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+        const SizedBox(height: 10),
+        if (widget.categories.isEmpty)
+          Text(
+            'No custom categories yet.',
+            style: TextStyle(
+              color: HeyBeanTheme.muted,
+              fontWeight: FontWeight.w600,
+            ),
+          )
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final category in widget.categories)
+                InputChip(
+                  key: Key('settings-category-${category.id}'),
+                  avatar: CircleAvatar(
+                    radius: 6,
+                    backgroundColor: _safeCategoryColor(category.color),
+                  ),
+                  label: Text(category.name),
+                  onPressed: _busy
+                      ? null
+                      : () => unawaited(_editCategory(category)),
+                  onDeleted: _busy
+                      ? null
+                      : () => unawaited(_deleteCategory(category)),
+                ),
+            ],
+          ),
+      ],
+    ),
+  );
+}
 
 class _TimezonePreferencesCard extends StatefulWidget {
   const _TimezonePreferencesCard({

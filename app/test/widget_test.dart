@@ -258,6 +258,7 @@ class _DashboardApiClient extends BeanApiClient {
     int? sessionId,
     int? workspaceId,
     String? clientTimezone,
+    String? source,
   }) async {
     sentBeanMessages.add(content);
     return BeanAssistantTurn(

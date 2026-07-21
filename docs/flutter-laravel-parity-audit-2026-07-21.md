@@ -30,6 +30,9 @@ Laravel web is the source of truth for the current HeyBean MVP. This audit focus
 **Implemented**
 
 - `BeanApiClient.sendBeanMessage()` now accepts and sends `client_timezone`.
+- `sendBeanMessage()` also accepts optional `source`, so native/mobile voice turns can identify their origin without changing the text path.
+- Added client coverage for Laravel Bean session/activity/voice-event/confirmation routes: `/bean/sessions`, `/bean/sessions/{id}/activity`, `/bean/voice-events`, and `/bean/confirmations/{id}/approve`.
+- Bean assistant panel now renders pending confirmations and can approve them through Laravel.
 - Flutter registration seeds timezone with `flutter_timezone` where available.
 - `BeanApiClient.createBeanRealtimeSession()` now maps to `/bean/elevenlabs/conversation-token` and parses the current token/dashboard-context response for future native ElevenLabs mobile work.
 - Bean assistant panel now has a mic button for mobile voice input using native speech recognition and speaks Bean responses using native TTS. This preserves the existing mobile panel style and routes the recognized text through Laravel `/bean/messages`.
@@ -101,12 +104,14 @@ Current settings exposed through `/auth/me` include:
 - `BeanUser` now parses/carries `timezone`.
 - `updateMe()` now accepts `timezone`.
 - Settings screen now includes a Timezone card with IANA timezone field, Device shortcut, validation via Laravel, and save status.
+- Account settings now expose data export and copy the Laravel `/account/export` payload to the clipboard.
+- Settings now expose event/task/reminder category add/edit/delete using the existing category editor and Laravel event-category API.
 
 ## Verification
 
 - `dart format lib test` passed.
 - `flutter analyze` passed with no issues.
-- `flutter test` passed: 10 tests.
+- `flutter test` passed: 11 tests.
 - `./gradlew assembleDebug -PallowDebugReleaseSigning=true` passed.
 - `flutter build ios --simulator --no-codesign` passed.
 
