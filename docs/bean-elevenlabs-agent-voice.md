@@ -15,16 +15,31 @@ Browser HeyBean app
   -> Tool result returns to ElevenLabs Agent, which speaks the response
 ```
 
+Public Laravel pages use a separate boundary:
+
+```text
+Public landing / pricing / legal page
+  -> local “Hey Bean” wake detection after the visitor taps to enable
+  -> /bean/landing/conversation-token (session + CSRF + rate limited)
+  -> dedicated ElevenLabs Landing Guide agent
+  -> Agent calls client tool: askLandingBean({ message })
+  -> /bean/landing/messages
+  -> isolated per-browser Hermes home with the heybean-guide skill
+  -> no authenticated dashboard plugin, account data, or private tools
+```
+
 ## Required env
 
 ```bash
 ELEVENLABS_API_KEY=...
 ELEVENLABS_AGENT_ENABLED=true
 ELEVENLABS_AGENT_ID=agent_...
+ELEVENLABS_LANDING_AGENT_ID=agent_...
 # optional
 ELEVENLABS_AGENT_ENVIRONMENT=
 ELEVENLABS_AGENT_BRANCH_ID=
 ELEVENLABS_AGENT_NAME="HeyBean Voice Agent"
+ELEVENLABS_LANDING_AGENT_NAME="HeyBean Landing Guide"
 ```
 
 ## Configure/update the ElevenLabs Agent
@@ -33,6 +48,7 @@ From `web/`:
 
 ```bash
 npm run elevenlabs:agent-configure
+npm run elevenlabs:landing-agent-configure
 ```
 
 The script creates or updates:
@@ -43,6 +59,8 @@ The script creates or updates:
 - the agent's tool binding
 
 If no `ELEVENLABS_AGENT_ID` is present, the script creates a new agent and prints the id. Put that id in `.env` as `ELEVENLABS_AGENT_ID`, enable `ELEVENLABS_AGENT_ENABLED=true`, then cache Laravel config.
+
+The landing command creates or updates a separate `askLandingBean` client tool and public voice agent. If no `ELEVENLABS_LANDING_AGENT_ID` is present, save the printed id in `.env` under that name before caching Laravel config. The public runtime deliberately has no `bean_dashboard` tool and cannot access authenticated data.
 
 ## Removed legacy voice paths
 

@@ -1,0 +1,157 @@
+.public-bean-presence {
+    --public-bean-accent: 82, 168, 105;
+    position: relative;
+    z-index: 36;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    flex: 0 1 auto;
+    border: 1px solid rgba(var(--public-bean-accent), .26);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .92);
+    box-shadow: 0 8px 22px rgba(16, 24, 40, .08);
+    isolation: isolate;
+    transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
+}
+
+.public-bean-control {
+    min-width: 0;
+    min-height: 42px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    border: 0;
+    border-radius: inherit;
+    padding: 0 14px 0 0;
+    background: transparent;
+    color: #667085;
+    font: inherit;
+    cursor: pointer;
+}
+
+.public-bean-control:hover {
+    color: #2d3748;
+}
+
+.public-bean-control:focus-visible {
+    outline: 2px solid rgba(var(--public-bean-accent), .62);
+    outline-offset: 3px;
+}
+
+.public-bean-icon {
+    position: relative;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.public-bean-icon img {
+    position: relative;
+    z-index: 1;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    object-fit: cover;
+    opacity: .82;
+    filter: grayscale(.12);
+}
+
+.public-bean-ring {
+    position: absolute;
+    inset: -3px;
+    z-index: 2;
+    border-radius: 999px;
+    padding: 2px;
+    background: transparent;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+}
+
+.public-bean-status {
+    min-width: 0;
+    max-width: min(260px, 36vw);
+    overflow: hidden;
+    color: currentColor;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.public-bean-presence[data-mode="starting"],
+.public-bean-presence[data-mode="wake_listening"],
+.public-bean-presence[data-mode="listening"] {
+    border-color: rgba(var(--public-bean-accent), .46);
+    background: rgba(var(--public-bean-accent), .13);
+}
+
+.public-bean-presence[data-mode="starting"] .public-bean-ring,
+.public-bean-presence[data-mode="wake_listening"] .public-bean-ring,
+.public-bean-presence[data-mode="listening"] .public-bean-ring {
+    background: conic-gradient(from 20deg, transparent 0 18%, rgba(var(--public-bean-accent), .58) 34% 66%, transparent 82%);
+    animation: public-bean-pulse 1.8s ease-in-out infinite;
+}
+
+.public-bean-presence[data-mode="connecting"] .public-bean-ring,
+.public-bean-presence[data-mode="thinking"] .public-bean-ring {
+    background: conic-gradient(from 20deg, transparent 0 52%, rgba(var(--public-bean-accent), .26) 62%, rgb(var(--public-bean-accent)) 78%, transparent 92%);
+    animation: public-bean-orbit .85s linear infinite;
+}
+
+.public-bean-presence[data-mode="speaking"] .public-bean-ring {
+    background: conic-gradient(from 20deg, rgba(var(--public-bean-accent), .18), rgba(var(--public-bean-accent), .68), rgba(var(--public-bean-accent), .18));
+    animation: public-bean-pulse 1.05s ease-in-out infinite;
+}
+
+.public-bean-presence[data-mode="error"] {
+    border-color: rgba(220, 38, 38, .34);
+    background: rgba(254, 242, 242, .94);
+    color: #a43b3b;
+}
+
+.public-bean-presence[data-mode]:not([data-mode="disabled"]) .public-bean-icon img {
+    opacity: 1;
+    filter: none;
+}
+
+@keyframes public-bean-pulse {
+    0%, 100% { opacity: .78; filter: drop-shadow(0 0 1px rgba(var(--public-bean-accent), .3)); }
+    50% { opacity: .28; filter: drop-shadow(0 0 7px rgba(var(--public-bean-accent), .42)); }
+}
+
+@keyframes public-bean-orbit {
+    to { transform: rotate(1turn); }
+}
+
+@media (max-width: 620px) {
+    .public-bean-status {
+        max-width: 132px;
+    }
+}
+
+@media (max-width: 390px) {
+    .public-bean-control {
+        padding-right: 10px;
+    }
+
+    .public-bean-status {
+        max-width: 104px;
+        font-size: 11px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .public-bean-presence,
+    .public-bean-ring {
+        animation: none !important;
+        transition: none;
+    }
+}

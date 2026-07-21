@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\LandingBeanController;
 use App\Models\EarlyAccessSignup;
 use App\Models\User;
 use App\Services\WorkspaceService;
@@ -33,6 +34,13 @@ Route::view('/privacy', 'legal.privacy')->name('privacy');
 Route::view('/terms', 'legal.terms')->name('terms');
 Route::view('/support', 'legal.support')->name('support');
 Route::view('/account-deletion', 'legal.account-deletion')->name('account-deletion');
+
+Route::post('/bean/landing/conversation-token', [LandingBeanController::class, 'conversationToken'])
+    ->middleware('throttle:12,1')
+    ->name('bean.landing.conversation-token');
+Route::post('/bean/landing/messages', [LandingBeanController::class, 'message'])
+    ->middleware('throttle:30,1')
+    ->name('bean.landing.messages');
 
 Route::get('/reset-password/{token}', function (Request $request, string $token) {
     return view('auth.reset-password', [

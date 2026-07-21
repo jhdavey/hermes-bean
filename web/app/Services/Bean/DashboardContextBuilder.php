@@ -9,6 +9,7 @@ use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\WorkspaceService;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 class DashboardContextBuilder
@@ -74,7 +75,7 @@ class DashboardContextBuilder
     /** @param array<int> $workspaceIds @param Collection<int|string, string> $workspaceMap @param array{timezone:string} $context */
     private function tasksForDay(array $workspaceIds, Collection $workspaceMap, array $context, string $date): array
     {
-        [$start, $end] = $this->timeContext->localDayUtcRange($date, $context);
+        [$start, $end] = $this->databaseRange($this->timeContext->localDayUtcRange($date, $context));
 
         return Task::query()
             ->whereIn('workspace_id', $workspaceIds)
@@ -90,7 +91,7 @@ class DashboardContextBuilder
     /** @param array<int> $workspaceIds @param Collection<int|string, string> $workspaceMap @param array{timezone:string} $context */
     private function overdueTasks(array $workspaceIds, Collection $workspaceMap, array $context): array
     {
-        [$todayStart] = $this->timeContext->todayUtcRange($context);
+        [$todayStart] = $this->databaseRange($this->timeContext->todayUtcRange($context));
 
         return Task::query()
             ->whereIn('workspace_id', $workspaceIds)
@@ -107,8 +108,8 @@ class DashboardContextBuilder
     /** @param array<int> $workspaceIds @param Collection<int|string, string> $workspaceMap @param array{timezone:string} $context */
     private function upcomingTasks(array $workspaceIds, Collection $workspaceMap, array $context, int $days): array
     {
-        [$start] = $this->timeContext->todayUtcRange($context);
-        [, $end] = $this->timeContext->localDayUtcRange($this->timeContext->localNow($context)->addDays($days)->toDateString(), $context);
+        [$start] = $this->databaseRange($this->timeContext->todayUtcRange($context));
+        [, $end] = $this->databaseRange($this->timeContext->localDayUtcRange($this->timeContext->localNow($context)->addDays($days)->toDateString(), $context));
 
         return Task::query()
             ->whereIn('workspace_id', $workspaceIds)
@@ -124,7 +125,7 @@ class DashboardContextBuilder
     /** @param array<int> $workspaceIds @param Collection<int|string, string> $workspaceMap @param array{timezone:string} $context */
     private function remindersForDay(array $workspaceIds, Collection $workspaceMap, array $context, string $date): array
     {
-        [$start, $end] = $this->timeContext->localDayUtcRange($date, $context);
+        [$start, $end] = $this->databaseRange($this->timeContext->localDayUtcRange($date, $context));
 
         return Reminder::query()
             ->whereIn('workspace_id', $workspaceIds)
@@ -140,8 +141,8 @@ class DashboardContextBuilder
     /** @param array<int> $workspaceIds @param Collection<int|string, string> $workspaceMap @param array{timezone:string} $context */
     private function upcomingReminders(array $workspaceIds, Collection $workspaceMap, array $context, int $days): array
     {
-        [$start] = $this->timeContext->todayUtcRange($context);
-        [, $end] = $this->timeContext->localDayUtcRange($this->timeContext->localNow($context)->addDays($days)->toDateString(), $context);
+        [$start] = $this->databaseRange($this->timeContext->todayUtcRange($context));
+        [, $end] = $this->databaseRange($this->timeContext->localDayUtcRange($this->timeContext->localNow($context)->addDays($days)->toDateString(), $context));
 
         return Reminder::query()
             ->whereIn('workspace_id', $workspaceIds)
@@ -157,7 +158,7 @@ class DashboardContextBuilder
     /** @param array<int> $workspaceIds @param Collection<int|string, string> $workspaceMap @param array{timezone:string} $context */
     private function eventsForDay(array $workspaceIds, Collection $workspaceMap, array $context, string $date): array
     {
-        [$start, $end] = $this->timeContext->localDayUtcRange($date, $context);
+        [$start, $end] = $this->databaseRange($this->timeContext->localDayUtcRange($date, $context));
 
         return CalendarEvent::query()
             ->whereIn('workspace_id', $workspaceIds)
@@ -176,8 +177,8 @@ class DashboardContextBuilder
     /** @param array<int> $workspaceIds @param Collection<int|string, string> $workspaceMap @param array{timezone:string} $context */
     private function upcomingEvents(array $workspaceIds, Collection $workspaceMap, array $context, int $days): array
     {
-        [$start] = $this->timeContext->todayUtcRange($context);
-        [, $end] = $this->timeContext->localDayUtcRange($this->timeContext->localNow($context)->addDays($days)->toDateString(), $context);
+        [$start] = $this->databaseRange($this->timeContext->todayUtcRange($context));
+        [, $end] = $this->databaseRange($this->timeContext->localDayUtcRange($this->timeContext->localNow($context)->addDays($days)->toDateString(), $context));
 
         return CalendarEvent::query()
             ->whereIn('workspace_id', $workspaceIds)
@@ -268,5 +269,11 @@ class DashboardContextBuilder
     private function localDate(mixed $value, array $context): ?string
     {
         return $value ? $value->copy()->timezone($this->timeContext->timezone($context))->toDateString() : null;
+    }
+
+    /** @param array{0:string,1:string} $range @return array{0:Carbon,1:Carbon} */
+    private function databaseRange(array $range): array
+    {
+        return [Carbon::parse($range[0])->utc(), Carbon::parse($range[1])->utc()];
     }
 }

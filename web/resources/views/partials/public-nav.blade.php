@@ -1,5 +1,18 @@
 <header class="wrap nav">
-    <a class="brand" href="/"><img src="{{ asset('images/bean-logo.png') }}" alt="HeyBean logo">HeyBean</a>
+    <div
+        class="public-bean-presence"
+        data-public-bean
+        data-mode="disabled"
+        data-csrf-token="{{ csrf_token() }}"
+        data-conversation-token-url="{{ route('bean.landing.conversation-token') }}"
+        data-message-url="{{ route('bean.landing.messages') }}"
+    >
+        <span class="public-bean-ring" aria-hidden="true"></span>
+        <button class="public-bean-control" type="button" data-public-bean-toggle aria-pressed="false" aria-label="Enable landing page Bean">
+            <span class="public-bean-icon"><img src="{{ asset('images/bean-logo.png') }}" alt="Bean"></span>
+            <span class="public-bean-status" data-public-bean-status aria-live="polite">Tap to enable</span>
+        </button>
+    </div>
     <nav class="navlinks" aria-label="Primary navigation">
         <a href="/pricing">Pricing</a>
         <a href="/#reviews">Reviews</a>
@@ -17,3 +30,4 @@
         </div>
     </details>
 </header>
+@vite('resources/js/publicBean.js')

@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\User;
+use App\Services\Bean\LandingBeanRuntimeService;
 use App\Services\Bean\Quality\BeanQualityLabService;
 use App\Services\Bean\Quality\BeanUxBenchmarkService;
 use App\Services\Bean\Quality\BeanUxScenarioCatalogService;
@@ -32,6 +33,14 @@ Artisan::command('tasks:purge-completed', function (PlanHistoryService $history)
 
     return self::SUCCESS;
 })->purpose('Compatibility alias for plan-history:prune');
+
+Artisan::command('bean:landing-prune {--hours=}', function (LandingBeanRuntimeService $runtime): int {
+    $hours = $this->option('hours');
+    $deleted = $runtime->pruneInactive(is_numeric($hours) ? (int) $hours : null);
+    $this->info("Pruned {$deleted} inactive landing Bean visitor homes.");
+
+    return self::SUCCESS;
+})->purpose('Delete expired anonymous landing Bean Hermes homes');
 
 Artisan::command('admin:user {email} {--password=} {--name=Hey Bean Admin}', function (string $email): int {
     $password = (string) ($this->option('password') ?: env('ADMIN_PASSWORD', ''));
@@ -168,6 +177,7 @@ Artisan::command('bean:ux-evaluate-scenarios {--recent=500} {--json=} {--markdow
 Schedule::command('plan-history:prune')->daily();
 Schedule::command('calendar-events:materialize-recurring')->daily();
 Schedule::command('reminders:send-due-notifications')->everyMinute();
+Schedule::command('bean:landing-prune')->daily()->withoutOverlapping();
 Schedule::command('bean:evaluate --production-smoke --recent=500 --json='.storage_path('app/bean-quality/latest-production-audit.json').' --markdown='.storage_path('app/bean-quality/latest-production-audit.md'))->dailyAt('03:15')->withoutOverlapping();
 Schedule::command('bean:ux-benchmark --days=7 --json='.storage_path('app/bean-ux/latest-benchmark.json').' --markdown='.storage_path('app/bean-ux/latest-benchmark.md').' --progress='.base_path('../docs/bean-world-class-ux-progress.json'))->dailyAt('03:30')->withoutOverlapping();
 Schedule::command('bean:ux-evaluate-scenarios --recent=500 --json='.storage_path('app/bean-ux/latest-scenario-evaluation.json').' --markdown='.storage_path('app/bean-ux/latest-scenario-evaluation.md'))->dailyAt('03:45')->withoutOverlapping();

@@ -106,6 +106,9 @@ return [
         'agent_environment' => env('ELEVENLABS_AGENT_ENVIRONMENT'),
         'agent_branch_id' => env('ELEVENLABS_AGENT_BRANCH_ID'),
         'agent_enabled' => (bool) env('ELEVENLABS_AGENT_ENABLED', false),
+        'landing_agent_id' => env('ELEVENLABS_LANDING_AGENT_ID'),
+        'landing_agent_environment' => env('ELEVENLABS_LANDING_AGENT_ENVIRONMENT'),
+        'landing_agent_branch_id' => env('ELEVENLABS_LANDING_AGENT_BRANCH_ID'),
     ],
 
     'google_calendar' => [

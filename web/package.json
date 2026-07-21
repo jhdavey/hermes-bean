@@ -6,7 +6,8 @@
         "build": "vite build",
         "dev": "vite",
         "test": "node --test tests/js/*.test.mjs",
-        "elevenlabs:agent-configure": "node scripts/elevenlabs-agent-configure.mjs"
+        "elevenlabs:agent-configure": "node scripts/elevenlabs-agent-configure.mjs",
+        "elevenlabs:landing-agent-configure": "node scripts/elevenlabs-landing-agent-configure.mjs"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",
