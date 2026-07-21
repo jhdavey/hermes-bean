@@ -31,6 +31,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('HeyBean is currently in beta.', false)
             ->assertSee('AI EXECUTIVE ASSISTANCE FOR REAL LIFE', false)
             ->assertSee('class="hero-icon bean"', false)
+            ->assertSee('.hero-icon.bean,.hero-icon.bean img{width:45px;height:45px}', false)
             ->assertSee('Stop carrying every detail yourself.', false)
             ->assertSee('AI executive assistant for busy professionals and parents', false)
             ->assertSee('Built for people balancing a career, a household, and everything between them.', false)
