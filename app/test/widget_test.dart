@@ -114,6 +114,26 @@ void main() {
     },
   );
 
+  testWidgets('dashboard parse failure does not sign the user out', (
+    tester,
+  ) async {
+    final api = _DashboardBootstrapFailingApiClient();
+    await tester.pumpWidget(
+      HeyBeanApp(
+        apiClient: api,
+        tokenStore: _TestTokenStore(token: 'test-token'),
+        launchExternalUrl: (_) async => true,
+        updateAppIconBadge: (_) async {},
+        stripePaymentHandler: _TestStripePaymentHandler(),
+      ),
+    );
+    await _pumpUntilFound(tester, find.byKey(const Key('command-center-home')));
+
+    expect(find.byKey(const Key('command-center-home')), findsOneWidget);
+    expect(find.byKey(const Key('login-card')), findsNothing);
+    expect(find.textContaining('Could not load your account'), findsNothing);
+  });
+
   test('restored screens retain forms, sheets, and modal editors', () {
     final sources = [
       File('lib/src/calendar/title_time_editor.dart').readAsStringSync(),
@@ -174,6 +194,15 @@ class _TestTokenStore implements AuthTokenStore {
 
   @override
   Future<void> saveToken(String value) async => token = value;
+}
+
+class _DashboardBootstrapFailingApiClient extends _DashboardApiClient {
+  @override
+  Future<List<BeanCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
+    throw const FormatException('Expected test dashboard JSON shape');
+  }
 }
 
 class _TestStripePaymentHandler implements StripePaymentHandler {

@@ -806,6 +806,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         } else {
           _restoreDashboardSnapshot(cachedSnapshot);
         }
+        _phase = _AuthPhase.signedIn;
+        _loadingStatusText = null;
         _dashboardDataLoading = true;
       });
 
@@ -824,28 +826,40 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         ),
       );
 
-      final results = await Future.wait<Object>([
-        widget.apiClient.listTasks(),
-        widget.apiClient.listReminders(),
-        widget.apiClient.listCalendarEvents(skipExternalSync: true),
-        widget.apiClient.listEventCategories(),
-      ]);
-      if (!_isCurrentAuthGeneration(authGeneration)) return;
-      setState(() {
-        _tasks = _tasksWithPendingWrites(results[0] as List<BeanTask>);
-        _reminders = _remindersWithPendingWrites(
-          results[1] as List<BeanReminder>,
+      try {
+        final results = await Future.wait<Object>([
+          widget.apiClient.listTasks(),
+          widget.apiClient.listReminders(),
+          widget.apiClient.listCalendarEvents(skipExternalSync: true),
+          widget.apiClient.listEventCategories(),
+        ]);
+        if (!_isCurrentAuthGeneration(authGeneration)) return;
+        setState(() {
+          _tasks = _tasksWithPendingWrites(results[0] as List<BeanTask>);
+          _reminders = _remindersWithPendingWrites(
+            results[1] as List<BeanReminder>,
+          );
+          _calendar = _calendarEventsForDashboardState(
+            listed: results[2] as List<BeanCalendarEvent>,
+            summary: const [],
+          );
+          _eventCategories = results[3] as List<BeanEventCategory>;
+          _dashboardDataLoading = false;
+          _error = null;
+        });
+      } catch (error, stackTrace) {
+        debugPrint(
+          'HeyBean dashboard bootstrap failed: ${error.runtimeType}: $error\n$stackTrace',
         );
-        _calendar = _calendarEventsForDashboardState(
-          listed: results[2] as List<BeanCalendarEvent>,
-          summary: const [],
-        );
-        _eventCategories = results[3] as List<BeanEventCategory>;
-        _phase = _AuthPhase.signedIn;
-        _loadingStatusText = null;
-        _dashboardDataLoading = false;
-        _error = null;
-      });
+        if (!_isCurrentAuthGeneration(authGeneration)) return;
+        setState(() {
+          _dashboardDataLoading = false;
+          _error = beanFriendlyErrorMessage(
+            error,
+            action: 'load your latest dashboard data',
+          );
+        });
+      }
       _syncReminderNotifications();
       unawaited(_pushNotifications.registerForUser(widget.apiClient));
       _cacheCurrentDashboardSnapshot();
