@@ -97,12 +97,14 @@ void main() {
         find.byKey(const Key('bean-assistant-button-logo')),
         findsOneWidget,
       );
-      expect(find.byKey(const Key('bean-assistant-status')), findsOneWidget);
+      expect(find.byKey(const Key('bean-assistant-status')), findsNothing);
       await tester.tap(find.byKey(const Key('bean-assistant-button')));
       await _pumpUntilFound(
         tester,
         find.byKey(const Key('bean-assistant-panel')),
       );
+      expect(find.byKey(const Key('bean-assistant-status')), findsOneWidget);
+      expect(find.text('Bean ready'), findsNothing);
 
       await tester.enterText(
         find.byKey(const Key('bean-assistant-input')),
@@ -112,6 +114,7 @@ void main() {
       await _pumpUntilFound(tester, find.text('I’ll add that task. Done.'));
 
       expect(api.sentBeanMessages, ['Create task call mom']);
+      expect(api.sentBeanMessageSources, ['flutter_text']);
 
       await tester.tap(find.byKey(const Key('bean-assistant-status')));
       await tester.pumpAndSettle();
@@ -295,6 +298,7 @@ class _DashboardApiClient extends BeanApiClient {
   _DashboardApiClient() : super(baseUrl: Uri.parse('https://example.test/api'));
 
   final List<String> sentBeanMessages = [];
+  final List<String?> sentBeanMessageSources = [];
 
   static const workspace = BeanWorkspace(
     id: '1',
@@ -364,6 +368,7 @@ class _DashboardApiClient extends BeanApiClient {
     String? source,
   }) async {
     sentBeanMessages.add(content);
+    sentBeanMessageSources.add(source);
     return BeanAssistantTurn(
       session: const BeanAssistantSession(id: 42),
       run: const BeanAssistantRun(

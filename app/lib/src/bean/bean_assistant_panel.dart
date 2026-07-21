@@ -13,6 +13,8 @@ class _BeanAssistantPanel extends StatefulWidget {
     required this.onElevenLabsSessionReady,
     required this.onAskBeanFromElevenLabsAgent,
     required this.onVoiceEvent,
+    required this.onVoiceDockChanged,
+    this.voiceDockOnly = false,
     this.userId,
     this.workspaceId,
     this.clientTimezone,
@@ -34,6 +36,8 @@ class _BeanAssistantPanel extends StatefulWidget {
     Map<String, Object?>? payload,
   })
   onVoiceEvent;
+  final ValueChanged<_BeanDockStatusSnapshot> onVoiceDockChanged;
+  final bool voiceDockOnly;
   final int? userId;
   final int? workspaceId;
   final String? clientTimezone;
@@ -48,30 +52,39 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
   Timer? _voiceIdleDisconnectTimer;
   bool _voiceConnecting = false;
   bool _voicePushToTalkHeld = false;
-  String _voiceStatusText = 'Hold mic to talk to Bean';
-  String? _voiceError;
-  String? _voiceTranscript;
+  bool _voiceAwaitingResponse = false;
   int _voiceRequestCount = 0;
-
-  bool get _voiceActive {
-    final status = _elevenLabsClient?.status;
-    return _voiceConnecting ||
-        status == elevenlabs.ConversationStatus.connected ||
-        status == elevenlabs.ConversationStatus.connecting;
-  }
 
   bool get _voiceConnected =>
       _elevenLabsClient?.status == elevenlabs.ConversationStatus.connected;
 
-  String _voiceReadyStatusText() {
-    final client = _elevenLabsClient;
-    if (_voiceConnecting) return 'Connecting ElevenLabs voice…';
-    if (client?.isSpeaking == true) return 'Speaking…';
-    if (_voicePushToTalkHeld && client?.isMuted == false) {
-      return 'Listening — release to send';
+  void _publishVoiceDock(
+    _BeanDockActivity activity, {
+    String? label,
+    String? detail,
+  }) {
+    widget.onVoiceDockChanged(
+      _BeanDockStatusSnapshot(activity: activity, label: label, detail: detail),
+    );
+  }
+
+  void _clearVoiceDock() =>
+      widget.onVoiceDockChanged(_BeanDockStatusSnapshot.idle);
+
+  void _publishVoiceReadyOrIdle() {
+    if (_voicePushToTalkHeld) {
+      _publishVoiceDock(
+        _BeanDockActivity.listening,
+        label: 'Listening',
+        detail: 'Release to send',
+      );
+      return;
     }
-    if (_voiceConnected) return 'Hold mic to talk again';
-    return 'Hold mic to talk to Bean';
+    if (_voiceAwaitingResponse) {
+      _publishVoiceDock(_BeanDockActivity.thinking, label: 'Thinking');
+      return;
+    }
+    _clearVoiceDock();
   }
 
   @override
@@ -87,7 +100,7 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
     final text = _controller.text.trim();
     if (text.isEmpty || widget.sending) return;
     _controller.clear();
-    await widget.onSend(text);
+    await widget.onSend(text, source: 'flutter_text');
   }
 
   elevenlabs.ConversationClient _ensureElevenLabsClient() {
@@ -103,9 +116,8 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
           if (!mounted) return;
           setState(() {
             _voiceConnecting = false;
-            _voiceError = null;
-            _voiceStatusText = _voiceReadyStatusText();
           });
+          _publishVoiceReadyOrIdle();
           unawaited(
             widget.onVoiceEvent(
               'voice_session_started',
@@ -121,9 +133,9 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
           setState(() {
             _voiceConnecting = false;
             _voicePushToTalkHeld = false;
-            _voiceTranscript = null;
-            _voiceStatusText = 'Hold mic to talk to Bean';
+            _voiceAwaitingResponse = false;
           });
+          _clearVoiceDock();
           unawaited(
             widget.onVoiceEvent(
               'voice_session_closed',
@@ -136,40 +148,46 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
         },
         onStatusChange: ({required status}) {
           if (!mounted) return;
-          setState(() {
-            _voiceStatusText = switch (status) {
-              elevenlabs.ConversationStatus.connecting =>
-                'Connecting ElevenLabs voice…',
-              elevenlabs.ConversationStatus.connected =>
-                _voiceReadyStatusText(),
-              elevenlabs.ConversationStatus.disconnecting =>
-                'Ending voice session…',
-              elevenlabs.ConversationStatus.disconnected =>
-                'Hold mic to talk to Bean',
-            };
-          });
+          switch (status) {
+            case elevenlabs.ConversationStatus.connecting:
+              _publishVoiceDock(
+                _BeanDockActivity.thinking,
+                label: 'Connecting',
+                detail: 'Starting Bean voice',
+              );
+            case elevenlabs.ConversationStatus.connected:
+              _publishVoiceReadyOrIdle();
+            case elevenlabs.ConversationStatus.disconnecting:
+              _publishVoiceDock(
+                _BeanDockActivity.thinking,
+                label: 'Ending voice',
+              );
+            case elevenlabs.ConversationStatus.disconnected:
+              _clearVoiceDock();
+          }
         },
         onModeChange: ({required mode}) {
           if (!mounted) return;
-          setState(() {
-            _voiceStatusText = mode == elevenlabs.ConversationMode.speaking
-                ? 'Speaking…'
-                : _voiceReadyStatusText();
-          });
           if (mode == elevenlabs.ConversationMode.speaking) {
+            _publishVoiceDock(_BeanDockActivity.speaking, label: 'Speaking');
             unawaited(
               widget.onVoiceEvent(
                 'assistant_speech_started',
                 payload: {'transport': 'elevenlabs_agent'},
               ),
             );
+          } else if (_voiceAwaitingResponse) {
+            _publishVoiceDock(_BeanDockActivity.thinking, label: 'Thinking');
           } else if (_voiceRequestCount > 0) {
+            _publishVoiceReadyOrIdle();
             unawaited(
               widget.onVoiceEvent(
                 'followup_window_opened',
                 payload: {'transport': 'elevenlabs_agent'},
               ),
             );
+          } else {
+            _publishVoiceReadyOrIdle();
           }
         },
         onMessage: ({required message, required source}) {
@@ -177,12 +195,12 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
           if (content.isEmpty) return;
           if (source == elevenlabs.Role.user) {
             _voiceRequestCount += 1;
-            if (mounted) {
-              setState(() {
-                _voiceTranscript = content;
-                _voiceStatusText = 'Thinking…';
-              });
-            }
+            _voiceAwaitingResponse = true;
+            _publishVoiceDock(
+              _BeanDockActivity.thinking,
+              label: 'Thinking',
+              detail: content,
+            );
             unawaited(
               widget.onVoiceEvent(
                 _voiceRequestCount > 1
@@ -195,12 +213,8 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
             return;
           }
           if (source == elevenlabs.Role.ai) {
-            if (mounted) {
-              setState(() {
-                _voiceTranscript = null;
-                _voiceStatusText = 'Speaking…';
-              });
-            }
+            _voiceAwaitingResponse = false;
+            _publishVoiceDock(_BeanDockActivity.speaking, label: 'Speaking');
             unawaited(
               widget.onVoiceEvent(
                 'bean_response_received',
@@ -214,6 +228,12 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
           }
         },
         onAgentToolRequest: ({required toolName, required toolCallId}) {
+          _voiceAwaitingResponse = true;
+          _publishVoiceDock(
+            _BeanDockActivity.working,
+            label: 'Working',
+            detail: toolName,
+          );
           unawaited(
             widget.onVoiceEvent(
               'bean_request_sent',
@@ -226,6 +246,14 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
           );
         },
         onAgentToolResponse: (response) {
+          if (response.isError) {
+            _publishVoiceDock(
+              _BeanDockActivity.error,
+              label: 'Voice needs attention',
+            );
+          } else {
+            _publishVoiceDock(_BeanDockActivity.speaking, label: 'Speaking');
+          }
           unawaited(
             widget.onVoiceEvent(
               'bean_response_received',
@@ -252,9 +280,12 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
           setState(() {
             _voiceConnecting = false;
             _voicePushToTalkHeld = false;
-            _voiceError = message;
-            _voiceStatusText = 'Voice hit a problem';
+            _voiceAwaitingResponse = false;
           });
+          _publishVoiceDock(
+            _BeanDockActivity.error,
+            label: 'Voice hit a problem',
+          );
           unawaited(
             widget.onVoiceEvent(
               'voice_session_error',
@@ -284,17 +315,24 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
 
     setState(() {
       _voicePushToTalkHeld = true;
-      _voiceError = null;
-      _voiceTranscript = null;
-      _voiceStatusText = _voiceConnected
-          ? 'Listening — release to send'
-          : 'Connecting ElevenLabs voice…';
+      _voiceAwaitingResponse = false;
     });
+    _publishVoiceDock(
+      _voiceConnected
+          ? _BeanDockActivity.listening
+          : _BeanDockActivity.thinking,
+      label: _voiceConnected ? 'Listening' : 'Connecting',
+      detail: _voiceConnected ? 'Release to send' : 'Starting Bean voice',
+    );
 
     if (_voiceConnected) {
       await client.setMicMuted(false);
       if (!mounted) return;
-      setState(() => _voiceStatusText = _voiceReadyStatusText());
+      _publishVoiceDock(
+        _BeanDockActivity.listening,
+        label: 'Listening',
+        detail: 'Release to send',
+      );
       unawaited(
         widget.onVoiceEvent(
           'push_to_talk_started',
@@ -307,6 +345,11 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
     if (_voiceConnecting) return;
 
     setState(() => _voiceConnecting = true);
+    _publishVoiceDock(
+      _BeanDockActivity.thinking,
+      label: 'Connecting',
+      detail: 'Starting Bean voice',
+    );
 
     try {
       final permission = await permissions.Permission.microphone.request();
@@ -338,8 +381,8 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
       if (!mounted) return;
       setState(() {
         _voiceConnecting = false;
-        _voiceStatusText = _voiceReadyStatusText();
       });
+      _publishVoiceReadyOrIdle();
       if (_voicePushToTalkHeld) {
         unawaited(
           widget.onVoiceEvent(
@@ -356,12 +399,9 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
       setState(() {
         _voiceConnecting = false;
         _voicePushToTalkHeld = false;
-        _voiceError = beanFriendlyErrorMessage(
-          error,
-          action: 'start Bean voice',
-        );
-        _voiceStatusText = 'Voice hit a problem';
+        _voiceAwaitingResponse = false;
       });
+      _publishVoiceDock(_BeanDockActivity.error, label: 'Voice hit a problem');
       unawaited(
         widget.onVoiceEvent(
           'voice_session_error',
@@ -378,22 +418,18 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
     final client = _elevenLabsClient;
     setState(() {
       _voicePushToTalkHeld = false;
-      _voiceStatusText = cancelled
-          ? 'Voice cancelled — hold mic to try again'
-          : _voiceConnected
-          ? 'Released — Bean is thinking…'
-          : 'Hold mic to talk to Bean';
+      _voiceAwaitingResponse = !cancelled;
     });
+    if (cancelled) {
+      _clearVoiceDock();
+    } else if (_voiceConnected || _voiceConnecting) {
+      _publishVoiceDock(_BeanDockActivity.thinking, label: 'Thinking');
+    }
 
     if (client == null) return;
     if (_voiceConnected) {
       await client.setMicMuted(true);
       if (!mounted) return;
-      setState(() {
-        _voiceStatusText = cancelled
-            ? 'Voice cancelled — hold mic to try again'
-            : 'Released — Bean is thinking…';
-      });
       unawaited(
         widget.onVoiceEvent(
           cancelled ? 'push_to_talk_cancelled' : 'push_to_talk_released',
@@ -416,29 +452,29 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+    final dockBottomPadding = bottomPadding > 0 ? bottomPadding + 4 : 8.0;
+    final dockHeight = 46.0 + 66.0 + dockBottomPadding;
     final messages = widget.messages;
-    final voiceButtonEnabled = !widget.sending;
-    final voiceButtonListening =
-        _voicePushToTalkHeld &&
-        _voiceConnected &&
-        _elevenLabsClient?.isMuted == false;
+
+    if (widget.voiceDockOnly) {
+      return const SizedBox.shrink(key: Key('bean-voice-dock-controller'));
+    }
 
     return Align(
       alignment: Alignment.bottomCenter,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         key: const Key('bean-assistant-panel'),
-        margin: EdgeInsets.fromLTRB(
-          14,
-          0,
-          14,
-          104 + MediaQuery.paddingOf(context).bottom + bottomInset,
+        margin: EdgeInsets.only(
+          bottom: keyboardInset > 0 ? keyboardInset : dockHeight,
         ),
-        constraints: const BoxConstraints(maxWidth: 720, maxHeight: 520),
+        constraints: const BoxConstraints(maxHeight: 540),
+        width: double.infinity,
         decoration: BoxDecoration(
           color: HeyBeanTheme.surface,
-          borderRadius: BorderRadius.circular(28),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
           border: Border.all(color: _quietBorderColor(alpha: .42)),
           boxShadow: [
             BoxShadow(
@@ -459,15 +495,6 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _BeanElevenLabsVoiceStatus(
-                    active: _voiceActive,
-                    connected: _voiceConnected,
-                    speaking: _elevenLabsClient?.isSpeaking == true,
-                    statusText: _voiceStatusText,
-                    transcript: _voiceTranscript,
-                    error: _voiceError,
-                  ),
-                  const SizedBox(height: 10),
                   Flexible(
                     child: Container(
                       width: double.infinity,
@@ -484,9 +511,7 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
                               child: Padding(
                                 padding: const EdgeInsets.all(18),
                                 child: Text(
-                                  _voicePushToTalkHeld
-                                      ? 'Speak naturally. Release the mic when you’re done and Bean will answer.'
-                                      : 'Try “Create task call mom” or hold the mic for ElevenLabs voice.',
+                                  'Type to Bean here. Hold the Bean button for voice.',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     color: HeyBeanTheme.muted,
@@ -615,57 +640,6 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      Listener(
-                        onPointerDown: voiceButtonEnabled
-                            ? (_) => unawaited(_startElevenLabsPushToTalk())
-                            : null,
-                        onPointerUp: voiceButtonEnabled
-                            ? (_) => unawaited(_stopElevenLabsPushToTalk())
-                            : null,
-                        onPointerCancel: voiceButtonEnabled
-                            ? (_) => unawaited(
-                                _stopElevenLabsPushToTalk(cancelled: true),
-                              )
-                            : null,
-                        child: Tooltip(
-                          message: 'Hold to talk to Bean. Release to send.',
-                          child: Semantics(
-                            button: true,
-                            label: 'Hold to talk to Bean',
-                            hint:
-                                'Press and hold to speak, then release to send',
-                            child: AnimatedContainer(
-                              key: const Key('bean-assistant-voice-input'),
-                              duration: const Duration(milliseconds: 140),
-                              width: 48,
-                              height: 48,
-                              decoration: BoxDecoration(
-                                color: voiceButtonListening || _voiceConnecting
-                                    ? HeyBeanTheme.accentStrong
-                                    : HeyBeanTheme.accent.withValues(
-                                        alpha: .16,
-                                      ),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color:
-                                      voiceButtonListening || _voiceConnecting
-                                      ? HeyBeanTheme.accentStrong
-                                      : _quietBorderColor(alpha: .38),
-                                ),
-                              ),
-                              child: Icon(
-                                voiceButtonListening
-                                    ? Icons.mic_rounded
-                                    : Icons.mic_none_rounded,
-                                color: voiceButtonListening || _voiceConnecting
-                                    ? Colors.white
-                                    : HeyBeanTheme.accentStrong,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
                       FilledButton(
                         key: const Key('bean-assistant-send'),
                         onPressed: widget.sending ? null : _send,
@@ -709,105 +683,4 @@ class _AskBeanClientTool implements elevenlabs.ClientTool {
       );
     }
   }
-}
-
-class _BeanElevenLabsVoiceStatus extends StatelessWidget {
-  const _BeanElevenLabsVoiceStatus({
-    required this.active,
-    required this.connected,
-    required this.speaking,
-    required this.statusText,
-    this.transcript,
-    this.error,
-  });
-
-  final bool active;
-  final bool connected;
-  final bool speaking;
-  final String statusText;
-  final String? transcript;
-  final String? error;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    key: const Key('bean-elevenlabs-voice-status'),
-    width: double.infinity,
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-    decoration: BoxDecoration(
-      color: active
-          ? HeyBeanTheme.accent.withValues(alpha: .12)
-          : HeyBeanTheme.bg0.withValues(alpha: .84),
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(
-        color: active
-            ? HeyBeanTheme.accentStrong.withValues(alpha: .42)
-            : _quietBorderColor(alpha: .32),
-      ),
-    ),
-    child: Row(
-      children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: active ? HeyBeanTheme.accentStrong : HeyBeanTheme.surface,
-            shape: BoxShape.circle,
-            border: Border.all(color: _quietBorderColor(alpha: .28)),
-          ),
-          child: Icon(
-            speaking
-                ? Icons.graphic_eq_rounded
-                : connected
-                ? Icons.hearing_rounded
-                : Icons.mic_none_rounded,
-            color: active ? Colors.white : HeyBeanTheme.muted,
-            size: 19,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                statusText,
-                style: TextStyle(
-                  color: error == null
-                      ? HeyBeanTheme.text
-                      : const Color(0xFFB42318),
-                  fontWeight: FontWeight.w800,
-                  fontSize: 13,
-                ),
-              ),
-              if ((transcript ?? '').trim().isNotEmpty) ...[
-                const SizedBox(height: 2),
-                Text(
-                  transcript!,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: HeyBeanTheme.muted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ] else if ((error ?? '').trim().isNotEmpty) ...[
-                const SizedBox(height: 2),
-                Text(
-                  error!,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFFB42318),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ],
-    ),
-  );
 }

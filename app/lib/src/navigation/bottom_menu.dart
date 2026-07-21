@@ -1,5 +1,31 @@
 part of '../../main.dart';
 
+enum _BeanDockActivity {
+  idle,
+  chat,
+  listening,
+  thinking,
+  working,
+  speaking,
+  error,
+}
+
+class _BeanDockStatusSnapshot {
+  const _BeanDockStatusSnapshot({
+    required this.activity,
+    this.label,
+    this.detail,
+  });
+
+  final _BeanDockActivity activity;
+  final String? label;
+  final String? detail;
+
+  bool get visible => activity != _BeanDockActivity.idle;
+
+  static const idle = _BeanDockStatusSnapshot(activity: _BeanDockActivity.idle);
+}
+
 class _SignedInBottomDock extends StatelessWidget {
   const _SignedInBottomDock({required this.menu});
 
@@ -15,6 +41,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
     required this.selected,
     required this.beanOpen,
     required this.beanSending,
+    required this.beanStatus,
     required this.beanHasError,
     required this.onSelected,
     required this.onBeanPressed,
@@ -26,6 +53,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
   final _HomeDestination selected;
   final bool beanOpen;
   final bool beanSending;
+  final _BeanDockStatusSnapshot beanStatus;
   final bool beanHasError;
   final ValueChanged<_HomeDestination> onSelected;
   final VoidCallback onBeanPressed;
@@ -36,20 +64,38 @@ class _HeyBeanBottomMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
-    final dockBottomPadding = bottomInset > 0 ? bottomInset + 2 : 6.0;
+    final dockBottomPadding = bottomInset > 0 ? bottomInset + 4 : 8.0;
+    final status = _effectiveStatus();
+    final statusVisible = status.visible;
+    final statusHeight = statusVisible ? 46.0 : 0.0;
+    final navHeight = 66.0 + dockBottomPadding;
 
     return SizedBox(
       key: const Key('heybean-bottom-menu'),
-      height: 104 + dockBottomPadding,
+      height: statusHeight + navHeight,
       child: Stack(
-        alignment: Alignment.topCenter,
         clipBehavior: Clip.none,
         children: [
-          Positioned.fill(
-            top: _beanBottomMenuSurfaceInset,
+          if (statusVisible)
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              height: statusHeight,
+              child: _BeanDockStatus(
+                status: status,
+                expanded: beanOpen,
+                onPressed: onBeanPressed,
+              ),
+            ),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: statusHeight,
+            bottom: 0,
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: HeyBeanTheme.surface.withValues(alpha: .97),
+                color: HeyBeanTheme.surface.withValues(alpha: .985),
                 border: Border(
                   top: BorderSide(color: _quietBorderColor(alpha: .42)),
                 ),
@@ -62,7 +108,7 @@ class _HeyBeanBottomMenu extends StatelessWidget {
                 ],
               ),
               child: Padding(
-                padding: EdgeInsets.fromLTRB(10, 7, 10, dockBottomPadding),
+                padding: EdgeInsets.fromLTRB(10, 3, 10, dockBottomPadding),
                 child: Row(
                   children: [
                     Expanded(
@@ -83,12 +129,12 @@ class _HeyBeanBottomMenu extends StatelessWidget {
                         onPressed: () => onSelected(_HomeDestination.reminders),
                       ),
                     ),
-                    const SizedBox(width: 86),
+                    const SizedBox(width: 76),
                     Expanded(
                       child: _MenuIconButton(
                         key: const Key('nav-notes'),
                         iconWidget: _BeanNotesIcon(
-                          size: 24,
+                          size: 23,
                           color: selected == _HomeDestination.notes
                               ? HeyBeanTheme.accentStrong
                               : HeyBeanTheme.muted,
@@ -113,28 +159,52 @@ class _HeyBeanBottomMenu extends StatelessWidget {
             ),
           ),
           Positioned(
-            top: 24,
-            child: _CommandCenterFab(
-              selected: selected == _HomeDestination.commandCenter,
-              active: beanOpen,
-              working: beanSending,
-              onPressed: onBeanPressed,
-              onPushToTalkStart: onBeanPushToTalkStart,
-              onPushToTalkEnd: onBeanPushToTalkEnd,
-            ),
-          ),
-          Positioned(
-            top: 0,
-            child: _BeanDockStatus(
-              expanded: beanOpen,
-              working: beanSending,
-              hasError: beanHasError,
-              onPressed: onBeanPressed,
+            top: statusHeight - 19,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: _CommandCenterFab(
+                selected: selected == _HomeDestination.commandCenter,
+                active: beanOpen || statusVisible,
+                working:
+                    beanSending ||
+                    status.activity == _BeanDockActivity.thinking ||
+                    status.activity == _BeanDockActivity.working ||
+                    status.activity == _BeanDockActivity.speaking,
+                listening: status.activity == _BeanDockActivity.listening,
+                onPressed: onBeanPressed,
+                onPushToTalkStart: onBeanPushToTalkStart,
+                onPushToTalkEnd: onBeanPushToTalkEnd,
+              ),
             ),
           ),
         ],
       ),
     );
+  }
+
+  _BeanDockStatusSnapshot _effectiveStatus() {
+    if (beanHasError) {
+      return const _BeanDockStatusSnapshot(
+        activity: _BeanDockActivity.error,
+        label: 'Bean needs attention',
+      );
+    }
+    if (beanStatus.visible) return beanStatus;
+    if (beanSending) {
+      return const _BeanDockStatusSnapshot(
+        activity: _BeanDockActivity.working,
+        label: 'Working',
+      );
+    }
+    if (beanOpen) {
+      return const _BeanDockStatusSnapshot(
+        activity: _BeanDockActivity.chat,
+        label: 'Bean chat',
+        detail: 'Tap to collapse',
+      );
+    }
+    return _BeanDockStatusSnapshot.idle;
   }
 }
 
@@ -170,9 +240,9 @@ class _MenuIconButton extends StatelessWidget {
                 Icon(
                   icon,
                   color: selected ? HeyBeanTheme.text : HeyBeanTheme.muted,
-                  size: 22,
+                  size: 21,
                 ),
-            const SizedBox(height: 3),
+            const SizedBox(height: 2),
             Text(
               label,
               maxLines: 1,
@@ -195,6 +265,7 @@ class _CommandCenterFab extends StatelessWidget {
     required this.selected,
     required this.active,
     required this.working,
+    required this.listening,
     required this.onPressed,
     required this.onPushToTalkStart,
     required this.onPushToTalkEnd,
@@ -203,14 +274,19 @@ class _CommandCenterFab extends StatelessWidget {
   final bool selected;
   final bool active;
   final bool working;
+  final bool listening;
   final VoidCallback onPressed;
   final VoidCallback onPushToTalkStart;
   final void Function({bool cancelled}) onPushToTalkEnd;
 
   @override
   Widget build(BuildContext context) {
-    final activeColor = HeyBeanTheme.accentStrong;
-    final highlighted = selected || active || working;
+    final activeColor = listening
+        ? const Color(0xFF16A34A)
+        : working
+        ? HeyBeanTheme.accentStrong
+        : HeyBeanTheme.accentStrong;
+    final highlighted = selected || active || working || listening;
     return GestureDetector(
       key: const Key('nav-command-center'),
       behavior: HitTestBehavior.opaque,
@@ -220,30 +296,42 @@ class _CommandCenterFab extends StatelessWidget {
       onLongPressCancel: () => onPushToTalkEnd(cancelled: true),
       child: SizedBox(
         key: const Key('bean-assistant-button'),
-        width: 88,
-        height: 88,
+        width: 78,
+        height: 78,
         child: Center(
           child: Material(
             color: Colors.transparent,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 180),
               key: const Key('heybean-center-command-center-button'),
-              width: 64,
-              height: 64,
+              width: listening ? 61 : 58,
+              height: listening ? 61 : 58,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: HeyBeanTheme.surface,
+                gradient: highlighted
+                    ? LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          HeyBeanTheme.surface,
+                          HeyBeanTheme.accent.withValues(alpha: .10),
+                        ],
+                      )
+                    : null,
+                color: highlighted ? null : HeyBeanTheme.surface,
                 border: Border.all(
                   color: highlighted
                       ? activeColor
                       : _quietBorderColor(alpha: .54),
-                  width: 1.6,
+                  width: listening ? 2.4 : 1.5,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: .08),
-                    blurRadius: 14,
-                    offset: const Offset(0, 6),
+                    color: activeColor.withValues(
+                      alpha: highlighted ? .22 : .08,
+                    ),
+                    blurRadius: highlighted ? 20 : 12,
+                    offset: const Offset(0, 7),
                   ),
                 ],
               ),
@@ -251,7 +339,7 @@ class _CommandCenterFab extends StatelessWidget {
                 label: 'Bean assistant',
                 image: true,
                 child: Padding(
-                  padding: const EdgeInsets.all(13),
+                  padding: const EdgeInsets.all(12),
                   child: Image.asset(
                     HeyBeanTheme.isDark
                         ? 'assets/images/bean/bean-logo-white-overlay.png'
@@ -271,15 +359,13 @@ class _CommandCenterFab extends StatelessWidget {
 
 class _BeanDockStatus extends StatefulWidget {
   const _BeanDockStatus({
+    required this.status,
     required this.expanded,
-    required this.working,
-    required this.hasError,
     required this.onPressed,
   });
 
+  final _BeanDockStatusSnapshot status;
   final bool expanded;
-  final bool working;
-  final bool hasError;
   final VoidCallback onPressed;
 
   @override
@@ -293,19 +379,24 @@ class _BeanDockStatusState extends State<_BeanDockStatus>
     duration: const Duration(milliseconds: 900),
   );
 
+  bool get _animated =>
+      widget.status.activity == _BeanDockActivity.listening ||
+      widget.status.activity == _BeanDockActivity.thinking ||
+      widget.status.activity == _BeanDockActivity.working ||
+      widget.status.activity == _BeanDockActivity.speaking;
+
   @override
   void initState() {
     super.initState();
-    if (widget.working) _borderController.repeat();
+    if (_animated) _borderController.repeat();
   }
 
   @override
   void didUpdateWidget(covariant _BeanDockStatus oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.working == oldWidget.working) return;
-    if (widget.working) {
+    if (_animated && !_borderController.isAnimating) {
       _borderController.repeat();
-    } else {
+    } else if (!_animated && _borderController.isAnimating) {
       _borderController
         ..stop()
         ..value = 0;
@@ -320,69 +411,94 @@ class _BeanDockStatusState extends State<_BeanDockStatus>
 
   @override
   Widget build(BuildContext context) {
-    final label = widget.working
-        ? 'Bean is working'
-        : widget.hasError
-        ? 'Bean needs attention'
-        : 'Bean ready';
+    final color = _statusColor(widget.status.activity);
+    final label = widget.status.label ?? _defaultLabel(widget.status.activity);
+    final detail = widget.status.detail;
     return AnimatedBuilder(
       animation: _borderController,
       builder: (context, child) => CustomPaint(
         foregroundPainter: _BeanDockBorderPainter(
           progress: _borderController.value,
-          active: widget.working,
+          active: _animated,
+          color: color,
         ),
         child: child,
       ),
       child: Material(
+        key: const Key('bean-assistant-status'),
         color: HeyBeanTheme.surface,
-        borderRadius: BorderRadius.circular(999),
         child: InkWell(
-          key: const Key('bean-assistant-status'),
           onTap: widget.onPressed,
-          borderRadius: BorderRadius.circular(999),
           child: Container(
-            height: 36,
-            padding: const EdgeInsets.fromLTRB(14, 0, 10, 0),
+            height: 46,
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: widget.hasError
-                    ? const Color(0xFFB42318).withValues(alpha: .48)
-                    : _quietBorderColor(alpha: .54),
+              color: widget.status.activity == _BeanDockActivity.error
+                  ? const Color(0xFFFFF1F1)
+                  : HeyBeanTheme.surface.withValues(alpha: .99),
+              border: Border(
+                top: BorderSide(color: _quietBorderColor(alpha: .38)),
+                bottom: BorderSide(color: _quietBorderColor(alpha: .30)),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: .08),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
             ),
             child: Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                Flexible(
-                  fit: FlexFit.loose,
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: widget.hasError
-                          ? const Color(0xFFB42318)
-                          : HeyBeanTheme.muted,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
+                Container(
+                  width: 9,
+                  height: 9,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    boxShadow: _animated
+                        ? [
+                            BoxShadow(
+                              color: color.withValues(alpha: .42),
+                              blurRadius: 12,
+                              spreadRadius: 2,
+                            ),
+                          ]
+                        : null,
                   ),
                 ),
-                const SizedBox(width: 2),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color:
+                              widget.status.activity == _BeanDockActivity.error
+                              ? const Color(0xFFB42318)
+                              : HeyBeanTheme.text,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      if ((detail ?? '').trim().isNotEmpty)
+                        Text(
+                          detail!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: HeyBeanTheme.muted,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
                 Icon(
                   widget.expanded
                       ? Icons.keyboard_arrow_down_rounded
                       : Icons.keyboard_arrow_up_rounded,
-                  size: 20,
+                  size: 22,
                   color: HeyBeanTheme.muted,
                   semanticLabel: widget.expanded
                       ? 'Collapse Bean chat'
@@ -395,13 +511,37 @@ class _BeanDockStatusState extends State<_BeanDockStatus>
       ),
     );
   }
+
+  static String _defaultLabel(_BeanDockActivity activity) => switch (activity) {
+    _BeanDockActivity.chat => 'Bean chat',
+    _BeanDockActivity.listening => 'Listening',
+    _BeanDockActivity.thinking => 'Thinking',
+    _BeanDockActivity.working => 'Working',
+    _BeanDockActivity.speaking => 'Speaking',
+    _BeanDockActivity.error => 'Bean needs attention',
+    _BeanDockActivity.idle => '',
+  };
+
+  static Color _statusColor(_BeanDockActivity activity) => switch (activity) {
+    _BeanDockActivity.listening => const Color(0xFF16A34A),
+    _BeanDockActivity.thinking => const Color(0xFF2563EB),
+    _BeanDockActivity.working => HeyBeanTheme.accentStrong,
+    _BeanDockActivity.speaking => const Color(0xFF7C3AED),
+    _BeanDockActivity.error => const Color(0xFFB42318),
+    _ => HeyBeanTheme.accentStrong,
+  };
 }
 
 class _BeanDockBorderPainter extends CustomPainter {
-  const _BeanDockBorderPainter({required this.progress, required this.active});
+  const _BeanDockBorderPainter({
+    required this.progress,
+    required this.active,
+    required this.color,
+  });
 
   final double progress;
   final bool active;
+  final Color color;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -409,24 +549,23 @@ class _BeanDockBorderPainter extends CustomPainter {
     final rect = Offset.zero & size;
     final paint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.4
-      ..shader = SweepGradient(
-        startAngle: progress * math.pi * 2,
-        endAngle: progress * math.pi * 2 + math.pi * 2,
+      ..strokeWidth = 2.2
+      ..shader = LinearGradient(
+        begin: Alignment(-1 + progress * 2, 0),
+        end: Alignment(progress * 2, 0),
         colors: [
-          HeyBeanTheme.accentStrong.withValues(alpha: .12),
-          HeyBeanTheme.accentStrong,
-          HeyBeanTheme.accentStrong.withValues(alpha: .12),
+          color.withValues(alpha: .08),
+          color.withValues(alpha: .72),
+          color.withValues(alpha: .08),
         ],
-        stops: const [0, .28, 1],
+        stops: const [0, .5, 1],
       ).createShader(rect);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(rect.deflate(1.2), const Radius.circular(999)),
-      paint,
-    );
+    canvas.drawRect(rect.deflate(1.1), paint);
   }
 
   @override
   bool shouldRepaint(covariant _BeanDockBorderPainter oldDelegate) =>
-      oldDelegate.progress != progress || oldDelegate.active != active;
+      oldDelegate.progress != progress ||
+      oldDelegate.active != active ||
+      oldDelegate.color != color;
 }

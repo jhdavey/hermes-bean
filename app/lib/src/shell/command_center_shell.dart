@@ -90,6 +90,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _beanAssistantOpen = false;
   bool _beanAssistantSending = false;
   bool _beanDockPushToTalkHeld = false;
+  bool _beanVoiceDockActive = false;
+  _BeanDockStatusSnapshot _beanDockStatus = _BeanDockStatusSnapshot.idle;
   final GlobalKey<_BeanAssistantPanelState> _beanAssistantPanelKey =
       GlobalKey<_BeanAssistantPanelState>();
   int? _beanAssistantSessionId;
@@ -160,6 +162,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _beanAssistantOpen = false;
     _beanAssistantSending = false;
     _beanDockPushToTalkHeld = false;
+    _beanVoiceDockActive = false;
+    _beanDockStatus = _BeanDockStatusSnapshot.idle;
     _beanAssistantSessionId = null;
     _beanAssistantError = null;
     _beanAssistantMessages = const [];
@@ -1289,6 +1293,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     setState(() {
       _beanAssistantOpen = !_beanAssistantOpen;
       _beanAssistantError = null;
+      if (_beanAssistantOpen) {
+        _beanDockStatus = _BeanDockStatusSnapshot.idle;
+      }
     });
   }
 
@@ -1296,11 +1303,17 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (_phase != _AuthPhase.signedIn) return;
     _beanDockPushToTalkHeld = true;
     setState(() {
-      _beanAssistantOpen = true;
+      _beanVoiceDockActive = true;
+      _beanAssistantOpen = false;
       _beanAssistantError = null;
+      _beanDockStatus = const _BeanDockStatusSnapshot(
+        activity: _BeanDockActivity.listening,
+        label: 'Listening',
+        detail: 'Hold and speak',
+      );
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_beanDockPushToTalkHeld || !_beanAssistantOpen) return;
+      if (!mounted || !_beanDockPushToTalkHeld || !_beanVoiceDockActive) return;
       unawaited(
         _beanAssistantPanelKey.currentState?._startElevenLabsPushToTalk(),
       );
@@ -1309,11 +1322,33 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   void _stopBeanAssistantPushToTalkFromDock({bool cancelled = false}) {
     _beanDockPushToTalkHeld = false;
+    if (mounted && !cancelled) {
+      setState(() {
+        _beanDockStatus = const _BeanDockStatusSnapshot(
+          activity: _BeanDockActivity.thinking,
+          label: 'Thinking',
+        );
+      });
+    }
     unawaited(
       _beanAssistantPanelKey.currentState?._stopElevenLabsPushToTalk(
         cancelled: cancelled,
       ),
     );
+    if (cancelled && mounted) {
+      setState(() {
+        _beanVoiceDockActive = false;
+        _beanDockStatus = _BeanDockStatusSnapshot.idle;
+      });
+    }
+  }
+
+  void _updateBeanVoiceDock(_BeanDockStatusSnapshot status) {
+    if (!mounted) return;
+    setState(() {
+      _beanDockStatus = status;
+      _beanVoiceDockActive = status.visible;
+    });
   }
 
   Future<void> _sendBeanAssistantMessage(
@@ -4117,6 +4152,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                         selected: _selectedDestination,
                         beanOpen: _beanAssistantOpen,
                         beanSending: _beanAssistantSending,
+                        beanStatus: _beanDockStatus,
                         beanHasError: _beanAssistantError != null,
                         onSelected: _selectDestination,
                         onBeanPressed: _openBeanAssistant,
@@ -4129,9 +4165,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                     )
                   : null,
             ),
-            if (_beanAssistantOpen)
+            if (_beanAssistantOpen || _beanVoiceDockActive)
               _BeanAssistantPanel(
                 key: _beanAssistantPanelKey,
+                voiceDockOnly: !_beanAssistantOpen,
                 messages: _beanAssistantMessages,
                 confirmations: _beanAssistantConfirmations,
                 sending: _beanAssistantSending,
@@ -4142,6 +4179,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                 onElevenLabsSessionReady: _applyElevenLabsBeanSession,
                 onAskBeanFromElevenLabsAgent: _askBeanFromElevenLabsAgent,
                 onVoiceEvent: _recordBeanVoiceEvent,
+                onVoiceDockChanged: _updateBeanVoiceDock,
                 userId: _user?.id,
                 workspaceId: _activeWorkspaceId(),
                 clientTimezone: _user?.timezone,

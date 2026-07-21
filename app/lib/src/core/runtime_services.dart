@@ -53,7 +53,6 @@ final Uri _enterpriseContactUrl = Uri.parse(
   'mailto:support@heybean.org?subject=HeyBean%20Enterprise',
 );
 const String _beanGreenCategoryColor = '#34C759';
-const double _beanBottomMenuSurfaceInset = 36;
 
 Future<String?> _deviceIanaTimezone() async {
   try {
