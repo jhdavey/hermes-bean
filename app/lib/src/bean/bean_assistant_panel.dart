@@ -53,6 +53,7 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
   bool _voiceConnecting = false;
   bool _voicePushToTalkHeld = false;
   bool _voiceAwaitingResponse = false;
+  bool _voiceSpeaking = false;
   int _voiceRequestCount = 0;
 
   bool get _voiceConnected =>
@@ -134,6 +135,7 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
             _voiceConnecting = false;
             _voicePushToTalkHeld = false;
             _voiceAwaitingResponse = false;
+            _voiceSpeaking = false;
           });
           _clearVoiceDock();
           unawaited(
@@ -168,7 +170,10 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
         },
         onModeChange: ({required mode}) {
           if (!mounted) return;
+          final wasSpeaking = _voiceSpeaking;
           if (mode == elevenlabs.ConversationMode.speaking) {
+            _voiceSpeaking = true;
+            _voiceIdleDisconnectTimer?.cancel();
             _publishVoiceDock(_BeanDockActivity.speaking, label: 'Speaking');
             unawaited(
               widget.onVoiceEvent(
@@ -177,8 +182,10 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
               ),
             );
           } else if (_voiceAwaitingResponse) {
+            _voiceSpeaking = false;
             _publishVoiceDock(_BeanDockActivity.thinking, label: 'Thinking');
           } else if (_voiceRequestCount > 0) {
+            _voiceSpeaking = false;
             _publishVoiceReadyOrIdle();
             unawaited(
               widget.onVoiceEvent(
@@ -186,7 +193,11 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
                 payload: {'transport': 'elevenlabs_agent'},
               ),
             );
+            if (wasSpeaking && !_voicePushToTalkHeld) {
+              _scheduleVoiceIdleDisconnect();
+            }
           } else {
+            _voiceSpeaking = false;
             _publishVoiceReadyOrIdle();
           }
         },
@@ -281,6 +292,7 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
             _voiceConnecting = false;
             _voicePushToTalkHeld = false;
             _voiceAwaitingResponse = false;
+            _voiceSpeaking = false;
           });
           _publishVoiceDock(
             _BeanDockActivity.error,
@@ -400,6 +412,7 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
         _voiceConnecting = false;
         _voicePushToTalkHeld = false;
         _voiceAwaitingResponse = false;
+        _voiceSpeaking = false;
       });
       _publishVoiceDock(_BeanDockActivity.error, label: 'Voice hit a problem');
       unawaited(
@@ -442,10 +455,14 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
 
   void _scheduleVoiceIdleDisconnect() {
     _voiceIdleDisconnectTimer?.cancel();
-    _voiceIdleDisconnectTimer = Timer(const Duration(minutes: 2), () {
+    _voiceIdleDisconnectTimer = Timer(const Duration(seconds: 5), () {
       final client = _elevenLabsClient;
       if (!mounted || client == null || _voicePushToTalkHeld) return;
       if (client.status != elevenlabs.ConversationStatus.connected) return;
+      if (_voiceAwaitingResponse || _voiceSpeaking) {
+        _scheduleVoiceIdleDisconnect();
+        return;
+      }
       unawaited(client.endSession());
     });
   }

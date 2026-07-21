@@ -226,8 +226,12 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(agentConfigSource, /agentOutputAudioFormat: 'pcm_48000'/);
     assert.match(agentConfigSource, /provider: 'scribe_realtime'/);
     assert.match(agentConfigSource, /keywords: \['Hey Bean'/);
-    assert.match(agentConfigSource, /turnTimeout: 30/);
-    assert.match(agentConfigSource, /silenceEndCallTimeout: 18/);
+    assert.match(agentConfigSource, /voiceMaxDurationSeconds = Number\(env\.ELEVENLABS_MAX_DURATION_SECONDS \|\| 60\)/);
+    assert.match(agentConfigSource, /voiceInitialWaitSeconds = Number\(env\.ELEVENLABS_INITIAL_WAIT_SECONDS \|\| env\.ELEVENLABS_SILENCE_TIMEOUT_SECONDS \|\| 5\)/);
+    assert.match(agentConfigSource, /voiceSilenceEndCallSeconds = Number\(env\.ELEVENLABS_SILENCE_END_CALL_SECONDS \|\| env\.ELEVENLABS_SILENCE_TIMEOUT_SECONDS \|\| 5\)/);
+    assert.match(agentConfigSource, /turnTimeout: voiceTurnTimeoutSeconds/);
+    assert.match(agentConfigSource, /initialWaitTime: voiceInitialWaitSeconds/);
+    assert.match(agentConfigSource, /silenceEndCallTimeout: voiceSilenceEndCallSeconds/);
     assert.match(agentConfigSource, /speculativeTurn: true/);
     assert.match(agentConfigSource, /timeoutSeconds: -1/);
     assert.match(agentConfigSource, /message: 'Waiting\.'/);
@@ -247,7 +251,7 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(source, /resolvePendingBeanVoiceResponseFromActivity/);
     assert.match(source, /voice_request_error/);
     assert.match(source, /voice_request_timed_out/);
-    assert.match(source, /const beanVoiceIdleCloseMs = 18000/);
+    assert.match(source, /const beanVoiceIdleCloseMs = 5000/);
     assert.match(source, /function markBeanVoiceActivity/);
     assert.match(source, /elapsedSinceActivity < beanVoiceIdleCloseMs/);
     assert.match(source, /scheduleBeanVoiceIdleClose\(`\$\{reason\}_after_activity`\)/);

@@ -47,6 +47,24 @@ CLOUDFLARE_TURNSTILE_SECRET_KEY=...
 
 The landing guide is disabled on every page load and requires an explicit visitor click before requesting microphone access. Its default cost and abuse envelope is an eight-minute conversation with at most 20 meaningful visitor turns, 3 sessions per browser per hour, 6 per browser per day, and 150 landing sessions globally per day. All values are configurable through the `BEAN_LANDING_*` environment variables documented in `.env.example`.
 
+## Cost controls and metering
+
+Mobile Bean voice is intentionally short-lived:
+
+- ElevenLabs Agent `maxDurationSeconds` defaults to `60`.
+- Initial/silent wait defaults to `5` seconds.
+- Silence-end-call timeout defaults to `5` seconds.
+- Flutter push-to-talk closes an idle Agent session after 5 seconds, but keeps it alive while Bean is still thinking or speaking so responses are not cut off.
+
+A conversation longer than 60 seconds is not blocked at the app level, but it becomes multiple voice sessions: after the Agent session reaches the 60-second cap, the user must hold Bean again to continue. That makes the UX feel more like repeated short voice turns than an always-open call, but it prevents idle WebRTC sessions from burning a large share of the ElevenLabs monthly allowance.
+
+Usage is persisted in `bean_usage_records`:
+
+- `provider=elevenlabs`, `usage_type=voice_session`: elapsed seconds between `voice_session_started` and `voice_session_closed`, estimated credits, and estimated USD cost.
+- `provider=openai`, `usage_type=llm_tokens`: Bean/Hermes run token estimates and estimated USD cost. These are marked `is_estimate=true` because Hermes does not currently expose exact provider token usage back to Laravel.
+
+The admin dashboard summary exposes `ai_usage.today`, `ai_usage.week`, and `ai_usage.month` with OpenAI tokens/cost, ElevenLabs voice seconds/minutes/credits/cost, source breakdowns, and top users.
+
 ## Configure/update the ElevenLabs Agent
 
 From `web/`:

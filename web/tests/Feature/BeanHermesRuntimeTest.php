@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\BeanActivityEvent;
 use App\Models\BeanRun;
 use App\Models\BeanSession;
+use App\Models\BeanUsageRecord;
 use App\Models\CalendarEvent;
 use App\Models\Reminder;
 use App\Models\Task;
@@ -81,6 +82,12 @@ PHP);
         $this->assertStringContainsString('Do not make up private dashboard facts', File::get($home.'/skills/bean-dashboard/SKILL.md'));
 
         $session = BeanSession::firstOrFail();
+        $run = BeanRun::firstOrFail();
+        $usage = BeanUsageRecord::where('provider', 'openai')->where('bean_run_id', $run->id)->firstOrFail();
+        $this->assertSame('llm_tokens', $usage->usage_type);
+        $this->assertSame('gpt-test', $usage->model);
+        $this->assertTrue($usage->is_estimate);
+        $this->assertGreaterThan(0, $usage->total_tokens);
         $this->assertSame('hermes', data_get($session->metadata, 'runtime_driver'));
         $this->assertSame($home, data_get($session->metadata, 'hermes_home'));
         $this->assertSame('bean-session-'.$session->id, data_get($session->metadata, 'hermes_session_name'));
@@ -510,6 +517,43 @@ PHP);
         $this->assertSame($expectedHome, $env['HERMES_HOME']);
         $this->assertStringStartsWith($expectedHome.'/tmp/bean-tool-context-', $env['BEAN_TOOL_CONTEXT']);
         $this->assertFileExists($env['BEAN_TOOL_CONTEXT']);
+    }
+
+    public function test_voice_lifecycle_events_meter_elevenlabs_voice_session_usage(): void
+    {
+        config([
+            'bean.usage.elevenlabs_agent_cost_per_minute_usd' => 0.08,
+            'bean.usage.elevenlabs_agent_credits_per_minute' => 10000 / 15,
+        ]);
+        $token = $this->apiToken('bean-voice-meter@example.com');
+        $user = User::where('email', 'bean-voice-meter@example.com')->firstOrFail();
+        $session = app(BeanRuntimeService::class)->createSession($user, null, 'America/New_York');
+        $startedAt = now();
+
+        $this->withToken($token)->postJson('/api/bean/voice-events', [
+            'event_type' => 'voice_session_started',
+            'session_id' => $session->id,
+            'source' => 'elevenlabs_agent',
+            'payload' => ['transport' => 'elevenlabs_agent', 'conversation_id' => 'conv_meter_test'],
+            'occurred_at' => $startedAt->toIso8601String(),
+            'occurred_at_ms' => 1_000,
+        ])->assertCreated();
+
+        $this->withToken($token)->postJson('/api/bean/voice-events', [
+            'event_type' => 'voice_session_closed',
+            'session_id' => $session->id,
+            'source' => 'elevenlabs_agent',
+            'payload' => ['transport' => 'elevenlabs_agent', 'conversation_id' => 'conv_meter_test', 'reason' => 'client_idle_timeout'],
+            'occurred_at' => $startedAt->copy()->addSeconds(60)->toIso8601String(),
+            'occurred_at_ms' => 61_000,
+        ])->assertCreated();
+
+        $usage = BeanUsageRecord::where('provider', 'elevenlabs')->where('external_id', 'conv_meter_test')->firstOrFail();
+        $this->assertSame('voice_session', $usage->usage_type);
+        $this->assertSame(60.0, $usage->quantity);
+        $this->assertEqualsWithDelta(666.67, $usage->credits, 0.1);
+        $this->assertEqualsWithDelta(0.08, $usage->estimated_cost_usd, 0.0001);
+        $this->assertTrue($usage->is_estimate);
     }
 
     public function test_elevenlabs_conversation_token_requires_agent_configuration(): void

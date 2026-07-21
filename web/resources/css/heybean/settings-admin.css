@@ -460,7 +460,7 @@
 
 .hb-admin-kpi-grid {
     display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
     gap: 10px;
 }
 
@@ -532,8 +532,14 @@
 
 .hb-admin-health-card:nth-child(3),
 .hb-admin-health-card:nth-child(4),
-.hb-admin-health-card:nth-child(5) {
+.hb-admin-health-card:nth-child(5),
+.hb-admin-health-card:nth-child(6),
+.hb-admin-health-card:nth-child(7) {
     grid-column: span 2;
+}
+
+.hb-admin-health-card.hb-admin-ai-usage-card {
+    grid-column: span 3;
 }
 
 .hb-admin-health-head {

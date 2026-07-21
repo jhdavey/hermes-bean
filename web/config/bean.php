@@ -44,4 +44,25 @@ return [
         'messages_per_hour' => (int) env('BEAN_LANDING_MESSAGES_PER_HOUR', 80),
         'messages_per_day' => (int) env('BEAN_LANDING_MESSAGES_PER_DAY', 160),
     ],
+
+    'usage' => [
+        'elevenlabs_max_duration_seconds' => (int) env('ELEVENLABS_MAX_DURATION_SECONDS', 60),
+        'elevenlabs_silence_timeout_seconds' => (int) env('ELEVENLABS_SILENCE_TIMEOUT_SECONDS', 5),
+        'elevenlabs_agent_cost_per_minute_usd' => (float) env('ELEVENLABS_AGENT_COST_PER_MINUTE_USD', 0.08),
+        'elevenlabs_agent_credits_per_minute' => (float) env('ELEVENLABS_AGENT_CREDITS_PER_MINUTE', 10000 / 15),
+        'openai_model_prices' => [
+            'gpt-4.1-mini' => [
+                'input_per_1m' => (float) env('OPENAI_GPT_4_1_MINI_INPUT_PER_1M_USD', 0.40),
+                'output_per_1m' => (float) env('OPENAI_GPT_4_1_MINI_OUTPUT_PER_1M_USD', 1.60),
+            ],
+            'gpt-4.1-nano' => [
+                'input_per_1m' => (float) env('OPENAI_GPT_4_1_NANO_INPUT_PER_1M_USD', 0.10),
+                'output_per_1m' => (float) env('OPENAI_GPT_4_1_NANO_OUTPUT_PER_1M_USD', 0.40),
+            ],
+            'gpt-4.1' => [
+                'input_per_1m' => (float) env('OPENAI_GPT_4_1_INPUT_PER_1M_USD', 2.00),
+                'output_per_1m' => (float) env('OPENAI_GPT_4_1_OUTPUT_PER_1M_USD', 8.00),
+            ],
+        ],
+    ],
 ];

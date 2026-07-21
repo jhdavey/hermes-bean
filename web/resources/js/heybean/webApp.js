@@ -251,7 +251,7 @@ export function mountHeyBeanWebApp(mount) {
     let beanPendingWakeTail = '';
     let beanPendingVoiceResponseTimer = 0;
     let beanPendingVoiceResponse = null;
-    const beanVoiceIdleCloseMs = 18000;
+    const beanVoiceIdleCloseMs = 5000;
     let beanVoiceIdleTimer = 0;
     let beanLastVoiceActivityAt = 0;
     let beanVoiceInputIgnoreUntil = 0;
@@ -2066,7 +2066,7 @@ export function mountHeyBeanWebApp(mount) {
         return `
             <section class="hb-card hb-card-pad hb-admin-panel">
                 <div class="hb-section-action-row">
-                    ${sectionTitle(icons.activity, 'Project admin', 'Business, traffic, app usage, server health, plans, and submitted issue reports')}
+                    ${sectionTitle(icons.activity, 'Project admin', 'Business, traffic, app usage, AI cost, server health, plans, and submitted issue reports')}
                     <button class="hb-button-secondary" type="button" data-refresh-admin ${state.adminLoading ? 'disabled' : ''}>${state.adminLoading ? 'Refreshing...' : 'Refresh'}</button>
                 </div>
                 ${errorMarkup(state.error)}
@@ -2092,12 +2092,15 @@ export function mountHeyBeanWebApp(mount) {
         const business = summary.business || {};
         const traffic = summary.traffic || {};
         const activation = summary.activation || {};
+        const aiUsage = summary.ai_usage || summary.aiUsage || {};
+        const aiMonth = aiUsage.month || {};
         const server = summary.server || {};
         return `
             <div class="hb-admin-kpi-grid">
                 ${adminKpiMarkup('Daily run-rate', formatCurrency(business.daily_revenue_rate || 0), 'From active local subscriptions', 'money')}
                 ${adminKpiMarkup('Weekly run-rate', formatCurrency(business.weekly_revenue_rate || 0), 'From active local subscriptions', 'money')}
                 ${adminKpiMarkup('MRR', formatCurrency(business.mrr || 0), `${escapeHtml(business.active_paid_subscriptions || 0)} paid subscriptions`, 'money')}
+                ${adminKpiMarkup('AI cost month', formatCurrency(aiMonth.estimated_cost_usd || aiMonth.estimatedCostUsd || 0), `${formatCompactNumber(aiMonth.openai?.total_tokens || aiMonth.openai?.totalTokens || 0)} tokens · ${formatDuration(aiMonth.elevenlabs?.voice_seconds || aiMonth.elevenlabs?.voiceSeconds || 0)}`, 'warning')}
                 ${adminKpiMarkup('ARR', formatCurrency(business.arr || 0), `${formatPercent(business.month_over_month_growth_rate)} MoM signup growth`, 'money')}
                 ${adminKpiMarkup('Active today', activation.active_users_today || 0, `${activation.active_users_7_days || 0} active in 7 days`, 'activity')}
                 ${adminKpiMarkup('Visitors today', traffic.unique_visitors_today || 0, `${traffic.page_views_today || 0} page views`, 'traffic')}
@@ -2121,6 +2124,7 @@ export function mountHeyBeanWebApp(mount) {
                 ${adminTrafficHealthMarkup(summary.traffic || {})}
                 ${adminActivationHealthMarkup(summary.activation || {})}
                 ${adminBeanQualityHealthMarkup(summary.bean_quality || summary.beanQuality || {})}
+                ${adminAiUsageHealthMarkup(summary.ai_usage || summary.aiUsage || {})}
                 ${adminAppUsageHealthMarkup(summary.app_usage || summary.appUsage || {})}
                 ${adminServerHealthMarkup(summary.server || {})}
             </div>`;
@@ -2206,6 +2210,38 @@ export function mountHeyBeanWebApp(mount) {
                     ${(flags.length ? flags : ['No quality flags in the last 24h']).slice(0, 4).map((flag) => `<span><strong>${escapeHtml(String(flag).replaceAll('_', ' '))}</strong><small>${escapeHtml(flag === 'No quality flags in the last 24h' ? 'clean' : 'flag')}</small></span>`).join('')}
                 </div>
                 ${recent.length ? `<div class="hb-admin-signal-list">${recent.slice(0, 3).map((run) => `<span class="hb-admin-signal hb-admin-signal-warning">#${escapeHtml(run.bean_run_id || '?')} ${escapeHtml(normalizeList(run.quality_flags || run.qualityFlags).join(', '))}</span>`).join('')}</div>` : ''}
+            </section>`;
+    }
+
+    function adminAiUsageHealthMarkup(aiUsage) {
+        const today = aiUsage.today || {};
+        const month = aiUsage.month || {};
+        const assumptions = aiUsage.pricing_assumptions || aiUsage.pricingAssumptions || {};
+        const openAiMonth = month.openai || {};
+        const elevenMonth = month.elevenlabs || {};
+        const topUsers = normalizeList(month.top_users || month.topUsers);
+        const modelRows = Object.entries(openAiMonth.by_model || openAiMonth.byModel || {}).slice(0, 3);
+        return `
+            <section class="hb-admin-health-card hb-admin-ai-usage-card">
+                <div class="hb-admin-health-head">
+                    <strong>AI usage</strong>
+                    <small>Estimated OpenAI + ElevenLabs cost</small>
+                </div>
+                <div class="hb-admin-health-metrics">
+                    ${adminHealthMetricMarkup('Today cost', formatCurrency(today.estimated_cost_usd || today.estimatedCostUsd || 0))}
+                    ${adminHealthMetricMarkup('Month cost', formatCurrency(month.estimated_cost_usd || month.estimatedCostUsd || 0))}
+                    ${adminHealthMetricMarkup('OpenAI tokens', formatCompactNumber(openAiMonth.total_tokens || openAiMonth.totalTokens || 0))}
+                    ${adminHealthMetricMarkup('OpenAI requests', openAiMonth.requests || 0)}
+                    ${adminHealthMetricMarkup('Voice minutes', formatDuration(elevenMonth.voice_seconds || elevenMonth.voiceSeconds || 0))}
+                    ${adminHealthMetricMarkup('Eleven credits', formatCompactNumber(elevenMonth.credits || 0))}
+                </div>
+                <p class="hb-admin-health-note">Assumes ElevenLabs ${formatCurrency(assumptions.elevenlabs_agent_cost_per_minute_usd || assumptions.elevenlabsAgentCostPerMinuteUsd || 0.08)}/min, ${formatCompactNumber(assumptions.elevenlabs_agent_credits_per_minute || assumptions.elevenlabsAgentCreditsPerMinute || 0)} credits/min, ${escapeHtml(assumptions.elevenlabs_max_duration_seconds || assumptions.elevenlabsMaxDurationSeconds || 60)}s max sessions, and ${escapeHtml(assumptions.elevenlabs_silence_timeout_seconds || assumptions.elevenlabsSilenceTimeoutSeconds || 5)}s silence timeout. OpenAI token counts are estimated until exact provider usage is exposed by the runtime.</p>
+                <div class="hb-admin-mini-list">
+                    ${(modelRows.length ? modelRows : [['No OpenAI usage yet', { total_tokens: 0, estimated_cost_usd: 0 }]]).map(([model, metrics]) => `<span><strong>${escapeHtml(model)}</strong><small>${escapeHtml(formatCompactNumber(metrics.total_tokens || metrics.totalTokens || 0))} tokens · ${escapeHtml(formatCurrency(metrics.estimated_cost_usd || metrics.estimatedCostUsd || 0))}</small></span>`).join('')}
+                </div>
+                <div class="hb-admin-mini-list hb-admin-source-list">
+                    ${(topUsers.length ? topUsers : [{ email: 'No usage records yet', estimated_cost_usd: 0 }]).slice(0, 4).map((user) => `<span><strong>${escapeHtml(user.email || user.name || `User #${user.user_id || user.userId || '?'}`)}</strong><small>${escapeHtml(formatCurrency(user.estimated_cost_usd || user.estimatedCostUsd || 0))} · ${escapeHtml(formatDuration(user.elevenlabs_voice_seconds || user.elevenlabsVoiceSeconds || 0))}</small></span>`).join('')}
+                </div>
             </section>`;
     }
 
@@ -9567,6 +9603,16 @@ export function mountHeyBeanWebApp(mount) {
         const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
         const amount = bytes / (1024 ** index);
         return `${amount.toFixed(amount >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
+    }
+
+    function formatDuration(seconds) {
+        const totalSeconds = Math.max(0, Number(seconds || 0));
+        if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return '0s';
+        if (totalSeconds < 60) return `${Math.round(totalSeconds)}s`;
+        const minutes = totalSeconds / 60;
+        if (minutes < 60) return `${minutes.toFixed(minutes >= 10 ? 0 : 1)}m`;
+        const hours = minutes / 60;
+        return `${hours.toFixed(hours >= 10 ? 0 : 1)}h`;
     }
 
     function adminServerStatusLabel(status) {

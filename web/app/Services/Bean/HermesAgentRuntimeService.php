@@ -21,6 +21,7 @@ class HermesAgentRuntimeService
         private readonly HermesUserHomeService $homes,
         private readonly BeanActivityLogger $activity,
         private readonly BeanTimeContext $timeContext,
+        private readonly BeanUsageMeterService $usageMeter,
     ) {}
 
     public function handleMessage(User $user, string $content, BeanSession $session, ?string $clientTimezone = null, ?string $source = null): array
@@ -105,6 +106,7 @@ class HermesAgentRuntimeService
                 'metadata' => [...$metadata, 'hermes_session_id' => $hermesSessionId, 'tool_calls_count' => $run->toolCalls()->count()],
                 'completed_at' => now(),
             ]);
+            $this->usageMeter->recordOpenAiRun($run->refresh());
         } catch (Throwable $exception) {
             Log::error('Bean Hermes runtime failed.', [
                 'bean_run_id' => $run->id,
@@ -121,6 +123,7 @@ class HermesAgentRuntimeService
                 'output' => $assistantText,
                 'completed_at' => now(),
             ]);
+            $this->usageMeter->recordOpenAiRun($run->refresh());
             BeanMessage::create([
                 'bean_session_id' => $session->id,
                 'bean_run_id' => $run->id,

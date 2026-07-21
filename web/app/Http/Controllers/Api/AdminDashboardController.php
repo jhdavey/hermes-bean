@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\BeanQualityTrace;
+use App\Models\BeanUsageRecord;
 use App\Models\CalendarEvent;
 use App\Models\EarlyAccessSignup;
 use App\Models\IssueReport;
@@ -42,6 +43,7 @@ class AdminDashboardController extends Controller
             'traffic' => $this->trafficMetrics($today, $week, $month),
             'activation' => $this->activationMetrics(),
             'app_usage' => $this->appUsageMetrics($today, $week, $month),
+            'ai_usage' => $this->aiUsageMetrics($today, $week, $month),
             'bean_quality' => $this->beanQualityMetrics($today),
             'server' => $this->serverHealth(),
             'user_growth_range' => $growthRange,
@@ -297,6 +299,113 @@ class AdminDashboardController extends Controller
             'created_today' => $this->domainCreatedCounts($today),
             'created_week' => $this->domainCreatedCounts($week),
             'created_month' => $this->domainCreatedCounts($month),
+        ];
+    }
+
+    private function aiUsageMetrics(Carbon $today, Carbon $week, Carbon $month): array
+    {
+        if (! Schema::hasTable('bean_usage_records')) {
+            return [
+                'today' => $this->emptyUsagePeriod(),
+                'week' => $this->emptyUsagePeriod(),
+                'month' => $this->emptyUsagePeriod(),
+                'pricing_assumptions' => $this->aiUsagePricingAssumptions(),
+            ];
+        }
+
+        return [
+            'today' => $this->usagePeriodMetrics($today),
+            'week' => $this->usagePeriodMetrics($week),
+            'month' => $this->usagePeriodMetrics($month),
+            'pricing_assumptions' => $this->aiUsagePricingAssumptions(),
+        ];
+    }
+
+    private function usagePeriodMetrics(Carbon $since): array
+    {
+        $records = BeanUsageRecord::query()
+            ->with('user:id,name,email,subscription_tier')
+            ->where('recorded_at', '>=', $since)
+            ->get();
+        $openAi = $records->where('provider', 'openai');
+        $elevenLabs = $records->where('provider', 'elevenlabs');
+
+        return [
+            'records' => $records->count(),
+            'estimated_cost_usd' => round((float) $records->sum('estimated_cost_usd'), 4),
+            'openai' => [
+                'requests' => $openAi->count(),
+                'input_tokens' => (int) $openAi->sum('input_tokens'),
+                'output_tokens' => (int) $openAi->sum('output_tokens'),
+                'total_tokens' => (int) $openAi->sum('total_tokens'),
+                'estimated_cost_usd' => round((float) $openAi->sum('estimated_cost_usd'), 4),
+                'by_model' => $openAi->groupBy(fn (BeanUsageRecord $record): string => (string) ($record->model ?: 'unknown'))
+                    ->map(fn ($modelRecords): array => [
+                        'requests' => $modelRecords->count(),
+                        'input_tokens' => (int) $modelRecords->sum('input_tokens'),
+                        'output_tokens' => (int) $modelRecords->sum('output_tokens'),
+                        'total_tokens' => (int) $modelRecords->sum('total_tokens'),
+                        'estimated_cost_usd' => round((float) $modelRecords->sum('estimated_cost_usd'), 4),
+                    ])->all(),
+            ],
+            'elevenlabs' => [
+                'sessions' => $elevenLabs->where('usage_type', 'voice_session')->count(),
+                'voice_seconds' => round((float) $elevenLabs->where('usage_type', 'voice_session')->sum('quantity'), 1),
+                'voice_minutes' => round(((float) $elevenLabs->where('usage_type', 'voice_session')->sum('quantity')) / 60, 2),
+                'credits' => round((float) $elevenLabs->sum('credits'), 1),
+                'estimated_cost_usd' => round((float) $elevenLabs->sum('estimated_cost_usd'), 4),
+            ],
+            'by_source' => $records->groupBy(fn (BeanUsageRecord $record): string => (string) ($record->source ?: 'unknown'))
+                ->map(fn ($sourceRecords): array => [
+                    'records' => $sourceRecords->count(),
+                    'estimated_cost_usd' => round((float) $sourceRecords->sum('estimated_cost_usd'), 4),
+                    'tokens' => (int) $sourceRecords->sum('total_tokens'),
+                    'voice_seconds' => round((float) $sourceRecords->where('provider', 'elevenlabs')->sum('quantity'), 1),
+                    'credits' => round((float) $sourceRecords->sum('credits'), 1),
+                ])->all(),
+            'top_users' => $records->groupBy('user_id')
+                ->map(function ($userRecords, $userId): array {
+                    $first = $userRecords->first();
+                    $user = $first?->user;
+
+                    return [
+                        'user_id' => $userId ? (int) $userId : null,
+                        'name' => $user?->name,
+                        'email' => $user?->email,
+                        'tier' => $user?->subscription_tier,
+                        'estimated_cost_usd' => round((float) $userRecords->sum('estimated_cost_usd'), 4),
+                        'openai_tokens' => (int) $userRecords->where('provider', 'openai')->sum('total_tokens'),
+                        'elevenlabs_voice_seconds' => round((float) $userRecords->where('provider', 'elevenlabs')->sum('quantity'), 1),
+                        'elevenlabs_credits' => round((float) $userRecords->where('provider', 'elevenlabs')->sum('credits'), 1),
+                    ];
+                })
+                ->sortByDesc('estimated_cost_usd')
+                ->values()
+                ->take(8)
+                ->all(),
+        ];
+    }
+
+    private function emptyUsagePeriod(): array
+    {
+        return [
+            'records' => 0,
+            'estimated_cost_usd' => 0,
+            'openai' => ['requests' => 0, 'input_tokens' => 0, 'output_tokens' => 0, 'total_tokens' => 0, 'estimated_cost_usd' => 0, 'by_model' => []],
+            'elevenlabs' => ['sessions' => 0, 'voice_seconds' => 0, 'voice_minutes' => 0, 'credits' => 0, 'estimated_cost_usd' => 0],
+            'by_source' => [],
+            'top_users' => [],
+        ];
+    }
+
+    private function aiUsagePricingAssumptions(): array
+    {
+        return [
+            'elevenlabs_agent_cost_per_minute_usd' => (float) config('bean.usage.elevenlabs_agent_cost_per_minute_usd', 0.08),
+            'elevenlabs_agent_credits_per_minute' => (float) config('bean.usage.elevenlabs_agent_credits_per_minute', 10000 / 15),
+            'elevenlabs_max_duration_seconds' => (int) config('bean.usage.elevenlabs_max_duration_seconds', 60),
+            'elevenlabs_silence_timeout_seconds' => (int) config('bean.usage.elevenlabs_silence_timeout_seconds', 5),
+            'openai_token_method' => 'estimated until provider token usage is available from the Hermes child process',
         ];
     }
 

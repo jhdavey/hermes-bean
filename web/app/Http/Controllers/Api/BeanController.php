@@ -10,6 +10,7 @@ use App\Models\BeanSession;
 use App\Models\BeanVoiceEvent;
 use App\Rules\ClientTimezone;
 use App\Services\Bean\BeanRuntimeService;
+use App\Services\Bean\BeanUsageMeterService;
 use App\Services\Bean\DashboardContextBuilder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,6 +23,7 @@ class BeanController extends Controller
     public function __construct(
         private readonly BeanRuntimeService $runtime,
         private readonly DashboardContextBuilder $dashboardContext,
+        private readonly BeanUsageMeterService $usageMeter,
     ) {}
 
     public function storeSession(Request $request): JsonResponse
@@ -118,6 +120,7 @@ class BeanController extends Controller
             'occurred_at' => isset($data['occurred_at']) ? Carbon::parse($data['occurred_at']) : now(),
             'occurred_at_ms' => $data['occurred_at_ms'] ?? null,
         ]);
+        $this->usageMeter->recordElevenLabsVoiceSession($event);
 
         return response()->json(['data' => ['id' => $event->id]], 201);
     }
