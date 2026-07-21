@@ -30,7 +30,7 @@ return [
         'visitors_path' => env('BEAN_LANDING_HERMES_VISITORS_PATH', storage_path('hermes/landing-visitors')),
         'source' => env('BEAN_LANDING_HERMES_SOURCE', 'bean-landing'),
         'provider' => env('BEAN_LANDING_HERMES_PROVIDER', env('BEAN_HERMES_PROVIDER', 'custom')),
-        'model' => env('BEAN_LANDING_HERMES_MODEL', 'gpt-5-nano'),
+        'model' => env('BEAN_LANDING_HERMES_MODEL', 'gpt-4.1-nano'),
         'base_url' => env('BEAN_LANDING_HERMES_BASE_URL', env('BEAN_HERMES_BASE_URL', 'https://api.openai.com/v1')),
         'timeout_seconds' => (int) env('BEAN_LANDING_HERMES_TIMEOUT_SECONDS', 25),
         'retention_hours' => (int) env('BEAN_LANDING_HERMES_RETENTION_HOURS', 24),

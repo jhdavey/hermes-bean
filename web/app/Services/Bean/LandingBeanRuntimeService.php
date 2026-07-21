@@ -85,7 +85,7 @@ class LandingBeanRuntimeService
     private function configYaml(): string
     {
         $provider = (string) config('bean.landing.provider', config('bean.hermes.provider', 'custom'));
-        $model = (string) config('bean.landing.model', 'gpt-5-nano');
+        $model = (string) config('bean.landing.model', 'gpt-4.1-nano');
         $baseUrl = trim((string) config('bean.landing.base_url', config('bean.hermes.base_url', 'https://api.openai.com/v1')));
         $baseUrlYaml = $baseUrl !== '' ? "  base_url: {$baseUrl}\n" : '';
 
@@ -180,7 +180,7 @@ MD;
         $timeout = (int) config('bean.landing.timeout_seconds', 25);
         $source = (string) config('bean.landing.source', 'bean-landing');
         $provider = (string) config('bean.landing.provider', config('bean.hermes.provider', 'custom'));
-        $model = (string) config('bean.landing.model', 'gpt-5-nano');
+        $model = (string) config('bean.landing.model', 'gpt-4.1-nano');
         $prompt = "Current public page: {$pagePath}\nVisitor said: {$content}";
         $command = [$binary, 'chat'];
 

@@ -24,7 +24,7 @@ const client = new ElevenLabsClient({ apiKey });
 const TOOL_NAME = 'askLandingBean';
 const AGENT_NAME = env.ELEVENLABS_LANDING_AGENT_NAME || 'HeyBean Landing Guide';
 const timezone = env.BEAN_CLIENT_TIMEZONE || 'America/New_York';
-const landingLlm = env.ELEVENLABS_LANDING_LLM || 'gpt-5-nano';
+const landingLlm = env.ELEVENLABS_LANDING_LLM || 'gpt-4.1-nano';
 const maxDurationSeconds = Number(env.BEAN_LANDING_MAX_DURATION_SECONDS || 480);
 const dailyConversationLimit = Number(env.BEAN_LANDING_GLOBAL_SESSIONS_PER_DAY || 150);
 const concurrencyLimit = Number(env.BEAN_LANDING_CONCURRENCY_LIMIT || 8);
@@ -119,8 +119,6 @@ function conversationConfig(toolId) {
             prompt: {
                 prompt,
                 llm: landingLlm,
-                reasoningEffort: 'none',
-                thinkingBudget: 0,
                 enableReasoningSummary: false,
                 temperature: 0,
                 maxTokens: 180,

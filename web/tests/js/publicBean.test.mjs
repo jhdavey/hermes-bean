@@ -55,7 +55,8 @@ test('landing voice uses a dedicated ElevenLabs agent configuration and public H
     assert.match(agentConfig, /isolated public Hermes Bean runtime/);
     assert.match(agentConfig, /firstMessage:\s*''/);
     assert.match(agentConfig, /llm:\s*landingLlm/);
-    assert.match(agentConfig, /reasoningEffort:\s*'none'/);
+    assert.match(agentConfig, /gpt-4\.1-nano/);
+    assert.doesNotMatch(agentConfig, /reasoningEffort|thinkingBudget/);
     assert.match(agentConfig, /maxDurationSeconds/);
     assert.match(agentConfig, /dailyLimit:\s*dailyConversationLimit/);
     assert.match(agentConfig, /enableAuth:\s*true/);
