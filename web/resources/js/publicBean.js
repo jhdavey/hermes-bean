@@ -19,6 +19,9 @@ function mountPublicBean(root) {
     let voiceActive = false;
     let idleTimer = 0;
     let lastActivityAt = 0;
+    let lifecycleRevision = 0;
+
+    const isCurrentLifecycle = (revision) => enabled && lifecycleRevision === revision;
 
     const setStatus = (mode, text) => {
         root.dataset.mode = mode;
@@ -61,31 +64,48 @@ function mountPublicBean(root) {
     };
 
     const disable = async () => {
+        lifecycleRevision += 1;
         enabled = false;
+        starting = false;
         localStorage.setItem(ENABLED_KEY, 'false');
+        setStatus('disabled', 'Tap to enable');
         stopWakeListening();
         await stopVoiceConversation();
-        setStatus('disabled', 'Tap to enable');
     };
 
     const restartWakeListening = async () => {
         if (!enabled || starting || wakeDetector || voiceActive) return;
+        const revision = lifecycleRevision;
+        let detector = null;
         try {
             setStatus('starting', 'Starting microphone…');
-            wakeDetector = await createWakeDetector(WAKE_PHRASE, handleWake, () => {
+            detector = await createWakeDetector(WAKE_PHRASE, handleWake, () => {
+                if (!isCurrentLifecycle(revision)) return;
                 wakeDetector = null;
                 setStatus('error', 'Microphone permission needed');
             });
-            await wakeDetector.start();
+            if (!isCurrentLifecycle(revision)) {
+                detector.stop?.();
+                return;
+            }
+            wakeDetector = detector;
+            await detector.start();
+            if (!isCurrentLifecycle(revision)) {
+                if (wakeDetector === detector) wakeDetector = null;
+                detector.stop?.();
+                return;
+            }
             setStatus('wake_listening', 'Just say “Hey Bean…”');
         } catch (_) {
-            wakeDetector = null;
-            setStatus('error', 'Wake word unavailable');
+            if (wakeDetector === detector) wakeDetector = null;
+            detector?.stop?.();
+            if (isCurrentLifecycle(revision)) setStatus('error', 'Wake word unavailable');
         }
     };
 
     const enable = async () => {
         if (starting) return;
+        const revision = ++lifecycleRevision;
         starting = true;
         enabled = true;
         localStorage.setItem(ENABLED_KEY, 'true');
@@ -94,39 +114,46 @@ function mountPublicBean(root) {
             if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone is unavailable.');
             const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
             permissionStream.getTracks().forEach((track) => track.stop());
+            if (!isCurrentLifecycle(revision)) return;
             starting = false;
             await restartWakeListening();
         } catch (_) {
+            if (!isCurrentLifecycle(revision)) return;
             enabled = false;
+            starting = false;
+            lifecycleRevision += 1;
             localStorage.setItem(ENABLED_KEY, 'false');
             setStatus('error', 'Tap to allow microphone');
         } finally {
-            starting = false;
+            if (lifecycleRevision === revision) starting = false;
         }
     };
 
     async function handleWake(event = {}) {
         if (!enabled || voiceActive || starting) return;
+        const revision = lifecycleRevision;
         stopWakeListening();
         const tail = String(event.tail || extractWakeTail(event.transcript || '', WAKE_PHRASE)).trim();
         setStatus('connecting', 'Hey Bean heard…');
         try {
-            await startVoiceConversation(tail);
+            await startVoiceConversation(tail, revision);
         } catch (_) {
+            if (!isCurrentLifecycle(revision)) return;
             await stopVoiceConversation();
             setStatus('error', 'Bean could not connect');
             window.setTimeout(() => restartWakeListening(), 1500);
         }
     }
 
-    async function startVoiceConversation(wakeTail) {
+    async function startVoiceConversation(wakeTail, revision) {
         const session = await postJson(root.dataset.conversationTokenUrl, {
             client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
             page_path: window.location.pathname,
         });
+        if (!isCurrentLifecycle(revision)) return;
         if (!session?.token) throw new Error('Bean voice did not return a token.');
 
-        conversation = await Conversation.startSession({
+        const nextConversation = await Conversation.startSession({
             conversationToken: session.token,
             connectionType: 'webrtc',
             textOnly: false,
@@ -150,25 +177,29 @@ function mountPublicBean(root) {
                 },
             },
             onConnect: () => {
+                if (!isCurrentLifecycle(revision)) return;
                 voiceActive = true;
                 lastActivityAt = Date.now();
                 setStatus('listening', 'Listening…');
                 window.setTimeout(() => {
-                    if (!conversation || !voiceActive) return;
+                    if (!isCurrentLifecycle(revision) || !conversation || !voiceActive) return;
                     conversation.sendUserMessage?.(wakeTail || WAKE_PHRASE);
                     conversation.sendUserActivity?.();
                 }, 300);
             },
             onDisconnect: () => {
+                if (!isCurrentLifecycle(revision)) return;
                 voiceActive = false;
                 conversation = null;
                 stopIdleTimer();
                 restartWakeListening();
             },
             onError: () => {
+                if (!isCurrentLifecycle(revision)) return;
                 setStatus('error', 'Bean voice hit a problem');
             },
             onMessage: (message = {}) => {
+                if (!isCurrentLifecycle(revision)) return;
                 const role = String(message.role || message.source || '').toLowerCase();
                 const content = String(message.message || message.text || '').trim();
                 if (!content) return;
@@ -180,6 +211,7 @@ function mountPublicBean(root) {
                 }
             },
             onModeChange: ({ mode } = {}) => {
+                if (!isCurrentLifecycle(revision)) return;
                 const nextMode = String(mode || '').toLowerCase();
                 lastActivityAt = Date.now();
                 if (nextMode === 'speaking') {
@@ -191,6 +223,11 @@ function mountPublicBean(root) {
                 }
             },
         });
+        if (!isCurrentLifecycle(revision)) {
+            await nextConversation?.endSession?.().catch(() => {});
+            return;
+        }
+        conversation = nextConversation;
     }
 
     button.addEventListener('click', () => {

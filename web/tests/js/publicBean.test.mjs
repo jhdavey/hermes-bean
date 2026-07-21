@@ -31,6 +31,17 @@ test('landing Bean enables the microphone, listens for the wake phrase, and star
     assert.match(source, /root\.dataset\.messageUrl/);
 });
 
+test('landing Bean can be disabled while wake or voice startup is still pending', () => {
+    assert.match(source, /let lifecycleRevision = 0/);
+    assert.match(source, /const isCurrentLifecycle = \(revision\) => enabled && lifecycleRevision === revision/);
+    assert.match(source, /if \(!isCurrentLifecycle\(revision\)\) \{\s*detector\.stop\?\.\(\);\s*return;/);
+    assert.match(source, /if \(!isCurrentLifecycle\(revision\)\) \{\s*await nextConversation\?\.endSession\?\.\(\)\.catch/);
+
+    const disableBody = source.match(/const disable = async \(\) => \{([\s\S]*?)\n    \};/)?.[1] || '';
+    assert.ok(disableBody.indexOf("setStatus('disabled', 'Tap to enable')") >= 0);
+    assert.ok(disableBody.indexOf("setStatus('disabled', 'Tap to enable')") < disableBody.indexOf('await stopVoiceConversation()'));
+});
+
 test('landing voice uses a dedicated ElevenLabs agent configuration and public Hermes tool', () => {
     assert.match(agentConfig, /ELEVENLABS_LANDING_AGENT_ID/);
     assert.match(agentConfig, /askLandingBean/);
