@@ -2728,18 +2728,18 @@ class BeanTask {
       id: _expectInt(json['id']),
       title: _readTitle(json),
       status: _canonicalTaskStatus(json['status']),
-      dueAt: (json['due_at'] ?? json['dueAt']) as String?,
-      notes: json['notes'] as String?,
+      dueAt: _readString(json['due_at'] ?? json['dueAt']),
+      notes: _readString(json['notes']),
       category:
-          json['category'] as String? ?? (metadata?['category'] as String?),
-      color: json['color'] as String? ?? (metadata?['color'] as String?),
+          _readString(json['category']) ?? _readString(metadata?['category']),
+      color: _readString(json['color']) ?? _readString(metadata?['color']),
       isCritical: _readBool(
         json['is_critical'] ??
             json['isCritical'] ??
             metadata?['is_critical'] ??
             metadata?['isCritical'],
       ),
-      completedAt: (json['completed_at'] ?? json['completedAt']) as String?,
+      completedAt: _readString(json['completed_at'] ?? json['completedAt']),
       metadata: metadata,
       workspaceId: _readIntOrNull(json['workspace_id']),
       linkedWorkspaceIds: _expectList(
@@ -2818,10 +2818,10 @@ class BeanReminder {
     return BeanReminder(
       id: _expectInt(json['id']),
       title: _readTitle(json),
-      dueAt: (json['due_at'] ?? json['remind_at'] ?? json['dueAt']) as String?,
+      dueAt: _readString(json['due_at'] ?? json['remind_at'] ?? json['dueAt']),
       category:
-          json['category'] as String? ?? (metadata?['category'] as String?),
-      color: json['color'] as String? ?? (metadata?['color'] as String?),
+          _readString(json['category']) ?? _readString(metadata?['category']),
+      color: _readString(json['color']) ?? _readString(metadata?['color']),
       isCritical: _readBool(
         json['is_critical'] ??
             json['isCritical'] ??
@@ -2829,7 +2829,7 @@ class BeanReminder {
             metadata?['isCritical'],
       ),
       status: _canonicalReminderStatus(json['status']),
-      completedAt: (json['completed_at'] ?? json['completedAt']) as String?,
+      completedAt: _readString(json['completed_at'] ?? json['completedAt']),
       calendarEventId: json['calendar_event_id'] == null
           ? null
           : _expectInt(json['calendar_event_id']),
@@ -2983,10 +2983,7 @@ class BeanCalendarEvent {
 
   factory BeanCalendarEvent.fromJson(Map<String, Object?> json) {
     final parsedMetadata = _expectMapOrNull(json['metadata']);
-    final canonicalAllDay = json['all_day'];
-    if (canonicalAllDay != null && canonicalAllDay is! bool) {
-      throw FormatException('Expected all_day to be a boolean');
-    }
+    final parsedAllDay = _readBoolOrNull(json['all_day']);
     final isGeneratedOccurrence =
         parsedMetadata?['recurrence_generated'] == true ||
         parsedMetadata?['recurrence_parent_event_id'] != null;
@@ -2994,13 +2991,13 @@ class BeanCalendarEvent {
     final metadata =
         parsedMetadata == null &&
             googleCalendarId == null &&
-            canonicalAllDay == null
+            parsedAllDay == null
         ? null
         : <String, Object?>{
             ...?parsedMetadata,
             if (googleCalendarId != null)
               'google_calendar_id': googleCalendarId,
-            if (canonicalAllDay != null) 'all_day': canonicalAllDay,
+            if (parsedAllDay != null) 'all_day': parsedAllDay,
           };
     return BeanCalendarEvent(
       id: _expectInt(json['id']),
@@ -3009,21 +3006,23 @@ class BeanCalendarEvent {
       linkedWorkspaceIds: _expectList(
         json['linked_workspace_ids'] ?? const [],
       ).map(_readIntOrNull).whereType<int>().toList(),
-      startsAt: (json['starts_at'] ?? json['startsAt']) as String?,
-      endsAt: (json['ends_at'] ?? json['endsAt']) as String?,
-      notes: (json['description'] ?? json['notes']) as String?,
-      location: json['location'] as String?,
+      startsAt: _readString(json['starts_at'] ?? json['startsAt']),
+      endsAt: _readString(json['ends_at'] ?? json['endsAt']),
+      notes: _readString(json['description'] ?? json['notes']),
+      location: _readString(json['location']),
       status: _canonicalCalendarStatus(json['status']),
       category:
-          json['category'] as String? ?? (metadata?['category'] as String?),
-      color: json['color'] as String? ?? (metadata?['color'] as String?),
+          _readString(json['category']) ?? _readString(metadata?['category']),
+      color: _readString(json['color']) ?? _readString(metadata?['color']),
       isCritical: _readBool(
         json['is_critical'] ??
             json['isCritical'] ??
             metadata?['is_critical'] ??
             metadata?['isCritical'],
       ),
-      recurrence: isGeneratedOccurrence ? null : json['recurrence'] as String?,
+      recurrence: isGeneratedOccurrence
+          ? null
+          : _readString(json['recurrence']),
       metadata: metadata,
     );
   }
@@ -3197,6 +3196,23 @@ String _plainTextFromHtml(String? value) {
       .replaceAll('&gt;', '>')
       .replaceAll('&quot;', '"')
       .trim();
+}
+
+bool? _readBoolOrNull(Object? value) {
+  if (value == null) return null;
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  if (value is String) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+    if (normalized == 'true' || normalized == '1' || normalized == 'yes') {
+      return true;
+    }
+    if (normalized == 'false' || normalized == '0' || normalized == 'no') {
+      return false;
+    }
+  }
+  throw FormatException('Expected boolean, got ${value.runtimeType}');
 }
 
 bool _readBool(Object? value) {

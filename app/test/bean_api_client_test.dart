@@ -47,6 +47,63 @@ void main() {
     expect(reminder.title, 'Call home');
     expect(event.title, 'Planning');
   });
+  test('dashboard resource parsers tolerate legacy scalar shapes', () {
+    final task = BeanTask.fromJson({
+      'id': 7,
+      'title': 'File taxes',
+      'status': 'open',
+      'due_at': 1784316000,
+      'notes': 123,
+      'metadata': {'category': 456, 'color': 789},
+      'is_critical': 1,
+      'completed_at': null,
+      'linked_workspace_ids': ['1', 2],
+    });
+    final reminder = BeanReminder.fromJson({
+      'id': 8,
+      'title': 'Call home',
+      'status': 'scheduled',
+      'remind_at': 1784319600,
+      'category': 456,
+      'color': 789,
+      'is_critical': 'true',
+      'linked_workspace_ids': ['1', 2],
+    });
+    final event = BeanCalendarEvent.fromJson({
+      'id': 9,
+      'title': 'Planning',
+      'status': 'scheduled',
+      'starts_at': 1784323200,
+      'ends_at': 1784326800,
+      'description': 123,
+      'location': 456,
+      'all_day': 0,
+      'category': 789,
+      'color': 101112,
+      'recurrence': 131415,
+      'linked_workspace_ids': ['1', 2],
+    });
+
+    expect(task.dueAt, '1784316000');
+    expect(task.notes, '123');
+    expect(task.category, '456');
+    expect(task.color, '789');
+    expect(task.isCritical, isTrue);
+    expect(task.linkedWorkspaceIds, [1, 2]);
+    expect(reminder.dueAt, '1784319600');
+    expect(reminder.category, '456');
+    expect(reminder.color, '789');
+    expect(reminder.isCritical, isTrue);
+    expect(event.startsAt, '1784323200');
+    expect(event.endsAt, '1784326800');
+    expect(event.notes, '123');
+    expect(event.location, '456');
+    expect(event.metadata?['all_day'], isFalse);
+    expect(event.category, '789');
+    expect(event.color, '101112');
+    expect(event.recurrence, '131415');
+  });
+
   test('Flutter Bean API client posts messages to Laravel runtime', () async {
     final requests = <BeanApiRequest>[];
     final client = BeanApiClient(
