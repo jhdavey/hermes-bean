@@ -150,6 +150,9 @@ class LandingBeanTest extends TestCase
             $this->assertStringNotContainsString('bean_dashboard', File::get($home.'/config.yaml'));
             $this->assertStringNotContainsString('session_search', File::get($home.'/config.yaml'));
             $this->assertStringContainsString('memory_enabled: false', File::get($home.'/config.yaml'));
+            $this->assertStringContainsString('AI executive assistant for real life', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('busy professionals and parents', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('Do not position HeyBean as a general-purpose chatbot', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('how Bean works, explore the features or pricing, or take a quick tour', File::get($home.'/skills/heybean-guide/SKILL.md'));
             touch($home.'/.last-used', now()->subHours(3)->timestamp);
             $this->assertSame(1, app(LandingBeanRuntimeService::class)->pruneInactive(2));

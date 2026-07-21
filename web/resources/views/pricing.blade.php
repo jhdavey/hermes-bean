@@ -6,8 +6,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Pricing | HeyBean</title>
-    <meta name="description" content="Choose a HeyBean plan for calendars, tasks, reminders, notes, and workspace coordination.">
+    <title>HeyBean Pricing – AI Executive Assistant for Work and Life</title>
+    <meta name="description" content="Choose a HeyBean plan for organizing calendars, tasks, reminders, and everyday follow-through across work and home.">
     <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="any">
     <link rel="icon" type="image/png" href="{{ asset('favicon.png') }}">
     <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
@@ -111,7 +111,7 @@
         <div class="wrap">
             <div class="section-head">
                 <span class="section-kicker">Pricing</span>
-                <h2>Organized Your Days With Less Effort</h2>
+                <h2>Choose the support your life needs.</h2>
                 <p>{{ $trialDays }}-day Free Trial - cancel anytime</p>
             </div>
 
@@ -132,7 +132,7 @@
             <div class="plans">
                 <article class="plan">
                     <h3>Base</h3>
-                    <p class="for">Best for getting your personal day into one organized place.</p>
+                    <p class="for">Best for one person coordinating work and personal life.</p>
                     <div class="price"><span class="amount"><span class="monthly-price">$4.99</span><span class="yearly-price">$49.99</span></span><span class="period"><span class="monthly-period">/month</span><span class="yearly-period">/year</span></span></div>
                     <ul class="features">
                         <li>2 workspaces for personal and shared planning</li>
@@ -144,15 +144,15 @@
                         <li>Recent calendar and task history</li>
                     </ul>
                     <div class="plan-actions">
-                        <a class="button monthly-link" data-plan-link="base" href="/register?plan=base&billing_interval=monthly">Start {{ $trialDays }} day free trial <span aria-hidden="true">-></span></a>
-                        <a class="button yearly-link" href="/register?plan=base&billing_interval=yearly">Start {{ $trialDays }} day free trial <span aria-hidden="true">-></span></a>
+                        <a class="button monthly-link" data-plan-link="base" href="/register?plan=base&billing_interval=monthly">Create your free beta account <span aria-hidden="true">→</span></a>
+                        <a class="button yearly-link" href="/register?plan=base&billing_interval=yearly">Create your free beta account <span aria-hidden="true">→</span></a>
                     </div>
                     <p class="fine">$0.00 due today, cancel anytime</p>
                 </article>
 
                 <article class="plan popular">
                     <h3>Premium <span class="badge">Most popular</span></h3>
-                    <p class="for">Best for families and power users with busy daily routines.</p>
+                    <p class="for">Best for busy households coordinating more people and responsibilities.</p>
                     <div class="price"><span class="amount"><span class="monthly-price">$19.99</span><span class="yearly-price">$199.99</span></span><span class="period"><span class="monthly-period">/month</span><span class="yearly-period">/year</span></span></div>
                     <ul class="features">
                         <li>5 workspaces for home, work, school, and projects</li>
@@ -165,15 +165,15 @@
                         <li>The best fit for most busy households</li>
                     </ul>
                     <div class="plan-actions">
-                        <a class="button monthly-link" data-plan-link="premium" href="/register?plan=premium&billing_interval=monthly">Start {{ $trialDays }} day free trial <span aria-hidden="true">-></span></a>
-                        <a class="button yearly-link" href="/register?plan=premium&billing_interval=yearly">Start {{ $trialDays }} day free trial <span aria-hidden="true">-></span></a>
+                        <a class="button monthly-link" data-plan-link="premium" href="/register?plan=premium&billing_interval=monthly">Create your free beta account <span aria-hidden="true">→</span></a>
+                        <a class="button yearly-link" href="/register?plan=premium&billing_interval=yearly">Create your free beta account <span aria-hidden="true">→</span></a>
                     </div>
                     <p class="fine">$0.00 due today, cancel anytime</p>
                 </article>
 
                 <article class="plan">
                     <h3>Pro</h3>
-                    <p class="for">Best for people coordinating every workspace and workflow.</p>
+                    <p class="for">Best for complex schedules with more calendars, workspaces, and history.</p>
                     <div class="price"><span class="amount"><span class="monthly-price">$49.99</span><span class="yearly-price">$499.99</span></span><span class="period"><span class="monthly-period">/month</span><span class="yearly-period">/year</span></span></div>
                     <ul class="features">
                         <li>Unlimited workspaces for every area of life</li>
@@ -186,8 +186,8 @@
                         <li>Priority support</li>
                     </ul>
                     <div class="plan-actions">
-                        <a class="button monthly-link" data-plan-link="pro" href="/register?plan=pro&billing_interval=monthly">Start {{ $trialDays }} day free trial <span aria-hidden="true">-></span></a>
-                        <a class="button yearly-link" href="/register?plan=pro&billing_interval=yearly">Start {{ $trialDays }} day free trial <span aria-hidden="true">-></span></a>
+                        <a class="button monthly-link" data-plan-link="pro" href="/register?plan=pro&billing_interval=monthly">Create your free beta account <span aria-hidden="true">→</span></a>
+                        <a class="button yearly-link" href="/register?plan=pro&billing_interval=yearly">Create your free beta account <span aria-hidden="true">→</span></a>
                     </div>
                     <p class="fine">$0.00 due today, cancel anytime</p>
                 </article>
@@ -197,13 +197,14 @@
 
     <section class="cta-band">
         <div class="wrap">
-            <h2>Shaping a larger rollout?</h2>
-            <p class="hero-subhead">For teams or special requirements, contact us and we will help shape the right HeyBean setup.</p>
-            <div class="hero-actions"><a class="button outline" href="mailto:support@heybean.org?subject=HeyBean%20Enterprise">Contact us</a></div>
+            <h2>Let Bean take the next few things off your mind.</h2>
+            <p class="hero-subhead">Start with one request. Bean will help you turn it into an organized plan for what happens next.</p>
+            <div class="hero-actions"><a class="button" href="/register">Create your free beta account <span aria-hidden="true">→</span></a></div>
+            <p class="hero-microcopy">Free during beta</p>
         </div>
     </section>
 
-    <footer class="wrap footer"><span>© {{ date('Y') }} HeyBean. Productivity for real life.</span><span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Use</a> · <a href="/support">Support</a></span></footer>
+    <footer class="wrap footer"><span>© {{ date('Y') }} HeyBean. AI executive assistance for real life.</span><span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Use</a> · <a href="/support">Support</a> · <a href="/pricing">Pricing</a> · <a href="/login">Log In</a></span></footer>
     <script>
         (() => {
             const options = Array.from(document.querySelectorAll('input[data-billing-option]'));

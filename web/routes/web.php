@@ -15,11 +15,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 
-Route::get('/', function () {
-    return view('welcome', [
-        'proofUserCount' => 1122 + User::query()->count(),
-    ]);
-});
+Route::view('/', 'welcome');
 
 Route::view('/pricing', 'pricing')->name('pricing');
 Route::view('/login', 'app')->name('login');

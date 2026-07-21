@@ -3,8 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>HeyBean - AI executive assistance for real life</title>
-    <meta name="description" content="HeyBean helps you manage calendars, tasks, reminders, and daily follow-through from one calm assistant dashboard.">
+    <title>HeyBean – AI Executive Assistant for Work and Life</title>
+    <meta name="description" content="HeyBean helps busy professionals and parents organize calendars, tasks, reminders, and everyday follow-through across work and home.">
     <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="any">
     <link rel="icon" type="image/png" href="{{ asset('favicon.png') }}">
     <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
@@ -19,7 +19,7 @@
         .bean-demo-tap:after{content:"";position:absolute;inset:10px;border-radius:inherit;background:#16a34a}
         .bean-demo-tap.calendar{left:11.2%;top:94.1%}
         .bean-demo-tap.reminders{left:70.2%;top:94.1%}
-        .bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-soft-mask{animation:beanSoftMaskProofCycle 16s linear infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-input:before{animation:beanInputPlaceholderProofCycle 16s linear infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-input-text{animation:beanInputTextProofCycle 16s linear infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-user{animation:beanCardUserProofCycle 16s ease infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-progress{animation:beanCardProgressProofCycle 16s ease infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-result{animation:beanCardResultProofCycle 16s ease infinite both}.bean-proof-screen.calendar{animation:beanCalendarScreenCycle 16s ease infinite both}.bean-proof-screen.reminders{animation:beanReminderScreenCycle 16s ease infinite both}.bean-demo-tap.calendar{animation:beanTapCalendarCycle 16s ease infinite both}.bean-demo-tap.reminders{animation:beanTapReminderCycle 16s ease infinite both}@keyframes beanSoftMaskProofCycle{0%,67.8%,100%{opacity:1}68.6%,96%{opacity:0}}@keyframes beanInputPlaceholderProofCycle{0%,3%,33%,100%{opacity:1}4%,32%{opacity:0}}@keyframes beanInputTextProofCycle{0%,4%{opacity:0;clip-path:inset(0 100% 0 0)}5%{opacity:1;clip-path:inset(0 100% 0 0)}24%,31%{opacity:1;clip-path:inset(0 0 0 0)}32%,100%{opacity:0;clip-path:inset(0 0 0 0)}}@keyframes beanCardUserProofCycle{0%,31%,96%,100%{opacity:0;transform:translateY(8px)}34%,62%{opacity:1;transform:translateY(0)}}@keyframes beanCardProgressProofCycle{0%,39%,52%,100%{opacity:0;transform:translateY(8px)}42%,49%{opacity:1;transform:translateY(0)}}@keyframes beanCardResultProofCycle{0%,50%,67%,100%{opacity:0;transform:translateY(8px)}53%,64%{opacity:1;transform:translateY(0)}}@keyframes beanTapCalendarCycle{0%,61.5%,68%,100%{opacity:0;transform:translate(-50%,-50%) scale(.64);box-shadow:0 0 0 0 rgba(22,163,74,.22)}62.5%,66%{opacity:1;transform:translate(-50%,-50%) scale(1);box-shadow:0 0 0 14px rgba(22,163,74,.08)}64%{opacity:.95;transform:translate(-50%,-50%) scale(.78);box-shadow:0 0 0 23px rgba(22,163,74,0)}}@keyframes beanCalendarScreenCycle{0%,66%,82%,100%{opacity:0;transform:translateX(18px)}68%,78.5%{opacity:1;transform:translateX(0)}}@keyframes beanTapReminderCycle{0%,77.5%,84%,100%{opacity:0;transform:translate(-50%,-50%) scale(.64);box-shadow:0 0 0 0 rgba(22,163,74,.22)}78.5%,82%{opacity:1;transform:translate(-50%,-50%) scale(1);box-shadow:0 0 0 14px rgba(22,163,74,.08)}80%{opacity:.95;transform:translate(-50%,-50%) scale(.78);box-shadow:0 0 0 23px rgba(22,163,74,0)}}@keyframes beanReminderScreenCycle{0%,82%,98%,100%{opacity:0;transform:translateX(18px)}84%,95%{opacity:1;transform:translateX(0)}}@media(prefers-reduced-motion:reduce){.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-soft-mask,.bean-proof-screen.reminders{opacity:1!important;transform:none!important}.bean-proof-screen.calendar,.bean-demo-tap{display:none!important}}
+        .bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-soft-mask{animation:beanSoftMaskProofCycle 16s linear infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-input:before{animation:beanInputPlaceholderProofCycle 16s linear infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-input-text{animation:beanInputTextProofCycle 16s linear infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-user{animation:beanCardUserProofCycle 16s ease infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-progress{animation:beanCardProgressProofCycle 16s ease infinite both}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-result{animation:beanCardResultProofCycle 16s ease infinite both}.bean-proof-screen.calendar{animation:beanCalendarScreenCycle 16s ease infinite both}.bean-proof-screen.reminders{animation:beanReminderScreenCycle 16s ease infinite both}.bean-demo-tap.calendar{animation:beanTapCalendarCycle 16s ease infinite both}.bean-demo-tap.reminders{animation:beanTapReminderCycle 16s ease infinite both}@keyframes beanSoftMaskProofCycle{0%,67.8%,100%{opacity:1}68.6%,96%{opacity:0}}@keyframes beanInputPlaceholderProofCycle{0%,3%,33%,100%{opacity:1}4%,32%{opacity:0}}@keyframes beanInputTextProofCycle{0%,4%{opacity:0;clip-path:inset(0 100% 0 0)}5%{opacity:1;clip-path:inset(0 100% 0 0)}24%,31%{opacity:1;clip-path:inset(0 0 0 0)}32%,100%{opacity:0;clip-path:inset(0 0 0 0)}}@keyframes beanCardUserProofCycle{0%,31%,96%,100%{opacity:0;transform:translateY(8px)}34%,62%{opacity:1;transform:translateY(0)}}@keyframes beanCardProgressProofCycle{0%,39%,52%,100%{opacity:0;transform:translateY(8px)}42%,49%{opacity:1;transform:translateY(0)}}@keyframes beanCardResultProofCycle{0%,50%,67%,100%{opacity:0;transform:translateY(8px)}53%,64%{opacity:1;transform:translateY(0)}}@keyframes beanTapCalendarCycle{0%,61.5%,68%,100%{opacity:0;transform:translate(-50%,-50%) scale(.64);box-shadow:0 0 0 0 rgba(22,163,74,.22)}62.5%,66%{opacity:1;transform:translate(-50%,-50%) scale(1);box-shadow:0 0 0 14px rgba(22,163,74,.08)}64%{opacity:.95;transform:translate(-50%,-50%) scale(.78);box-shadow:0 0 0 23px rgba(22,163,74,0)}}@keyframes beanCalendarScreenCycle{0%,66%,82%,100%{opacity:0;transform:translateX(18px)}68%,78.5%{opacity:1;transform:translateX(0)}}@keyframes beanTapReminderCycle{0%,77.5%,84%,100%{opacity:0;transform:translate(-50%,-50%) scale(.64);box-shadow:0 0 0 0 rgba(22,163,74,.22)}78.5%,82%{opacity:1;transform:translate(-50%,-50%) scale(1);box-shadow:0 0 0 14px rgba(22,163,74,.08)}80%{opacity:.95;transform:translate(-50%,-50%) scale(.78);box-shadow:0 0 0 23px rgba(22,163,74,0)}}@keyframes beanReminderScreenCycle{0%,82%,98%,100%{opacity:0;transform:translateX(18px)}84%,95%{opacity:1;transform:translateX(0)}}@media(prefers-reduced-motion:reduce){.bean-demo-proof-shell,.bean-demo-progress,.bean-demo-tap{display:none!important}.bean-demo-overlay:has(.bean-demo-proof-shell) .bean-demo-soft-mask,.bean-demo-user,.bean-demo-result{opacity:1!important;transform:none!important}}
     </style>
 </head>
 <body>
@@ -41,40 +41,53 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
             </span>
         </div>
-        <h1>Run your day with Bean</h1>
-        <p class="hero-subhead">Easy calendar, task, and reminder management with Bean, your AI assistant for the real-life details that keep slipping between apps.</p>
+        <span class="section-kicker hero-kicker">AI EXECUTIVE ASSISTANCE FOR REAL LIFE</span>
+        <h1>Stop carrying every detail yourself.</h1>
+        <p class="hero-subhead">HeyBean is the AI executive assistant for busy professionals and parents. Tell Bean what needs to happen, and it turns your requests into calendar events, tasks, reminders, and follow-ups across work and home.</p>
         <div class="hero-actions">
-            <a class="button" href="#early-access">Try it for free <span aria-hidden="true">-></span></a>
+            <a class="button" href="/register">Create your free beta account <span aria-hidden="true">→</span></a>
+            <a class="button outline" href="#bean-demo">See Bean in action</a>
         </div>
+        <p class="hero-microcopy">Free during beta <span aria-hidden="true">·</span> You approve important changes</p>
         <div class="agent-pills" aria-label="HeyBean highlights">
-            <a class="button ghost" href="#features">Capture once</a>
-            <a class="button ghost" href="#features">Coordinate home + work</a>
-            <a class="button ghost" href="#features">Approve sensitive changes</a>
-        </div>
-        <div class="proof" aria-label="Seeded HeyBean user proof">
-            <span class="avatar-stack" aria-hidden="true">
-                <img src="{{ asset('images/heybean-review-alex.svg') }}" alt="">
-                <img src="{{ asset('images/heybean-review-maya.svg') }}" alt="">
-                <img src="{{ asset('images/heybean-review-sam.svg') }}" alt="">
-                <img src="{{ asset('images/heybean-review-jordan.svg') }}" alt="">
-                <img src="{{ asset('images/heybean-review-priya.svg') }}" alt="">
-            </span>
-            <span>Used by <strong>{{ number_format($proofUserCount ?? 1122) }}</strong> busy households and operators</span>
+            <a class="button ghost" href="#features">Capture it once</a>
+            <a class="button ghost" href="#features">Coordinate work + home</a>
+            <a class="button ghost" href="#features">Keep the follow-through moving</a>
         </div>
     </main>
 
-    <section class="section" id="features">
+    <section class="section soft problem-section" id="how-it-works">
+        <div class="wrap problem-layout">
+            <div class="problem-copy">
+                <span class="section-kicker" style="text-align:left">THE MENTAL LOAD</span>
+                <h2>Built for people balancing a career, a household, and everything between them.</h2>
+                <p>Work deadlines, appointments, school forms, family plans, errands, and follow-ups rarely live in one place. Your calendar holds some of them. Your messages and notes hold others. And too many still depend on you remembering them.</p>
+                <p class="problem-closing">Bean gives you one assistant for organizing what needs to happen next.</p>
+            </div>
+            <div class="life-load-grid" aria-label="Examples of work and personal responsibilities">
+                <article class="life-load-card">
+                    <span>Work</span>
+                    <strong>Proposal deadline</strong>
+                    <strong>Client follow-up</strong>
+                    <strong>Focus time</strong>
+                </article>
+                <article class="life-load-card">
+                    <span>Life</span>
+                    <strong>Appointment</strong>
+                    <strong>School form</strong>
+                    <strong>Household errand</strong>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <section class="section" id="bean-demo">
         <div class="wrap">
             <div class="feature-row">
                 <div class="feature-copy">
                     <span class="section-kicker" style="text-align:left">BEAN ASSISTANT</span>
-                    <h3>Ask once. Bean organizes the follow-through.</h3>
-                    <p>Tell Bean what needs to happen and it can turn the request into calendar events, tasks, reminders, and a short plan you can approve before anything important changes.</p>
-                    <ul class="feature-list">
-                        <li>Create and update plans from plain language.</li>
-                        <li>Answer schedule questions without digging through screens.</li>
-                        <li>Keep approvals in front of you for sensitive actions.</li>
-                    </ul>
+                    <h3>Ask once. Bean organizes what happens next.</h3>
+                    <p>Bean doesn’t just answer questions. It turns what you tell it into an organized plan using your calendar, tasks, and reminders.</p>
                 </div>
                 <div class="feature-media" aria-label="Animated HeyBean assistant mockup">
                     <div class="feature-demo hero-phone image-mockup hero-device" data-bean-demo>
@@ -85,20 +98,22 @@
                                 <div class="bean-demo-thread">
                                     <div class="bean-demo-card bean-demo-user" data-bean-user>
                                         <strong>You</strong>
-                                        <span data-bean-submitted>Add dinner with Lauren Friday at 7 and remind me to bring the gift.</span>
+                                        <span data-bean-submitted>Block 90 minutes Friday to finish the Acme proposal, add a follow-up with Jordan for Monday, and remind me about Ava’s school form tonight.</span>
                                     </div>
                                     <div class="bean-demo-card bean-demo-progress" data-bean-progress>
                                         <span class="bean-demo-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-                                        <span>Bean is checking your calendar...</span>
+                                        <span>Bean is checking your calendar and organizing the details…</span>
                                     </div>
                                     <div class="bean-demo-card bean-demo-result" data-bean-result>
-                                        <strong>Done - dinner is on your calendar.</strong>
-                                        <div><span>✓</span><span>Friday at 7:00 PM with Lauren</span></div>
-                                        <div><span>✓</span><span>Reminder set: bring the gift before you leave.</span></div>
+                                        <strong>Proposed plan</strong>
+                                        <div><span>✓</span><span>Focus block: Acme proposal — Friday</span></div>
+                                        <div><span>✓</span><span>Task: Follow up with Jordan — Monday</span></div>
+                                        <div><span>✓</span><span>Reminder: Ava’s school form — Tonight</span></div>
+                                        <span class="bean-demo-review">Review and approve</span>
                                     </div>
                                 </div>
                                 <div class="bean-demo-input" data-bean-input>
-                                    <span id="bean-demo-request" class="bean-demo-input-text placeholder">Add dinner with Lauren Friday at 7 and remind me to bring the gift.</span>
+                                    <span id="bean-demo-request" class="bean-demo-input-text placeholder">Block 90 minutes Friday for the Acme proposal…</span>
                                     <span class="bean-demo-send">›</span>
                                 </div>
                                 <div class="bean-demo-proof-shell" aria-hidden="true">
@@ -117,112 +132,102 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </section>
 
+    <section class="section soft" id="features">
+        <div class="wrap">
             <div class="feature-row reverse">
                 <div class="feature-media">
-                    <figure class="mock-card landing-screenshot-card" aria-label="HeyBean scheduling screenshot">
-                        <img class="landing-screenshot" src="{{ asset('images/heybean-landing-scheduling.png') }}?v={{ filemtime(public_path('images/heybean-landing-scheduling.png')) }}" width="614" height="558" loading="lazy" alt="HeyBean scheduling screen showing a full calendar for Sarah's July schedule">
+                    <figure class="mock-card landing-screenshot-card" aria-label="HeyBean task and reminder screenshot">
+                        <img class="landing-screenshot" src="{{ asset('images/heybean-landing-task-management.png') }}?v={{ filemtime(public_path('images/heybean-landing-task-management.png')) }}" width="762" height="434" loading="lazy" alt="HeyBean task view showing work and personal commitments with dates and follow-ups">
                     </figure>
                 </div>
                 <div class="feature-copy">
-                    <span class="section-kicker" style="text-align:left">SCHEDULING</span>
-                    <h3>Keep every calendar moving.</h3>
-                    <p>Bean helps you create, adjust, and review events across the calendars that shape your day, without making scheduling feel like a separate job.</p>
+                    <span class="section-kicker" style="text-align:left">CAPTURE</span>
+                    <h3>Capture it before it slips away.</h3>
+                    <p>Tell Bean what you need to remember while it is still on your mind. Bean can turn a quick request into an event, task, reminder, or simple plan without making you stop and organize everything yourself.</p>
                     <ul class="feature-list">
-                        <li>Daily, weekly, and monthly calendar views.</li>
-                        <li>Shared workspaces for home, work, and recurring plans.</li>
-                        <li>Calendar-aware suggestions before Bean changes anything important.</li>
+                        <li>Create events, tasks, and reminders from plain language.</li>
+                        <li>Capture work and personal commitments in the same conversation.</li>
+                        <li>Ask schedule questions without digging through screens.</li>
                     </ul>
                 </div>
             </div>
 
             <div class="feature-row">
                 <div class="feature-media">
-                    <figure class="mock-card landing-screenshot-card" aria-label="HeyBean task management screenshot">
-                        <img class="landing-screenshot" src="{{ asset('images/heybean-landing-task-management.png') }}?v={{ filemtime(public_path('images/heybean-landing-task-management.png')) }}" width="762" height="434" loading="lazy" alt="HeyBean task management screen showing Sarah's tasks and follow-ups">
+                    <figure class="mock-card landing-screenshot-card" aria-label="HeyBean scheduling screenshot">
+                        <img class="landing-screenshot" src="{{ asset('images/heybean-landing-scheduling.png') }}?v={{ filemtime(public_path('images/heybean-landing-scheduling.png')) }}" width="614" height="558" loading="lazy" alt="HeyBean calendar showing coordinated work and personal plans across the month">
                     </figure>
                 </div>
                 <div class="feature-copy">
-                    <span class="section-kicker" style="text-align:left">TASK MANAGEMENT</span>
-                    <h3>Turn loose ends into managed tasks.</h3>
-                    <p>Capture what needs to happen, let Bean sort the next step, and keep task work connected to the people, dates, and reminders that make it real.</p>
+                    <span class="section-kicker" style="text-align:left">COORDINATION</span>
+                    <h3>Keep work and home moving together.</h3>
+                    <p>Your responsibilities may belong to different parts of your life, but they still compete for the same time and attention. Bean helps you coordinate calendars, tasks, people, and reminders without treating household management like another job.</p>
                     <ul class="feature-list">
-                        <li>Fast capture before small details slip away.</li>
-                        <li>Due dates, owners, and workspace context in one list.</li>
-                        <li>Follow-up reminders when a task needs another nudge.</li>
+                        <li>Daily, weekly, and monthly calendar views.</li>
+                        <li>Shared workspaces for work, home, and recurring plans.</li>
+                        <li>Calendar-aware suggestions before important changes.</li>
+                        <li>Dates, owners, and context connected to each task.</li>
                     </ul>
                 </div>
             </div>
 
             <div class="feature-row reverse">
                 <div class="feature-media">
-                    <figure class="mock-card landing-screenshot-card" aria-label="HeyBean daily control screenshot">
-                        <img class="landing-screenshot" src="{{ asset('images/heybean-landing-daily-control.png') }}?v={{ filemtime(public_path('images/heybean-landing-daily-control.png')) }}" width="598" height="702" loading="lazy" alt="HeyBean daily control screen showing Sarah's events, tasks, reminders, and notes">
+                    <figure class="mock-card landing-screenshot-card" aria-label="HeyBean daily follow-through screenshot">
+                        <img class="landing-screenshot" src="{{ asset('images/heybean-landing-daily-control.png') }}?v={{ filemtime(public_path('images/heybean-landing-daily-control.png')) }}" width="598" height="702" loading="lazy" alt="HeyBean daily view showing events, tasks, reminders, and notes">
                     </figure>
                 </div>
                 <div class="feature-copy">
-                    <span class="section-kicker" style="text-align:left">DAILY CONTROL</span>
-                    <h3>See the day Bean is helping you run.</h3>
-                    <p>HeyBean gives you a simple control layer for what is scheduled, what is due, and what still needs a nudge across home, work, school, errands, and recurring routines.</p>
+                    <span class="section-kicker" style="text-align:left">DAILY FOLLOW-THROUGH</span>
+                    <h3>Open Bean and know what needs your attention.</h3>
+                    <p>See what is scheduled, what is due, and what still needs a nudge across work, family, appointments, errands, and recurring responsibilities.</p>
                     <ul class="feature-list">
-                        <li>One place for calendar events, tasks, and reminders.</li>
-                        <li>Approvals stay visible before sensitive actions happen.</li>
-                        <li>Daily planning that adapts as the day changes.</li>
+                        <li>Events, tasks, and reminders in one daily view.</li>
+                        <li>Follow-up reminders for unfinished commitments.</li>
+                        <li>A clear view of what needs attention next.</li>
+                        <li>Plans that can be adjusted as the day changes.</li>
                     </ul>
                 </div>
             </div>
         </div>
     </section>
 
-    <section class="section soft" id="reviews">
-        <div class="wrap">
-            <div class="section-head">
-                <span class="section-kicker">REVIEWS</span>
-                <h2>HeyBean is loved by busy people who need fewer loose ends.</h2>
-            </div>
-            <div class="reviews-grid">
-                <article class="review-card">
-                    <div class="review-user"><img src="{{ asset('images/heybean-review-alex.svg') }}" alt="Alex Rivera"><div><h3>Alex Rivera</h3><span>Operations lead</span></div></div>
-                    <p>"Bean is the first assistant that feels built around the actual mess of a day. I can capture a request once and trust the reminder will be there later."</p>
-                </article>
-                <article class="review-card">
-                    <div class="review-user"><img src="{{ asset('images/heybean-review-maya.svg') }}" alt="Maya Chen"><div><h3>Maya Chen</h3><span>Parent + founder</span></div></div>
-                    <p>"The household workspace is the win. Dinner, school forms, calendar moves, and follow-ups finally live in one place instead of five apps."</p>
-                </article>
-                <article class="review-card">
-                    <div class="review-user"><img src="{{ asset('images/heybean-review-sam.svg') }}" alt="Sam Patel"><div><h3>Sam Patel</h3><span>Consultant</span></div></div>
-                    <p>"I use Bean to turn quick thoughts into real tasks and events. It saves me from reopening my calendar every time plans change."</p>
-                </article>
-            </div>
+    <section class="section clarity-section">
+        <div class="wrap clarity-grid">
+            <article class="clarity-card">
+                <span class="section-kicker" style="text-align:left">LESS MANUAL ORGANIZING</span>
+                <h2>More than a place to store another list.</h2>
+                <p>A traditional task manager waits for you to enter, organize, and maintain everything. Bean helps turn what you say into structured follow-through—so using the system does not become another responsibility.</p>
+                <strong>You can still review and edit everything. You just do not have to organize every detail manually.</strong>
+            </article>
+            <article class="clarity-card trust-card">
+                <span class="section-kicker" style="text-align:left">YOU STAY IN CONTROL</span>
+                <h2>Bean works for you—and you stay in control.</h2>
+                <p>Review important changes before they happen, see what Bean has organized, and decide which information and services Bean can access.</p>
+                <ul class="feature-list">
+                    <li>Sensitive changes require your approval.</li>
+                    <li>You can review and edit what Bean creates or updates.</li>
+                    <li>You choose which calendars and workspaces Bean can use.</li>
+                    <li>You can disconnect linked calendar services at any time.</li>
+                </ul>
+            </article>
         </div>
     </section>
 
-    <section class="cta-band" id="early-access">
+    <section class="cta-band final-cta">
         <div class="wrap">
-            <h2>Start with one place for the day you actually have.</h2>
-            <p class="hero-subhead">Join the HeyBean beta for product updates, or create an account when you are ready to start.</p>
-            <form class="hero-actions" method="POST" action="{{ route('early-access.store') }}">
-                @csrf
-                <input type="email" name="email" required placeholder="you@example.com" aria-label="Email address" style="min-height:56px;width:min(360px,100%);border:1px solid var(--pb-border);border-radius:9999px;padding:0 20px;font:inherit;color:var(--pb-ink);outline:none">
-                <button class="button" type="submit">Get Early Access <span aria-hidden="true">-></span></button>
-            </form>
-            @if (session('early_access_status'))
-                <p class="hero-subhead" style="font-size:15px"><strong>You are on the list - thank you.</strong></p>
-            @endif
+            <h2>Let Bean take the next few things off your mind.</h2>
+            <p class="hero-subhead">Start with one request. Bean will help you turn it into an organized plan for what happens next.</p>
+            <div class="hero-actions">
+                <a class="button" href="/register">Create your free beta account <span aria-hidden="true">→</span></a>
+            </div>
+            <p class="hero-microcopy">Free during beta</p>
         </div>
     </section>
 
-    @if (session('early_access_status'))
-        <div class="signup-modal" role="dialog" aria-modal="true" aria-labelledby="signup-modal-title">
-            <div class="signup-modal-card">
-                <div class="signup-modal-icon" aria-hidden="true">✓</div>
-                <h2 id="signup-modal-title">Thank you for signing up!</h2>
-                <p>We will send you an email as soon as we can share the app with you. We look forward to your help with making Bean great.</p>
-                <a class="button" href="/">Sounds good</a>
-            </div>
-        </div>
-    @endif
-
-    <footer class="wrap footer"><span>© {{ date('Y') }} HeyBean. AI executive assistance for real life.</span><span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Use</a> · <a href="/support">Support</a></span></footer>
+    <footer class="wrap footer"><span>© {{ date('Y') }} HeyBean. AI executive assistance for real life.</span><span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Use</a> · <a href="/support">Support</a> · <a href="/pricing">Pricing</a> · <a href="/login">Log In</a></span></footer>
 </body>
 </html>
