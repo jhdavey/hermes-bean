@@ -13,6 +13,7 @@ use App\Services\Bean\BeanDashboardToolBridgeService;
 use App\Services\Bean\BeanRuntimeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -238,7 +239,7 @@ PHP);
             'bean_run_id' => $run->id,
             'workspace_id' => $session->workspace_id,
             'client_timezone' => 'America/Chicago',
-            'expires_at' => now()->addMinutes(5)->timestamp,
+            'expires_at' => time() + 300,
         ];
         $context['signature'] = app(BeanDashboardToolBridgeService::class)->sign($context);
 
@@ -252,6 +253,102 @@ PHP);
         $this->assertDatabaseHas('tasks', ['title' => 'from hermes tool bridge', 'user_id' => $user->id]);
         $this->assertDatabaseHas('bean_tool_calls', ['bean_run_id' => $run->id, 'action' => 'task.create', 'status' => 'completed']);
         $this->assertSame(1, Task::where('user_id', $user->id)->count());
+    }
+
+    public function test_dashboard_calendar_date_arguments_are_normalized_to_user_local_day_and_local_times(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-21T00:00:00Z'));
+        $this->apiToken('bean-calendar-local-date@example.com');
+        $user = User::where('email', 'bean-calendar-local-date@example.com')->firstOrFail();
+        $session = app(BeanRuntimeService::class)->createSession($user, null, 'America/New_York');
+        $run = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'status' => 'running',
+            'mode' => 'hermes',
+            'input' => 'calendar date tool test',
+            'metadata' => ['time_context' => app(\App\Services\Bean\BeanTimeContext::class)->forSession($session)],
+            'started_at' => now(),
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Saturday noon event',
+            'status' => 'scheduled',
+            'starts_at' => Carbon::parse('2026-07-25 12:00', 'America/New_York')->utc(),
+            'ends_at' => Carbon::parse('2026-07-25 18:00', 'America/New_York')->utc(),
+        ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Friday event should not leak',
+            'status' => 'scheduled',
+            'starts_at' => Carbon::parse('2026-07-24 12:00', 'America/New_York')->utc(),
+            'ends_at' => Carbon::parse('2026-07-24 18:00', 'America/New_York')->utc(),
+        ]);
+
+        $result = app(BeanDashboardToolBridgeService::class)->execute($this->signedToolContextForTimezone($user, $session, $run, 'America/New_York'), [
+            'action' => 'calendar_event.list',
+            'arguments' => ['date' => '2026-07-25'],
+        ]);
+
+        $this->assertTrue((bool) ($result['ok'] ?? false));
+        $this->assertSame(1, $result['total_count']);
+        $this->assertSame('Saturday noon event', $result['items'][0]['title']);
+        $this->assertSame('2026-07-25T16:00:00+00:00', $result['items'][0]['starts_at']);
+        $this->assertSame('2026-07-25T12:00:00-04:00', $result['items'][0]['starts_at_local']);
+        $this->assertSame('2026-07-25T18:00:00-04:00', $result['items'][0]['ends_at_local']);
+        $this->assertSame('2026-07-25', $result['time_label']);
+        $this->assertSame([
+            ['field' => 'starts_at', 'operator' => 'overlaps_day', 'value' => ['2026-07-25T04:00:00+00:00', '2026-07-26T03:59:59+00:00']],
+        ], $result['filters']);
+
+        $weekdayResult = app(BeanDashboardToolBridgeService::class)->execute($this->signedToolContextForTimezone($user, $session, $run, 'America/New_York'), [
+            'action' => 'calendar_event.list',
+            'arguments' => ['time_label' => 'saturday'],
+        ]);
+        $this->assertSame(1, $weekdayResult['total_count']);
+        $this->assertSame('Saturday noon event', $weekdayResult['items'][0]['title']);
+        $this->assertSame('2026-07-25T12:00:00-04:00', $weekdayResult['items'][0]['starts_at_local']);
+    }
+
+    public function test_task_date_moves_preserve_existing_local_due_time_when_no_new_time_is_explicit(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-20T15:00:00Z'));
+        $this->apiToken('bean-task-preserve-time@example.com');
+        $user = User::where('email', 'bean-task-preserve-time@example.com')->firstOrFail();
+        $session = app(BeanRuntimeService::class)->createSession($user, null, 'America/New_York');
+        $run = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'status' => 'running',
+            'mode' => 'hermes',
+            'input' => 'move overdue task to today',
+            'metadata' => ['time_context' => app(\App\Services\Bean\BeanTimeContext::class)->forSession($session)],
+            'started_at' => now(),
+        ]);
+        $task = Task::create([
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'Preserve my time',
+            'type' => 'todo',
+            'status' => 'open',
+            'due_at' => Carbon::parse('2026-07-11 17:00', 'America/New_York')->utc(),
+        ]);
+
+        $result = app(BeanDashboardToolBridgeService::class)->execute($this->signedToolContextForTimezone($user, $session, $run, 'America/New_York'), [
+            'action' => 'task.update',
+            'arguments' => ['id' => $task->id, 'due_at' => '2026-07-20T23:59:59-04:00'],
+        ]);
+
+        $this->assertTrue((bool) ($result['ok'] ?? false));
+        $this->assertSame('2026-07-20T21:00:00+00:00', $task->refresh()->due_at->toIso8601String());
+        $this->assertSame('2026-07-20T17:00:00-04:00', $result['item']['due_at_local']);
     }
 
     public function test_hermes_dashboard_tool_delete_requires_confirmation_and_can_be_approved(): void
@@ -467,6 +564,15 @@ PHP);
             'starts_at' => now()->timezone('America/New_York')->addHours(2)->utc(),
             'ends_at' => now()->timezone('America/New_York')->addHours(3)->utc(),
         ]);
+        CalendarEvent::create([
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'created_by_user_id' => $user->id,
+            'title' => 'context event this Saturday',
+            'status' => 'scheduled',
+            'starts_at' => now()->timezone('America/New_York')->next(Carbon::SATURDAY)->setTime(12, 0)->utc(),
+            'ends_at' => now()->timezone('America/New_York')->next(Carbon::SATURDAY)->setTime(18, 0)->utc(),
+        ]);
 
         Http::fake(function (HttpRequest $request) {
             $this->assertSame('https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=agent_test&participant_name=bean-user-1', $request->url());
@@ -486,6 +592,9 @@ PHP);
             ->assertJsonPath('data.dashboard_context.today.tasks.0.title', 'context task today')
             ->assertJsonPath('data.dashboard_context.today.reminders.0.title', 'context reminder today')
             ->assertJsonPath('data.dashboard_context.today.calendar_events.0.title', 'context event today')
+            ->assertJsonPath('data.dashboard_context.upcoming.horizon_days', 14)
+            ->assertJsonPath('data.dashboard_context.upcoming.calendar_events.1.title', 'context event this Saturday')
+            ->assertJsonPath('data.dashboard_context.upcoming.calendar_events.1.starts_at_local', now()->timezone('America/New_York')->next(Carbon::SATURDAY)->setTime(12, 0)->toIso8601String())
             ->assertJsonPath('data.dashboard_context.policy.answer_from_context_for_read_only', true)
             ->assertJsonPath('data.dashboard_context.policy.call_askBean_when_missing_or_mutating', true)
             ->assertJsonMissingPath('data.bridge_session_id');
@@ -496,13 +605,18 @@ PHP);
 
     private function signedToolContext(User $user, BeanSession $session, BeanRun $run): array
     {
+        return $this->signedToolContextForTimezone($user, $session, $run, 'America/Chicago');
+    }
+
+    private function signedToolContextForTimezone(User $user, BeanSession $session, BeanRun $run, string $timezone): array
+    {
         $context = [
             'user_id' => $user->id,
             'bean_session_id' => $session->id,
             'bean_run_id' => $run->id,
             'workspace_id' => $session->workspace_id,
-            'client_timezone' => 'America/Chicago',
-            'expires_at' => now()->addMinutes(5)->timestamp,
+            'client_timezone' => $timezone,
+            'expires_at' => time() + 300,
         ];
         $context['signature'] = app(BeanDashboardToolBridgeService::class)->sign($context);
 

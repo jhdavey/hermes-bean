@@ -156,6 +156,9 @@ The tool returns structured JSON. Read it before responding. Confirm only action
 - If the tool returns `ok: false`, explain the failure and ask for the smallest clarification needed.
 - For destructive actions, rely on the tool's confirmation result rather than bypassing it.
 - For dates like today/tomorrow/Tuesday, use natural language in arguments when useful; Laravel TimeContext normalizes the user's timezone.
+- For read/list actions on a specific date, prefer `time_label` with `today`, `tomorrow`, a weekday name, or `YYYY-MM-DD`, or pass `date: "YYYY-MM-DD"`; Laravel expands it to the user's local-day UTC range.
+- Tool results include UTC timestamps and `*_local` timestamp fields. Use `*_local` when wording times for the user.
+- When moving an existing timed task/reminder/event to a different date without an explicitly requested new time, preserve the existing local time by passing `preserve_time: true` or by sending only the new date. If the user explicitly changes the time, pass `time_was_explicit: true`.
 - For source-backed notes, first gather useful source content, then call `note.create` with real content. Never save an empty placeholder note.
 
 ## Memory boundary

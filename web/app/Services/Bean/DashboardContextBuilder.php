@@ -58,6 +58,12 @@ class DashboardContextBuilder
                 'reminders' => $this->remindersForDay($workspaceIds, $workspaceMap, $context, $tomorrow),
                 'calendar_events' => $this->eventsForDay($workspaceIds, $workspaceMap, $context, $tomorrow),
             ],
+            'upcoming' => [
+                'horizon_days' => 14,
+                'tasks' => $this->upcomingTasks($workspaceIds, $workspaceMap, $context, 14),
+                'reminders' => $this->upcomingReminders($workspaceIds, $workspaceMap, $context, 14),
+                'calendar_events' => $this->upcomingEvents($workspaceIds, $workspaceMap, $context, 14),
+            ],
             'overdue' => [
                 'tasks' => $this->overdueTasks($workspaceIds, $workspaceMap, $context),
             ],
@@ -77,7 +83,7 @@ class DashboardContextBuilder
             ->orderBy('due_at')
             ->limit(8)
             ->get()
-            ->map(fn (Task $task): array => $this->taskSummary($task, $workspaceMap))
+            ->map(fn (Task $task): array => $this->taskSummary($task, $workspaceMap, $context))
             ->values()
             ->all();
     }
@@ -95,7 +101,25 @@ class DashboardContextBuilder
             ->orderBy('due_at')
             ->limit(8)
             ->get()
-            ->map(fn (Task $task): array => $this->taskSummary($task, $workspaceMap))
+            ->map(fn (Task $task): array => $this->taskSummary($task, $workspaceMap, $context))
+            ->values()
+            ->all();
+    }
+
+    /** @param array<int> $workspaceIds @param Collection<int|string, string> $workspaceMap @param array{timezone:string} $context */
+    private function upcomingTasks(array $workspaceIds, Collection $workspaceMap, array $context, int $days): array
+    {
+        [$start] = $this->timeContext->todayUtcRange($context);
+        [, $end] = $this->timeContext->localDayUtcRange($this->timeContext->localNow($context)->addDays($days)->toDateString(), $context);
+
+        return Task::query()
+            ->whereIn('workspace_id', $workspaceIds)
+            ->where('status', Task::STATUS_OPEN)
+            ->whereBetween('due_at', [$start, $end])
+            ->orderBy('due_at')
+            ->limit(20)
+            ->get()
+            ->map(fn (Task $task): array => $this->taskSummary($task, $workspaceMap, $context))
             ->values()
             ->all();
     }
@@ -112,13 +136,25 @@ class DashboardContextBuilder
             ->orderBy('remind_at')
             ->limit(8)
             ->get()
-            ->map(fn (Reminder $reminder): array => [
-                'id' => $reminder->id,
-                'title' => $reminder->title,
-                'remind_at' => optional($reminder->remind_at)->toIso8601String(),
-                'workspace_id' => $reminder->workspace_id,
-                'workspace_name' => $workspaceMap->get($reminder->workspace_id),
-            ])
+            ->map(fn (Reminder $reminder): array => $this->reminderSummary($reminder, $workspaceMap, $context))
+            ->values()
+            ->all();
+    }
+
+    /** @param array<int> $workspaceIds @param Collection<int|string, string> $workspaceMap @param array{timezone:string} $context */
+    private function upcomingReminders(array $workspaceIds, Collection $workspaceMap, array $context, int $days): array
+    {
+        [$start] = $this->timeContext->todayUtcRange($context);
+        [, $end] = $this->timeContext->localDayUtcRange($this->timeContext->localNow($context)->addDays($days)->toDateString(), $context);
+
+        return Reminder::query()
+            ->whereIn('workspace_id', $workspaceIds)
+            ->where('status', 'scheduled')
+            ->whereBetween('remind_at', [$start, $end])
+            ->orderBy('remind_at')
+            ->limit(20)
+            ->get()
+            ->map(fn (Reminder $reminder): array => $this->reminderSummary($reminder, $workspaceMap, $context))
             ->values()
             ->all();
     }
@@ -132,19 +168,34 @@ class DashboardContextBuilder
             ->whereIn('workspace_id', $workspaceIds)
             ->where('status', 'scheduled')
             ->where('starts_at', '<=', $end)
-            ->where('ends_at', '>=', $start)
+            ->where(function ($query) use ($start): void {
+                $query->whereNull('ends_at')->orWhere('ends_at', '>=', $start);
+            })
             ->orderBy('starts_at')
             ->limit(8)
             ->get()
-            ->map(fn (CalendarEvent $event): array => [
-                'id' => $event->id,
-                'title' => $event->title,
-                'starts_at' => optional($event->starts_at)->toIso8601String(),
-                'ends_at' => optional($event->ends_at)->toIso8601String(),
-                'location' => $event->location,
-                'workspace_id' => $event->workspace_id,
-                'workspace_name' => $workspaceMap->get($event->workspace_id),
-            ])
+            ->map(fn (CalendarEvent $event): array => $this->eventSummary($event, $workspaceMap, $context))
+            ->values()
+            ->all();
+    }
+
+    /** @param array<int> $workspaceIds @param Collection<int|string, string> $workspaceMap @param array{timezone:string} $context */
+    private function upcomingEvents(array $workspaceIds, Collection $workspaceMap, array $context, int $days): array
+    {
+        [$start] = $this->timeContext->todayUtcRange($context);
+        [, $end] = $this->timeContext->localDayUtcRange($this->timeContext->localNow($context)->addDays($days)->toDateString(), $context);
+
+        return CalendarEvent::query()
+            ->whereIn('workspace_id', $workspaceIds)
+            ->where('status', 'scheduled')
+            ->where('starts_at', '<=', $end)
+            ->where(function ($query) use ($start): void {
+                $query->whereNull('ends_at')->orWhere('ends_at', '>=', $start);
+            })
+            ->orderBy('starts_at')
+            ->limit(30)
+            ->get()
+            ->map(fn (CalendarEvent $event): array => $this->eventSummary($event, $workspaceMap, $context))
             ->values()
             ->all();
     }
@@ -169,7 +220,7 @@ class DashboardContextBuilder
     }
 
     /** @param Collection<int|string, string> $workspaceMap */
-    private function taskSummary(Task $task, Collection $workspaceMap): array
+    private function taskSummary(Task $task, Collection $workspaceMap, array $context): array
     {
         return [
             'id' => $task->id,
@@ -177,9 +228,52 @@ class DashboardContextBuilder
             'type' => $task->type,
             'status' => $task->status,
             'due_at' => optional($task->due_at)->toIso8601String(),
+            'due_at_local' => $this->localIso($task->due_at, $context),
+            'local_date' => $this->localDate($task->due_at, $context),
             'is_critical' => (bool) $task->is_critical,
             'workspace_id' => $task->workspace_id,
             'workspace_name' => $workspaceMap->get($task->workspace_id),
         ];
+    }
+
+    /** @param Collection<int|string, string> $workspaceMap */
+    private function reminderSummary(Reminder $reminder, Collection $workspaceMap, array $context): array
+    {
+        return [
+            'id' => $reminder->id,
+            'title' => $reminder->title,
+            'remind_at' => optional($reminder->remind_at)->toIso8601String(),
+            'remind_at_local' => $this->localIso($reminder->remind_at, $context),
+            'local_date' => $this->localDate($reminder->remind_at, $context),
+            'workspace_id' => $reminder->workspace_id,
+            'workspace_name' => $workspaceMap->get($reminder->workspace_id),
+        ];
+    }
+
+    /** @param Collection<int|string, string> $workspaceMap */
+    private function eventSummary(CalendarEvent $event, Collection $workspaceMap, array $context): array
+    {
+        return [
+            'id' => $event->id,
+            'title' => $event->title,
+            'starts_at' => optional($event->starts_at)->toIso8601String(),
+            'starts_at_local' => $this->localIso($event->starts_at, $context),
+            'ends_at' => optional($event->ends_at)->toIso8601String(),
+            'ends_at_local' => $this->localIso($event->ends_at, $context),
+            'local_date' => $this->localDate($event->starts_at, $context),
+            'location' => $event->location,
+            'workspace_id' => $event->workspace_id,
+            'workspace_name' => $workspaceMap->get($event->workspace_id),
+        ];
+    }
+
+    private function localIso(mixed $value, array $context): ?string
+    {
+        return $value ? $value->copy()->timezone($this->timeContext->timezone($context))->toIso8601String() : null;
+    }
+
+    private function localDate(mixed $value, array $context): ?string
+    {
+        return $value ? $value->copy()->timezone($this->timeContext->timezone($context))->toDateString() : null;
     }
 }

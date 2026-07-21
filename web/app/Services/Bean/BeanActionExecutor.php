@@ -154,6 +154,7 @@ class BeanActionExecutor
         if ($field === null) return $arguments;
         $arguments = $this->normalizeInlineReadFilters($class, $field, $arguments);
         $arguments = $this->normalizeDateOnlyTemporalFilters($arguments, $field, $timeContext);
+        $arguments = $this->normalizeDateShortcutArgument($class, $field, $arguments, $timeContext);
 
         $timeLabel = $this->timeLabel($arguments) ?? $this->inferTemporalLabelFromFilters($class, $field, $arguments, $timeContext);
         if ($timeLabel === null) return $arguments;
@@ -162,8 +163,9 @@ class BeanActionExecutor
         $temporalFilters = $this->temporalFilters($class, $field, $timeLabel, $timeContext);
         if ($temporalFilters === []) return $arguments;
 
+        $temporalFields = $class === CalendarEvent::class ? [$field, 'ends_at'] : [$field];
         $existing = collect(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [])
-            ->filter(fn ($filter): bool => is_array($filter) && ($filter['field'] ?? null) !== $field)
+            ->filter(fn ($filter): bool => is_array($filter) && ! in_array($filter['field'] ?? null, $temporalFields, true))
             ->values()
             ->all();
         $arguments['filters'] = array_merge($existing, $temporalFilters);
@@ -244,6 +246,30 @@ class BeanActionExecutor
         return $arguments;
     }
 
+    private function normalizeDateShortcutArgument(string $class, string $field, array $arguments, array $timeContext): array
+    {
+        $date = $arguments['date'] ?? null;
+        if (! is_string($date) || ! $this->timeContext->isDateOnly($date)) {
+            return $arguments;
+        }
+
+        unset($arguments['date']);
+        $arguments['time_label'] ??= $date;
+        $filters = collect(is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [])
+            ->filter(fn ($filter): bool => is_array($filter) && ! in_array($filter['field'] ?? null, [$field, 'ends_at'], true))
+            ->values()
+            ->all();
+        [$start, $end] = $this->timeContext->localDayUtcRange($date, $timeContext);
+        if ($class === CalendarEvent::class) {
+            $filters[] = ['field' => 'starts_at', 'operator' => 'overlaps_day', 'value' => [$start, $end]];
+        } else {
+            $filters[] = ['field' => $field, 'operator' => 'between', 'value' => [$start, $end]];
+        }
+        $arguments['filters'] = $filters;
+
+        return $arguments;
+    }
+
     private function inferTemporalLabelFromFilters(string $class, string $field, array $arguments, array $timeContext): ?string
     {
         foreach (is_array($arguments['filters'] ?? null) ? $arguments['filters'] : [] as $filter) {
@@ -306,16 +332,45 @@ class BeanActionExecutor
         [$start, $end] = $this->timeContext->todayUtcRange($timeContext);
         if ($timeLabel === 'tomorrow') {
             [$start, $end] = $this->timeContext->tomorrowUtcRange($timeContext);
+        } elseif (($date = $this->dateForTimeLabel($timeLabel, $timeContext)) !== null) {
+            [$start, $end] = $this->timeContext->localDayUtcRange($date, $timeContext);
+        }
+
+        if ($class === CalendarEvent::class && in_array($timeLabel, ['today', 'tomorrow'], true) || ($class === CalendarEvent::class && ($date ?? null) !== null)) {
+            return [
+                ['field' => 'starts_at', 'operator' => 'overlaps_day', 'value' => [$start, $end]],
+            ];
         }
 
         return match ($timeLabel) {
             'overdue' => [['field' => $field, 'operator' => '<', 'value' => $start]],
-            'today' => $class === CalendarEvent::class
-                ? [['field' => $field, 'operator' => 'between', 'value' => [$start, $end]]]
-                : [['field' => $field, 'operator' => '<=', 'value' => $end]],
+            'today' => [['field' => $field, 'operator' => '<=', 'value' => $end]],
             'tomorrow' => [['field' => $field, 'operator' => 'between', 'value' => [$start, $end]]],
-            default => [],
+            default => ($date ?? null) !== null ? [['field' => $field, 'operator' => 'between', 'value' => [$start, $end]]] : [],
         };
+    }
+
+    private function dateForTimeLabel(string $timeLabel, array $timeContext): ?string
+    {
+        $label = strtolower(trim(preg_replace('/[^a-z0-9\- ]+/', ' ', $timeLabel) ?: $timeLabel));
+        $label = trim(preg_replace('/\s+/', ' ', $label) ?: $label);
+        if ($this->timeContext->isDateOnly($label)) return $label;
+        $label = trim(preg_replace('/^(this|coming|next|on|the)\s+/u', '', $label) ?: $label);
+        $weekdays = [
+            'monday' => Carbon::MONDAY,
+            'tuesday' => Carbon::TUESDAY,
+            'wednesday' => Carbon::WEDNESDAY,
+            'thursday' => Carbon::THURSDAY,
+            'friday' => Carbon::FRIDAY,
+            'saturday' => Carbon::SATURDAY,
+            'sunday' => Carbon::SUNDAY,
+        ];
+        if (! array_key_exists($label, $weekdays)) return null;
+        $local = $this->timeContext->localNow($timeContext)->startOfDay();
+        if ($local->dayOfWeek === $weekdays[$label] && str_starts_with($timeLabel, 'this ')) {
+            return $local->toDateString();
+        }
+        return $local->next($weekdays[$label])->toDateString();
     }
 
     private function listResources(string $class, BeanRun $run, string $orderField, array $arguments = []): array
@@ -332,7 +387,7 @@ class BeanActionExecutor
         $totalCount = count($this->collapseLinkedSummaries($this->summaries($totalItems, $accessibleWorkspaceIds)));
         $order = $this->primarySort($class, $arguments, $orderField);
         $items = $query->orderBy($order['field'], $order['direction'])->orderBy('id')->limit($this->limit($arguments))->get();
-        $summaries = $this->collapseLinkedSummaries($this->summaries($items, $accessibleWorkspaceIds));
+        $summaries = $this->collapseLinkedSummaries($this->summaries($items, $accessibleWorkspaceIds, $timeContext));
 
         return [
             'ok' => true,
@@ -369,6 +424,19 @@ class BeanActionExecutor
             $value = $filter['value'] ?? null;
             if (! in_array($field, $allowed, true)) continue;
 
+            if ($class === CalendarEvent::class && $field === 'starts_at' && $operator === 'overlaps_day' && is_array($value) && count($value) >= 2) {
+                $start = $this->filterValue($field, $value[0], $timeContext);
+                $end = $this->filterValue($field, $value[1], $timeContext);
+                $query->whereNotNull('starts_at')
+                    ->where('starts_at', '<=', $end)
+                    ->where(function (Builder $builder) use ($start): void {
+                        $builder->where('ends_at', '>=', $start)
+                            ->orWhere(function (Builder $instant) use ($start): void {
+                                $instant->whereNull('ends_at')->where('starts_at', '>=', $start);
+                            });
+                    });
+                continue;
+            }
             if ($operator === 'between' && is_array($value) && count($value) >= 2) {
                 $query->whereNotNull($field)->whereBetween($field, [$this->filterValue($field, $value[0], $timeContext), $this->filterValue($field, $value[1], $timeContext)]);
                 continue;
@@ -462,7 +530,7 @@ class BeanActionExecutor
 
         return [
             'ok' => true,
-            'items' => $this->summaries($items, $this->workspaceIds($run)),
+            'items' => $this->summaries($items, $this->workspaceIds($run), $timeContext),
             'total_count' => $totalCount,
             'returned_count' => $items->count(),
             'limit' => $this->limit($arguments),
@@ -482,7 +550,7 @@ class BeanActionExecutor
             'ok' => true,
             'context_type' => 'workspace',
             'resource_type' => $this->resourceType($model),
-            'item' => $this->summary($model, $this->workspaceIds($run)),
+            'item' => $this->summary($model, $this->workspaceIds($run), $this->timeContext->forRun($run)),
         ];
     }
 
@@ -531,7 +599,7 @@ class BeanActionExecutor
         $order = $this->primarySort($class, $arguments, $orderField);
         $items = $query->orderBy($order['field'], $order['direction'])->orderBy('id')->limit($this->limit($arguments))->get();
         $accessibleWorkspaceIds = $this->workspaceIds($run);
-        $summaries = $this->collapseLinkedSummaries($this->summaries($items, $accessibleWorkspaceIds));
+        $summaries = $this->collapseLinkedSummaries($this->summaries($items, $accessibleWorkspaceIds, $timeContext));
         $timeLabel = $this->timeLabel($arguments);
         $explanations = [];
         if (($arguments['explain_visibility'] ?? false) || $timeLabel !== null) {
@@ -616,7 +684,7 @@ class BeanActionExecutor
             'completed_at' => ($this->dateOrNull($args['completed_at'] ?? null, $timeContext))?->toIso8601String(),
             'metadata' => $this->metadata($args),
         ]);
-        return ['ok' => true, 'resource_type' => 'task', 'item' => $this->summary($task, $this->workspaceIds($run))];
+        return ['ok' => true, 'resource_type' => 'task', 'item' => $this->summary($task, $this->workspaceIds($run), $timeContext)];
     }
 
     private function createReminder(BeanRun $run, array $args): array
@@ -635,7 +703,7 @@ class BeanActionExecutor
             'status' => $args['status'] ?? 'scheduled',
             'metadata' => $this->metadata($args),
         ]);
-        return ['ok' => true, 'resource_type' => 'reminder', 'item' => $this->summary($reminder, $this->workspaceIds($run))];
+        return ['ok' => true, 'resource_type' => 'reminder', 'item' => $this->summary($reminder, $this->workspaceIds($run), $timeContext)];
     }
 
     private function createCalendarEvent(BeanRun $run, array $args): array
@@ -658,7 +726,7 @@ class BeanActionExecutor
             'recurrence' => (string) ($args['recurrence'] ?? 'none'),
             'metadata' => $this->metadata($args),
         ]);
-        return ['ok' => true, 'resource_type' => 'calendar_event', 'item' => $this->summary($event, $this->workspaceIds($run))];
+        return ['ok' => true, 'resource_type' => 'calendar_event', 'item' => $this->summary($event, $this->workspaceIds($run), $timeContext)];
     }
 
     private function createNote(BeanRun $run, array $args): array
@@ -690,7 +758,7 @@ class BeanActionExecutor
             'is_pinned' => $args['is_pinned'] ?? null,
             'metadata' => $metadata,
         ]);
-        return ['ok' => true, 'resource_type' => 'note', 'item' => $this->summary($note, $this->workspaceIds($run)), 'grounded_from' => $metadata['grounded_from'] ?? null, 'evidence' => $metadata['external_evidence'] ?? null];
+        return ['ok' => true, 'resource_type' => 'note', 'item' => $this->summary($note, $this->workspaceIds($run), $this->timeContext->forRun($run)), 'grounded_from' => $metadata['grounded_from'] ?? null, 'evidence' => $metadata['external_evidence'] ?? null];
     }
 
     private function updateResource(string $class, BeanRun $run, array $args, array $allowed): array
@@ -705,7 +773,7 @@ class BeanActionExecutor
             if (array_key_exists($field, $args)) $updates[$field] = $args[$field];
         }
         foreach (['due_at', 'completed_at', 'remind_at', 'starts_at', 'ends_at'] as $field) {
-            if (array_key_exists($field, $updates)) $updates[$field] = $this->dateOrNull($updates[$field], $timeContext);
+            if (array_key_exists($field, $updates)) $updates[$field] = $this->normalizeTemporalUpdate($model, $field, $updates[$field], $timeContext, $args);
         }
         if ($model instanceof CalendarEvent
             && array_key_exists('starts_at', $updates)
@@ -725,7 +793,7 @@ class BeanActionExecutor
             $model instanceof Note => $this->domainResources->updateNote($user, $model, $updates),
             default => throw new \RuntimeException('Unsupported resource type.'),
         };
-        return ['ok' => true, 'resource_type' => $this->resourceType($updated), 'item' => $this->summary($updated, $this->workspaceIds($run))];
+        return ['ok' => true, 'resource_type' => $this->resourceType($updated), 'item' => $this->summary($updated, $this->workspaceIds($run), $timeContext)];
     }
 
     private function completeResource(string $class, BeanRun $run, array $args, ?string $completedAtField): array
@@ -926,9 +994,40 @@ class BeanActionExecutor
         $timeContext ??= $this->timeContext->forClientTimezone(null, 'app_default');
         return $this->timeContext->parseUserDateTime($value, $timeContext);
     }
+
+    private function normalizeTemporalUpdate(Model $model, string $field, mixed $value, array $timeContext, array $args): ?Carbon
+    {
+        $parsed = $this->dateOrNull($value, $timeContext);
+        if (! $parsed instanceof Carbon) return null;
+        if (! $this->shouldPreserveExistingLocalTime($model, $field, $value, $parsed, $timeContext, $args)) return $parsed;
+
+        $existing = $model->getAttribute($field);
+        if (! $existing instanceof Carbon) return $parsed;
+
+        $timezone = $this->timeContext->timezone($timeContext);
+        $targetLocal = $parsed->copy()->timezone($timezone);
+        $existingLocal = $existing->copy()->timezone($timezone);
+
+        return $targetLocal
+            ->setTime((int) $existingLocal->format('H'), (int) $existingLocal->format('i'), (int) $existingLocal->format('s'))
+            ->utc();
+    }
+
+    private function shouldPreserveExistingLocalTime(Model $model, string $field, mixed $value, Carbon $parsed, array $timeContext, array $args): bool
+    {
+        if (! in_array($field, ['due_at', 'remind_at', 'starts_at'], true)) return false;
+        if (($args['preserve_time'] ?? null) === false || ($args[$field.'_time_explicit'] ?? false) === true || ($args['time_was_explicit'] ?? false) === true) return false;
+        if (($args['preserve_time'] ?? null) === true) return true;
+        if (! $model->getAttribute($field) instanceof Carbon) return false;
+        if ($this->timeContext->isDateOnly($value)) return true;
+
+        $local = $parsed->copy()->timezone($this->timeContext->timezone($timeContext));
+        return in_array($local->format('H:i:s'), ['00:00:00', '23:59:59'], true);
+    }
+
     private function metadata(array $args): array { return is_array($args['metadata'] ?? null) ? $args['metadata'] : ['created_by' => 'bean']; }
 
-    private function summaries($items, ?array $accessibleWorkspaceIds = null): array { return $items->map(fn ($item): array => $this->summary($item, $accessibleWorkspaceIds))->values()->all(); }
+    private function summaries($items, ?array $accessibleWorkspaceIds = null, ?array $timeContext = null): array { return $items->map(fn ($item): array => $this->summary($item, $accessibleWorkspaceIds, $timeContext))->values()->all(); }
 
     private function collapseLinkedSummaries(array $summaries): array
     {
@@ -965,7 +1064,7 @@ class BeanActionExecutor
         return array_values($collapsed);
     }
 
-    private function summary(Model $model, ?array $accessibleWorkspaceIds = null): array
+    private function summary(Model $model, ?array $accessibleWorkspaceIds = null, ?array $timeContext = null): array
     {
         $workspaceNames = $this->workspaceNames($model, $accessibleWorkspaceIds);
         return array_filter([
@@ -976,12 +1075,22 @@ class BeanActionExecutor
             'workspace_name' => $workspaceNames[0] ?? null,
             'workspace_names' => $workspaceNames,
             'due_at' => optional($model->getAttribute('due_at'))->toIso8601String(),
+            'due_at_local' => $this->localIso($model->getAttribute('due_at'), $timeContext),
             'remind_at' => optional($model->getAttribute('remind_at'))->toIso8601String(),
+            'remind_at_local' => $this->localIso($model->getAttribute('remind_at'), $timeContext),
             'starts_at' => optional($model->getAttribute('starts_at'))->toIso8601String(),
+            'starts_at_local' => $this->localIso($model->getAttribute('starts_at'), $timeContext),
             'ends_at' => optional($model->getAttribute('ends_at'))->toIso8601String(),
+            'ends_at_local' => $this->localIso($model->getAttribute('ends_at'), $timeContext),
             'plain_text' => str($model->getAttribute('plain_text') ?? '')->limit(160)->toString(),
             'resource_type' => $this->resourceType($model),
         ], fn ($value) => $value !== null && $value !== '' && $value !== []);
+    }
+
+    private function localIso(mixed $value, ?array $timeContext): ?string
+    {
+        if (! $value instanceof Carbon || $timeContext === null) return null;
+        return $value->copy()->timezone($this->timeContext->timezone($timeContext))->toIso8601String();
     }
 
     private function workspaceNames(Model $model, ?array $accessibleWorkspaceIds = null): array
