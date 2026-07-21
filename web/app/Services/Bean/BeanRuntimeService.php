@@ -19,7 +19,7 @@ class BeanRuntimeService
         private readonly HermesUserHomeService $hermesHomes,
     ) {}
 
-    public function createSession(User $user, ?int $workspaceId = null, ?string $clientTimezone = null): BeanSession
+    public function createSession(User $user, ?int $workspaceId = null, ?string $clientTimezone = null, ?array $clientLocation = null): BeanSession
     {
         $workspace = app(WorkspaceService::class)->resolveWorkspace($user, $workspaceId);
         $timezone = $this->timeContext->rememberUserTimezoneIfMissing($user, $clientTimezone)
@@ -35,6 +35,7 @@ class BeanRuntimeService
                 'wake_phrase' => 'Hey Bean',
                 'client_timezone' => $timeContext['timezone'],
                 'timezone_source' => $timeContext['timezone_source'],
+                'client_location' => $this->normalizeClientLocation($clientLocation),
                 'runtime_driver' => 'hermes',
             ]),
         ]);
@@ -44,11 +45,11 @@ class BeanRuntimeService
         return $session->refresh();
     }
 
-    public function handleMessage(User $user, string $content, ?int $sessionId = null, ?int $workspaceId = null, ?string $clientTimezone = null, ?string $source = null): array
+    public function handleMessage(User $user, string $content, ?int $sessionId = null, ?int $workspaceId = null, ?string $clientTimezone = null, ?string $source = null, ?array $clientLocation = null): array
     {
         $session = $sessionId
             ? BeanSession::query()->where('user_id', $user->id)->findOrFail($sessionId)
-            : $this->createSession($user, $workspaceId, $clientTimezone);
+            : $this->createSession($user, $workspaceId, $clientTimezone, $clientLocation);
 
         if ($clientTimezone !== null && $sessionId) {
             $timezone = $this->timeContext->rememberUserTimezoneIfMissing($user, $clientTimezone)
@@ -59,6 +60,11 @@ class BeanRuntimeService
                 $session->forceFill(['metadata' => [...$metadata, 'client_timezone' => $timeContext['timezone'], 'timezone_source' => $timeContext['timezone_source']]])->save();
                 $session = $session->refresh();
             }
+        }
+
+        if ($clientLocation !== null) {
+            $this->rememberClientLocation($session, $clientLocation);
+            $session = $session->refresh();
         }
 
         if ($this->isAffirmativeConfirmationReply($content) && $sessionId) {
@@ -75,6 +81,17 @@ class BeanRuntimeService
         }
 
         return $this->hermesRuntime->handleMessage($user, $content, $session, $clientTimezone, $source);
+    }
+
+    public function rememberClientLocation(BeanSession $session, ?array $clientLocation): void
+    {
+        $normalized = $this->normalizeClientLocation($clientLocation);
+        if ($normalized === null) {
+            return;
+        }
+
+        $metadata = is_array($session->metadata) ? $session->metadata : [];
+        $session->forceFill(['metadata' => [...$metadata, 'client_location' => $normalized]])->save();
     }
 
     public function approveConfirmation(User $user, int $confirmationId): array
@@ -132,6 +149,35 @@ class BeanRuntimeService
         $lower = trim(preg_replace('/\s+/', ' ', $lower) ?: $lower);
 
         return preg_match('/^(yes|yeah|yep|yup|ok|okay|confirm|confirmed|approve|approved|do it|go ahead|that is right|that\s right)$/u', $lower) === 1;
+    }
+
+    private function normalizeClientLocation(?array $clientLocation): ?array
+    {
+        if (! is_array($clientLocation)) {
+            return null;
+        }
+
+        $latitude = $clientLocation['latitude'] ?? $clientLocation['lat'] ?? null;
+        $longitude = $clientLocation['longitude'] ?? $clientLocation['lng'] ?? $clientLocation['lon'] ?? null;
+        if (! is_numeric($latitude) || ! is_numeric($longitude)) {
+            return null;
+        }
+
+        $latitude = round((float) $latitude, 6);
+        $longitude = round((float) $longitude, 6);
+        if ($latitude < -90 || $latitude > 90 || $longitude < -180 || $longitude > 180) {
+            return null;
+        }
+
+        $accuracy = $clientLocation['accuracy'] ?? null;
+
+        return array_filter([
+            'latitude' => $latitude,
+            'longitude' => $longitude,
+            'accuracy' => is_numeric($accuracy) ? round((float) $accuracy, 2) : null,
+            'source' => trim((string) ($clientLocation['source'] ?? 'browser')) ?: 'browser',
+            'captured_at' => trim((string) ($clientLocation['captured_at'] ?? '')) ?: now()->toIso8601String(),
+        ], static fn ($value): bool => $value !== null && $value !== '');
     }
 
     private function withConversationState(BeanSession $session, array $payload): array

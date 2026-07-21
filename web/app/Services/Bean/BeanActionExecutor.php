@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
 use App\Services\Bean\External\ExternalLookupService;
+use App\Services\Bean\External\OpenMeteoWeatherService;
 use App\Services\Domain\DomainResourceCatalog;
 use App\Services\Domain\DomainResourceService;
 use App\Services\WorkspaceService;
@@ -30,6 +31,7 @@ class BeanActionExecutor
         private readonly DomainResourceService $domainResources,
         private readonly DomainResourceCatalog $resourceCatalog,
         private readonly ExternalLookupService $externalLookup,
+        private readonly OpenMeteoWeatherService $weather,
         private readonly BeanTimeContext $timeContext,
     ) {}
 
@@ -74,6 +76,7 @@ class BeanActionExecutor
                 'resource.relationships' => $this->resourceRelationships($run, $arguments),
                 'time.now' => $this->timeNow($run),
                 'external.lookup' => $this->externalLookup($arguments),
+                'external.weather' => $this->weather->forecast($arguments, $run),
                 'task.list' => $this->listResources(Task::class, $run, 'due_at', $arguments),
                 'task.search' => $this->searchResources(Task::class, $run, $arguments),
                 'task.context' => $this->resourceContext(Task::class, $run, $arguments),

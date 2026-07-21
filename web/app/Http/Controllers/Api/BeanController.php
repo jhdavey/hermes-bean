@@ -31,9 +31,15 @@ class BeanController extends Controller
         $data = $request->validate([
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'client_timezone' => ['nullable', new ClientTimezone],
+            'client_location' => ['nullable', 'array'],
+            'client_location.latitude' => ['required_with:client_location', 'numeric', 'between:-90,90'],
+            'client_location.longitude' => ['required_with:client_location', 'numeric', 'between:-180,180'],
+            'client_location.accuracy' => ['nullable', 'numeric', 'min:0', 'max:100000'],
+            'client_location.source' => ['nullable', 'string', 'max:40'],
+            'client_location.captured_at' => ['nullable', 'date'],
         ]);
 
-        return response()->json(['data' => $this->runtime->createSession($request->user(), $data['workspace_id'] ?? null, $data['client_timezone'] ?? null)], 201);
+        return response()->json(['data' => $this->runtime->createSession($request->user(), $data['workspace_id'] ?? null, $data['client_timezone'] ?? null, $data['client_location'] ?? null)], 201);
     }
 
     public function sessions(Request $request): JsonResponse
@@ -61,10 +67,16 @@ class BeanController extends Controller
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'content' => ['required', 'string', 'max:8000'],
             'client_timezone' => ['nullable', new ClientTimezone],
+            'client_location' => ['nullable', 'array'],
+            'client_location.latitude' => ['required_with:client_location', 'numeric', 'between:-90,90'],
+            'client_location.longitude' => ['required_with:client_location', 'numeric', 'between:-180,180'],
+            'client_location.accuracy' => ['nullable', 'numeric', 'min:0', 'max:100000'],
+            'client_location.source' => ['nullable', 'string', 'max:40'],
+            'client_location.captured_at' => ['nullable', 'date'],
             'source' => ['nullable', 'string', 'in:elevenlabs_agent'],
         ]);
 
-        return response()->json(['data' => $this->runtime->handleMessage($request->user(), $data['content'], $data['session_id'] ?? null, $data['workspace_id'] ?? null, $data['client_timezone'] ?? null, $data['source'] ?? null)]);
+        return response()->json(['data' => $this->runtime->handleMessage($request->user(), $data['content'], $data['session_id'] ?? null, $data['workspace_id'] ?? null, $data['client_timezone'] ?? null, $data['source'] ?? null, $data['client_location'] ?? null)]);
     }
 
     public function run(Request $request, BeanRun $run): JsonResponse
@@ -135,6 +147,12 @@ class BeanController extends Controller
             'session_id' => ['nullable', 'integer', 'exists:bean_sessions,id'],
             'workspace_id' => ['nullable', 'integer', 'exists:workspaces,id'],
             'client_timezone' => ['nullable', new ClientTimezone],
+            'client_location' => ['nullable', 'array'],
+            'client_location.latitude' => ['required_with:client_location', 'numeric', 'between:-90,90'],
+            'client_location.longitude' => ['required_with:client_location', 'numeric', 'between:-180,180'],
+            'client_location.accuracy' => ['nullable', 'numeric', 'min:0', 'max:100000'],
+            'client_location.source' => ['nullable', 'string', 'max:40'],
+            'client_location.captured_at' => ['nullable', 'date'],
         ]);
 
         $apiKey = (string) config('services.elevenlabs.api_key');
@@ -151,7 +169,11 @@ class BeanController extends Controller
                 ->where('id', $data['session_id'])
                 ->firstOrFail();
         } else {
-            $beanSession = $this->runtime->createSession($request->user(), $data['workspace_id'] ?? null, $data['client_timezone'] ?? null);
+            $beanSession = $this->runtime->createSession($request->user(), $data['workspace_id'] ?? null, $data['client_timezone'] ?? null, $data['client_location'] ?? null);
+        }
+        if (isset($data['client_location'])) {
+            $this->runtime->rememberClientLocation($beanSession, $data['client_location']);
+            $beanSession = $beanSession->refresh();
         }
 
         $query = array_filter([

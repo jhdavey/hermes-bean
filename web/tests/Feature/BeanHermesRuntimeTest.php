@@ -77,6 +77,7 @@ PHP);
         $this->assertFileExists($home.'/plugins/bean-dashboard/plugin.yaml');
         $this->assertFileExists($home.'/plugins/bean-dashboard/__init__.py');
         $this->assertStringContainsString('bean_dashboard', File::get($home.'/config.yaml'));
+        $this->assertStringContainsString('external.weather', File::get($home.'/skills/bean-dashboard/SKILL.md'));
         $this->assertStringContainsString('base_url: https://api.openai.com/v1', File::get($home.'/config.yaml'));
         $this->assertStringContainsString('reasoning_effort: none', File::get($home.'/config.yaml'));
         $this->assertStringContainsString('Do not make up private dashboard facts', File::get($home.'/skills/bean-dashboard/SKILL.md'));
@@ -261,6 +262,170 @@ PHP);
         $this->assertDatabaseHas('tasks', ['title' => 'from hermes tool bridge', 'user_id' => $user->id]);
         $this->assertDatabaseHas('bean_tool_calls', ['bean_run_id' => $run->id, 'action' => 'task.create', 'status' => 'completed']);
         $this->assertSame(1, Task::where('user_id', $user->id)->count());
+    }
+
+    public function test_external_weather_uses_browser_coordinates_with_open_meteo_forecast(): void
+    {
+        $this->apiToken('bean-weather-coordinates@example.com');
+        $user = User::where('email', 'bean-weather-coordinates@example.com')->firstOrFail();
+        $session = app(BeanRuntimeService::class)->createSession($user, null, 'America/New_York');
+        $session->forceFill(['metadata' => [
+            ...($session->metadata ?? []),
+            'client_location' => [
+                'latitude' => 35.5951,
+                'longitude' => -82.5515,
+                'accuracy' => 50,
+                'source' => 'browser',
+            ],
+        ]])->save();
+        $run = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'status' => 'running',
+            'mode' => 'hermes',
+            'input' => 'weather tool test',
+            'metadata' => ['time_context' => app(\App\Services\Bean\BeanTimeContext::class)->forSession($session)],
+            'started_at' => now(),
+        ]);
+
+        Http::fake([
+            'https://api.open-meteo.com/v1/forecast*' => Http::response([
+                'latitude' => 35.5951,
+                'longitude' => -82.5515,
+                'timezone' => 'America/New_York',
+                'current_units' => ['temperature_2m' => '°F', 'apparent_temperature' => '°F', 'wind_speed_10m' => 'mp/h'],
+                'current' => [
+                    'time' => '2026-07-21T10:00',
+                    'temperature_2m' => 72.4,
+                    'apparent_temperature' => 73.1,
+                    'relative_humidity_2m' => 64,
+                    'precipitation' => 0.01,
+                    'weather_code' => 2,
+                    'wind_speed_10m' => 4.8,
+                ],
+                'daily_units' => ['temperature_2m_max' => '°F', 'temperature_2m_min' => '°F', 'precipitation_sum' => 'inch'],
+                'daily' => [
+                    'time' => ['2026-07-21', '2026-07-22'],
+                    'weather_code' => [2, 61],
+                    'temperature_2m_max' => [81.2, 78.8],
+                    'temperature_2m_min' => [63.4, 62.1],
+                    'precipitation_probability_max' => [20, 70],
+                    'precipitation_sum' => [0.03, 0.4],
+                ],
+            ]),
+        ]);
+
+        $result = app(BeanDashboardToolBridgeService::class)->execute($this->signedToolContextForTimezone($user, $session, $run, 'America/New_York'), [
+            'action' => 'external.weather',
+            'arguments' => ['forecast_days' => 2],
+        ]);
+
+        $this->assertTrue((bool) ($result['ok'] ?? false));
+        $this->assertSame('external.weather', $result['action']);
+        $this->assertSame('open-meteo', $result['provider']);
+        $this->assertSame('browser', $result['location']['source']);
+        $this->assertSame(35.5951, $result['location']['latitude']);
+        $this->assertSame(-82.5515, $result['location']['longitude']);
+        $this->assertSame('partly cloudy', $result['current']['conditions']);
+        $this->assertSame(72.4, $result['current']['temperature']);
+        $this->assertSame('rain: slight', $result['daily_forecast'][1]['conditions']);
+        $this->assertDatabaseHas('bean_tool_calls', ['bean_run_id' => $run->id, 'action' => 'external.weather', 'status' => 'completed']);
+
+        Http::assertSent(function (HttpRequest $request): bool {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            return str_starts_with($request->url(), 'https://api.open-meteo.com/v1/forecast')
+                && (float) $query['latitude'] === 35.5951
+                && (float) $query['longitude'] === -82.5515
+                && ($query['temperature_unit'] ?? null) === 'fahrenheit'
+                && (int) ($query['forecast_days'] ?? 0) === 2;
+        });
+    }
+
+    public function test_external_weather_geocodes_named_locations_when_browser_location_is_missing(): void
+    {
+        $this->apiToken('bean-weather-geocode@example.com');
+        $user = User::where('email', 'bean-weather-geocode@example.com')->firstOrFail();
+        $session = app(BeanRuntimeService::class)->createSession($user, null, 'America/Chicago');
+        $run = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'status' => 'running',
+            'mode' => 'hermes',
+            'input' => 'weather geocode test',
+            'metadata' => ['time_context' => app(\App\Services\Bean\BeanTimeContext::class)->forSession($session)],
+            'started_at' => now(),
+        ]);
+
+        Http::fake([
+            'https://geocoding-api.open-meteo.com/v1/search*' => Http::response([
+                'results' => [[
+                    'name' => 'Chicago',
+                    'admin1' => 'Illinois',
+                    'country' => 'United States',
+                    'latitude' => 41.85003,
+                    'longitude' => -87.65005,
+                    'timezone' => 'America/Chicago',
+                ]],
+            ]),
+            'https://api.open-meteo.com/v1/forecast*' => Http::response([
+                'latitude' => 41.85,
+                'longitude' => -87.65,
+                'timezone' => 'America/Chicago',
+                'current_units' => ['temperature_2m' => '°F'],
+                'current' => ['time' => '2026-07-21T10:00', 'temperature_2m' => 68.0, 'weather_code' => 3],
+                'daily' => ['time' => ['2026-07-21'], 'weather_code' => [3], 'temperature_2m_max' => [74], 'temperature_2m_min' => [61]],
+            ]),
+        ]);
+
+        $result = app(BeanDashboardToolBridgeService::class)->execute($this->signedToolContextForTimezone($user, $session, $run, 'America/Chicago'), [
+            'action' => 'external.weather',
+            'arguments' => ['location' => 'Chicago, IL', 'units' => 'imperial'],
+        ]);
+
+        $this->assertTrue((bool) ($result['ok'] ?? false));
+        $this->assertSame('geocoded', $result['location']['source']);
+        $this->assertSame('Chicago, Illinois, United States', $result['location']['name']);
+        $this->assertSame('overcast', $result['current']['conditions']);
+    }
+
+    public function test_bean_message_persists_browser_location_for_weather_tools(): void
+    {
+        $usersPath = storage_path('framework/testing/hermes-users-location-'.uniqid());
+        $fakeHermes = storage_path('framework/testing/fake-hermes-location-'.uniqid().'.php');
+        File::ensureDirectoryExists(dirname($fakeHermes));
+        File::put($fakeHermes, <<<'PHP'
+#!/usr/bin/env php
+<?php
+echo "Weather location captured.";
+fwrite(STDERR, "session_id: fake-weather-location-session\n");
+PHP);
+        chmod($fakeHermes, 0755);
+        config([
+            'bean.hermes.binary' => $fakeHermes,
+            'bean.hermes.users_path' => $usersPath,
+            'bean.hermes.provider' => 'custom',
+            'bean.hermes.model' => 'gpt-test',
+        ]);
+
+        $token = $this->apiToken('bean-weather-location-message@example.com');
+        $this->withToken($token)->postJson('/api/bean/messages', [
+            'content' => 'what is the weather?',
+            'client_timezone' => 'America/New_York',
+            'client_location' => [
+                'latitude' => 35.5951,
+                'longitude' => -82.5515,
+                'accuracy' => 25,
+                'source' => 'browser',
+            ],
+        ])->assertOk();
+
+        $session = BeanSession::firstOrFail();
+        $this->assertSame(35.5951, data_get($session->metadata, 'client_location.latitude'));
+        $this->assertSame(-82.5515, data_get($session->metadata, 'client_location.longitude'));
+        $this->assertSame('browser', data_get($session->metadata, 'client_location.source'));
     }
 
     public function test_dashboard_calendar_date_arguments_are_normalized_to_user_local_day_and_local_times(): void

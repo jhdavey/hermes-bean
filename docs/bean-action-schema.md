@@ -34,6 +34,7 @@ The generic wrapper keeps Hermes flexible while Laravel remains strict at execut
 - `dashboard.summary`
 - `time.now`
 - `external.lookup`
+- `external.weather`
 - `resource.query`
 - `resource.relationships`
 - `task.list`, `task.search`, `task.context`, `task.create`, `task.update`, `task.complete`, `task.delete`

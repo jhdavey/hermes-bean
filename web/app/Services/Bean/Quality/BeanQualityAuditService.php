@@ -119,6 +119,9 @@ class BeanQualityAuditService
         if ($toolCalls->where('status', 'completed')->isEmpty() && $this->isAppDataFactualQuestion($lowerUser) && ! $this->isClarifyingAnswer($lowerAnswer)) {
             $flags[] = 'factual_app_data_answer_without_tool_call';
         }
+        if ($this->looksLikeWeatherQuestion($lowerUser) && ! in_array('external.weather', $actions, true) && ! $this->isClarifyingAnswer($lowerAnswer)) {
+            $flags[] = 'weather_request_without_external_weather';
+        }
         if ($this->looksLikeExternalLookupQuestion($lowerUser) && ! in_array('external.lookup', $actions, true)) {
             $flags[] = 'external_lookup_request_without_external_lookup';
         }
@@ -252,8 +255,16 @@ class BeanQualityAuditService
         if (preg_match('/\b(time|date|today[’\']?s date|what day|current time|time is it)\b/u', $lowerUser) === 1) {
             return false;
         }
+        if ($this->looksLikeWeatherQuestion($lowerUser)) {
+            return false;
+        }
 
-        return preg_match('/\b(go online|online|look up|lookup|search the web|search online|internet|web|source|sources|cite|citation|verify|latest|recent reviews|weather|forecast|temperature)\b/u', $lowerUser) === 1;
+        return preg_match('/\b(go online|online|look up|lookup|search the web|search online|internet|web|source|sources|cite|citation|verify|latest|recent reviews)\b/u', $lowerUser) === 1;
+    }
+
+    private function looksLikeWeatherQuestion(string $lowerUser): bool
+    {
+        return preg_match('/\b(weather|forecast|temperature|temp|rain|snow|sleet|hail|storm|wind|windy|umbrella|coat|jacket|degrees|outside|humidity)\b/u', $lowerUser) === 1;
     }
 
     private function looksLikeSubstantivePublicNoteCreation(string $lowerUser): bool

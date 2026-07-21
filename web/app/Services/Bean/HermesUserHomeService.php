@@ -142,6 +142,7 @@ The tool returns structured JSON. Read it before responding. Confirm only action
 - `dashboard.summary`
 - `time.now`
 - `external.lookup`
+- `external.weather`
 - `resource.query`
 - `resource.relationships`
 - `task.list`, `task.search`, `task.context`, `task.create`, `task.update`, `task.complete`, `task.delete`
@@ -159,6 +160,7 @@ The tool returns structured JSON. Read it before responding. Confirm only action
 - For read/list actions on a specific date, prefer `time_label` with `today`, `tomorrow`, a weekday name, or `YYYY-MM-DD`, or pass `date: "YYYY-MM-DD"`; Laravel expands it to the user's local-day UTC range.
 - Tool results include UTC timestamps and `*_local` timestamp fields. Use `*_local` when wording times for the user.
 - When moving an existing timed task/reminder/event to a different date without an explicitly requested new time, preserve the existing local time by passing `preserve_time: true` or by sending only the new date. If the user explicitly changes the time, pass `time_was_explicit: true`.
+- For weather, forecast, temperature, rain/snow, or "do I need an umbrella/coat" requests, call `external.weather` first. It uses browser/user location when available; if location is missing, pass a city/place if the user supplied one or ask for location.
 - For source-backed notes, first gather useful source content, then call `note.create` with real content. Never save an empty placeholder note.
 
 ## Memory boundary
@@ -191,7 +193,7 @@ _SCHEMA = {
     "description": (
         "Use this for any private HeyBean dashboard data or mutations: tasks, reminders, "
         "calendar events, notes, workspace-aware resource queries, dashboard summaries, "
-        "time context, and source-backed external lookup. The tool is scoped to the current "
+        "time context, weather/forecast, and source-backed external lookup. The tool is scoped to the current "
         "authenticated Bean user and returns verifiable structured results."
     ),
     "parameters": {
@@ -199,7 +201,7 @@ _SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "description": "Bean dashboard action, for example task.list, task.create, note.create, dashboard.summary, external.lookup.",
+                "description": "Bean dashboard action, for example task.list, task.create, note.create, dashboard.summary, external.lookup, external.weather.",
             },
             "arguments": {
                 "type": "object",

@@ -432,6 +432,9 @@ export function mountHeyBeanWebApp(mount) {
         }
     }
 
+    let cachedClientLocation = null;
+    let pendingClientLocationPromise = null;
+
     function browserTimezone() {
         try {
             return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
@@ -447,6 +450,58 @@ export function mountHeyBeanWebApp(mount) {
     function clientTimezonePayload() {
         const timezone = userTimezone();
         return timezone ? { client_timezone: timezone } : {};
+    }
+
+    function isWeatherIntent(value) {
+        return /\b(weather|forecast|temperature|temp|rain|snow|sleet|hail|storm|storms|wind|windy|umbrella|coat|jacket|degrees|outside|humidity)\b/i.test(String(value || ''));
+    }
+
+    async function clientLocationPayload(content = '') {
+        if (!isWeatherIntent(content)) return {};
+        const location = await browserLocationForWeather();
+        return location ? { client_location: location } : {};
+    }
+
+    async function browserLocationForWeather() {
+        const cachedAt = Date.parse(cachedClientLocation?.captured_at || '');
+        if (cachedClientLocation && Number.isFinite(cachedAt) && Date.now() - cachedAt < 15 * 60 * 1000) {
+            return cachedClientLocation;
+        }
+        if (!navigator.geolocation?.getCurrentPosition) return null;
+        if (pendingClientLocationPromise) return pendingClientLocationPromise;
+
+        pendingClientLocationPromise = (async () => {
+            try {
+                if (navigator.permissions?.query) {
+                    const permission = await navigator.permissions.query({ name: 'geolocation' }).catch(() => null);
+                    if (permission?.state === 'denied') return null;
+                }
+                const position = await new Promise((resolve, reject) => {
+                    navigator.geolocation.getCurrentPosition(resolve, reject, {
+                        enableHighAccuracy: false,
+                        maximumAge: 15 * 60 * 1000,
+                        timeout: 3500,
+                    });
+                });
+                const latitude = Number(position?.coords?.latitude);
+                const longitude = Number(position?.coords?.longitude);
+                if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+                cachedClientLocation = {
+                    latitude: Number(latitude.toFixed(6)),
+                    longitude: Number(longitude.toFixed(6)),
+                    accuracy: Number.isFinite(position?.coords?.accuracy) ? Math.round(position.coords.accuracy) : undefined,
+                    source: 'browser',
+                    captured_at: new Date().toISOString(),
+                };
+                return cachedClientLocation;
+            } catch (_) {
+                return null;
+            } finally {
+                pendingClientLocationPromise = null;
+            }
+        })();
+
+        return pendingClientLocationPromise;
     }
 
     async function api(path, options = {}) {
@@ -4778,6 +4833,7 @@ export function mountHeyBeanWebApp(mount) {
                     content,
                     source: 'elevenlabs_agent',
                     ...clientTimezonePayload(),
+                    ...await clientLocationPayload(content),
                 },
             });
             state.bean.sessionId = data.session?.id || state.bean.sessionId;
@@ -5310,7 +5366,7 @@ export function mountHeyBeanWebApp(mount) {
             const sessionId = await ensureBeanSession();
             logBeanVoiceLifecycleEvent('bean_request_sent', { label: String(content || '').slice(0, 160) });
             beanVoiceRequestCount += 1;
-            const data = await api('/bean/messages', { method: 'POST', body: { session_id: sessionId, content, ...clientTimezonePayload() } });
+            const data = await api('/bean/messages', { method: 'POST', body: { session_id: sessionId, content, ...clientTimezonePayload(), ...await clientLocationPayload(content) } });
             state.bean.sessionId = data.session?.id || sessionId;
             const runId = data.run?.id || null;
             logBeanVoiceLifecycleEvent('bean_response_received', { run_id: runId, failed: data.run?.status === 'failed', label: String(data.run?.output || '').slice(0, 160) });

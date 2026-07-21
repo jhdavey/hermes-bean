@@ -156,8 +156,12 @@ test('Bean requests include the canonical user timezone for local-day task queri
     assert.match(source, /state\.user\?\.timezone/);
     assert.match(source, /Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/);
     assert.match(source, /client_timezone: timezone/);
+    assert.match(source, /function clientLocationPayload/);
+    assert.match(source, /function isWeatherIntent/);
+    assert.match(source, /navigator\.geolocation\.getCurrentPosition/);
+    assert.match(source, /\.\.\.await clientLocationPayload\(content\)/);
     assert.match(source, /\/bean\/sessions', \{ method: 'POST', body: \{ workspace_id: currentWorkspaceId\(\), \.\.\.clientTimezonePayload\(\) \}/);
-    assert.match(source, /\/bean\/messages', \{ method: 'POST', body: \{ session_id: sessionId, content, \.\.\.clientTimezonePayload\(\) \}/);
+    assert.match(source, /\/bean\/messages', \{ method: 'POST', body: \{ session_id: sessionId, content, \.\.\.clientTimezonePayload\(\), \.\.\.await clientLocationPayload\(content\) \}/);
 });
 
 test('Bean voice starts from wake detection through ElevenLabs Agent client tools', () => {
@@ -244,6 +248,7 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(agentConfigSource, /answer directly from dashboard_context/);
     assert.match(agentConfigSource, /\*_local timestamp fields/);
     assert.match(agentConfigSource, /call askBean/);
+    assert.match(agentConfigSource, /weather\/forecast/);
     assert.match(source, /isLikelyBeanAssistantEcho/);
     assert.match(source, /reason: 'assistant_speaking'/);
     assert.match(source, /beanPendingVoiceResponse/);
