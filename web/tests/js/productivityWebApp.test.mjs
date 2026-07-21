@@ -228,7 +228,7 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(agentConfigSource, /keywords: \['Hey Bean'/);
     assert.match(agentConfigSource, /voiceMaxDurationSeconds = Number\(env\.ELEVENLABS_MAX_DURATION_SECONDS \|\| 60\)/);
     assert.match(agentConfigSource, /voiceInitialWaitSeconds = Number\(env\.ELEVENLABS_INITIAL_WAIT_SECONDS \|\| env\.ELEVENLABS_SILENCE_TIMEOUT_SECONDS \|\| 5\)/);
-    assert.match(agentConfigSource, /voiceSilenceEndCallSeconds = Number\(env\.ELEVENLABS_SILENCE_END_CALL_SECONDS \|\| env\.ELEVENLABS_SILENCE_TIMEOUT_SECONDS \|\| 5\)/);
+    assert.match(agentConfigSource, /voiceSilenceEndCallSeconds = Number\(env\.ELEVENLABS_SILENCE_END_CALL_SECONDS \|\| 12\)/);
     assert.match(agentConfigSource, /turnTimeout: voiceTurnTimeoutSeconds/);
     assert.match(agentConfigSource, /initialWaitTime: voiceInitialWaitSeconds/);
     assert.match(agentConfigSource, /silenceEndCallTimeout: voiceSilenceEndCallSeconds/);
@@ -251,9 +251,11 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(source, /resolvePendingBeanVoiceResponseFromActivity/);
     assert.match(source, /voice_request_error/);
     assert.match(source, /voice_request_timed_out/);
-    assert.match(source, /const beanVoiceIdleCloseMs = 5000/);
+    assert.match(source, /const beanVoiceInitialIdleCloseMs = 5000/);
+    assert.match(source, /const beanVoiceFollowUpIdleCloseMs = 12000/);
     assert.match(source, /function markBeanVoiceActivity/);
-    assert.match(source, /elapsedSinceActivity < beanVoiceIdleCloseMs/);
+    assert.match(source, /beanVoiceRequestCount > 0 \? beanVoiceFollowUpIdleCloseMs : beanVoiceInitialIdleCloseMs/);
+    assert.match(source, /elapsedSinceActivity < idleCloseMs/);
     assert.match(source, /scheduleBeanVoiceIdleClose\(`\$\{reason\}_after_activity`\)/);
     assert.match(source, /markBeanVoiceActivity\(\);\n\s*logBeanVoiceLifecycleEvent\('bean_response_received'/);
     assert.match(source, /markBeanVoiceActivity\(\);\n\s*beanLastSpokenAnswer = content/);

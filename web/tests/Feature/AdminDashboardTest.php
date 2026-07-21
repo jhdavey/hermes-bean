@@ -105,6 +105,8 @@ class AdminDashboardTest extends TestCase
             ->assertJsonPath('data.ai_usage.month.by_source.landing_page.voice_seconds', 30)
             ->assertJsonPath('data.ai_usage.pricing_assumptions.elevenlabs_max_duration_seconds', 60)
             ->assertJsonPath('data.ai_usage.pricing_assumptions.elevenlabs_silence_timeout_seconds', 5)
+            ->assertJsonPath('data.ai_usage.pricing_assumptions.elevenlabs_silence_end_call_seconds', 12)
+            ->assertJsonPath('data.ai_usage.pricing_assumptions.elevenlabs_followup_idle_close_seconds', 12)
             ->assertJsonPath('data.bean_quality.status', 'watch')
             ->assertJsonPath('data.bean_quality.flagged_24h', 1)
             ->assertJsonPath('data.bean_quality.top_quality_flags.0', 'generic_done_after_factual_question');

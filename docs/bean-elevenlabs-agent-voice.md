@@ -53,7 +53,8 @@ Mobile Bean voice is intentionally short-lived:
 
 - ElevenLabs Agent `maxDurationSeconds` defaults to `60`.
 - Initial/silent wait defaults to `5` seconds.
-- Silence-end-call timeout defaults to `5` seconds.
+- Silence-end-call timeout defaults to `12` seconds for authenticated app voice so natural follow-up questions are captured after Bean speaks.
+- The browser client still closes abandoned first-turn sessions after 5 seconds, but gives a 12-second post-response follow-up grace while keeping the total Agent session capped at 60 seconds.
 - Flutter push-to-talk closes an idle Agent session after 5 seconds, but keeps it alive while Bean is still thinking or speaking so responses are not cut off.
 
 A conversation longer than 60 seconds is not blocked at the app level, but it becomes multiple voice sessions: after the Agent session reaches the 60-second cap, the user must hold Bean again to continue. That makes the UX feel more like repeated short voice turns than an always-open call, but it prevents idle WebRTC sessions from burning a large share of the ElevenLabs monthly allowance.

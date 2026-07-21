@@ -251,7 +251,8 @@ export function mountHeyBeanWebApp(mount) {
     let beanPendingWakeTail = '';
     let beanPendingVoiceResponseTimer = 0;
     let beanPendingVoiceResponse = null;
-    const beanVoiceIdleCloseMs = 5000;
+    const beanVoiceInitialIdleCloseMs = 5000;
+    const beanVoiceFollowUpIdleCloseMs = 12000;
     let beanVoiceIdleTimer = 0;
     let beanLastVoiceActivityAt = 0;
     let beanVoiceInputIgnoreUntil = 0;
@@ -2241,7 +2242,7 @@ export function mountHeyBeanWebApp(mount) {
                     ${adminHealthMetricMarkup('Landing voice', formatDuration(landingVoice.voice_seconds || landingVoice.voiceSeconds || 0))}
                     ${adminHealthMetricMarkup('Eleven credits', formatCompactNumber(elevenMonth.credits || 0))}
                 </div>
-                <p class="hb-admin-health-note">Assumes ElevenLabs ${formatCurrency(assumptions.elevenlabs_agent_cost_per_minute_usd || assumptions.elevenlabsAgentCostPerMinuteUsd || 0.08)}/min, ${formatCompactNumber(assumptions.elevenlabs_agent_credits_per_minute || assumptions.elevenlabsAgentCreditsPerMinute || 0)} credits/min, ${escapeHtml(assumptions.elevenlabs_max_duration_seconds || assumptions.elevenlabsMaxDurationSeconds || 60)}s max sessions, and ${escapeHtml(assumptions.elevenlabs_silence_timeout_seconds || assumptions.elevenlabsSilenceTimeoutSeconds || 5)}s silence timeout. OpenAI token counts are estimated until exact provider usage is exposed by the runtime.</p>
+                <p class="hb-admin-health-note">Assumes ElevenLabs ${formatCurrency(assumptions.elevenlabs_agent_cost_per_minute_usd || assumptions.elevenlabsAgentCostPerMinuteUsd || 0.08)}/min, ${formatCompactNumber(assumptions.elevenlabs_agent_credits_per_minute || assumptions.elevenlabsAgentCreditsPerMinute || 0)} credits/min, ${escapeHtml(assumptions.elevenlabs_max_duration_seconds || assumptions.elevenlabsMaxDurationSeconds || 60)}s max sessions, ${escapeHtml(assumptions.elevenlabs_initial_wait_seconds || assumptions.elevenlabsInitialWaitSeconds || 5)}s initial idle, and ${escapeHtml(assumptions.elevenlabs_silence_end_call_seconds || assumptions.elevenlabsSilenceEndCallSeconds || 12)}s follow-up silence. OpenAI token counts are estimated until exact provider usage is exposed by the runtime.</p>
                 <div class="hb-admin-mini-list hb-admin-source-list">
                     <span><strong>Product app</strong><small>${escapeHtml(formatCurrency(productAppMonth.estimated_cost_usd || productAppMonth.estimatedCostUsd || 0))} · ${escapeHtml(formatDuration(productVoice.voice_seconds || productVoice.voiceSeconds || 0))} voice</small></span>
                     <span><strong>Landing page</strong><small>${escapeHtml(formatCurrency(landingMonth.estimated_cost_usd || landingMonth.estimatedCostUsd || 0))} · ${escapeHtml(formatDuration(landingVoice.voice_seconds || landingVoice.voiceSeconds || 0))} voice</small></span>
@@ -4660,18 +4661,19 @@ export function mountHeyBeanWebApp(mount) {
         if (!state.bean.voiceActive || state.bean.busy) return;
         const startedAt = Date.now();
         if (!beanLastVoiceActivityAt) beanLastVoiceActivityAt = startedAt;
+        const idleCloseMs = beanVoiceRequestCount > 0 ? beanVoiceFollowUpIdleCloseMs : beanVoiceInitialIdleCloseMs;
         beanVoiceIdleTimer = window.setTimeout(() => {
             beanVoiceIdleTimer = 0;
             if (!state.bean.voiceActive || state.bean.busy) return;
             const elapsedSinceActivity = Date.now() - Math.max(beanLastVoiceActivityAt, startedAt);
-            if (elapsedSinceActivity < beanVoiceIdleCloseMs) {
+            if (elapsedSinceActivity < idleCloseMs) {
                 scheduleBeanVoiceIdleClose(`${reason}_after_activity`);
                 return;
             }
-            logBeanVoiceLifecycleEvent('voice_idle_timeout_closed', { reason, transport: 'elevenlabs_agent' });
+            logBeanVoiceLifecycleEvent('voice_idle_timeout_closed', { reason, transport: 'elevenlabs_agent', idle_close_ms: idleCloseMs });
             endBeanVoiceConversationForWake('Listening locally for “Hey Bean”');
             render();
-        }, beanVoiceIdleCloseMs);
+        }, idleCloseMs);
     }
 
     function isBeanNonSpeechTranscript(value) {

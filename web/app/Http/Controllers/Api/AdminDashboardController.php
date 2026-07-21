@@ -460,6 +460,9 @@ class AdminDashboardController extends Controller
             'elevenlabs_agent_credits_per_minute' => (float) config('bean.usage.elevenlabs_agent_credits_per_minute', 10000 / 15),
             'elevenlabs_max_duration_seconds' => (int) config('bean.usage.elevenlabs_max_duration_seconds', 60),
             'elevenlabs_silence_timeout_seconds' => (int) config('bean.usage.elevenlabs_silence_timeout_seconds', 5),
+            'elevenlabs_initial_wait_seconds' => (int) config('bean.usage.elevenlabs_initial_wait_seconds', 5),
+            'elevenlabs_silence_end_call_seconds' => (int) config('bean.usage.elevenlabs_silence_end_call_seconds', 12),
+            'elevenlabs_followup_idle_close_seconds' => (int) config('bean.usage.elevenlabs_followup_idle_close_seconds', 12),
             'openai_token_method' => 'estimated until provider token usage is available from the Hermes child process',
         ];
     }
