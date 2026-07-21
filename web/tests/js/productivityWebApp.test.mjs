@@ -184,10 +184,14 @@ test('Bean wake handoff does not submit the first partial wake tail as the comma
     assert.match(source, /beanPendingWakeTailTimer/);
     assert.match(source, /beanPendingWakeTail = wakeTail/);
     assert.match(source, /isLikelyCompleteBeanWakeTail/);
+    assert.match(source, /function beanWakeTailSubmitDelay/);
+    assert.match(source, /weatherIntentHasEnoughLocationContext/);
+    assert.match(source, /return 1300/);
     assert.match(source, /statusText = 'Hey Bean heard — keep talking…'/);
     assert.match(source, /state\.bean\.voiceTranscript = wakeTail/);
     assert.doesNotMatch(source, /sendBeanVoiceTranscript\(wakeTail\)/);
     assert.match(source, /startBeanVoiceSession\(\{ wakeEvent: event, wakeTail \}\)/);
+    assert.match(source, /submitCompleteBeanWakeTail\(wakeTail\)/);
     assert.match(source, /sendUserActivity/);
 });
 

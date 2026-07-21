@@ -391,6 +391,66 @@ PHP);
         $this->assertSame('overcast', $result['current']['conditions']);
     }
 
+    public function test_external_weather_extracts_named_location_from_run_input_when_tool_arguments_are_empty(): void
+    {
+        $this->apiToken('bean-weather-run-input@example.com');
+        $user = User::where('email', 'bean-weather-run-input@example.com')->firstOrFail();
+        $session = app(BeanRuntimeService::class)->createSession($user, null, 'America/New_York');
+        $session->forceFill(['metadata' => [
+            ...($session->metadata ?? []),
+            'client_location' => ['latitude' => 35.5951, 'longitude' => -82.5515, 'source' => 'browser'],
+        ]])->save();
+        $run = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'status' => 'running',
+            'mode' => 'hermes',
+            'input' => "Hey Bean, what's the weather like in Orlando right now?",
+            'metadata' => ['time_context' => app(\App\Services\Bean\BeanTimeContext::class)->forSession($session)],
+            'started_at' => now(),
+        ]);
+
+        Http::fake([
+            'https://geocoding-api.open-meteo.com/v1/search*' => Http::response([
+                'results' => [[
+                    'name' => 'Orlando',
+                    'admin1' => 'Florida',
+                    'country' => 'United States',
+                    'latitude' => 28.5384,
+                    'longitude' => -81.3789,
+                    'timezone' => 'America/New_York',
+                ]],
+            ]),
+            'https://api.open-meteo.com/v1/forecast*' => Http::response([
+                'latitude' => 28.5384,
+                'longitude' => -81.3789,
+                'timezone' => 'America/New_York',
+                'current_units' => ['temperature_2m' => '°F'],
+                'current' => ['time' => '2026-07-21T19:00', 'temperature_2m' => 89.0, 'apparent_temperature' => 96.0, 'weather_code' => 2],
+                'daily' => ['time' => ['2026-07-21'], 'weather_code' => [2], 'temperature_2m_max' => [93], 'temperature_2m_min' => [78]],
+            ]),
+        ]);
+
+        $result = app(BeanDashboardToolBridgeService::class)->execute($this->signedToolContextForTimezone($user, $session, $run, 'America/New_York'), [
+            'action' => 'external.weather',
+            'arguments' => [],
+        ]);
+
+        $this->assertTrue((bool) ($result['ok'] ?? false));
+        $this->assertSame('geocoded', $result['location']['source']);
+        $this->assertSame('Orlando, Florida, United States', $result['location']['name']);
+        $this->assertSame(89.0, $result['current']['temperature']);
+
+        Http::assertSent(function (HttpRequest $request): bool {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            return str_starts_with($request->url(), 'https://api.open-meteo.com/v1/forecast')
+                && (float) $query['latitude'] === 28.5384
+                && (float) $query['longitude'] === -81.3789;
+        });
+    }
+
     public function test_bean_message_persists_browser_location_for_weather_tools(): void
     {
         $usersPath = storage_path('framework/testing/hermes-users-location-'.uniqid());

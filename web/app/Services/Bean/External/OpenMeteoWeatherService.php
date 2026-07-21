@@ -87,24 +87,22 @@ class OpenMeteoWeatherService
 
     private function resolveLocation(array $arguments, BeanRun $run): array
     {
-        $candidate = $this->coordinateCandidate($arguments)
-            ?? $this->coordinateCandidate(data_get($run->metadata, 'client_location'))
+        $argumentCoordinates = $this->coordinateCandidate($arguments);
+        if ($argumentCoordinates !== null) {
+            return $this->coordinateLocation($argumentCoordinates, $run);
+        }
+
+        $locationName = $this->locationNameFromArguments($arguments)
+            ?: $this->extractNamedLocationFromText((string) $run->input);
+        if ($locationName !== '') {
+            return $this->geocodeLocation($locationName);
+        }
+
+        $candidate = $this->coordinateCandidate(data_get($run->metadata, 'client_location'))
             ?? $this->coordinateCandidate(data_get($run->session?->metadata ?? [], 'client_location'));
 
         if ($candidate !== null) {
-            return [
-                'ok' => true,
-                'source' => $candidate['source'] ?? 'browser',
-                'latitude' => $candidate['latitude'],
-                'longitude' => $candidate['longitude'],
-                'accuracy' => $candidate['accuracy'] ?? null,
-                'timezone' => data_get($run->metadata, 'time_context.timezone'),
-            ];
-        }
-
-        $locationName = trim((string) ($arguments['location'] ?? $arguments['place'] ?? $arguments['city'] ?? $arguments['query'] ?? ''));
-        if ($locationName !== '') {
-            return $this->geocodeLocation($locationName);
+            return $this->coordinateLocation($candidate, $run);
         }
 
         return [
@@ -116,6 +114,62 @@ class OpenMeteoWeatherService
                 'timezone' => data_get($run->metadata, 'time_context.timezone'),
             ],
         ];
+    }
+
+    private function coordinateLocation(array $candidate, BeanRun $run): array
+    {
+        return [
+            'ok' => true,
+            'source' => $candidate['source'] ?? 'browser',
+            'latitude' => $candidate['latitude'],
+            'longitude' => $candidate['longitude'],
+            'accuracy' => $candidate['accuracy'] ?? null,
+            'timezone' => data_get($run->metadata, 'time_context.timezone'),
+        ];
+    }
+
+    private function locationNameFromArguments(array $arguments): string
+    {
+        return trim((string) ($arguments['location'] ?? $arguments['place'] ?? $arguments['city'] ?? $arguments['query'] ?? ''));
+    }
+
+    private function extractNamedLocationFromText(string $text): string
+    {
+        $normalized = trim(preg_replace('/\s+/u', ' ', $text) ?: $text);
+        if ($normalized === '') {
+            return '';
+        }
+
+        $patterns = [
+            '/\b(?:weather|forecast|temperature|temp|rain|snow|sleet|hail|storm|storms|wind|windy|humidity|degrees|outside)\b.*?\b(?:in|for|near|around|at)\s+(.+?)\s*(?:\?|!|\.)?$/iu',
+            '/\b(?:in|for|near|around|at)\s+(.+?)\s*(?:\?|!|\.)?$/iu',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $normalized, $matches) !== 1) {
+                continue;
+            }
+
+            $location = $this->cleanExtractedLocation((string) ($matches[1] ?? ''));
+            if ($location !== '') {
+                return $location;
+            }
+        }
+
+        return '';
+    }
+
+    private function cleanExtractedLocation(string $location): string
+    {
+        $location = trim(preg_replace('/\s+/u', ' ', $location) ?: $location, " \t\n\r\0\x0B,.;:!?\"'“”‘’");
+        $location = preg_replace('/\s+\b(?:right now|currently|now|today|tonight|tomorrow|this morning|this afternoon|this evening|this week|this weekend)\b.*$/iu', '', $location) ?: $location;
+        $location = trim($location, " \t\n\r\0\x0B,.;:!?\"'“”‘’");
+
+        if (preg_match('/^(?:here|outside|near me|my location|current location|me|home)$/iu', $location) === 1) {
+            return '';
+        }
+
+        return mb_substr($location, 0, 120);
     }
 
     private function coordinateCandidate(mixed $value): ?array

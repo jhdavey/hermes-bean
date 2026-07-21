@@ -249,6 +249,7 @@ export function mountHeyBeanWebApp(mount) {
     let beanRealtimeSessionPromise = null;
     let beanPendingWakeTailTimer = 0;
     let beanPendingWakeTail = '';
+    let beanSubmittedWakeTail = '';
     let beanPendingVoiceResponseTimer = 0;
     let beanPendingVoiceResponse = null;
     const beanVoiceInitialIdleCloseMs = 5000;
@@ -4589,7 +4590,7 @@ export function mountHeyBeanWebApp(mount) {
                             const isFinal = Array.from(event.results || [])
                                 .slice(event.resultIndex || 0)
                                 .some((result) => result?.isFinal);
-                            const delay = isFinal || isLikelyCompleteBeanWakeTail(tail) ? 450 : 950;
+                            const delay = beanWakeTailSubmitDelay(tail, isFinal);
                             wakeTimer = window.setTimeout(fireWake, delay);
                         } else if (!wakeTimer) {
                             wakeTimer = window.setTimeout(fireWake, 700);
@@ -4659,6 +4660,18 @@ export function mountHeyBeanWebApp(mount) {
             return words.length >= 4 || /\b(today|tomorrow|weather|calendar|task|tasks|todo|reminder|note|workspace|recipe|card|date|time)\b/u.test(normalized);
         }
         return words.length >= 5;
+    }
+
+    function weatherIntentHasEnoughLocationContext(value) {
+        const normalized = String(value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+        if (!isWeatherIntent(normalized)) return true;
+        return /\b(here|outside|near me|my location|current location|in|for|near|around|at)\b/u.test(normalized);
+    }
+
+    function beanWakeTailSubmitDelay(tail, isFinal = false) {
+        if (isFinal) return 250;
+        if (isWeatherIntent(tail) && !weatherIntentHasEnoughLocationContext(tail)) return 1300;
+        return isLikelyCompleteBeanWakeTail(tail) ? 900 : 1300;
     }
 
     function clearBeanPendingWakeTail() {
@@ -5036,6 +5049,25 @@ export function mountHeyBeanWebApp(mount) {
         probeBeanElevenLabsOutputVolume('audio_chunk');
     }
 
+    function submitCompleteBeanWakeTail(wakeTail) {
+        const content = String(wakeTail || '').trim();
+        if (!content || !beanElevenLabsConversation || !state.bean.voiceActive) return false;
+        if (beanSubmittedWakeTail === content) return true;
+        beanSubmittedWakeTail = content;
+        beanVoiceClientTurnId = newBeanVoiceEventId('voice-turn');
+        state.bean.voiceTranscript = content;
+        clearBeanVoiceIdleTimer();
+        logBeanVoiceLifecycleEvent('wake_tail_submitted', { label: content.slice(0, 160), transport: 'elevenlabs_agent' });
+        beanElevenLabsConversation?.sendUserMessage?.(content);
+        beanElevenLabsConversation?.sendUserActivity?.();
+        window.setTimeout(() => {
+            if (!state.bean.voiceActive || state.bean.busy || beanVoiceRequestCount > 0 || beanPendingVoiceResponse) return;
+            logBeanVoiceLifecycleEvent('wake_tail_direct_fallback_request_sent', { label: content.slice(0, 160), transport: 'elevenlabs_agent' });
+            askBeanFromElevenLabsAgent({ message: content, source: 'wake_tail_direct_fallback' }).catch(() => {});
+        }, 2500);
+        return true;
+    }
+
     async function startBeanVoiceSession(options = {}) {
         if (!navigator.mediaDevices?.getUserMedia || !Conversation?.startSession) {
             state.bean.error = 'Voice requires a browser with microphone support and the ElevenLabs realtime client.';
@@ -5106,12 +5138,8 @@ export function mountHeyBeanWebApp(mount) {
 
                     if (wakeTail && isLikelyCompleteBeanWakeTail(wakeTail)) {
                         window.setTimeout(() => {
-                            if (!beanElevenLabsConversation || !state.bean.voiceActive) return;
-                            beanVoiceClientTurnId = newBeanVoiceEventId('voice-turn');
-                            logBeanVoiceLifecycleEvent('wake_tail_submitted', { label: wakeTail.slice(0, 160), transport: 'elevenlabs_agent' });
-                            beanElevenLabsConversation?.sendUserMessage?.(wakeTail);
-                            beanElevenLabsConversation?.sendUserActivity?.();
-                        }, 350);
+                            submitCompleteBeanWakeTail(wakeTail);
+                        }, beanWakeTailSubmitDelay(wakeTail, true));
                     }
                 },
                 onDisconnect: (details) => {
@@ -5148,6 +5176,9 @@ export function mountHeyBeanWebApp(mount) {
                 onStatusChange: ({ status } = {}) => {
                     if (status === 'connected') {
                         state.bean.statusText = 'Listening — speak to Bean';
+                        if (wakeTail && isLikelyCompleteBeanWakeTail(wakeTail)) {
+                            window.setTimeout(() => submitCompleteBeanWakeTail(wakeTail), beanWakeTailSubmitDelay(wakeTail, true));
+                        }
                         render();
                     }
                 },
@@ -5164,6 +5195,7 @@ export function mountHeyBeanWebApp(mount) {
     function stopBeanVoiceSession(options = {}) {
         const wasActive = state.bean.voiceActive || state.bean.voiceConnecting;
         clearBeanPendingWakeTail();
+        beanSubmittedWakeTail = '';
         clearBeanPendingVoiceResponse();
         clearBeanVoiceIdleTimer();
         beanVoiceRequestCount = 0;
