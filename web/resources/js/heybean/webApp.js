@@ -232,6 +232,7 @@ export function mountHeyBeanWebApp(mount) {
     const dailyStickyNoteAutosaveTimers = new Map();
     const dailyStickyNoteSaveInFlight = new Set();
     const pendingDailyStickyNoteBodies = new Map();
+    const dailyStickyNoteStatusFadeTimers = new Map();
     const dailyStickyNoteAutosaveDelay = 500;
     let workspaceSwitchGeneration = 0;
     let beanEventAbort = null;
@@ -3118,15 +3119,12 @@ export function mountHeyBeanWebApp(mount) {
         const loaded = state.dailyStickyNoteLoadedKeys.has(key);
         const loading = state.dailyStickyNoteLoadingKeys.has(key) || !loaded;
         const content = state.dailyStickyNotes.get(key) || '';
-        const status = state.dailyStickyNoteStatuses.get(key) || (loading ? 'Loading…' : 'Autosaves');
+        const status = state.dailyStickyNoteStatuses.get(key) || '';
         const dateLabel = dayLabel(parseLocalDate(date));
         return `
             <div class="hb-daily-sticky-note ${loading ? 'hb-daily-sticky-note-loading' : ''}" data-daily-sticky-note-shell>
-                <div class="hb-daily-sticky-note-head">
-                    <label for="hb-daily-sticky-note">Sticky note</label>
-                    <span role="status" aria-live="polite" data-daily-sticky-note-status>${escapeHtml(status)}</span>
-                </div>
-                <textarea id="hb-daily-sticky-note" data-daily-sticky-note data-sticky-note-key="${escapeAttr(key)}" data-sticky-note-date="${escapeAttr(date)}" data-sticky-note-workspace="${escapeAttr(workspaceId)}" maxlength="12000" aria-label="${escapeAttr(`Sticky note for ${dateLabel}`)}" placeholder="Quick note for ${escapeAttr(dateLabel)}…" ${loading ? 'disabled' : ''}>${escapeHtml(content)}</textarea>
+                <textarea id="hb-daily-sticky-note" data-daily-sticky-note data-sticky-note-key="${escapeAttr(key)}" data-sticky-note-date="${escapeAttr(date)}" data-sticky-note-workspace="${escapeAttr(workspaceId)}" maxlength="12000" aria-label="${escapeAttr(`Sticky note for ${dateLabel}`)}" placeholder="Sticky Note" ${loading ? 'disabled' : ''}>${escapeHtml(content)}</textarea>
+                <span class="hb-daily-sticky-note-status ${status ? 'hb-daily-sticky-note-status-visible' : ''} ${status.includes('Couldn’t') ? 'hb-daily-sticky-note-status-error' : ''}" role="status" aria-live="polite" data-daily-sticky-note-status>${escapeHtml(status)}</span>
             </div>`;
     }
 
@@ -5951,7 +5949,7 @@ export function mountHeyBeanWebApp(mount) {
             const note = await api(workspaceScopedPath(`/daily-sticky-note?date=${encodeURIComponent(date)}`, workspaceId));
             state.dailyStickyNotes.set(key, String(note?.content || ''));
             state.dailyStickyNoteLoadedKeys.add(key);
-            state.dailyStickyNoteStatuses.set(key, note?.updated_at ? 'Saved' : 'Autosaves');
+            state.dailyStickyNoteStatuses.set(key, '');
             updateDailyStickyNoteDom(key);
         } catch (error) {
             state.dailyStickyNoteStatuses.set(key, 'Couldn’t load');
@@ -5967,7 +5965,7 @@ export function mountHeyBeanWebApp(mount) {
         textarea.value = state.dailyStickyNotes.get(key) || '';
         textarea.disabled = false;
         textarea.closest('[data-daily-sticky-note-shell]')?.classList.remove('hb-daily-sticky-note-loading');
-        setDailyStickyNoteStatus(key, state.dailyStickyNoteStatuses.get(key) || 'Autosaves');
+        setDailyStickyNoteStatus(key, state.dailyStickyNoteStatuses.get(key) || '');
     }
 
     function scheduleDailyStickyNoteAutosave(textarea, immediate = false) {
@@ -5981,7 +5979,7 @@ export function mountHeyBeanWebApp(mount) {
             workspace_id: Number(workspaceId),
         };
         state.dailyStickyNotes.set(key, body.content);
-        setDailyStickyNoteStatus(key, 'Saving…');
+        setDailyStickyNoteStatus(key, 'Saving');
         const queued = dailyStickyNoteAutosaveTimers.get(key);
         if (queued?.timer) window.clearTimeout(queued.timer);
         const timer = window.setTimeout(
@@ -6031,7 +6029,7 @@ export function mountHeyBeanWebApp(mount) {
             const pendingBody = pendingDailyStickyNoteBodies.get(key);
             pendingDailyStickyNoteBodies.delete(key);
             if (pendingBody) {
-                setDailyStickyNoteStatus(key, 'Saving…');
+                setDailyStickyNoteStatus(key, 'Saving');
                 saveDailyStickyNotePayload(key, pendingBody);
             } else if (saveFailed && !options.keepalive) {
                 setDailyStickyNoteStatus(key, 'Couldn’t save');
@@ -6040,16 +6038,36 @@ export function mountHeyBeanWebApp(mount) {
             } else if (!saveFailed) {
                 const newerSaveQueued = dailyStickyNoteAutosaveTimers.has(key)
                     || state.dailyStickyNotes.get(key) !== body.content;
-                setDailyStickyNoteStatus(key, newerSaveQueued ? 'Saving…' : 'Saved');
+                setDailyStickyNoteStatus(key, newerSaveQueued ? 'Saving' : 'Saved');
             }
         }
     }
 
     function setDailyStickyNoteStatus(key, text) {
         state.dailyStickyNoteStatuses.set(key, text);
+        const existingTimer = dailyStickyNoteStatusFadeTimers.get(key);
+        if (existingTimer) window.clearTimeout(existingTimer);
+        dailyStickyNoteStatusFadeTimers.delete(key);
+
         const textarea = mount.querySelector('[data-daily-sticky-note]');
         const status = mount.querySelector('[data-daily-sticky-note-status]');
-        if (textarea?.dataset?.stickyNoteKey === key && status) status.textContent = text;
+        if (textarea?.dataset?.stickyNoteKey === key && status) {
+            status.textContent = text;
+            status.classList.toggle('hb-daily-sticky-note-status-visible', Boolean(text));
+            status.classList.toggle('hb-daily-sticky-note-status-error', text.includes('Couldn’t'));
+        }
+
+        if (text !== 'Saved') return;
+        const timer = window.setTimeout(() => {
+            state.dailyStickyNoteStatuses.set(key, '');
+            dailyStickyNoteStatusFadeTimers.delete(key);
+            const currentTextarea = mount.querySelector('[data-daily-sticky-note]');
+            const currentStatus = mount.querySelector('[data-daily-sticky-note-status]');
+            if (currentTextarea?.dataset?.stickyNoteKey === key && currentStatus) {
+                currentStatus.classList.remove('hb-daily-sticky-note-status-visible');
+            }
+        }, 10000);
+        dailyStickyNoteStatusFadeTimers.set(key, timer);
     }
 
     function setNoteSaveStatus(text) {

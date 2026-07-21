@@ -653,46 +653,24 @@
 }
 
 .hb-daily-sticky-note {
-    display: grid;
-    gap: 7px;
-    padding: 10px;
+    position: relative;
+    min-height: 165px;
     border-top: 1px solid var(--hb-border);
-    background: color-mix(in srgb, var(--hb-warning) 14%, var(--hb-surface));
-}
-
-.hb-daily-sticky-note-head {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-}
-
-.hb-daily-sticky-note-head label {
-    color: var(--hb-text);
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1.2;
-}
-
-.hb-daily-sticky-note-head span {
-    color: var(--hb-muted);
-    font-size: 10px;
-    font-weight: 600;
-    line-height: 1.2;
+    background: var(--hb-surface);
 }
 
 .hb-daily-sticky-note textarea {
+    display: block;
     width: 100%;
-    height: 104px;
-    min-height: 104px;
+    height: 165px;
+    min-height: 165px;
     resize: none;
-    border: 1px solid color-mix(in srgb, var(--hb-warning) 32%, var(--hb-border));
-    border-radius: 8px;
+    border: 0;
+    border-radius: 0;
     outline: 0;
-    background: color-mix(in srgb, var(--hb-warning) 9%, var(--hb-surface));
+    background: transparent;
     color: var(--hb-text);
-    padding: 9px 10px;
+    padding: 12px 12px 28px;
     font: inherit;
     font-size: 13px;
     line-height: 1.45;
@@ -700,12 +678,36 @@
 }
 
 .hb-daily-sticky-note textarea::placeholder {
-    color: color-mix(in srgb, var(--hb-muted) 78%, transparent);
+    color: var(--hb-muted);
+    font-weight: 600;
+    text-align: right;
+    opacity: .72;
 }
 
 .hb-daily-sticky-note textarea:focus {
-    border-color: color-mix(in srgb, var(--hb-warning) 68%, var(--hb-accent));
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--hb-warning) 19%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hb-accent) 45%, var(--hb-border));
+}
+
+.hb-daily-sticky-note-status {
+    position: absolute;
+    right: 12px;
+    bottom: 9px;
+    pointer-events: none;
+    color: var(--hb-muted);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity 200ms ease-out;
+}
+
+.hb-daily-sticky-note-status-visible {
+    opacity: .72;
+}
+
+.hb-daily-sticky-note-status-error {
+    color: var(--hb-danger);
+    opacity: 1;
 }
 
 .hb-daily-sticky-note-loading textarea {
