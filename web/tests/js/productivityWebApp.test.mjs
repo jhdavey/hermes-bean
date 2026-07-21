@@ -42,6 +42,7 @@ test('command center includes a date-scoped plain-text sticky note with autosave
     assert.match(cssRuleContaining(dashboardSource, '.hb-daily-sticky-note'), /background:\s*var\(--hb-surface\)/);
     assert.match(cssRuleContaining(dashboardSource, '.hb-daily-sticky-note'), /min-height:\s*165px/);
     assert.match(cssRuleContaining(dashboardSource, '.hb-daily-sticky-note textarea'), /border:\s*0/);
+    assert.doesNotMatch(cssRuleContaining(dashboardSource, '.hb-daily-sticky-note textarea::placeholder'), /text-align:\s*right/);
     assert.doesNotMatch(cssRuleContaining(dashboardSource, '.hb-daily-sticky-note'), /--hb-warning/);
     assert.doesNotMatch(source, /['"]Autosaves['"]/);
     assert.doesNotMatch(source, /data-daily-sticky-note[^>]*contenteditable/);

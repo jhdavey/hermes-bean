@@ -680,7 +680,6 @@
 .hb-daily-sticky-note textarea::placeholder {
     color: var(--hb-muted);
     font-weight: 600;
-    text-align: right;
     opacity: .72;
 }
 
