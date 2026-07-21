@@ -106,7 +106,7 @@ class LandingBeanTest extends TestCase
             $this->assertFileExists($home.'/skills/heybean-guide/SKILL.md');
             $this->assertStringNotContainsString('bean_dashboard', File::get($home.'/config.yaml'));
             $this->assertStringContainsString('memory_enabled: false', File::get($home.'/config.yaml'));
-            $this->assertStringContainsString('asking whether they would like a quick tour', strtolower(File::get($home.'/skills/heybean-guide/SKILL.md')));
+            $this->assertStringContainsString('whether they would like you to explain how the app works', strtolower(File::get($home.'/skills/heybean-guide/SKILL.md')));
             touch($home.'/.last-used', now()->subHours(3)->timestamp);
             $this->assertSame(1, app(LandingBeanRuntimeService::class)->pruneInactive(2));
             $this->assertDirectoryDoesNotExist($home);

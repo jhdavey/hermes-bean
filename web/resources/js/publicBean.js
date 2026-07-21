@@ -181,11 +181,6 @@ function mountPublicBean(root) {
                 voiceActive = true;
                 lastActivityAt = Date.now();
                 setStatus('listening', 'Listening…');
-                window.setTimeout(() => {
-                    if (!isCurrentLifecycle(revision) || !conversation || !voiceActive) return;
-                    conversation.sendUserMessage?.(wakeTail || WAKE_PHRASE);
-                    conversation.sendUserActivity?.();
-                }, 300);
             },
             onDisconnect: () => {
                 if (!isCurrentLifecycle(revision)) return;
@@ -228,6 +223,11 @@ function mountPublicBean(root) {
             return;
         }
         conversation = nextConversation;
+        voiceActive = true;
+        lastActivityAt = Date.now();
+        setStatus('thinking', 'Thinking…');
+        conversation.sendUserMessage?.(wakeTail || WAKE_PHRASE);
+        conversation.sendUserActivity?.();
     }
 
     button.addEventListener('click', () => {

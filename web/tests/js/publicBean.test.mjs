@@ -29,6 +29,11 @@ test('landing Bean enables the microphone, listens for the wake phrase, and star
     assert.match(source, /askLandingBean/);
     assert.match(source, /root\.dataset\.conversationTokenUrl/);
     assert.match(source, /root\.dataset\.messageUrl/);
+
+    const sessionAssignment = source.indexOf('conversation = nextConversation');
+    const wakeSubmission = source.indexOf('conversation.sendUserMessage?.(wakeTail || WAKE_PHRASE)');
+    assert.ok(sessionAssignment >= 0);
+    assert.ok(wakeSubmission > sessionAssignment);
 });
 
 test('landing Bean can be disabled while wake or voice startup is still pending', () => {
@@ -48,4 +53,11 @@ test('landing voice uses a dedicated ElevenLabs agent configuration and public H
     assert.match(agentConfig, /isolated public Hermes Bean runtime/);
     assert.match(agentConfig, /firstMessage:\s*''/);
     assert.doesNotMatch(agentConfig, /dashboard_context|bean_dashboard/);
+});
+
+test('landing Bean uses the stationary app-style border tracing indicator', () => {
+    assert.match(styles, /@property --public-bean-ring-angle/);
+    assert.match(styles, /conic-gradient\(from var\(--public-bean-ring-angle\)/);
+    assert.match(styles, /to \{ --public-bean-ring-angle: 360deg; \}/);
+    assert.doesNotMatch(styles, /public-bean-orbit[\s\S]*?transform:\s*rotate/);
 });
