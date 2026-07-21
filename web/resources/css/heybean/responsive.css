@@ -233,10 +233,6 @@
 }
 
 @media (max-width: 1120px) {
-    .hb-topbar {
-        --hb-topbar-date-font-size: 22px;
-    }
-
     .hb-top-nav {
         display: none;
     }

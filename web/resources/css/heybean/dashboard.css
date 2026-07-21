@@ -260,7 +260,6 @@
 
 .hb-task-future-list {
     padding-left: 8px;
-    border-left: 2px solid var(--hb-border);
 }
 
 .hb-item {
@@ -701,8 +700,9 @@
 .heybean-app-body[data-hb-theme-resolved="dark"] .hb-board-card > .hb-tabs {
     gap: 18px;
     margin-bottom: 14px;
-    padding: 0;
+    padding: 0 0 12px;
     border: 0;
+    border-bottom: 1px solid var(--hb-border);
     border-radius: 0;
     background: transparent;
 }

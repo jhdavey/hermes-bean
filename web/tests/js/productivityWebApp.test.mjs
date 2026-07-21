@@ -71,6 +71,7 @@ test('Bean status and expandable chat share one dynamic bordered control', () =>
 
 test('top navigation, productivity pages, and notes use the simplified surfaces', () => {
     const topbarRule = cssRuleContaining(baseShellSource, '.hb-topbar');
+    assert.match(topbarRule, /--hb-topbar-date-font-size:\s*17px/);
     assert.match(topbarRule, /border-bottom:\s*1px solid var\(--hb-border\)/);
     assert.match(source, /<section class="hb-card-pad hb-board-card" data-tour-target="tasks-view">/);
     assert.match(source, /<section class="hb-card-pad hb-board-card" data-tour-target="reminders-view">/);
@@ -79,11 +80,13 @@ test('top navigation, productivity pages, and notes use the simplified surfaces'
     assert.doesNotMatch(source, /sectionTitle\(icons\.tasks, 'Tasks'/);
     assert.doesNotMatch(source, /sectionTitle\(icons\.reminders, 'Reminders'/);
     assert.match(dashboardSource, /\.hb-board-card > \.hb-tabs[\s\S]*?border:\s*0/);
+    assert.match(cssRuleContaining(dashboardSource, '.hb-board-card > .hb-tabs'), /border-bottom:\s*1px solid var\(--hb-border\)/);
     assert.match(dashboardSource, /\.hb-board-card > \.hb-tabs \.hb-chip\[aria-pressed="true"\][\s\S]*?color:\s*var\(--hb-accent-strong\)/);
     assert.match(dashboardSource, /\.hb-main-board \.hb-day-board-column[\s\S]*?background:\s*transparent/);
     assert.match(dashboardSource, /\.hb-main-board \.hb-day-board::before[\s\S]*?background:\s*var\(--hb-border\)/);
     assert.match(dashboardSource, /\.hb-main-board \.hb-day-board::after[\s\S]*?left:\s*calc\(200% \/ 3\)/);
     assert.match(dashboardSource, /\.hb-main-board \.hb-day-board-shell > \.hb-day-board-column-all::before[\s\S]*?left:\s*-7px/);
+    assert.doesNotMatch(cssRuleContaining(dashboardSource, '.hb-task-future-list'), /border-left/);
     assert.doesNotMatch(source, /noteFolderButtonMarkup\('unfiled'/);
     assert.doesNotMatch(source, /noteListOptionButton\('unfiled'/);
     assert.doesNotMatch(source, />Unfiled</);
