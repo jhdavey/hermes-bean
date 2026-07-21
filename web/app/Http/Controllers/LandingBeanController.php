@@ -108,9 +108,13 @@ class LandingBeanController extends Controller
             'turn' => $turnCount + 1,
             'max_turns' => $maxTurns,
             'page_path' => $data['page_path'] ?? '/',
+            'ui_action' => $result['ui_action'] ?? null,
         ]);
 
-        return response()->json(['data' => ['answer' => $result['answer']]]);
+        return response()->json(['data' => [
+            'answer' => $result['answer'],
+            'ui_action' => $result['ui_action'] ?? null,
+        ]]);
     }
 
     private function passesHumanVerification(Request $request, ?string $token): bool

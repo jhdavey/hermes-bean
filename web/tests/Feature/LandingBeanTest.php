@@ -71,6 +71,7 @@ class LandingBeanTest extends TestCase
                 ->andReturn([
                     'answer' => 'Hi, I’m Bean. I can help organize your day. Would you like a quick tour?',
                     'hermes_session_id' => 'landing-hermes-session-1',
+                    'ui_action' => 'features',
                 ]);
         });
 
@@ -78,7 +79,8 @@ class LandingBeanTest extends TestCase
             'content' => 'Hey Bean',
             'page_path' => '/',
         ])->assertOk()
-            ->assertJsonPath('data.answer', 'Hi, I’m Bean. I can help organize your day. Would you like a quick tour?');
+            ->assertJsonPath('data.answer', 'Hi, I’m Bean. I can help organize your day. Would you like a quick tour?')
+            ->assertJsonPath('data.ui_action', 'features');
 
         $this->assertSame('landing-hermes-session-1', session('landing_bean.hermes_session_id'));
         $this->assertTrue(Str::isUuid((string) session('landing_bean.visitor_id')));
@@ -128,7 +130,7 @@ class LandingBeanTest extends TestCase
         $root = storage_path('framework/testing/landing-bean-'.Str::uuid());
         $binary = $root.'/fake-hermes';
         File::ensureDirectoryExists($root);
-        File::put($binary, "#!/bin/sh\nprintf 'Hello from Bean. Would you like a quick tour?\\nSession ID: public-session-1\\n'\n");
+        File::put($binary, "#!/bin/sh\nprintf 'Hello from Bean. Would you like a quick tour?\\n[[BEAN_UI:unsupported]]\\n[[BEAN_UI:features]]\\nSession ID: public-session-1\\n'\n");
         chmod($binary, 0755);
 
         config([
@@ -143,6 +145,7 @@ class LandingBeanTest extends TestCase
 
             $this->assertSame('Hello from Bean. Would you like a quick tour?', $result['answer']);
             $this->assertSame('public-session-1', $result['hermes_session_id']);
+            $this->assertSame('features', $result['ui_action']);
             $this->assertFileExists($home.'/skills/heybean-guide/SKILL.md');
             $this->assertStringNotContainsString('bean_dashboard', File::get($home.'/config.yaml'));
             $this->assertStringNotContainsString('session_search', File::get($home.'/config.yaml'));

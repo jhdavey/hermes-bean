@@ -72,6 +72,17 @@ test('landing Bean supports optional bot verification without exposing a secret'
     assert.doesNotMatch(navigation, /TURNSTILE_SECRET|secret_key/);
 });
 
+test('landing Bean reveals allowlisted feature and pricing destinations', () => {
+    assert.match(source, /showLandingUiAction\(response\?\.ui_action\)/);
+    assert.match(source, /features:\s*\{ selector: '#features', href: '\/#features'/);
+    assert.match(source, /pricing:\s*\{ selector: '#plans', href: '\/pricing#plans'/);
+    assert.match(source, /scrollIntoView\(\{ behavior: reduceMotion \? 'auto' : 'smooth'/);
+    assert.match(source, /previousMode === 'speaking' && pendingNavigation/);
+    assert.match(source, /window\.location\.assign\(navigation\.href\)/);
+    assert.match(styles, /\.public-bean-guided-highlight/);
+    assert.match(styles, /@keyframes public-bean-guided-highlight/);
+});
+
 test('landing Bean uses the stationary app-style border tracing indicator', () => {
     assert.match(styles, /@property --public-bean-ring-angle/);
     assert.match(styles, /conic-gradient\(from var\(--public-bean-ring-angle\)/);

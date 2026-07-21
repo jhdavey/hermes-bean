@@ -21,6 +21,8 @@ function mountPublicBean(root) {
     let idleTimer = 0;
     let lastActivityAt = 0;
     let lifecycleRevision = 0;
+    let lastVoiceMode = '';
+    let pendingNavigation = null;
 
     const isCurrentLifecycle = (revision) => enabled && lifecycleRevision === revision;
 
@@ -59,6 +61,8 @@ function mountPublicBean(root) {
     const stopVoiceConversation = async () => {
         stopIdleTimer();
         voiceActive = false;
+        lastVoiceMode = '';
+        pendingNavigation = null;
         const activeConversation = conversation;
         conversation = null;
         await activeConversation?.endSession?.().catch(() => {});
@@ -174,6 +178,7 @@ function mountPublicBean(root) {
                             content,
                             page_path: window.location.pathname,
                         });
+                        pendingNavigation = showLandingUiAction(response?.ui_action);
                         return String(response?.answer || 'I am having trouble answering right now.');
                     } catch (error) {
                         return String(error?.publicMessage || 'I am having trouble answering right now.');
@@ -183,6 +188,8 @@ function mountPublicBean(root) {
             onConnect: () => {
                 if (!isCurrentLifecycle(revision)) return;
                 voiceActive = true;
+                lastVoiceMode = '';
+                pendingNavigation = null;
                 lastActivityAt = Date.now();
                 setStatus('listening', 'Listening…');
             },
@@ -190,6 +197,8 @@ function mountPublicBean(root) {
                 if (!isCurrentLifecycle(revision)) return;
                 voiceActive = false;
                 conversation = null;
+                lastVoiceMode = '';
+                pendingNavigation = null;
                 stopIdleTimer();
                 restartWakeListening();
             },
@@ -212,6 +221,8 @@ function mountPublicBean(root) {
             onModeChange: ({ mode } = {}) => {
                 if (!isCurrentLifecycle(revision)) return;
                 const nextMode = String(mode || '').toLowerCase();
+                const previousMode = lastVoiceMode;
+                lastVoiceMode = nextMode;
                 lastActivityAt = Date.now();
                 if (nextMode === 'speaking') {
                     stopIdleTimer();
@@ -219,6 +230,15 @@ function mountPublicBean(root) {
                 } else if (nextMode === 'listening') {
                     setStatus('listening', 'Listening…');
                     scheduleIdleClose();
+                    if (previousMode === 'speaking' && pendingNavigation) {
+                        const navigation = pendingNavigation;
+                        pendingNavigation = null;
+                        stopIdleTimer();
+                        setStatus('navigating', `Opening ${navigation.label}…`);
+                        window.setTimeout(() => {
+                            if (isCurrentLifecycle(revision)) window.location.assign(navigation.href);
+                        }, 250);
+                    }
                 }
             },
         });
@@ -266,6 +286,27 @@ function mountPublicBean(root) {
         }
         return payload.data || payload;
     }
+}
+
+function showLandingUiAction(action) {
+    const targets = {
+        features: { selector: '#features', href: '/#features', label: 'features' },
+        pricing: { selector: '#plans', href: '/pricing#plans', label: 'pricing' },
+    };
+    const target = targets[String(action || '').toLowerCase()];
+    if (!target) return null;
+
+    const section = document.querySelector(target.selector);
+    if (!section) return { href: target.href, label: target.label };
+
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
+    section.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    const cue = section.querySelector('.feature-copy, .section-head') || section;
+    cue.classList.remove('public-bean-guided-highlight');
+    window.requestAnimationFrame(() => cue.classList.add('public-bean-guided-highlight'));
+    window.setTimeout(() => cue.classList.remove('public-bean-guided-highlight'), 2400);
+
+    return null;
 }
 
 async function getTurnstileToken(root) {

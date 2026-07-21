@@ -12,23 +12,24 @@ class LandingBeanRuntimeService
     private const USER_FACING_FAILURE = 'I am having trouble answering right now. Please try me again in a moment.';
 
     /**
-     * @return array{answer: string, hermes_session_id: string|null}
+     * @return array{answer: string, hermes_session_id: string|null, ui_action: string|null}
      */
     public function respond(string $visitorId, ?string $hermesSessionId, string $content, string $pagePath = '/'): array
     {
         $home = $this->ensureVisitorHome($visitorId);
 
         try {
-            [$answer, $nextSessionId] = $this->invokeHermes($home, $hermesSessionId, $content, $pagePath);
+            [$answer, $nextSessionId, $uiAction] = $this->invokeHermes($home, $hermesSessionId, $content, $pagePath);
             $answer = trim($answer);
 
             if ($answer === '' || $this->looksLikeInternalFailure($answer)) {
-                return ['answer' => self::USER_FACING_FAILURE, 'hermes_session_id' => null];
+                return ['answer' => self::USER_FACING_FAILURE, 'hermes_session_id' => null, 'ui_action' => null];
             }
 
             return [
                 'answer' => $answer,
                 'hermes_session_id' => $nextSessionId ?? $hermesSessionId,
+                'ui_action' => $uiAction,
             ];
         } catch (Throwable $exception) {
             Log::error('Landing Bean Hermes runtime failed.', [
@@ -37,7 +38,7 @@ class LandingBeanRuntimeService
                 'message' => $exception->getMessage(),
             ]);
 
-            return ['answer' => self::USER_FACING_FAILURE, 'hermes_session_id' => null];
+            return ['answer' => self::USER_FACING_FAILURE, 'hermes_session_id' => null, 'ui_action' => null];
         }
     }
 
@@ -150,11 +151,12 @@ Do not repeat the full introduction later in the same conversation.
 ## Guided responses
 
 - If the visitor asks how Bean works, explain that they can speak or type naturally and Bean coordinates the relevant HeyBean tools inside their signed-in account, while important or sensitive actions remain visible to them.
-- If they ask about features, briefly group the answer into planning, follow-through, notes, shared workspaces, and connected calendars. Ask which group matters most to them.
-- If they ask about pricing, compare the three plans concisely and ask whether they are planning for themselves, a household, or a high-volume workflow.
+- If they ask about features, briefly group the answer into planning, follow-through, notes, shared workspaces, and connected calendars. Ask which group matters most to them, then put `[[BEAN_UI:features]]` on its own final line so the website can show the features section.
+- If they ask about pricing, compare the three plans concisely and ask whether they are planning for themselves, a household, or a high-volume workflow, then put `[[BEAN_UI:pricing]]` on its own final line so the website can show the pricing view.
 - If they ask for a quick tour, give a short verbal tour in this order: the daily command center, calendar views, tasks and reminders, notes, shared workspaces, then Bean. Pause after two or three areas and invite a question before continuing.
 - A verbal tour may span several turns. Do not rush through every feature in one long response.
-- Visual page scrolling is not active yet. Never claim that you moved, highlighted, opened, or changed the page.
+- The two `BEAN_UI` markers are silent control metadata, never part of the spoken answer. Use only the exact allowlisted `features` and `pricing` values, and only when the response is substantively about that requested area.
+- The website, not you, performs the movement. You may say you are showing the relevant section, but never claim it succeeded or describe any other visual action.
 
 ## Conversation rules
 
@@ -172,7 +174,7 @@ MD;
     }
 
     /**
-     * @return array{0: string, 1: string|null}
+     * @return array{0: string, 1: string|null, 2: string|null}
      */
     private function invokeHermes(string $home, ?string $sessionId, string $content, string $pagePath): array
     {
@@ -245,11 +247,20 @@ MD;
     }
 
     /**
-     * @return array{0: string, 1: string|null}
+     * @return array{0: string, 1: string|null, 2: string|null}
      */
     private function parseHermesOutput(string $output): array
     {
         $sessionId = null;
+        $uiAction = null;
+        $output = preg_replace_callback('/\[\[BEAN_UI:([a-z0-9_-]+)\]\]/iu', function (array $matches) use (&$uiAction): string {
+            $candidate = strtolower($matches[1]);
+            if (in_array($candidate, ['features', 'pricing'], true)) {
+                $uiAction = $candidate;
+            }
+
+            return '';
+        }, $output) ?? $output;
         $lines = collect(preg_split('/\R/', trim($output)) ?: [])
             ->map(fn (string $line): string => trim($line))
             ->filter(function (string $line) use (&$sessionId): bool {
@@ -265,7 +276,7 @@ MD;
                 return true;
             })->values();
 
-        return [$lines->implode("\n"), $sessionId];
+        return [$lines->implode("\n"), $sessionId, $uiAction];
     }
 
     private function looksLikeInternalFailure(string $text): bool
