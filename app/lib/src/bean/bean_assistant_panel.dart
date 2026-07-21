@@ -2,6 +2,7 @@ part of '../../main.dart';
 
 class _BeanAssistantPanel extends StatefulWidget {
   const _BeanAssistantPanel({
+    super.key,
     required this.messages,
     required this.confirmations,
     required this.sending,
@@ -44,8 +45,10 @@ class _BeanAssistantPanel extends StatefulWidget {
 class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
   final TextEditingController _controller = TextEditingController();
   elevenlabs.ConversationClient? _elevenLabsClient;
+  Timer? _voiceIdleDisconnectTimer;
   bool _voiceConnecting = false;
-  String _voiceStatusText = 'Tap mic to start ElevenLabs voice';
+  bool _voicePushToTalkHeld = false;
+  String _voiceStatusText = 'Hold mic to talk to Bean';
   String? _voiceError;
   String? _voiceTranscript;
   int _voiceRequestCount = 0;
@@ -60,8 +63,20 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
   bool get _voiceConnected =>
       _elevenLabsClient?.status == elevenlabs.ConversationStatus.connected;
 
+  String _voiceReadyStatusText() {
+    final client = _elevenLabsClient;
+    if (_voiceConnecting) return 'Connecting ElevenLabs voice…';
+    if (client?.isSpeaking == true) return 'Speaking…';
+    if (_voicePushToTalkHeld && client?.isMuted == false) {
+      return 'Listening — release to send';
+    }
+    if (_voiceConnected) return 'Hold mic to talk again';
+    return 'Hold mic to talk to Bean';
+  }
+
   @override
   void dispose() {
+    _voiceIdleDisconnectTimer?.cancel();
     unawaited(_elevenLabsClient?.endSession());
     _elevenLabsClient?.dispose();
     _controller.dispose();
@@ -89,7 +104,7 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
           setState(() {
             _voiceConnecting = false;
             _voiceError = null;
-            _voiceStatusText = 'Listening — speak to Bean';
+            _voiceStatusText = _voiceReadyStatusText();
           });
           unawaited(
             widget.onVoiceEvent(
@@ -105,8 +120,9 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
           if (!mounted) return;
           setState(() {
             _voiceConnecting = false;
+            _voicePushToTalkHeld = false;
             _voiceTranscript = null;
-            _voiceStatusText = 'Tap mic to start ElevenLabs voice';
+            _voiceStatusText = 'Hold mic to talk to Bean';
           });
           unawaited(
             widget.onVoiceEvent(
@@ -125,13 +141,11 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
               elevenlabs.ConversationStatus.connecting =>
                 'Connecting ElevenLabs voice…',
               elevenlabs.ConversationStatus.connected =>
-                _elevenLabsClient?.isSpeaking == true
-                    ? 'Speaking…'
-                    : 'Listening — speak to Bean',
+                _voiceReadyStatusText(),
               elevenlabs.ConversationStatus.disconnecting =>
                 'Ending voice session…',
               elevenlabs.ConversationStatus.disconnected =>
-                'Tap mic to start ElevenLabs voice',
+                'Hold mic to talk to Bean',
             };
           });
         },
@@ -140,7 +154,7 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
           setState(() {
             _voiceStatusText = mode == elevenlabs.ConversationMode.speaking
                 ? 'Speaking…'
-                : 'Listening — speak to Bean';
+                : _voiceReadyStatusText();
           });
           if (mode == elevenlabs.ConversationMode.speaking) {
             unawaited(
@@ -237,6 +251,7 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
           if (!mounted) return;
           setState(() {
             _voiceConnecting = false;
+            _voicePushToTalkHeld = false;
             _voiceError = message;
             _voiceStatusText = 'Voice hit a problem';
           });
@@ -260,19 +275,38 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
     return client;
   }
 
-  Future<void> _toggleElevenLabsVoice() async {
+  Future<void> _startElevenLabsPushToTalk() async {
+    if (widget.sending) return;
+    _voiceIdleDisconnectTimer?.cancel();
+
     final client = _ensureElevenLabsClient();
-    if (_voiceActive) {
-      await client.endSession();
+    if (_voicePushToTalkHeld) return;
+
+    setState(() {
+      _voicePushToTalkHeld = true;
+      _voiceError = null;
+      _voiceTranscript = null;
+      _voiceStatusText = _voiceConnected
+          ? 'Listening — release to send'
+          : 'Connecting ElevenLabs voice…';
+    });
+
+    if (_voiceConnected) {
+      await client.setMicMuted(false);
+      if (!mounted) return;
+      setState(() => _voiceStatusText = _voiceReadyStatusText());
+      unawaited(
+        widget.onVoiceEvent(
+          'push_to_talk_started',
+          payload: {'transport': 'elevenlabs_agent'},
+        ),
+      );
       return;
     }
 
-    setState(() {
-      _voiceConnecting = true;
-      _voiceError = null;
-      _voiceTranscript = null;
-      _voiceStatusText = 'Connecting ElevenLabs voice…';
-    });
+    if (_voiceConnecting) return;
+
+    setState(() => _voiceConnecting = true);
 
     try {
       final permission = await permissions.Permission.microphone.request();
@@ -299,11 +333,29 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
           'bean_dashboard_context': jsonEncode(realtime.dashboardContext),
         },
       );
+
+      await client.setMicMuted(!_voicePushToTalkHeld);
+      if (!mounted) return;
+      setState(() {
+        _voiceConnecting = false;
+        _voiceStatusText = _voiceReadyStatusText();
+      });
+      if (_voicePushToTalkHeld) {
+        unawaited(
+          widget.onVoiceEvent(
+            'push_to_talk_started',
+            payload: {'transport': 'elevenlabs_agent'},
+          ),
+        );
+      } else {
+        _scheduleVoiceIdleDisconnect();
+      }
     } catch (error) {
       await client.endSession();
       if (!mounted) return;
       setState(() {
         _voiceConnecting = false;
+        _voicePushToTalkHeld = false;
         _voiceError = beanFriendlyErrorMessage(
           error,
           action: 'start Bean voice',
@@ -320,10 +372,57 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
     }
   }
 
+  Future<void> _stopElevenLabsPushToTalk({bool cancelled = false}) async {
+    if (!_voicePushToTalkHeld && !_voiceConnecting) return;
+
+    final client = _elevenLabsClient;
+    setState(() {
+      _voicePushToTalkHeld = false;
+      _voiceStatusText = cancelled
+          ? 'Voice cancelled — hold mic to try again'
+          : _voiceConnected
+          ? 'Released — Bean is thinking…'
+          : 'Hold mic to talk to Bean';
+    });
+
+    if (client == null) return;
+    if (_voiceConnected) {
+      await client.setMicMuted(true);
+      if (!mounted) return;
+      setState(() {
+        _voiceStatusText = cancelled
+            ? 'Voice cancelled — hold mic to try again'
+            : 'Released — Bean is thinking…';
+      });
+      unawaited(
+        widget.onVoiceEvent(
+          cancelled ? 'push_to_talk_cancelled' : 'push_to_talk_released',
+          payload: {'transport': 'elevenlabs_agent'},
+        ),
+      );
+      _scheduleVoiceIdleDisconnect();
+    }
+  }
+
+  void _scheduleVoiceIdleDisconnect() {
+    _voiceIdleDisconnectTimer?.cancel();
+    _voiceIdleDisconnectTimer = Timer(const Duration(minutes: 2), () {
+      final client = _elevenLabsClient;
+      if (!mounted || client == null || _voicePushToTalkHeld) return;
+      if (client.status != elevenlabs.ConversationStatus.connected) return;
+      unawaited(client.endSession());
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final messages = widget.messages;
+    final voiceButtonEnabled = !widget.sending;
+    final voiceButtonListening =
+        _voicePushToTalkHeld &&
+        _voiceConnected &&
+        _elevenLabsClient?.isMuted == false;
 
     return Align(
       alignment: Alignment.bottomCenter,
@@ -385,9 +484,9 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
                               child: Padding(
                                 padding: const EdgeInsets.all(18),
                                 child: Text(
-                                  _voiceActive
-                                      ? 'Speak naturally. ElevenLabs will call Bean when it needs your HeyBean data or actions.'
-                                      : 'Try “Create task call mom” or tap the mic for ElevenLabs voice.',
+                                  _voicePushToTalkHeld
+                                      ? 'Speak naturally. Release the mic when you’re done and Bean will answer.'
+                                      : 'Try “Create task call mom” or hold the mic for ElevenLabs voice.',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     color: HeyBeanTheme.muted,
@@ -516,18 +615,54 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      IconButton.filledTonal(
-                        key: const Key('bean-assistant-voice-input'),
-                        onPressed: widget.sending || _voiceConnecting
-                            ? null
-                            : () => unawaited(_toggleElevenLabsVoice()),
-                        tooltip: _voiceActive
-                            ? 'End ElevenLabs voice'
-                            : 'Start ElevenLabs voice',
-                        icon: Icon(
-                          _voiceActive
-                              ? Icons.mic_rounded
-                              : Icons.mic_none_rounded,
+                      Listener(
+                        onPointerDown: voiceButtonEnabled
+                            ? (_) => unawaited(_startElevenLabsPushToTalk())
+                            : null,
+                        onPointerUp: voiceButtonEnabled
+                            ? (_) => unawaited(_stopElevenLabsPushToTalk())
+                            : null,
+                        onPointerCancel: voiceButtonEnabled
+                            ? (_) => unawaited(
+                                _stopElevenLabsPushToTalk(cancelled: true),
+                              )
+                            : null,
+                        child: Tooltip(
+                          message: 'Hold to talk to Bean. Release to send.',
+                          child: Semantics(
+                            button: true,
+                            label: 'Hold to talk to Bean',
+                            hint:
+                                'Press and hold to speak, then release to send',
+                            child: AnimatedContainer(
+                              key: const Key('bean-assistant-voice-input'),
+                              duration: const Duration(milliseconds: 140),
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: voiceButtonListening || _voiceConnecting
+                                    ? HeyBeanTheme.accentStrong
+                                    : HeyBeanTheme.accent.withValues(
+                                        alpha: .16,
+                                      ),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color:
+                                      voiceButtonListening || _voiceConnecting
+                                      ? HeyBeanTheme.accentStrong
+                                      : _quietBorderColor(alpha: .38),
+                                ),
+                              ),
+                              child: Icon(
+                                voiceButtonListening
+                                    ? Icons.mic_rounded
+                                    : Icons.mic_none_rounded,
+                                color: voiceButtonListening || _voiceConnecting
+                                    ? Colors.white
+                                    : HeyBeanTheme.accentStrong,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),

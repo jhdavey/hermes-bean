@@ -89,6 +89,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   int _noteSaveVersion = 0;
   bool _beanAssistantOpen = false;
   bool _beanAssistantSending = false;
+  bool _beanDockPushToTalkHeld = false;
+  final GlobalKey<_BeanAssistantPanelState> _beanAssistantPanelKey =
+      GlobalKey<_BeanAssistantPanelState>();
   int? _beanAssistantSessionId;
   String? _beanAssistantError;
   List<BeanAssistantMessage> _beanAssistantMessages = const [];
@@ -156,6 +159,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _onboardingTourFinishWithImport = false;
     _beanAssistantOpen = false;
     _beanAssistantSending = false;
+    _beanDockPushToTalkHeld = false;
     _beanAssistantSessionId = null;
     _beanAssistantError = null;
     _beanAssistantMessages = const [];
@@ -1227,6 +1231,30 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _beanAssistantOpen = !_beanAssistantOpen;
       _beanAssistantError = null;
     });
+  }
+
+  void _startBeanAssistantPushToTalkFromDock() {
+    if (_phase != _AuthPhase.signedIn) return;
+    _beanDockPushToTalkHeld = true;
+    setState(() {
+      _beanAssistantOpen = true;
+      _beanAssistantError = null;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_beanDockPushToTalkHeld || !_beanAssistantOpen) return;
+      unawaited(
+        _beanAssistantPanelKey.currentState?._startElevenLabsPushToTalk(),
+      );
+    });
+  }
+
+  void _stopBeanAssistantPushToTalkFromDock({bool cancelled = false}) {
+    _beanDockPushToTalkHeld = false;
+    unawaited(
+      _beanAssistantPanelKey.currentState?._stopElevenLabsPushToTalk(
+        cancelled: cancelled,
+      ),
+    );
   }
 
   Future<void> _sendBeanAssistantMessage(
@@ -4014,6 +4042,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                         beanHasError: _beanAssistantError != null,
                         onSelected: _selectDestination,
                         onBeanPressed: _openBeanAssistant,
+                        onBeanPushToTalkStart:
+                            _startBeanAssistantPushToTalkFromDock,
+                        onBeanPushToTalkEnd:
+                            _stopBeanAssistantPushToTalkFromDock,
                         onMorePressed: _openMoreMenu,
                       ),
                     )
@@ -4021,6 +4053,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             ),
             if (_beanAssistantOpen)
               _BeanAssistantPanel(
+                key: _beanAssistantPanelKey,
                 messages: _beanAssistantMessages,
                 confirmations: _beanAssistantConfirmations,
                 sending: _beanAssistantSending,

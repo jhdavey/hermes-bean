@@ -18,6 +18,8 @@ class _HeyBeanBottomMenu extends StatelessWidget {
     required this.beanHasError,
     required this.onSelected,
     required this.onBeanPressed,
+    required this.onBeanPushToTalkStart,
+    required this.onBeanPushToTalkEnd,
     required this.onMorePressed,
   });
 
@@ -27,6 +29,8 @@ class _HeyBeanBottomMenu extends StatelessWidget {
   final bool beanHasError;
   final ValueChanged<_HomeDestination> onSelected;
   final VoidCallback onBeanPressed;
+  final VoidCallback onBeanPushToTalkStart;
+  final void Function({bool cancelled}) onBeanPushToTalkEnd;
   final VoidCallback onMorePressed;
 
   @override
@@ -115,6 +119,8 @@ class _HeyBeanBottomMenu extends StatelessWidget {
               active: beanOpen,
               working: beanSending,
               onPressed: onBeanPressed,
+              onPushToTalkStart: onBeanPushToTalkStart,
+              onPushToTalkEnd: onBeanPushToTalkEnd,
             ),
           ),
           Positioned(
@@ -190,12 +196,16 @@ class _CommandCenterFab extends StatelessWidget {
     required this.active,
     required this.working,
     required this.onPressed,
+    required this.onPushToTalkStart,
+    required this.onPushToTalkEnd,
   });
 
   final bool selected;
   final bool active;
   final bool working;
   final VoidCallback onPressed;
+  final VoidCallback onPushToTalkStart;
+  final void Function({bool cancelled}) onPushToTalkEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -205,6 +215,9 @@ class _CommandCenterFab extends StatelessWidget {
       key: const Key('nav-command-center'),
       behavior: HitTestBehavior.opaque,
       onTap: onPressed,
+      onLongPressStart: (_) => onPushToTalkStart(),
+      onLongPressEnd: (_) => onPushToTalkEnd(),
+      onLongPressCancel: () => onPushToTalkEnd(cancelled: true),
       child: SizedBox(
         key: const Key('bean-assistant-button'),
         width: 88,
