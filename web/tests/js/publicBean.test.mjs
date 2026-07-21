@@ -73,7 +73,9 @@ test('landing Bean supports optional bot verification without exposing a secret'
 });
 
 test('landing Bean reveals allowlisted feature and pricing destinations', () => {
-    assert.match(source, /showLandingUiAction\(response\?\.ui_action\)/);
+    assert.match(source, /showLandingUiAction\(response\?\.ui_action \|\| parameters\.destination\)/);
+    assert.match(agentConfig, /required: \['message', 'destination'\]/);
+    assert.match(agentConfig, /enum: \['none', 'features', 'pricing'\]/);
     assert.match(source, /features:\s*\{ selector: '#features', href: '\/#features'/);
     assert.match(source, /pricing:\s*\{ selector: '#plans', href: '\/pricing#plans'/);
     assert.match(source, /scrollIntoView\(\{ behavior: reduceMotion \? 'auto' : 'smooth'/);

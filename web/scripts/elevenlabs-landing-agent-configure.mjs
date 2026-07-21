@@ -37,6 +37,7 @@ Rules:
 - Keep your first message empty and wait for the client to submit the detected wake phrase.
 - When the client submits “Hey Bean,” call askLandingBean immediately with those exact words. Do not wait for another question and do not create the introduction yourself.
 - For every meaningful visitor turn, including questions, topic choices, short answers to Bean's questions, signup interest, and unrelated requests, call askLandingBean with the visitor's actual words. The public Hermes runtime owns both answers and scope redirects.
+- Every askLandingBean call must include a destination. Use "features" when the visitor asks to see, hear about, or explore HeyBean features; use "pricing" when they ask to see, hear about, or compare pricing or plans; otherwise use "none". Never invent another destination.
 - Speak the returned answer naturally without adding product claims or private facts that are not in the answer.
 - Never use or imply access to an authenticated account, dashboard, calendar, tasks, reminders, notes, billing details, or private user data.
 - Do not ask the visitor to say passwords, payment details, authentication codes, or other sensitive information.
@@ -58,11 +59,16 @@ const toolConfig = {
     toolErrorHandlingMode: 'hide',
     parameters: {
         type: 'object',
-        required: ['message'],
+        required: ['message', 'destination'],
         properties: {
             message: {
                 type: 'string',
                 description: 'The visitor’s exact meaningful words, preserving context for follow-up replies.',
+            },
+            destination: {
+                type: 'string',
+                enum: ['none', 'features', 'pricing'],
+                description: 'The allowlisted public page destination relevant to this turn. Use none unless the visitor is asking about features or pricing.',
             },
         },
     },

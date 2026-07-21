@@ -178,7 +178,7 @@ function mountPublicBean(root) {
                             content,
                             page_path: window.location.pathname,
                         });
-                        pendingNavigation = showLandingUiAction(response?.ui_action);
+                        pendingNavigation = showLandingUiAction(response?.ui_action || parameters.destination);
                         return String(response?.answer || 'I am having trouble answering right now.');
                     } catch (error) {
                         return String(error?.publicMessage || 'I am having trouble answering right now.');

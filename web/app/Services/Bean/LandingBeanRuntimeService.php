@@ -183,7 +183,7 @@ MD;
         $source = (string) config('bean.landing.source', 'bean-landing');
         $provider = (string) config('bean.landing.provider', config('bean.hermes.provider', 'custom'));
         $model = (string) config('bean.landing.model', 'gpt-4.1-nano');
-        $prompt = "Current public page: {$pagePath}\nVisitor said: {$content}";
+        $prompt = "Current public page: {$pagePath}\nVisitor said: {$content}\nFollow the heybean-guide response and BEAN_UI marker contract exactly.";
         $command = [$binary, 'chat'];
 
         if (is_string($sessionId) && $sessionId !== '') {

@@ -69,7 +69,7 @@ The landing command creates or updates a separate `askLandingBean` client tool a
 
 The landing command also applies the provider-side controls: authentication-only conversation tokens, GPT-4.1 Nano without a reasoning layer, a concurrency and daily call cap with bursting disabled, focus and prompt-injection guardrails, no voice recording, and zero-day transcript/audio retention. Laravel independently applies session, IP, global, message, and per-conversation turn limits. Configure both Cloudflare Turnstile keys to require a managed bot challenge before Laravel mints an ElevenLabs token.
 
-The public Hermes guide can return only two allowlisted browser actions: `features` and `pricing`. Laravel strips the silent action marker from the spoken answer. The browser scrolls to `#features` or `#plans` when that section exists; cross-page pricing/features requests navigate to `/pricing#plans` or `/#features` only after Bean finishes speaking. This is the initial UI-action boundary for a future guided tour and does not allow arbitrary selectors or URLs.
+The public Hermes guide can return only two allowlisted browser actions: `features` and `pricing`. Laravel strips the silent action marker from the spoken answer. The required ElevenLabs client-tool destination (`none`, `features`, or `pricing`) provides a structured voice fallback if the landing model omits its marker. The browser scrolls to `#features` or `#plans` when that section exists; cross-page pricing/features requests navigate to `/pricing#plans` or `/#features` only after Bean finishes speaking. This is the initial UI-action boundary for a future guided tour and does not allow arbitrary selectors or URLs.
 
 ## Removed legacy voice paths
 
