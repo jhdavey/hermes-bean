@@ -1452,17 +1452,6 @@ export function mountHeyBeanWebApp(mount) {
                 render();
                 return;
             }
-            const admission = await api('/early-access', {
-                method: 'POST',
-                body: { email: availability.email, name: state.guidedSignupName, source: 'web_bean_onboarding' },
-            });
-            if (admission.waitlisted || admission.status === 'waitlisted') {
-                state.busy = false;
-                state.phase = 'waitlist';
-                state.guidedSignupError = '';
-                render();
-                return;
-            }
             state.guidedSignupEmail = availability.email;
             state.guidedSignupStep = 'password';
             render();
@@ -1493,6 +1482,12 @@ export function mountHeyBeanWebApp(mount) {
             state.user = result.user || null;
             state.subscriptionSummary = null;
             state.busy = false;
+            if (state.user?.access_state === 'waitlisted' || state.user?.accessState === 'waitlisted') {
+                state.phase = 'waitlist';
+                state.guidedSignupError = '';
+                render();
+                return;
+            }
             state.guidedSignupStep = 'plan';
             openGuidedPlanSelection();
         } catch (error) {
@@ -1676,21 +1671,16 @@ export function mountHeyBeanWebApp(mount) {
         state.busy = true;
         render();
         try {
-            const admission = await api('/early-access', {
-                method: 'POST',
-                body: { email, name, source: 'web_plain_signup' },
-            });
-            if (admission.waitlisted || admission.status === 'waitlisted') {
-                state.busy = false;
-                state.phase = 'waitlist';
-                render();
-                return;
-            }
             const result = await registerGuidedSignupAccount({ password });
             persistToken(result.token, true);
             state.user = result.user || null;
             state.subscriptionSummary = null;
             state.busy = false;
+            if (state.user?.access_state === 'waitlisted' || state.user?.accessState === 'waitlisted') {
+                state.phase = 'waitlist';
+                render();
+                return;
+            }
             openGuidedPlanSelection();
         } catch (error) {
             state.busy = false;
@@ -1705,9 +1695,9 @@ export function mountHeyBeanWebApp(mount) {
                 <section class="hb-card hb-auth-card hb-auth-card-register">
                     <div class="hb-auth-title">
                         <img src="${escapeAttr(logoUrl)}" alt="Bean">
-                        <div><h1>You’re on the early-access waitlist</h1><p class="hb-item-meta">Bean will be ready when your spot opens.</p></div>
+                        <div><h1>Your account is created</h1><p class="hb-item-meta">You’re on the early-access waitlist.</p></div>
                     </div>
-                    <div class="hb-success"><strong>Thanks for joining us.</strong><span>I’m a solo developer and I’m onboarding people gradually so I can keep HeyBean reliable. We’ll email you as soon as access opens. You won’t be asked to choose a plan or pay while you wait.</span></div>
+                    <div class="hb-success"><strong>Your place is saved.</strong><span>I’m a solo developer and I’m onboarding people gradually so I can keep HeyBean reliable. We’ll email you as soon as access opens. You won’t be asked to choose a plan or pay while you wait.</span></div>
                     <div class="hb-link-row"><a class="hb-button-secondary" href="/">Back to HeyBean</a><button class="hb-button-ghost" type="button" data-subscribe-logout>Use another email</button></div>
                 </section>
             </main>

@@ -173,13 +173,13 @@ class BeanUxBenchmarkService
     private function progressSnapshot(array $report): array
     {
         return [
-            'goal' => 'Make Bean meet world-class user-experience benchmarks.',
+            'goal' => 'Make Bean meet measured user-experience benchmarks.',
             'updated_at' => now()->toIso8601String(),
             'latest_report' => $report,
             'next_recommended_action' => 'Use php artisan bean:ux-benchmark locally or on production after each runtime/voice change; address the largest failing target cluster first.',
             'resume_instructions' => [
-                'Read docs/bean-world-class-ux-goal.md.',
-                'Read docs/bean-world-class-ux-progress.json.',
+                'Read docs/agent-project-state.md.',
+                'Read AGENTS.md.',
                 'Run php artisan bean:ux-benchmark --days=7.',
                 'Do not rely on chat history as the source of truth.',
             ],

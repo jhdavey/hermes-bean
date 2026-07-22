@@ -120,10 +120,11 @@ Artisan::command('bean:ux-benchmark {--days=7} {--json=} {--markdown=} {--progre
     $stamp = now()->format('Ymd-His');
     $jsonPath = (string) ($this->option('json') ?: $defaultBase.'/bean-ux-benchmark-'.$stamp.'.json');
     $markdownPath = (string) ($this->option('markdown') ?: $defaultBase.'/bean-ux-benchmark-'.$stamp.'.md');
-    $progressPath = (string) ($this->option('progress') ?: base_path('../docs/bean-world-class-ux-progress.json'));
+    $progressOption = $this->option('progress');
+    $progressPath = is_string($progressOption) && trim($progressOption) !== '' ? $progressOption : null;
     $benchmarks->writeReport($report, $jsonPath, $markdownPath, $progressPath);
 
-    $this->info('Bean World-Class UX Benchmark Report');
+    $this->info('Bean UX Benchmark Report');
     $this->line('Window days: '.($report['window_days'] ?? $days));
     $this->line('Runs: '.data_get($report, 'counts.runs', 0));
     $this->line('Task success: '.(data_get($report, 'metrics.task_success_rate') === null ? 'unknown' : round(data_get($report, 'metrics.task_success_rate') * 100, 2).'%'));
@@ -131,10 +132,12 @@ Artisan::command('bean:ux-benchmark {--days=7} {--json=} {--markdown=} {--progre
     $this->line('Voice first-command capture: '.(data_get($report, 'metrics.voice.first_command_capture_rate') === null ? 'unknown' : round(data_get($report, 'metrics.voice.first_command_capture_rate') * 100, 2).'%'));
     $this->line('JSON: '.$jsonPath);
     $this->line('Markdown: '.$markdownPath);
-    $this->line('Progress: '.$progressPath);
+    if ($progressPath) {
+        $this->line('Progress: '.$progressPath);
+    }
 
     return self::SUCCESS;
-})->purpose('Run Bean world-class UX benchmark scorecard and update durable progress');
+})->purpose('Run the Bean UX benchmark scorecard and optionally write a progress snapshot');
 
 Artisan::command('bean:ux-scenarios {--json=} {--markdown=}', function (BeanUxScenarioCatalogService $scenarios): int {
     $catalog = $scenarios->catalog();
@@ -179,5 +182,5 @@ Schedule::command('calendar-events:materialize-recurring')->daily();
 Schedule::command('reminders:send-due-notifications')->everyMinute();
 Schedule::command('bean:landing-prune')->daily()->withoutOverlapping();
 Schedule::command('bean:evaluate --production-smoke --recent=500 --json='.storage_path('app/bean-quality/latest-production-audit.json').' --markdown='.storage_path('app/bean-quality/latest-production-audit.md'))->dailyAt('03:15')->withoutOverlapping();
-Schedule::command('bean:ux-benchmark --days=7 --json='.storage_path('app/bean-ux/latest-benchmark.json').' --markdown='.storage_path('app/bean-ux/latest-benchmark.md').' --progress='.base_path('../docs/bean-world-class-ux-progress.json'))->dailyAt('03:30')->withoutOverlapping();
+Schedule::command('bean:ux-benchmark --days=7 --json='.storage_path('app/bean-ux/latest-benchmark.json').' --markdown='.storage_path('app/bean-ux/latest-benchmark.md'))->dailyAt('03:30')->withoutOverlapping();
 Schedule::command('bean:ux-evaluate-scenarios --recent=500 --json='.storage_path('app/bean-ux/latest-scenario-evaluation.json').' --markdown='.storage_path('app/bean-ux/latest-scenario-evaluation.md'))->dailyAt('03:45')->withoutOverlapping();

@@ -38,17 +38,20 @@ Route::middleware('api.rate_limit')->group(function (): void {
         Route::delete('/account', [AuthController::class, 'destroy']);
         Route::get('/account/export', [AuthController::class, 'export']);
         Route::get('/billing/subscription', [BillingController::class, 'show']);
-        Route::post('/billing/mobile-subscriptions/setup', [BillingController::class, 'mobileSubscriptionSetup']);
-        Route::post('/billing/mobile-subscriptions/confirm', [BillingController::class, 'confirmMobileSubscription']);
         Route::get('/billing/payment-method', [BillingController::class, 'paymentMethod']);
-        Route::post('/billing/payment-method/setup', [BillingController::class, 'paymentMethodSetup']);
-        Route::post('/billing/payment-method/checkout-session', [BillingController::class, 'paymentMethodCheckoutSession']);
-        Route::post('/billing/payment-method/confirm', [BillingController::class, 'confirmPaymentMethod']);
-        Route::post('/billing/checkout-sessions', [BillingController::class, 'checkoutSession']);
-        Route::post('/billing/subscription/upgrade', [BillingController::class, 'upgrade']);
-        Route::post('/billing/subscription/change-plan', [BillingController::class, 'changePlan']);
-        Route::post('/billing/subscription/cancel', [BillingController::class, 'cancel']);
-        Route::post('/billing/subscription/resume', [BillingController::class, 'resume']);
+
+        Route::middleware('early_access.admitted')->group(function (): void {
+            Route::post('/billing/mobile-subscriptions/setup', [BillingController::class, 'mobileSubscriptionSetup']);
+            Route::post('/billing/mobile-subscriptions/confirm', [BillingController::class, 'confirmMobileSubscription']);
+            Route::post('/billing/payment-method/setup', [BillingController::class, 'paymentMethodSetup']);
+            Route::post('/billing/payment-method/checkout-session', [BillingController::class, 'paymentMethodCheckoutSession']);
+            Route::post('/billing/payment-method/confirm', [BillingController::class, 'confirmPaymentMethod']);
+            Route::post('/billing/checkout-sessions', [BillingController::class, 'checkoutSession']);
+            Route::post('/billing/subscription/upgrade', [BillingController::class, 'upgrade']);
+            Route::post('/billing/subscription/change-plan', [BillingController::class, 'changePlan']);
+            Route::post('/billing/subscription/cancel', [BillingController::class, 'cancel']);
+            Route::post('/billing/subscription/resume', [BillingController::class, 'resume']);
+        });
 
         Route::middleware('product.access')->group(function (): void {
             Route::post('/billing/coupon-codes/redeem', [CouponCodeController::class, 'redeem']);

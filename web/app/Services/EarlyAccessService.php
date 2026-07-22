@@ -74,10 +74,16 @@ class EarlyAccessService
 
     public function markRegistered(EarlyAccessSignup $signup, User $user): EarlyAccessSignup
     {
+        $status = match ($signup->status) {
+            self::STATUS_INTERNAL => self::STATUS_INTERNAL,
+            self::STATUS_WAITLISTED => self::STATUS_WAITLISTED,
+            default => self::STATUS_REGISTERED,
+        };
+
         $signup->forceFill([
             'user_id' => $user->id,
             'name' => $user->name,
-            'status' => $signup->status === self::STATUS_INTERNAL ? self::STATUS_INTERNAL : self::STATUS_REGISTERED,
+            'status' => $status,
             'registered_at' => now(),
         ])->save();
 

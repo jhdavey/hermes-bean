@@ -22,7 +22,7 @@ class AdmitEarlyAccessSignup extends Command
                 (string) $this->argument('email'),
                 is_numeric($capacity) ? (int) $capacity : null,
             );
-            Notification::route('mail', $signup->email)->notify(new EarlyAccessAvailable);
+            Notification::route('mail', $signup->email)->notify(new EarlyAccessAvailable($signup->user_id !== null));
             $this->info("Admitted and notified {$signup->email}.");
 
             return self::SUCCESS;

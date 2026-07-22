@@ -95,13 +95,6 @@ class AuthController extends Controller
             $data['plan'] ?? null,
             'app_register',
         );
-        if ($signup->status === EarlyAccessService::STATUS_WAITLISTED) {
-            return response()->json([
-                'message' => $earlyAccess->payload($signup)['message'],
-                'code' => 'early_access_waitlisted',
-                'data' => $earlyAccess->payload($signup),
-            ], 202);
-        }
 
         $user = DB::transaction(function () use ($data, $signup, $earlyAccess): User {
             $user = User::create([

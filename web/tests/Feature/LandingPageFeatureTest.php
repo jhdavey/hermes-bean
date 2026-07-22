@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Services\PlanLimitService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class LandingPageFeatureTest extends TestCase
@@ -144,6 +145,22 @@ class LandingPageFeatureTest extends TestCase
             'email' => 'harley@example.com',
             'source' => 'landing',
             'status' => 'admitted',
+        ]);
+    }
+
+    public function test_waitlisted_visitors_continue_to_account_creation(): void
+    {
+        DB::table('early_access_rollouts')->where('key', 'public_beta')->update([
+            'admitted_count' => 100,
+        ]);
+
+        $this->post(route('early-access.store'), ['email' => 'waiting@example.com'])
+            ->assertRedirect('/register?email=waiting%40example.com');
+
+        $this->assertDatabaseHas('early_access_signups', [
+            'email' => 'waiting@example.com',
+            'source' => 'landing',
+            'status' => 'waitlisted',
         ]);
     }
 }

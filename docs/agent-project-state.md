@@ -1,18 +1,18 @@
 # HeyBean Agent Project State
 
-Last updated: 2026-07-22T02:20:54Z
+Last updated: 2026-07-22T03:16:04Z
 
 Purpose: give future Hermes/agent sessions a compact, durable starting point for HeyBean work without relying on chat context. Read this file before coding when the task touches Bean, HeyBean, voice UX, runtime/tooling, deployment, or project direction.
 
 ## Current repository/deploy state
 
 - Local project path: `/Users/joshuadavey/development/projects/hermes-bean`
-- Main branch status at last update: `main...origin/main`, clean locally.
-- Latest local/main commit at last update: `3bd22b28 Speed up landing Bean and add homepage pricing`
+- Main branch at last update: `88f56d35 docs: add HeyBean agent project state`
+- Local working tree at last update had an intentional docs cleanup in progress.
 - Production host/path: `forge@heybean.org:/home/forge/heybean.org/current`
-- Production commit at last update: `3bd22b28 Speed up landing Bean and add homepage pricing`
-- Production known server-only state: untracked `.env`, `storage`, `web/storage`; deleted tracked `web/storage/**/.gitignore` paths show in production status and should not be cleaned casually.
-- Production Bean voice timing at last update: `60/9/15/15` = max duration / ElevenLabs initial wait / silence end-call / follow-up idle close.
+- Production commit last verified in prior work: `3bd22b28 Speed up landing Bean and add homepage pricing`
+- Production known server-only state: untracked `.env`, `storage`, `web/storage`; do not clean production storage/env casually.
+- Production Bean voice timing last verified in prior work: `60/9/15/15` = max duration / ElevenLabs initial wait / silence end-call / follow-up idle close.
 
 ## Product/runtime direction
 
@@ -25,11 +25,11 @@ Purpose: give future Hermes/agent sessions a compact, durable starting point for
 
 ## Voice UX direction
 
-- Production voice uses ElevenLabs Agent/Conversational AI for browser realtime/STT/TTS/turn-taking.
+- Production browser voice uses ElevenLabs Agent/Conversational AI for realtime STT/TTS/turn-taking.
 - Browser wake phrase is local: “Hey Bean”. Local wake should activate capture but should not become a brittle parallel command brain.
 - ElevenLabs should own voice turn-taking; avoid client-side fallback layers that duplicate provider responsibility.
 - Credit/cost controls should not make Bean miss speech. Prefer metering, quotas, admin visibility, and a max session safety cap over rushed idle windows.
-- Current intended voice timing: max session `60s`, initial wait `9s`, silence end-call `15s`, follow-up idle `15s`.
+- Current intended authenticated voice timing: max session `60s`, initial wait `9s`, silence end-call `15s`, follow-up idle `15s`.
 - Wake-tail fragments like “what’s/can/spec” should not submit as commands. Prefer stable/full provider transcript or provider-native final turn behavior.
 
 ## Weather/external tools state
@@ -52,26 +52,27 @@ Purpose: give future Hermes/agent sessions a compact, durable starting point for
 
 1. Read this file.
 2. Read `AGENTS.md`.
-3. For Bean UX work, read:
-   - `docs/bean-world-class-ux-goal.md`
-   - `docs/bean-world-class-ux-progress.json`
-   - `docs/bean-ux-evaluation-scenarios.md`
-   - `docs/bean-voice-live-sample-harness.md` for voice work
-4. Check local git state:
+3. For architecture/runtime work, read:
+   - `docs/bean-ai-architecture.md`
+   - `docs/bean-model-routing.md`
+   - `docs/bean-action-schema.md`
+4. For voice work, read `docs/bean-elevenlabs-agent-voice.md`.
+5. For UX benchmark/scenario work, read `docs/bean-ux-evaluation-scenarios.md` and run:
+   ```bash
+   cd web
+   php artisan bean:ux-benchmark --days=7
+   php artisan bean:ux-evaluate-scenarios --recent=500
+   ```
+6. Check local git state:
    ```bash
    git status --short --branch
    git log -5 --oneline
    ```
-5. If production state matters, verify it read-only before assuming:
+7. If production state matters, verify it read-only before assuming:
    ```bash
    ssh -o BatchMode=yes forge@heybean.org 'cd /home/forge/heybean.org/current && git status --short --branch && git log -3 --oneline'
    ```
-6. For meaningful Bean UX changes, run/update the relevant benchmark:
-   ```bash
-   cd web
-   php artisan bean:ux-benchmark --days=7
-   ```
-7. After deploying, verify the deployed commit/config and update this file.
+8. After deploying, verify the deployed commit/config and update this file when the durable architecture or deploy state changes.
 
 ## Verification expectations
 

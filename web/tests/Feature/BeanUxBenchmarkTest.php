@@ -131,7 +131,7 @@ class BeanUxBenchmarkTest extends TestCase
         $this->assertSame('pass', data_get($report, 'target_status.voice_speech_to_answer_started_p95_ms.status'));
         $this->assertSame('fail', data_get($report, 'target_status.task_success_rate.status'));
         $progress = json_decode(File::get($progressPath), true);
-        $this->assertSame('Make Bean meet world-class user-experience benchmarks.', $progress['goal']);
+        $this->assertSame('Make Bean meet measured user-experience benchmarks.', $progress['goal']);
         $this->assertSame('bean-world-class-ux-benchmark', data_get($progress, 'latest_report.mode'));
     }
 

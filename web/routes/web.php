@@ -121,10 +121,6 @@ Route::post('/early-access', function (Request $request, EarlyAccessService $ear
     );
     $payload = $earlyAccess->payload($signup);
 
-    if ($payload['waitlisted']) {
-        return redirect('/#early-access')->with('early_access_status', $payload['message']);
-    }
-
     return redirect('/register?email='.urlencode(strtolower($validated['email'])))
         ->with('early_access_status', $payload['message']);
 })->name('early-access.store');

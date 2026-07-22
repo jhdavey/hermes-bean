@@ -800,6 +800,8 @@ PHP);
 
     public function test_elevenlabs_conversation_token_mints_agent_session_without_bridge_state(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-07-21T16:00:00Z'));
+
         config([
             'services.elevenlabs.agent_enabled' => true,
             'services.elevenlabs.api_key' => 'test-elevenlabs-key',

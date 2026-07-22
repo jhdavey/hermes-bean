@@ -221,22 +221,6 @@ class _GuidedBeanOnboardingScreenState
         _focusInput();
         return;
       }
-      final admission = await widget.apiClient.requestEarlyAccess(
-        email: availability.email,
-        name: _name,
-        source: 'flutter_bean_onboarding',
-      );
-      if (!mounted) return;
-      if (admission.waitlisted) {
-        setState(() {
-          _busy = false;
-          _step = _GuidedOnboardingStep.waitlist;
-        });
-        await _respondBean(
-          'You’re on the early-access waitlist. I’m being rolled out gradually by a solo developer so every new group can be supported well. We’ll email you as soon as your spot opens, and you won’t be asked to choose a plan or pay while you wait.',
-        );
-        return;
-      }
       _email = availability.email;
       await _respondBean(
         'Great. Now choose a password. Please text it here and I’ll keep it hidden.',
@@ -261,9 +245,21 @@ class _GuidedBeanOnboardingScreenState
     _addUser('Password saved', masked: true);
     setState(() => _busy = true);
     try {
-      await widget.onCreateAccount(_name, _email, value, _themeModeKey);
+      final auth = await widget.onCreateAccount(
+        _name,
+        _email,
+        value,
+        _themeModeKey,
+      );
       if (!mounted) return;
       setState(() => _busy = false);
+      if (auth.user.accessState == 'waitlisted') {
+        setState(() => _step = _GuidedOnboardingStep.waitlist);
+        await _respondBean(
+          'Your account is created and your place on the early-access waitlist is saved. I’m being rolled out gradually by a solo developer so every new group can be supported well. We’ll email you as soon as your spot opens, and you won’t be asked to choose a plan or pay while you wait.',
+        );
+        return;
+      }
       await _respondBean(
         'Your account is ready. Choose a plan and complete checkout to start your 7-day free trial. Then I’ll show you around your dashboard.',
       );
@@ -462,21 +458,20 @@ class _PlainSignupScreenState extends State<_PlainSignupScreen> {
       _error = null;
     });
     try {
-      final admission = await widget.apiClient.requestEarlyAccess(
-        email: email,
-        name: name,
-        source: 'flutter_plain_signup',
+      final auth = await widget.onCreateAccount(
+        name,
+        email,
+        password,
+        _themeModeKey,
       );
       if (!mounted) return;
-      if (admission.waitlisted) {
+      if (auth.user.accessState == 'waitlisted') {
         setState(() {
           _busy = false;
           _waitlisted = true;
         });
         return;
       }
-      await widget.onCreateAccount(name, email, password, _themeModeKey);
-      if (!mounted) return;
       widget.onAccountCreated();
     } catch (error) {
       if (!mounted) return;
@@ -630,7 +625,7 @@ class _EarlyAccessWaitlistScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 18),
                 Text(
-                  'You’re on the early-access waitlist',
+                  'Your account is created',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w900,
@@ -638,7 +633,7 @@ class _EarlyAccessWaitlistScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'HeyBean is being rolled out gradually by a solo developer so each new group can be supported well. We’ll email you as soon as your spot opens.',
+                  'You’re on the early-access waitlist. HeyBean is being rolled out gradually by a solo developer so each new group can be supported well. We’ll email you as soon as your spot opens.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: HeyBeanTheme.muted,
