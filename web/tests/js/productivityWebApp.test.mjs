@@ -91,6 +91,15 @@ test('month event pills fit their text without exceeding the date cell', () => {
     assert.match(calendarSource, /\.hb-month-event-title\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s);
 });
 
+test('all-day month events use date-only exclusive end bounds', () => {
+    assert.match(source, /function allDayEventStartDate\(event = \{\}\)/);
+    assert.match(source, /metadata\.all_day_start_date \|\| metadata\.allDayStartDate \|\| event\.starts_at \|\| event\.startsAt/);
+    assert.match(source, /function allDayEventExclusiveEndDate\(event = \{\}\)/);
+    assert.match(source, /metadata\.all_day_exclusive_end_date \|\| metadata\.allDayExclusiveEndDate \|\| event\.ends_at \|\| event\.endsAt/);
+    assert.match(source, /dayValue >= startDate && dayValue < exclusiveEndDate/);
+    assert.doesNotMatch(cssRuleContaining(calendarSource, '.hb-month-cell'), /border-radius:\s*4px/);
+});
+
 test('beta bar and calendar month grid extend square to their edges', () => {
     assert.match(cssRuleContaining(baseShellSource, '.hb-beta-banner'), /appearance:\s*none/);
     assert.match(cssRuleContaining(baseShellSource, '.hb-beta-banner'), /border-radius:\s*0/);

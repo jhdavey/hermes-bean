@@ -217,6 +217,8 @@ class GoogleCalendarSyncService
                     'google_calendar_id' => $calendarId,
                     'google_calendar_summary' => $calendarSummary,
                     'all_day' => $isAllDay,
+                    'all_day_start_date' => $isAllDay ? ($item['start']['date'] ?? null) : null,
+                    'all_day_exclusive_end_date' => $isAllDay ? ($item['end']['date'] ?? null) : null,
                     'last_synced_from_google_at' => now()->toIso8601String(),
                 ]);
                 $event->forceFill([

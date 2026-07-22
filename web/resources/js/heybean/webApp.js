@@ -9625,17 +9625,37 @@ export function mountHeyBeanWebApp(mount) {
         return (event?.all_day ?? metadata.all_day) === true;
     }
 
+    function allDayEventStartDate(event = {}) {
+        const metadata = eventMetadata(event);
+        return String(metadata.all_day_start_date || metadata.allDayStartDate || event.starts_at || event.startsAt || '').slice(0, 10);
+    }
+
+    function allDayEventExclusiveEndDate(event = {}) {
+        const metadata = eventMetadata(event);
+        const explicitEnd = String(metadata.all_day_exclusive_end_date || metadata.allDayExclusiveEndDate || event.ends_at || event.endsAt || '').slice(0, 10);
+        const start = allDayEventStartDate(event);
+        if (explicitEnd && explicitEnd > start) return explicitEnd;
+        if (!start) return '';
+        return dateOnly(addDays(parseLocalDate(start), 1));
+    }
+
     function eventIntersectsDay(event, day) {
         const startValue = event.starts_at || event.startsAt;
         if (!startValue) return false;
         const dayStart = new Date(parseLocalDate(day));
         dayStart.setHours(0, 0, 0, 0);
         const dayEnd = addDays(dayStart, 1);
+        if (eventAllDay(event)) {
+            const dayValue = dateOnly(dayStart);
+            const startDate = allDayEventStartDate(event);
+            const exclusiveEndDate = allDayEventExclusiveEndDate(event);
+            return Boolean(startDate && exclusiveEndDate && dayValue >= startDate && dayValue < exclusiveEndDate);
+        }
         const start = new Date(startValue);
         const endValue = event.ends_at || event.endsAt;
         const end = endValue
             ? new Date(endValue)
-            : (eventAllDay(event) ? addDays(start, 1) : addMinutes(start, 60));
+            : addMinutes(start, 60);
         return start < dayEnd && end > dayStart;
     }
 

@@ -218,6 +218,8 @@ class GoogleCalendarSyncTest extends TestCase
         ]);
         $holiday = CalendarEvent::where('google_event_id', 'holiday-event-1')->firstOrFail();
         $this->assertTrue($holiday->metadata['all_day']);
+        $this->assertSame('2026-05-25', $holiday->metadata['all_day_start_date']);
+        $this->assertSame('2026-05-26', $holiday->metadata['all_day_exclusive_end_date']);
     }
 
     public function test_google_sync_preserves_heybean_category_on_exported_events(): void
