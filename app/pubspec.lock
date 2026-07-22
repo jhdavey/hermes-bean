@@ -140,10 +140,9 @@ packages:
   elevenlabs_agents:
     dependency: "direct main"
     description:
-      name: elevenlabs_agents
-      sha256: "27face1bfd905e07f9195cbd164124dc4d432656287fcee41bcb14cece248eab"
-      url: "https://pub.dev"
-    source: hosted
+      path: "packages/elevenlabs_agents"
+      relative: true
+    source: path
     version: "0.5.1"
   equatable:
     dependency: transitive

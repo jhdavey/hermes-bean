@@ -203,6 +203,25 @@ void main() {
     expect(shellSource, contains('setState(() {\n      _user = user;'));
   });
 
+  test('Flutter ElevenLabs startup waits for LiveKit data channel', () {
+    final liveKitManagerSource = File(
+      'packages/elevenlabs_agents/lib/src/connection/livekit_manager.dart',
+    ).readAsStringSync();
+    final pubspec = File('pubspec.yaml').readAsStringSync();
+
+    expect(pubspec, contains('path: packages/elevenlabs_agents'));
+    expect(
+      liveKitManagerSource,
+      contains('dataChannelGetBufferedAmountFailed'),
+    );
+    expect(
+      liveKitManagerSource,
+      contains('dataChannel not found or not opened'),
+    );
+    expect(liveKitManagerSource, contains('for (var attempt = 0; attempt < 8'));
+    expect(liveKitManagerSource, contains('Duration(milliseconds: 150 *'));
+  });
+
   test('Flutter Bean voice permission is not shown as generic red failure', () {
     final voiceSource = File(
       'lib/src/bean/bean_assistant_panel.dart',
