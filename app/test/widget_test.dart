@@ -225,6 +225,17 @@ void main() {
     ]) {
       expect(sources, contains(key));
     }
+    expect(sources, contains('Walk me through it'));
+    expect(sources, contains('Have Bean do it'));
+    expect(
+      sources.indexOf('post-tour-walkthrough'),
+      lessThan(sources.indexOf('post-tour-bean-do-it')),
+    );
+    expect(sources, contains("child: const Text('Skip')"));
+    expect(sources, isNot(contains('Skip this step')));
+    expect(sources, isNot(contains('workspace label')));
+    expect(sources, isNot(contains('command-center-label-field')));
+    expect(sources, isNot(contains('Command Center name')));
     expect(sources, isNot(contains('notes-filter-unfiled')));
     expect(sources, isNot(contains("label: 'Unfiled'")));
   });

@@ -35,12 +35,14 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.match(source, /Customize dashboard/);
     assert.match(source, /Import a calendar/);
     assert.match(source, /Create a shared workspace/);
-    assert.match(source, /Ask Bean to do it/);
-    assert.match(source, /Walk me step by step/);
-    assert.match(source, /Skip this step/);
+    assert.match(source, /Walk me through it/);
+    assert.match(source, /Have Bean do it/);
+    assert.match(source, /data-post-tour-first-action-skip>Skip</);
     assert.match(source, /data-post-tour-first-action/);
     assert.match(source, /data-post-tour-bean-do-it/);
     assert.match(source, /data-post-tour-walkthrough/);
+    assert.ok(source.indexOf('data-post-tour-walkthrough') < source.indexOf('data-post-tour-bean-do-it'));
+    assert.doesNotMatch(source, /Skip this step/);
     assert.match(source, /sendBeanMessageContent\(action\.beanPrompt\)/);
     assert.match(source, /finishPostTourFirstAction/);
     assert.doesNotMatch(source, /openCalendarImport: true/);

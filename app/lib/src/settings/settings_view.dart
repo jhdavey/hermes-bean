@@ -22,7 +22,6 @@ class _SettingsView extends StatelessWidget {
     required this.onNotificationPreferencesChanged,
     required this.onThemeChanged,
     required this.onThemeModeChanged,
-    required this.onCommandCenterLabelChanged,
     required this.onPreferredMapAppChanged,
     required this.onTimezoneChanged,
     required this.onWorkspacesChanged,
@@ -60,7 +59,6 @@ class _SettingsView extends StatelessWidget {
   onNotificationPreferencesChanged;
   final Future<void> Function(String themeKey) onThemeChanged;
   final Future<void> Function(String themeModeKey) onThemeModeChanged;
-  final Future<void> Function(String label) onCommandCenterLabelChanged;
   final Future<void> Function(String preferredMapApp) onPreferredMapAppChanged;
   final Future<void> Function(String timezone) onTimezoneChanged;
   final Future<void> Function() onWorkspacesChanged;
@@ -110,10 +108,8 @@ class _SettingsView extends StatelessWidget {
             _ThemePreferencesCard(
               selectedThemeKey: user.theme,
               selectedThemeModeKey: user.themeMode,
-              commandCenterLabel: user.commandCenterLabel,
               onChanged: onThemeChanged,
               onModeChanged: onThemeModeChanged,
-              onCommandCenterLabelChanged: onCommandCenterLabelChanged,
             ),
             _NotificationPreferencesCard(
               preferences: user.notificationPreferences,
@@ -959,18 +955,14 @@ class _ThemePreferencesCard extends StatefulWidget {
   const _ThemePreferencesCard({
     required this.selectedThemeKey,
     required this.selectedThemeModeKey,
-    required this.commandCenterLabel,
     required this.onChanged,
     required this.onModeChanged,
-    required this.onCommandCenterLabelChanged,
   });
 
   final String selectedThemeKey;
   final String selectedThemeModeKey;
-  final String commandCenterLabel;
   final Future<void> Function(String themeKey) onChanged;
   final Future<void> Function(String themeModeKey) onModeChanged;
-  final Future<void> Function(String label) onCommandCenterLabelChanged;
 
   @override
   State<_ThemePreferencesCard> createState() => _ThemePreferencesCardState();
@@ -979,11 +971,9 @@ class _ThemePreferencesCard extends StatefulWidget {
 class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
   late String _selectedThemeKey;
   late String _selectedThemeModeKey;
-  late final TextEditingController _commandCenterLabelController;
   bool _saving = false;
   bool _savingMode = false;
   bool _expanded = false;
-  bool _savingLabel = false;
 
   @override
   void initState() {
@@ -992,9 +982,6 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
     _selectedThemeModeKey = heyBeanThemeModeForKey(
       widget.selectedThemeModeKey,
     ).key;
-    _commandCenterLabelController = TextEditingController(
-      text: widget.commandCenterLabel,
-    );
   }
 
   @override
@@ -1008,17 +995,6 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
         widget.selectedThemeModeKey,
       ).key;
     }
-    if (!_savingLabel &&
-        oldWidget.commandCenterLabel != widget.commandCenterLabel &&
-        _commandCenterLabelController.text != widget.commandCenterLabel) {
-      _commandCenterLabelController.text = widget.commandCenterLabel;
-    }
-  }
-
-  @override
-  void dispose() {
-    _commandCenterLabelController.dispose();
-    super.dispose();
   }
 
   Future<void> _save(String themeKey) async {
@@ -1046,23 +1022,6 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
       await widget.onModeChanged(normalizedThemeModeKey);
     } finally {
       if (mounted) setState(() => _savingMode = false);
-    }
-  }
-
-  Future<void> _saveCommandCenterLabel() async {
-    if (_savingLabel) return;
-    final label = _commandCenterLabelController.text.trim().isEmpty
-        ? 'Command Center'
-        : _commandCenterLabelController.text.trim();
-    if (label == widget.commandCenterLabel) return;
-    setState(() {
-      _savingLabel = true;
-      _commandCenterLabelController.text = label;
-    });
-    try {
-      await widget.onCommandCenterLabelChanged(label);
-    } finally {
-      if (mounted) setState(() => _savingLabel = false);
     }
   }
 
@@ -1098,7 +1057,7 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            '${selectedTheme.label} accent · ${selectedMode.label} · ${widget.commandCenterLabel}',
+                            '${selectedTheme.label} accent · ${selectedMode.label}',
                             style: TextStyle(
                               color: HeyBeanTheme.muted,
                               fontSize: 12,
@@ -1179,34 +1138,6 @@ class _ThemePreferencesCardState extends State<_ThemePreferencesCard> {
                     selectedThemeModeKey: _selectedThemeModeKey,
                     disabled: _savingMode,
                     onChanged: _saveMode,
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    key: const Key('command-center-label-field'),
-                    controller: _commandCenterLabelController,
-                    enabled: !_savingLabel,
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => unawaited(_saveCommandCenterLabel()),
-                    decoration: const InputDecoration(
-                      labelText: 'Command Center name',
-                      hintText: 'Command Center',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: FilledButton(
-                      key: const Key('command-center-label-save'),
-                      onPressed: _savingLabel
-                          ? null
-                          : () => unawaited(_saveCommandCenterLabel()),
-                      child: _savingLabel
-                          ? const SizedBox.square(
-                              dimension: 17,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Text('Save'),
-                    ),
                   ),
                 ],
               ),

@@ -1332,7 +1332,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Bean will walk you through Settings: pick a theme, notification preferences, workspace label, and calendar hours.',
+              'Bean will walk you through Settings: pick a theme, notification preferences, and calendar hours.',
             ),
           ),
         );
@@ -1359,7 +1359,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   String _postTourBeanPrompt(_PostTourFirstAction action) {
     switch (action) {
       case _PostTourFirstAction.customizeDashboard:
-        return 'Help me customize my HeyBean dashboard. Ask one question at a time, then use available dashboard tools or guide me through Settings to set theme, notifications, workspace label, and calendar hours.';
+        return 'Help me customize my HeyBean dashboard. Ask one question at a time, then use available dashboard tools or guide me through Settings to set theme, notifications, and calendar hours.';
       case _PostTourFirstAction.importCalendar:
         return 'Help me import my calendar into HeyBean. Ask what calendar provider or iCal link I use, then either do the import if you have enough information or walk me step by step.';
       case _PostTourFirstAction.sharedWorkspace:
@@ -3911,43 +3911,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
-  Future<void> _updateCommandCenterLabel(String label) async {
-    if (_busy) return;
-    final normalizedLabel = label.trim().isEmpty
-        ? 'Command Center'
-        : label.trim();
-    final previousUser = _user;
-    setState(() {
-      _busy = true;
-      _error = null;
-      if (previousUser != null) {
-        _user = previousUser.copyWith(commandCenterLabel: normalizedLabel);
-      }
-    });
-    try {
-      final updatedUser = await widget.apiClient.updateMe(
-        commandCenterLabel: normalizedLabel,
-      );
-      if (!mounted) return;
-      _applyUserTheme(updatedUser);
-      setState(() {
-        _user = updatedUser;
-        _busy = false;
-        _error = null;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _user = previousUser;
-        _busy = false;
-        _error = beanFriendlyErrorMessage(
-          error,
-          action: 'update your command center name',
-        );
-      });
-    }
-  }
-
   Future<void> _updatePreferredMapApp(String preferredMapApp) async {
     if (_busy) return;
     final normalized = preferredMapApp == 'apple' ? 'apple' : 'google';
@@ -4571,7 +4534,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     onNotificationPreferencesChanged: _updateNotificationPreferences,
     onThemeChanged: _updateTheme,
     onThemeModeChanged: _updateThemeMode,
-    onCommandCenterLabelChanged: _updateCommandCenterLabel,
     onPreferredMapAppChanged: _updatePreferredMapApp,
     onTimezoneChanged: _updateTimezone,
     eventCategoriesForSettings: _eventCategories,
@@ -4662,8 +4624,7 @@ class _PostTourFirstActionSheet extends StatelessWidget {
             key: const Key('post-tour-customize-dashboard'),
             icon: Icons.tune_rounded,
             title: 'Customize dashboard',
-            subtitle:
-                'Theme, notifications, workspace label, and calendar hours.',
+            subtitle: 'Theme, notifications, and calendar hours.',
             onTap: () => Navigator.of(
               context,
             ).pop(_PostTourFirstAction.customizeDashboard),
@@ -4689,7 +4650,7 @@ class _PostTourFirstActionSheet extends StatelessWidget {
           TextButton(
             key: const Key('post-tour-first-action-skip'),
             onPressed: onSkip,
-            child: const Text('Skip this step'),
+            child: const Text('Skip'),
           ),
         ],
       ),
@@ -4732,26 +4693,26 @@ class _PostTourActionHelpSheet extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
-            key: const Key('post-tour-bean-do-it'),
-            onPressed: () =>
-                Navigator.of(context).pop(_PostTourFirstActionHelpMode.bean),
-            icon: const Icon(Icons.auto_awesome_rounded),
-            label: const Text('Ask Bean to do it'),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
             key: const Key('post-tour-walkthrough'),
             onPressed: () => Navigator.of(
               context,
             ).pop(_PostTourFirstActionHelpMode.walkthrough),
             icon: const Icon(Icons.route_rounded),
-            label: const Text('Walk me step by step'),
+            label: const Text('Walk me through it'),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            key: const Key('post-tour-bean-do-it'),
+            onPressed: () =>
+                Navigator.of(context).pop(_PostTourFirstActionHelpMode.bean),
+            icon: const Icon(Icons.auto_awesome_rounded),
+            label: const Text('Have Bean do it'),
           ),
           const SizedBox(height: 8),
           TextButton(
             key: const Key('post-tour-action-help-skip'),
             onPressed: onSkip,
-            child: const Text('Skip this step'),
+            child: const Text('Skip'),
           ),
         ],
       ),

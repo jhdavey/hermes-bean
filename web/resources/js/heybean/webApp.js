@@ -4032,10 +4032,10 @@ export function mountHeyBeanWebApp(mount) {
                 <section class="hb-card hb-modal hb-post-tour-first-action-modal">
                     ${sectionTitle(icons.bean || icons.activity, postTourFirstActionTitle(action), 'Want Bean to handle as much as possible, or walk you step by step while you complete it?')}
                     <div class="hb-post-tour-action-grid">
-                        <button class="hb-button" type="button" data-post-tour-bean-do-it="${escapeAttr(action.key)}">Ask Bean to do it</button>
-                        <button class="hb-button-secondary" type="button" data-post-tour-walkthrough="${escapeAttr(action.key)}">Walk me step by step</button>
+                        <button class="hb-button" type="button" data-post-tour-walkthrough="${escapeAttr(action.key)}">Walk me through it</button>
+                        <button class="hb-button-secondary" type="button" data-post-tour-bean-do-it="${escapeAttr(action.key)}">Have Bean do it</button>
                     </div>
-                    <div class="hb-modal-actions"><button class="hb-button-ghost" type="button" data-post-tour-first-action-skip>Skip this step</button></div>
+                    <div class="hb-modal-actions"><button class="hb-button-ghost" type="button" data-post-tour-first-action-skip>Skip</button></div>
                 </section>
             </div>`;
         }
@@ -4050,7 +4050,7 @@ export function mountHeyBeanWebApp(mount) {
                                 <span>${escapeHtml(item.subtitle)}</span>
                             </button>`).join('')}
                     </div>
-                    <div class="hb-modal-actions"><button class="hb-button-ghost" type="button" data-post-tour-first-action-skip>Skip this step</button></div>
+                    <div class="hb-modal-actions"><button class="hb-button-ghost" type="button" data-post-tour-first-action-skip>Skip</button></div>
                 </section>
             </div>`;
     }
@@ -4059,8 +4059,8 @@ export function mountHeyBeanWebApp(mount) {
         {
             key: 'customize_dashboard',
             title: 'Customize dashboard',
-            subtitle: 'Theme, notifications, workspace label, and calendar hours.',
-            beanPrompt: 'Help me customize my HeyBean dashboard. Ask one question at a time, then use available dashboard tools or guide me through Settings to set theme, notifications, workspace label, and calendar hours.',
+            subtitle: 'Theme, notifications, and calendar hours.',
+            beanPrompt: 'Help me customize my HeyBean dashboard. Ask one question at a time, then use available dashboard tools or guide me through Settings to set theme, notifications, and calendar hours.',
         },
         {
             key: 'import_calendar',
@@ -4113,7 +4113,7 @@ export function mountHeyBeanWebApp(mount) {
         state.error = '';
         if (action.key === 'customize_dashboard') {
             state.selected = 'settings';
-            state.notice = 'Start in Settings: pick your theme, notifications, workspace label, and calendar hours. Bean can stay open if you want guidance.';
+            state.notice = 'Start in Settings: pick your theme, notifications, and calendar hours. Bean can stay open if you want guidance.';
         } else if (action.key === 'import_calendar') {
             state.selected = 'settings';
             state.modal = { type: 'external-calendar-import', providerKey: 'apple', title: 'First action: import your calendar' };

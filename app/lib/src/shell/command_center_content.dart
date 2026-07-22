@@ -53,7 +53,6 @@ class _CommandCenterContent extends StatelessWidget {
     required this.onNotificationPreferencesChanged,
     required this.onThemeChanged,
     required this.onThemeModeChanged,
-    required this.onCommandCenterLabelChanged,
     required this.onPreferredMapAppChanged,
     required this.onTimezoneChanged,
     required this.eventCategoriesForSettings,
@@ -217,7 +216,6 @@ class _CommandCenterContent extends StatelessWidget {
   onNotificationPreferencesChanged;
   final Future<void> Function(String themeKey) onThemeChanged;
   final Future<void> Function(String themeModeKey) onThemeModeChanged;
-  final Future<void> Function(String label) onCommandCenterLabelChanged;
   final Future<void> Function(String preferredMapApp) onPreferredMapAppChanged;
   final Future<void> Function(String timezone) onTimezoneChanged;
   final List<BeanEventCategory> eventCategoriesForSettings;
@@ -370,7 +368,6 @@ class _CommandCenterContent extends StatelessWidget {
         onNotificationPreferencesChanged: onNotificationPreferencesChanged,
         onThemeChanged: onThemeChanged,
         onThemeModeChanged: onThemeModeChanged,
-        onCommandCenterLabelChanged: onCommandCenterLabelChanged,
         onPreferredMapAppChanged: onPreferredMapAppChanged,
         onTimezoneChanged: onTimezoneChanged,
         onWorkspacesChanged: onWorkspacesChanged,
