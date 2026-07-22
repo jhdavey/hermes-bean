@@ -999,8 +999,51 @@ class BeanActionExecutor
 
     private function isDestructive(string $action): bool { return str_ends_with($action, '.delete'); }
     private function confirmationSummary(string $action, array $arguments): string { return "Confirm before I run {$action}."; }
-    private function labelFor(string $action): string { return "Working: {$action}"; }
-    private function resultLabel(string $action, array $result): string { return ($result['ok'] ?? false) ? "Done: {$action}".$this->progressDetailText($action, $result) : "Failed: {$action}".($result['error'] ?? null ? ' · '.(string) $result['error'] : ''); }
+
+    private function labelFor(string $action): string
+    {
+        return match ($action) {
+            'dashboard.summary' => 'Checking your dashboard',
+            'resource.query', 'resource.relationships' => 'Looking through your workspace',
+            'time.now' => 'Checking the current time',
+            'external.lookup' => 'Looking that up',
+            'external.weather' => 'Checking the forecast',
+            'task.list', 'task.search', 'task.context' => 'Checking your tasks',
+            'task.create' => 'Adding a task',
+            'task.update' => 'Updating a task',
+            'task.complete' => 'Completing a task',
+            'task.delete' => 'Deleting a task',
+            'reminder.list', 'reminder.search' => 'Checking your reminders',
+            'reminder.create' => 'Adding a reminder',
+            'reminder.update' => 'Updating a reminder',
+            'reminder.complete' => 'Completing a reminder',
+            'reminder.delete' => 'Deleting a reminder',
+            'calendar_event.list', 'calendar_event.search' => 'Checking your calendar',
+            'calendar_event.create' => 'Adding a calendar event',
+            'calendar_event.update' => 'Updating a calendar event',
+            'calendar_event.delete' => 'Deleting a calendar event',
+            'note.list', 'note.search' => 'Checking your notes',
+            'note.create' => 'Creating a note',
+            'note.update' => 'Updating a note',
+            'note.delete' => 'Deleting a note',
+            default => 'Working on that',
+        };
+    }
+
+    private function resultLabel(string $action, array $result): string
+    {
+        if (! ($result['ok'] ?? false)) {
+            return 'Could not finish: '.$this->labelFor($action).($result['error'] ?? null ? ' · '.(string) $result['error'] : '');
+        }
+
+        return match (true) {
+            str_ends_with($action, '.create') => str_replace(['Adding', 'Creating'], ['Added', 'Created'], $this->labelFor($action)).$this->progressDetailText($action, $result),
+            str_ends_with($action, '.update') => str_replace('Updating', 'Updated', $this->labelFor($action)).$this->progressDetailText($action, $result),
+            str_ends_with($action, '.complete') => str_replace('Completing', 'Completed', $this->labelFor($action)).$this->progressDetailText($action, $result),
+            str_ends_with($action, '.delete') => str_replace('Deleting', 'Deleted', $this->labelFor($action)).$this->progressDetailText($action, $result),
+            default => $this->labelFor($action).$this->progressDetailText($action, $result),
+        };
+    }
 
     private function dateOrNull(mixed $value, ?array $timeContext = null): ?Carbon
     {

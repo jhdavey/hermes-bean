@@ -95,7 +95,7 @@ class HermesAgentRuntimeService
                 ],
             ]);
             $this->activity->log($session, $run, 'assistant_message', $assistantText, ['runtime' => 'hermes']);
-            $this->activity->log($session, $run, 'status', 'Done', ['mode' => 'wake_listening', 'runtime' => 'hermes']);
+            $this->activity->log($session, $run, 'status', 'Ready', ['mode' => 'wake_listening', 'runtime' => 'hermes']);
 
             $waiting = $run->toolCalls()->where('status', 'waiting_confirmation')->exists();
             $metadata = is_array($run->metadata) ? $run->metadata : [];

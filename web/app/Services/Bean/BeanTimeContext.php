@@ -162,12 +162,24 @@ class BeanTimeContext
             return Carbon::parse($text, $this->timezone($context))->startOfDay()->utc();
         }
 
-        return Carbon::parse($text)->utc();
+        if ($this->hasExplicitTimezone($text)) {
+            return Carbon::parse($text)->utc();
+        }
+
+        return Carbon::parse($text, $this->timezone($context))->utc();
     }
 
     public function isDateOnly(mixed $value): bool
     {
         return is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($value)) === 1;
+    }
+
+    private function hasExplicitTimezone(string $value): bool
+    {
+        $text = trim($value);
+
+        return preg_match('/(?:Z|[+-]\d{2}:?\d{2})$/i', $text) === 1
+            || preg_match('/\b(?:UTC|GMT|[A-Za-z_]+\/[A-Za-z_]+)\b/', $text) === 1;
     }
 
     private function snapshot(string $timezone, string $source): array

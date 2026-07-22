@@ -296,6 +296,9 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(source, /resolvePendingBeanVoiceResponseFromActivity/);
     assert.match(source, /voice_request_error/);
     assert.match(source, /voice_request_timed_out/);
+    assert.match(source, /voice_request_recovered_to_wake/);
+    assert.match(source, /Voice reset — listening for “Hey Bean”/);
+    assert.doesNotMatch(source, /Voice hit a problem/);
     assert.match(source, /const beanVoiceInitialIdleCloseMs = 9000/);
     assert.match(source, /const beanVoiceFollowUpIdleCloseMs = 15000/);
     assert.match(source, /function markBeanVoiceActivity/);
@@ -304,8 +307,11 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(source, /scheduleBeanVoiceIdleClose\(`\$\{reason\}_after_activity`\)/);
     assert.match(source, /markBeanVoiceActivity\(\);\n\s*logBeanVoiceLifecycleEvent\('bean_response_received'/);
     assert.match(source, /markBeanVoiceActivity\(\);\n\s*beanLastSpokenAnswer = content/);
-    assert.match(source, /const voiceOwnsStatus = state\.bean\.voiceActive/);
-    assert.match(source, /payloadMode === 'wake_listening' \|\| event\.label === 'Done'/);
+    assert.match(source, /setBeanIdleStatus/);
+    assert.match(source, /beanIdleStatusText/);
+    assert.match(source, /const voiceOwnsIdleStatus = state\.bean\.voiceActive/);
+    assert.match(source, /payloadMode === 'wake_listening' \|\| payloadMode === 'privacy' \|\| event\.label === 'Done'/);
+    assert.match(source, /event\.type === 'assistant_message' && liveStatusEvent\) \{\n\s*setBeanIdleStatus\(\);/);
     assert.doesNotMatch(source, /input_audio_buffer\.clear/);
     assert.doesNotMatch(source, /response\.create/);
     assert.doesNotMatch(source, /function sendBeanRealtimeEvent/);

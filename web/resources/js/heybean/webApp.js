@@ -1980,6 +1980,19 @@ export function mountHeyBeanWebApp(mount) {
         return event?.payload?.progress?.status_text || event?.payload?.progress?.label || event?.label || fallback;
     }
 
+    function beanIdleMode() {
+        return localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
+    }
+
+    function beanIdleStatusText() {
+        return beanIdleMode() === 'privacy' ? 'Privacy mode' : 'Listening locally for “Hey Bean”';
+    }
+
+    function setBeanIdleStatus() {
+        state.bean.mode = beanIdleMode();
+        state.bean.statusText = beanIdleStatusText();
+    }
+
     function beanConfirmationMarkup(confirmation) {
         return `<div class="hb-bean-confirmation"><span>${escapeHtml(confirmation.summary || 'Please confirm this action.')}</span><button class="hb-button-secondary" type="button" data-bean-confirm="${escapeAttr(confirmation.id)}">Confirm</button></div>`;
     }
@@ -4923,9 +4936,8 @@ export function mountHeyBeanWebApp(mount) {
             clearBeanPendingVoiceResponse();
             state.bean.busy = false;
             state.bean.error = 'Bean took too long to answer by voice.';
-            state.bean.mode = 'error';
-            state.bean.statusText = 'Bean hit a problem';
-            stopBeanVoiceSession({ keepStatus: true });
+            logBeanVoiceLifecycleEvent('voice_request_recovered_to_wake', { reason: 'request_timeout', transport: 'elevenlabs_agent' });
+            stopBeanVoiceSession({ statusText: 'Voice reset — listening for “Hey Bean”' });
             render();
         }, 60000);
     }
@@ -5374,8 +5386,7 @@ export function mountHeyBeanWebApp(mount) {
                         logBeanVoiceLifecycleEvent('voice_session_closed', { transport: 'elevenlabs_agent', reason: details?.reason || '' });
                     }
                     if (state.bean.mode !== 'privacy') {
-                        state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
-                        state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening locally for “Hey Bean”';
+                        setBeanIdleStatus();
                         if (state.bean.mode !== 'privacy') startBeanWakeListening();
                     }
                     render();
@@ -5383,8 +5394,8 @@ export function mountHeyBeanWebApp(mount) {
                 onError: (message, context) => {
                     logBeanVoiceLifecycleEvent('voice_session_error', { label: String(message || '').slice(0, 160), transport: 'elevenlabs_agent', context: context ? String(context).slice(0, 160) : '' });
                     state.bean.error = String(message || 'ElevenLabs voice error.');
-                    state.bean.mode = 'error';
-                    state.bean.statusText = 'Voice hit a problem';
+                    logBeanVoiceLifecycleEvent('voice_request_recovered_to_wake', { reason: 'session_error', transport: 'elevenlabs_agent' });
+                    stopBeanVoiceSession({ statusText: 'Voice reset — listening for “Hey Bean”' });
                     render();
                 },
                 onMessage: (message) => handleBeanElevenLabsMessage(message),
@@ -5402,10 +5413,9 @@ export function mountHeyBeanWebApp(mount) {
                 },
             });
         } catch (error) {
-            stopBeanVoiceSession({ keepStatus: true });
             state.bean.error = friendlyError(error, 'start Bean voice');
-            state.bean.mode = 'error';
-            state.bean.statusText = 'Voice hit a problem';
+            logBeanVoiceLifecycleEvent('voice_request_recovered_to_wake', { reason: 'start_error', transport: 'elevenlabs_agent' });
+            stopBeanVoiceSession({ statusText: 'Voice could not start — listening for “Hey Bean”' });
         }
         render();
     }
@@ -5438,13 +5448,9 @@ export function mountHeyBeanWebApp(mount) {
         beanLastVoiceActivityAt = 0;
         beanAudioPlaybackBlocked = false;
         if (!options.keepStatus) {
-            state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
-            if (state.bean.mode === 'privacy') {
-                state.bean.statusText = 'Privacy mode';
-            } else {
-                state.bean.statusText = options.statusText || 'Listening locally for “Hey Bean”';
-                startBeanWakeListening();
-            }
+            setBeanIdleStatus();
+            if (options.statusText && state.bean.mode !== 'privacy') state.bean.statusText = options.statusText;
+            if (state.bean.mode !== 'privacy') startBeanWakeListening();
         }
     }
 
@@ -5628,8 +5634,7 @@ export function mountHeyBeanWebApp(mount) {
             state.bean.messages = normalizeList(data.messages);
             state.bean.activity = normalizeList(data.activity);
             state.bean.confirmations = normalizeList(data.confirmations);
-            state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
-            state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening locally for “Hey Bean”';
+            setBeanIdleStatus();
             scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
         } catch (error) {
             state.bean.error = friendlyError(error, 'ask Bean');
@@ -5650,8 +5655,7 @@ export function mountHeyBeanWebApp(mount) {
             await api(`/bean/confirmations/${encodeURIComponent(id)}/approve`, { method: 'POST', body: {} });
             await loadBeanActivity();
             scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
-            state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
-            state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening locally for “Hey Bean”';
+            setBeanIdleStatus();
         } catch (error) {
             state.bean.error = friendlyError(error, 'confirm Bean action');
             state.bean.mode = 'error';
@@ -8386,8 +8390,7 @@ export function mountHeyBeanWebApp(mount) {
     function startBeanEventFeed() {
         if (!state.token || state.phase !== 'signedIn' || beanEventAbort) return;
         beanEventStatusStartedAt = Date.now();
-        state.bean.mode = localStorage.getItem('heybean.bean.privacy') === 'listening' ? 'wake_listening' : 'privacy';
-        state.bean.statusText = state.bean.mode === 'privacy' ? 'Privacy mode' : 'Listening locally for “Hey Bean”';
+        setBeanIdleStatus();
         beanEventAbort = new AbortController();
         pollBeanEvents(beanEventAbort.signal);
     }
@@ -8445,10 +8448,14 @@ export function mountHeyBeanWebApp(mount) {
             render();
             return;
         }
-        const voiceOwnsStatus = state.bean.voiceActive && ['thinking', 'speaking', 'listening'].includes(state.bean.mode) && (payloadMode === 'wake_listening' || event.label === 'Done');
-        if (event.type === 'status' && payloadMode && liveStatusEvent && !voiceOwnsStatus) {
-            state.bean.mode = payloadMode;
-            state.bean.statusText = beanEventStatusText(event, state.bean.statusText);
+        const voiceOwnsIdleStatus = state.bean.voiceActive && ['thinking', 'speaking', 'listening'].includes(state.bean.mode) && (payloadMode === 'wake_listening' || payloadMode === 'privacy' || event.label === 'Done');
+        if (event.type === 'status' && payloadMode && liveStatusEvent && !voiceOwnsIdleStatus) {
+            if (payloadMode === 'wake_listening' || payloadMode === 'privacy' || event.label === 'Done') {
+                setBeanIdleStatus();
+            } else {
+                state.bean.mode = payloadMode;
+                state.bean.statusText = beanEventStatusText(event, state.bean.statusText);
+            }
         } else if (event.type === 'tool_started' && liveStatusEvent) {
             state.bean.mode = 'working';
             state.bean.statusText = beanEventStatusText(event, 'Working…');
@@ -8456,7 +8463,7 @@ export function mountHeyBeanWebApp(mount) {
             state.bean.mode = event.type === 'tool_failed' ? 'error' : 'working';
             state.bean.statusText = beanEventStatusText(event, event.type === 'tool_failed' ? 'Action failed' : 'Action complete');
         } else if (event.type === 'assistant_message' && liveStatusEvent) {
-            state.bean.statusText = beanEventStatusText(event, 'Done');
+            setBeanIdleStatus();
         }
         if (state.bean.panelOpen || ['status', 'tool_started', 'tool_completed', 'tool_failed', 'assistant_message'].includes(event.type)) {
             render();
