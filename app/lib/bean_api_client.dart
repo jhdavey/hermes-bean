@@ -84,6 +84,24 @@ class BeanApiClient {
     return BeanEmailAvailability.fromJson(_expectMap(data['data']));
   }
 
+  Future<BeanEarlyAccessStatus> requestEarlyAccess({
+    required String email,
+    String? name,
+    String source = 'flutter',
+  }) async {
+    final data = await _sendJson(
+      'POST',
+      '/early-access',
+      body: {
+        'email': email,
+        if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
+        'source': source,
+      },
+      authenticated: false,
+    );
+    return BeanEarlyAccessStatus.fromJson(_expectMap(data['data']));
+  }
+
   Future<BeanAuthResult> login({
     required String email,
     required String password,
@@ -1487,6 +1505,37 @@ class BeanEmailAvailability {
       );
 }
 
+class BeanEarlyAccessStatus {
+  const BeanEarlyAccessStatus({
+    required this.status,
+    required this.admitted,
+    required this.waitlisted,
+    required this.message,
+    this.capacity = 100,
+    this.displayRemaining = 24,
+  });
+
+  final String status;
+  final bool admitted;
+  final bool waitlisted;
+  final String message;
+  final int capacity;
+  final int displayRemaining;
+
+  factory BeanEarlyAccessStatus.fromJson(Map<String, Object?> json) =>
+      BeanEarlyAccessStatus(
+        status: _readStringOrDefault(json['status'], 'waitlisted'),
+        admitted: json['admitted'] == true,
+        waitlisted: json['waitlisted'] == true,
+        message: _readStringOrDefault(
+          json['message'],
+          'We will let you know as soon as early access opens.',
+        ),
+        capacity: _readIntOrNull(json['capacity']) ?? 100,
+        displayRemaining: _readIntOrNull(json['display_remaining']) ?? 24,
+      );
+}
+
 class BeanAuthResult {
   const BeanAuthResult({required this.token, required this.user});
 
@@ -1903,6 +1952,9 @@ class BeanUser {
     this.workspaces = const [],
     this.isBeta = false,
     this.isAdmin = false,
+    this.accessState = 'active',
+    this.earlyAccessStatus,
+    this.trialDays = 7,
     this.notificationPreferences = const BeanNotificationPreferences(),
     this.planLimits = const BeanPlanLimits(),
   });
@@ -1925,6 +1977,9 @@ class BeanUser {
   final List<BeanWorkspace> workspaces;
   final bool isBeta;
   final bool isAdmin;
+  final String accessState;
+  final String? earlyAccessStatus;
+  final int trialDays;
   final BeanNotificationPreferences notificationPreferences;
   final BeanPlanLimits planLimits;
 
@@ -1946,6 +2001,9 @@ class BeanUser {
     List<BeanWorkspace>? workspaces,
     bool? isBeta,
     bool? isAdmin,
+    String? accessState,
+    String? earlyAccessStatus,
+    int? trialDays,
     BeanNotificationPreferences? notificationPreferences,
     BeanPlanLimits? planLimits,
   }) => BeanUser(
@@ -1968,6 +2026,9 @@ class BeanUser {
     workspaces: workspaces ?? this.workspaces,
     isBeta: isBeta ?? this.isBeta,
     isAdmin: isAdmin ?? this.isAdmin,
+    accessState: accessState ?? this.accessState,
+    earlyAccessStatus: earlyAccessStatus ?? this.earlyAccessStatus,
+    trialDays: trialDays ?? this.trialDays,
     notificationPreferences:
         notificationPreferences ?? this.notificationPreferences,
     planLimits: planLimits ?? this.planLimits,
@@ -2013,11 +2074,20 @@ class BeanUser {
         .map((workspace) => BeanWorkspace.fromJson(_expectMap(workspace)))
         .toList(),
     isBeta:
+        json['is_early_access'] == true ||
+        json['isEarlyAccess'] == true ||
         json['is_beta'] == true ||
         json['isBeta'] == true ||
         json['beta_user'] != null ||
         json['betaUser'] != null,
     isAdmin: json['is_admin'] == true || json['isAdmin'] == true,
+    accessState: _readStringOrDefault(
+      json['access_state'] ?? json['accessState'],
+      'active',
+    ),
+    earlyAccessStatus:
+        (json['early_access_status'] ?? json['earlyAccessStatus'])?.toString(),
+    trialDays: _readIntOrNull(json['trial_days'] ?? json['trialDays']) ?? 7,
     notificationPreferences: BeanNotificationPreferences.fromJson(
       _expectMapOrNull(json['notification_preferences']),
     ),

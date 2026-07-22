@@ -41,6 +41,7 @@ export function mountHeyBeanWebApp(mount) {
     const initialSelectedPlan = ['base', 'premium', 'pro'].includes(mount.dataset.selectedPlan) ? mount.dataset.selectedPlan : '';
     const initialBillingInterval = mount.dataset.selectedBillingInterval === 'yearly' ? 'yearly' : 'monthly';
     const initialBillingStatus = new URLSearchParams(window.location.search).get('billing') || '';
+    const initialSignupEmail = new URLSearchParams(window.location.search).get('email') || '';
     const tokenKey = 'heybean.web.token';
     const rememberKey = 'heybean.web.remember';
     const activeWorkspaceKey = 'heybean.web.activeWorkspace';
@@ -54,7 +55,7 @@ export function mountHeyBeanWebApp(mount) {
         selectedBillingInterval: initialBillingInterval,
         guidedSignupStep: 'name',
         guidedSignupName: '',
-        guidedSignupEmail: '',
+        guidedSignupEmail: initialSignupEmail,
         guidedSignupPassword: '',
         guidedSignupThemeMode: 'light',
         guidedSignupError: '',
@@ -114,8 +115,6 @@ export function mountHeyBeanWebApp(mount) {
         onboardingJustCompleted: false,
         onboardingTourActive: false,
         onboardingTourStep: 0,
-        onboardingTourPendingPlanSelection: false,
-        firstActionPendingPlanSelection: false,
         calendarRefreshing: false,
         dashboardDataLoading: false,
         taskFilter: 'active',
@@ -683,6 +682,22 @@ export function mountHeyBeanWebApp(mount) {
         }
         try {
             const user = await api('/auth/me');
+            const accessState = String(user.access_state || user.accessState || '').trim().toLowerCase();
+            state.user = user;
+            if (accessState === 'waitlisted') {
+                state.phase = 'waitlist';
+                state.error = '';
+                render();
+                return;
+            }
+            if (userNeedsSignupPaywall(user)) {
+                state.subscriptionSummary = await api('/billing/subscription').catch(() => null);
+                state.phase = 'subscription';
+                state.error = '';
+                history.replaceState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan || 'premium')}&billing_interval=${encodeURIComponent(normalizedBillingInterval(state.selectedBillingInterval))}`);
+                render();
+                return;
+            }
             let refreshError = null;
             const recover = async (request, fallback) => {
                 try {
@@ -692,7 +707,6 @@ export function mountHeyBeanWebApp(mount) {
                     return fallback;
                 }
             };
-            state.user = user;
             restoreRememberedActiveWorkspace(user);
             state.dashboardChangeLastId = Number(localStorage.getItem(dashboardChangeStorageKey()) || 0);
             const cachedWorkspaceId = currentWorkspaceIdFromUser(state.user);
@@ -974,6 +988,9 @@ export function mountHeyBeanWebApp(mount) {
 
     function userNeedsSignupPaywall(user = state.user, subscription = state.subscriptionSummary) {
         if (!user) return false;
+        const accessState = String(user.access_state || user.accessState || '').trim().toLowerCase();
+        if (accessState === 'active') return false;
+        if (accessState === 'subscription_required') return true;
         if (user.is_admin === true || user.isAdmin === true) return false;
         const tier = String(user.subscription_tier || user.subscriptionTier || '').trim().toLowerCase();
         if (tier === 'enterprise') return false;
@@ -989,7 +1006,7 @@ export function mountHeyBeanWebApp(mount) {
     function resetGuidedSignupState(options = {}) {
         state.guidedSignupStep = options.step || 'name';
         state.guidedSignupName = options.name || '';
-        state.guidedSignupEmail = options.email || '';
+        state.guidedSignupEmail = options.email ?? initialSignupEmail;
         state.guidedSignupPassword = '';
         state.guidedSignupThemeMode = options.themeMode || 'light';
         state.guidedSignupError = options.error || '';
@@ -998,7 +1015,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function guidedSignupInputLocked() {
-        return state.busy || ['tour', 'plan'].includes(state.guidedSignupStep);
+        return state.busy || state.guidedSignupStep === 'plan';
     }
 
     function startGuidedSignup() {
@@ -1184,9 +1201,11 @@ export function mountHeyBeanWebApp(mount) {
                 ? plainSignupMarkup()
             : state.phase === 'subscription'
                 ? subscriptionSignupMarkup()
+            : state.phase === 'waitlist'
+                ? earlyAccessWaitlistMarkup()
                 : signedOutMarkup();
         bindCommonActions();
-        if (state.phase === 'subscription') bindSubscriptionActions();
+        if (state.phase === 'subscription' || state.phase === 'waitlist') bindSubscriptionActions();
         if (state.phase === 'signedIn') bindSignedInActions();
         if (state.phase === 'guidedOnboarding' || state.phase === 'subscription') {
             scrollGuidedOnboardingContent();
@@ -1381,9 +1400,6 @@ export function mountHeyBeanWebApp(mount) {
             await handleGuidedSignupPassword(value);
             return;
         }
-        if (step === 'tourChoice') {
-            await handleGuidedTourChoice(value);
-        }
     }
 
     async function handleGuidedSignupName(value) {
@@ -1436,6 +1452,17 @@ export function mountHeyBeanWebApp(mount) {
                 render();
                 return;
             }
+            const admission = await api('/early-access', {
+                method: 'POST',
+                body: { email: availability.email, name: state.guidedSignupName, source: 'web_bean_onboarding' },
+            });
+            if (admission.waitlisted || admission.status === 'waitlisted') {
+                state.busy = false;
+                state.phase = 'waitlist';
+                state.guidedSignupError = '';
+                render();
+                return;
+            }
             state.guidedSignupEmail = availability.email;
             state.guidedSignupStep = 'password';
             render();
@@ -1466,8 +1493,8 @@ export function mountHeyBeanWebApp(mount) {
             state.user = result.user || null;
             state.subscriptionSummary = null;
             state.busy = false;
-            state.guidedSignupStep = 'tourChoice';
-            render();
+            state.guidedSignupStep = 'plan';
+            openGuidedPlanSelection();
         } catch (error) {
             state.busy = false;
             state.guidedSignupError = friendlyError(error, 'create your account');
@@ -1488,37 +1515,6 @@ export function mountHeyBeanWebApp(mount) {
                 billing_interval: normalizedBillingInterval(state.selectedBillingInterval),
             },
         });
-    }
-
-    async function handleGuidedTourChoice(value) {
-        const normalized = String(value || '').toLowerCase();
-        if (/\b(yes|yeah|yep|sure|show|tour)\b/.test(normalized)) {
-            await launchGuidedDashboardTour();
-            return;
-        }
-        if (/\b(no|skip|straight|dashboard|plan)\b/.test(normalized)) {
-            openGuidedPlanSelection();
-            return;
-        }
-        state.guidedSignupError = 'Please answer yes for a quick dashboard tour, or no to go straight to plan setup.';
-        render();
-    }
-
-    async function launchGuidedDashboardTour() {
-        if (state.busy) return;
-        state.busy = true;
-        state.guidedSignupError = '';
-        render();
-        history.pushState({}, '', '/app');
-        await loadSignedIn({ deferInitialRender: true });
-        state.busy = false;
-        if (state.phase !== 'signedIn') {
-            render();
-            return;
-        }
-        state.onboardingTourPendingPlanSelection = true;
-        activateOnboardingTourStep(0);
-        render();
     }
 
     function openGuidedPlanSelection() {
@@ -1543,11 +1539,10 @@ export function mountHeyBeanWebApp(mount) {
                         <div class="hb-guided-onboarding-content hb-guided-chat-content" data-guided-content>
                             ${guidedChatTranscriptMarkup()}
                             ${step === 'themeMode' ? guidedThemeModePanelMarkup() : ''}
-                            ${step === 'tourChoice' ? guidedTourChoicePanelMarkup() : ''}
                             ${guidedOnboardingStatusMarkup()}
                         </div>
                     </section>
-                    ${['name', 'themeMode', 'email', 'password', 'tourChoice'].includes(step) ? guidedOnboardingComposerMarkup(step) : ''}
+                    ${['name', 'themeMode', 'email', 'password'].includes(step) ? guidedOnboardingComposerMarkup(step) : ''}
                 </main>
                 <div class="hb-guided-onboarding-bean-dock" aria-hidden="true"><img src="${escapeAttr(logoUrl)}" alt=""></div>
             </div>`;
@@ -1568,23 +1563,20 @@ export function mountHeyBeanWebApp(mount) {
             messages.push(['user', state.guidedSignupName]);
             messages.push(['bean', `Nice to meet you, ${state.guidedSignupName}. Do you prefer Light, Dark, or Auto mode? You can change this later in Appearance settings.`]);
         }
-        if (state.guidedSignupStep !== 'name' && ['email', 'password', 'tourChoice', 'tour', 'plan'].includes(state.guidedSignupStep)) {
+        if (state.guidedSignupStep !== 'name' && ['email', 'password', 'plan'].includes(state.guidedSignupStep)) {
             const mode = themeModesByKey.get(state.guidedSignupThemeMode) || themeModesByKey.get('auto');
             messages.push(['user', mode.label]);
             messages.push(['bean', `${mode.label} it is. What email address would you like to use for your account?`]);
         }
         if (state.guidedSignupEmail) {
             messages.push(['user', state.guidedSignupEmail]);
-            if (['password', 'tourChoice', 'tour', 'plan'].includes(state.guidedSignupStep)) {
+            if (['password', 'plan'].includes(state.guidedSignupStep)) {
                 messages.push(['bean', 'Great. Now choose a password. Please text it here and I’ll keep it hidden.']);
             }
         }
-        if (['tourChoice', 'tour', 'plan'].includes(state.guidedSignupStep)) {
-            messages.push(['user', '************']);
-            messages.push(['bean', 'Your account has been created. Would you like me to show you how to use your dashboard, or should we go straight to plan setup?']);
-        }
         if (state.guidedSignupStep === 'plan') {
-            messages.push(['bean', 'Last step: choose your plan so your free trial is ready.']);
+            messages.push(['user', '************']);
+            messages.push(['bean', 'Your account is ready. Choose a plan and complete checkout to start your 7-day free trial. Then I’ll show you around your dashboard.']);
         }
         return messages;
     }
@@ -1595,14 +1587,13 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function guidedOnboardingComposerMarkup(step) {
-        if (!['name', 'themeMode', 'email', 'password', 'tourChoice'].includes(step)) return '';
+        if (!['name', 'themeMode', 'email', 'password'].includes(step)) return '';
         const disabled = guidedSignupInputLocked();
         const field = {
             name: { type: 'text', value: '', autocomplete: 'name', placeholder: 'Name', attrs: 'minlength="2" maxlength="255"' },
             themeMode: { type: 'text', value: '', autocomplete: 'off', placeholder: 'Choose Light, Dark, or Auto...', attrs: '' },
             email: { type: 'email', value: state.guidedSignupEmail, autocomplete: 'email', placeholder: 'Text your email address...', attrs: 'maxlength="254"' },
             password: { type: 'password', value: '', autocomplete: 'new-password', placeholder: 'Text your password...', attrs: 'minlength="12"' },
-            tourChoice: { type: 'text', value: '', autocomplete: 'off', placeholder: 'Yes for tour, no for plan setup...', attrs: '' },
         }[step];
         return `
             <form class="hb-guided-chat-composer" data-action="guided-onboarding">
@@ -1625,13 +1616,6 @@ export function mountHeyBeanWebApp(mount) {
                     return `<button class="hb-guided-choice-chip ${state.guidedSignupThemeMode === key ? 'hb-guided-choice-chip-active' : ''}" type="button" data-guided-theme-mode="${escapeAttr(key)}" ${guidedSignupInputLocked() ? 'disabled' : ''}>${escapeHtml(mode.label)}</button>`;
                 }).join('')}
             </section>`;
-    }
-
-    function guidedTourChoicePanelMarkup() {
-        return `<section class="hb-guided-choice-panel hb-guided-tour-choice-panel">
-            <button class="hb-button" type="button" data-guided-tour-start>Take tour</button>
-            <button class="hb-button-secondary" type="button" data-guided-tour-skip>Skip tour</button>
-        </section>`;
     }
 
     function plainSignupMarkup() {
@@ -1692,6 +1676,16 @@ export function mountHeyBeanWebApp(mount) {
         state.busy = true;
         render();
         try {
+            const admission = await api('/early-access', {
+                method: 'POST',
+                body: { email, name, source: 'web_plain_signup' },
+            });
+            if (admission.waitlisted || admission.status === 'waitlisted') {
+                state.busy = false;
+                state.phase = 'waitlist';
+                render();
+                return;
+            }
             const result = await registerGuidedSignupAccount({ password });
             persistToken(result.token, true);
             state.user = result.user || null;
@@ -1703,6 +1697,21 @@ export function mountHeyBeanWebApp(mount) {
             state.error = friendlyError(error, 'create your account');
             render();
         }
+    }
+
+    function earlyAccessWaitlistMarkup() {
+        return `<div class="hb-app">
+            <main class="hb-auth-wrap hb-auth-wrap-register">
+                <section class="hb-card hb-auth-card hb-auth-card-register">
+                    <div class="hb-auth-title">
+                        <img src="${escapeAttr(logoUrl)}" alt="Bean">
+                        <div><h1>You’re on the early-access waitlist</h1><p class="hb-item-meta">Bean will be ready when your spot opens.</p></div>
+                    </div>
+                    <div class="hb-success"><strong>Thanks for joining us.</strong><span>I’m a solo developer and I’m onboarding people gradually so I can keep HeyBean reliable. We’ll email you as soon as access opens. You won’t be asked to choose a plan or pay while you wait.</span></div>
+                    <div class="hb-link-row"><a class="hb-button-secondary" href="/">Back to HeyBean</a><button class="hb-button-ghost" type="button" data-subscribe-logout>Use another email</button></div>
+                </section>
+            </main>
+        </div>`;
     }
 
     function subscriptionSignupMarkup() {
@@ -1776,7 +1785,6 @@ export function mountHeyBeanWebApp(mount) {
             <div class="hb-subscribe-grid">
                 ${Object.entries(subscriptionPlans).map(([key, plan]) => subscriptionPlanCardMarkup(key, plan, key === selectedPlan)).join('')}
             </div>
-            ${couponCodeEntryMarkup('subscribe')}
             <div class="hb-subscribe-footer">
                 <p>Payment is handled securely through Stripe.</p>
             </div>`;
@@ -1869,7 +1877,7 @@ export function mountHeyBeanWebApp(mount) {
                     <div><span>Billing cycle</span><strong>${billingInterval === 'yearly' ? 'Yearly' : 'Monthly'}</strong></div>
                 </div>
                 <div class="hb-subscribe-actions">
-                    <button class="hb-button" type="button" data-subscribe-dashboard>Go to dashboard</button>
+                    <button class="hb-button" type="button" data-subscribe-dashboard ${liveConfirmed ? '' : 'disabled'}>${liveConfirmed ? 'Continue to dashboard' : 'Waiting for Stripe confirmation'}</button>
                     <button class="hb-button-secondary" type="button" data-subscribe-refresh ${state.busy ? 'disabled' : ''}>${state.busy ? 'Refreshing…' : 'Refresh subscription status'}</button>
                 </div>
             </div>`;
@@ -2877,12 +2885,9 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function closeOnboardingTour() {
-        const pendingPlanSelection = state.onboardingTourPendingPlanSelection === true;
         markOnboardingTourSeen();
         state.onboardingTourActive = false;
         state.onboardingTourStep = 0;
-        state.onboardingTourPendingPlanSelection = false;
-        state.firstActionPendingPlanSelection = pendingPlanSelection;
         state.modal = { type: 'post-tour-first-action', step: 'choose' };
         window.cancelAnimationFrame(onboardingTourLayoutFrame);
         onboardingTourLayoutFrame = 0;
@@ -4087,18 +4092,11 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function finishPostTourFirstAction() {
-        const pendingPlanSelection = state.firstActionPendingPlanSelection === true;
-        state.firstActionPendingPlanSelection = false;
         state.modal = null;
-        if (pendingPlanSelection) {
-            state.phase = 'subscription';
-            history.pushState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan || 'premium')}&billing_interval=${encodeURIComponent(normalizedBillingInterval(state.selectedBillingInterval))}`);
-        }
     }
 
     async function askBeanToStartPostTourAction(actionKey) {
         const action = postTourFirstAction(actionKey);
-        state.firstActionPendingPlanSelection = false;
         state.modal = null;
         state.bean.panelOpen = true;
         state.notice = 'Bean is starting your first action.';
@@ -4108,7 +4106,6 @@ export function mountHeyBeanWebApp(mount) {
 
     function walkThroughPostTourAction(actionKey) {
         const action = postTourFirstAction(actionKey);
-        state.firstActionPendingPlanSelection = false;
         state.modal = null;
         state.error = '';
         if (action.key === 'customize_dashboard') {
@@ -4666,8 +4663,6 @@ export function mountHeyBeanWebApp(mount) {
             selectGuidedThemeMode(button.dataset.guidedThemeMode || '');
         }));
         mount.querySelectorAll('[data-plain-signup]').forEach((button) => button.addEventListener('click', startPlainSignup));
-        mount.querySelectorAll('[data-guided-tour-start]').forEach((button) => button.addEventListener('click', () => { launchGuidedDashboardTour(); }));
-        mount.querySelectorAll('[data-guided-tour-skip]').forEach((button) => button.addEventListener('click', openGuidedPlanSelection));
         mount.querySelectorAll('[data-dismiss-plan-limit-error]').forEach((button) => button.addEventListener('click', () => {
             state.error = '';
             render();
@@ -4680,13 +4675,6 @@ export function mountHeyBeanWebApp(mount) {
             state.selectedBillingInterval = normalizedBillingInterval(button.dataset.subscribeBillingInterval);
             render();
         }));
-        mount.querySelector('[data-subscribe-coupon-code]')?.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                redeemCouponCodeFromInput('subscribe');
-            }
-        });
-        mount.querySelector('[data-subscribe-apply-coupon]')?.addEventListener('click', () => redeemCouponCodeFromInput('subscribe'));
         mount.querySelectorAll('[data-subscribe-dashboard]').forEach((button) => button.addEventListener('click', async () => {
             history.pushState({}, '', '/app');
             state.selected = 'today';

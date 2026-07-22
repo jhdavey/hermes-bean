@@ -49,10 +49,10 @@
         <h1>Stop carrying every detail yourself.</h1>
         <p class="hero-subhead">HeyBean is the AI executive assistant for busy professionals and parents. Tell Bean what needs to happen, and it turns your requests into calendar events, tasks, reminders, and follow-ups across work and home.</p>
         <div class="hero-actions">
-            <a class="button" href="/register">Create your free beta account <span aria-hidden="true">→</span></a>
+            <a class="button" href="#early-access">Request early access <span aria-hidden="true">→</span></a>
             <a class="button outline" href="#bean-demo">See Bean in action</a>
         </div>
-        <p class="hero-microcopy">Free during beta <span aria-hidden="true">·</span> You approve important changes</p>
+        <p class="hero-microcopy">24 of 100 early-access spots left <span aria-hidden="true">·</span> 7-day free trial after plan selection</p>
         <div class="agent-pills" aria-label="HeyBean highlights">
             <a class="button ghost" href="#features">Capture it once</a>
             <a class="button ghost" href="#features">Coordinate work + home</a>
@@ -223,14 +223,16 @@
 
     @include('partials.public-pricing-plans')
 
+    @include('partials.public-early-access')
+
     <section class="cta-band final-cta">
         <div class="wrap">
             <h2>Let Bean take the next few things off your mind.</h2>
             <p class="hero-subhead">Start with one request. Bean will help you turn it into an organized plan for what happens next.</p>
             <div class="hero-actions">
-                <a class="button" href="/register">Create your free beta account <span aria-hidden="true">→</span></a>
+                <a class="button" href="#early-access">Request early access <span aria-hidden="true">→</span></a>
             </div>
-            <p class="hero-microcopy">Free during beta</p>
+            <p class="hero-microcopy">24 of 100 spots left · 7-day free trial after plan selection</p>
         </div>
     </section>
 

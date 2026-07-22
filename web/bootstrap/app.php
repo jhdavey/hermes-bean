@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\AdmitEarlyAccessSignup;
 use App\Console\Commands\ExecuteBeanDashboardTool;
 use App\Console\Commands\MaterializeRecurringCalendarEvents;
 use App\Console\Commands\SendDueReminderNotifications;
@@ -7,6 +8,7 @@ use App\Http\Middleware\ApiRateLimit;
 use App\Http\Middleware\ApiSecurityHeaders;
 use App\Http\Middleware\AuthenticateBearerToken;
 use App\Http\Middleware\EnsureAdmin;
+use App\Http\Middleware\EnsureProductAccess;
 use App\Http\Middleware\HandleApiCors;
 use App\Http\Middleware\RecordPageView;
 use Illuminate\Foundation\Application;
@@ -21,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withCommands([
+        AdmitEarlyAccessSignup::class,
         ExecuteBeanDashboardTool::class,
         MaterializeRecurringCalendarEvents::class,
         SendDueReminderNotifications::class,
@@ -37,6 +40,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'auth.bearer' => AuthenticateBearerToken::class,
             'admin' => EnsureAdmin::class,
+            'product.access' => EnsureProductAccess::class,
             'api.rate_limit' => ApiRateLimit::class,
         ]);
     })

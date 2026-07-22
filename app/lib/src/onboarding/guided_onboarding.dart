@@ -1,13 +1,6 @@
 part of '../../main.dart';
 
-enum _GuidedOnboardingStep {
-  name,
-  themeMode,
-  email,
-  password,
-  tourChoice,
-  plan,
-}
+enum _GuidedOnboardingStep { name, themeMode, email, password, plan, waitlist }
 
 class _GuidedOnboardingMessage {
   const _GuidedOnboardingMessage({
@@ -38,9 +31,7 @@ class _GuidedBeanOnboardingScreen extends StatefulWidget {
     required this.busyPlan,
     required this.checkoutError,
     required this.onCreateAccount,
-    required this.onLaunchLiveTour,
     required this.onSelectPlan,
-    required this.onRedeemCoupon,
     required this.onContactEnterprise,
     required this.onBackToLogin,
     required this.onSkipToPlainSignup,
@@ -52,9 +43,7 @@ class _GuidedBeanOnboardingScreen extends StatefulWidget {
   final String? busyPlan;
   final String? checkoutError;
   final _GuidedCreateAccount onCreateAccount;
-  final Future<void> Function() onLaunchLiveTour;
   final Future<void> Function(String plan, String billingInterval) onSelectPlan;
-  final Future<void> Function(String code) onRedeemCoupon;
   final VoidCallback onContactEnterprise;
   final VoidCallback onBackToLogin;
   final VoidCallback onSkipToPlainSignup;
@@ -74,7 +63,7 @@ class _GuidedBeanOnboardingScreenState
     const _GuidedOnboardingMessage(
       bean: true,
       text:
-          'Hi, I’m Bean. I’ll help get your HeyBean account set up. What name should I call you?',
+          'Hi, I’m Bean. HeyBean is opening early access gradually, with 24 of the first 100 spots left. I’ll help reserve yours and set up your account. What name should I call you?',
     ),
   ];
 
@@ -88,9 +77,14 @@ class _GuidedBeanOnboardingScreenState
   String _billingInterval = 'monthly';
 
   bool get _inputLocked =>
-      _busy || _beanThinking || _step == _GuidedOnboardingStep.plan;
+      _busy ||
+      _beanThinking ||
+      _step == _GuidedOnboardingStep.plan ||
+      _step == _GuidedOnboardingStep.waitlist;
 
-  bool get _showComposer => _step != _GuidedOnboardingStep.plan;
+  bool get _showComposer =>
+      _step != _GuidedOnboardingStep.plan &&
+      _step != _GuidedOnboardingStep.waitlist;
 
   @override
   void initState() {
@@ -159,9 +153,8 @@ class _GuidedBeanOnboardingScreenState
         await _handleEmail(value);
       case _GuidedOnboardingStep.password:
         await _handlePassword(override ?? value);
-      case _GuidedOnboardingStep.tourChoice:
-        await _handleTourChoice(value);
       case _GuidedOnboardingStep.plan:
+      case _GuidedOnboardingStep.waitlist:
         break;
     }
   }
@@ -228,6 +221,22 @@ class _GuidedBeanOnboardingScreenState
         _focusInput();
         return;
       }
+      final admission = await widget.apiClient.requestEarlyAccess(
+        email: availability.email,
+        name: _name,
+        source: 'flutter_bean_onboarding',
+      );
+      if (!mounted) return;
+      if (admission.waitlisted) {
+        setState(() {
+          _busy = false;
+          _step = _GuidedOnboardingStep.waitlist;
+        });
+        await _respondBean(
+          'You’re on the early-access waitlist. I’m being rolled out gradually by a solo developer so every new group can be supported well. We’ll email you as soon as your spot opens, and you won’t be asked to choose a plan or pay while you wait.',
+        );
+        return;
+      }
       _email = availability.email;
       await _respondBean(
         'Great. Now choose a password. Please text it here and I’ll keep it hidden.',
@@ -256,9 +265,9 @@ class _GuidedBeanOnboardingScreenState
       if (!mounted) return;
       setState(() => _busy = false);
       await _respondBean(
-        'Your account has been created. Would you like me to show you how to use your dashboard, or should we go straight to plan setup?',
+        'Your account is ready. Choose a plan and complete checkout to start your 7-day free trial. Then I’ll show you around your dashboard.',
       );
-      setState(() => _step = _GuidedOnboardingStep.tourChoice);
+      setState(() => _step = _GuidedOnboardingStep.plan);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -266,59 +275,6 @@ class _GuidedBeanOnboardingScreenState
         _error = beanFriendlyErrorMessage(error, action: 'create your account');
       });
     }
-  }
-
-  Future<void> _handleTourChoice(String value) async {
-    final normalized = value.toLowerCase();
-    final yes = RegExp(
-      r'\b(yes|yeah|yep|sure|show|tour)\b',
-    ).hasMatch(normalized);
-    final no = RegExp(
-      r'\b(no|skip|straight|dashboard|plan)\b',
-    ).hasMatch(normalized);
-    if (yes) {
-      _addUser(value);
-      await _launchDashboardTour();
-      return;
-    }
-    if (no) {
-      _addUser(value);
-      await _goToPlan(skipTour: true);
-      return;
-    }
-    _setError(
-      'Please answer yes for a quick tour, or no to go straight to plan setup.',
-    );
-  }
-
-  Future<void> _launchDashboardTour() async {
-    if (_busy) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      await widget.onLaunchLiveTour();
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = beanFriendlyErrorMessage(
-          error,
-          action: 'show your dashboard tour',
-        );
-      });
-    }
-  }
-
-  Future<void> _goToPlan({bool skipTour = false}) async {
-    await _respondBean(
-      skipTour
-          ? 'No problem. Let’s finish your plan setup so your free trial is ready. Choose the option that fits best.'
-          : 'That’s the quick tour. Last step: choose your plan so your free trial is ready.',
-    );
-    setState(() => _step = _GuidedOnboardingStep.plan);
-    _scrollToBottom();
   }
 
   bool _looksLikeEmailAddress(String value) {
@@ -356,8 +312,8 @@ class _GuidedBeanOnboardingScreenState
     _GuidedOnboardingStep.themeMode => 'Choose Light, Dark, or Auto...',
     _GuidedOnboardingStep.email => 'Text your email address...',
     _GuidedOnboardingStep.password => 'Text your password...',
-    _GuidedOnboardingStep.tourChoice => 'Yes for tour, no for plan setup...',
     _GuidedOnboardingStep.plan => 'Select a plan above...',
+    _GuidedOnboardingStep.waitlist => 'We’ll email you when access opens.',
   };
 
   @override
@@ -406,14 +362,6 @@ class _GuidedBeanOnboardingScreenState
                           onSelected: (key) => unawaited(_selectThemeMode(key)),
                         ),
                       ),
-                    if (_step == _GuidedOnboardingStep.tourChoice)
-                      _GuidedInlinePanel(
-                        child: _GuidedTourChoiceActions(
-                          enabled: !_inputLocked,
-                          onTour: () => unawaited(_launchDashboardTour()),
-                          onSkip: () => unawaited(_goToPlan(skipTour: true)),
-                        ),
-                      ),
                     if (_step == _GuidedOnboardingStep.plan)
                       _GuidedPlanPicker(
                         billingInterval: _billingInterval,
@@ -426,7 +374,6 @@ class _GuidedBeanOnboardingScreenState
                         ),
                         onSelect: (plan) =>
                             widget.onSelectPlan(plan, _billingInterval),
-                        onRedeemCoupon: widget.onRedeemCoupon,
                         onContactEnterprise: widget.onContactEnterprise,
                       ),
                     if (_error != null) _GuidedError(message: _error!),
@@ -457,6 +404,7 @@ class _GuidedBeanOnboardingScreenState
 
 class _PlainSignupScreen extends StatefulWidget {
   const _PlainSignupScreen({
+    required this.apiClient,
     required this.onCreateAccount,
     required this.onAccountCreated,
     required this.onBackToBean,
@@ -464,6 +412,7 @@ class _PlainSignupScreen extends StatefulWidget {
     required this.onPreviewThemeMode,
   });
 
+  final BeanApiClient apiClient;
   final _GuidedCreateAccount onCreateAccount;
   final VoidCallback onAccountCreated;
   final VoidCallback onBackToBean;
@@ -481,6 +430,7 @@ class _PlainSignupScreenState extends State<_PlainSignupScreen> {
   String _themeModeKey = 'auto';
   bool _busy = false;
   String? _error;
+  bool _waitlisted = false;
 
   @override
   void dispose() {
@@ -512,6 +462,19 @@ class _PlainSignupScreenState extends State<_PlainSignupScreen> {
       _error = null;
     });
     try {
+      final admission = await widget.apiClient.requestEarlyAccess(
+        email: email,
+        name: name,
+        source: 'flutter_plain_signup',
+      );
+      if (!mounted) return;
+      if (admission.waitlisted) {
+        setState(() {
+          _busy = false;
+          _waitlisted = true;
+        });
+        return;
+      }
       await widget.onCreateAccount(name, email, password, _themeModeKey);
       if (!mounted) return;
       widget.onAccountCreated();
@@ -531,99 +494,172 @@ class _PlainSignupScreenState extends State<_PlainSignupScreen> {
   }
 
   @override
+  Widget build(BuildContext context) => _waitlisted
+      ? _EarlyAccessWaitlistScreen(onBack: widget.onBackToLogin)
+      : SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: _ShellCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Wrap(
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          TextButton.icon(
+                            onPressed: _busy ? null : widget.onBackToLogin,
+                            icon: const Icon(Icons.arrow_back_rounded),
+                            label: const Text('Login'),
+                          ),
+                          TextButton(
+                            key: const Key('plain-signup-back-to-bean'),
+                            onPressed: _busy ? null : widget.onBackToBean,
+                            child: const Text('Start with Bean instead'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Plain signup',
+                        key: const Key('plain-signup-title'),
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w900),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Request one of the first 100 early-access spots, then create your account. 24 spots are left.',
+                        style: TextStyle(
+                          color: HeyBeanTheme.muted,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      TextField(
+                        key: const Key('plain-signup-name'),
+                        controller: _name,
+                        enabled: !_busy,
+                        textInputAction: TextInputAction.next,
+                        autofillHints: const [AutofillHints.name],
+                        decoration: const InputDecoration(labelText: 'Name'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('plain-signup-email'),
+                        controller: _email,
+                        enabled: !_busy,
+                        keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.next,
+                        autofillHints: const [AutofillHints.email],
+                        decoration: const InputDecoration(labelText: 'Email'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('plain-signup-password'),
+                        controller: _password,
+                        enabled: !_busy,
+                        obscureText: true,
+                        textInputAction: TextInputAction.done,
+                        autofillHints: const [AutofillHints.newPassword],
+                        onSubmitted: (_) => unawaited(_submit()),
+                        decoration: const InputDecoration(
+                          labelText: 'Password',
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      _GuidedThemeModePicker(
+                        selected: _themeModeKey,
+                        enabled: !_busy,
+                        onSelected: _selectThemeMode,
+                      ),
+                      if (_error != null) ...[
+                        const SizedBox(height: 12),
+                        _GuidedError(message: _error!),
+                      ],
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        key: const Key('plain-signup-submit'),
+                        onPressed: _busy ? null : () => unawaited(_submit()),
+                        icon: _busy
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.arrow_forward_rounded),
+                        label: Text(
+                          _busy ? 'Creating account…' : 'Create account',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+}
+
+class _EarlyAccessWaitlistScreen extends StatelessWidget {
+  const _EarlyAccessWaitlistScreen({required this.onBack});
+
+  final VoidCallback onBack;
+
+  @override
   Widget build(BuildContext context) => SafeArea(
-    child: SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
-      child: Center(
+    child: Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
+          constraints: const BoxConstraints(maxWidth: 480),
           child: _ShellCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Wrap(
-                  alignment: WrapAlignment.spaceBetween,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 8,
-                  runSpacing: 4,
-                  children: [
-                    TextButton.icon(
-                      onPressed: _busy ? null : widget.onBackToLogin,
-                      icon: const Icon(Icons.arrow_back_rounded),
-                      label: const Text('Login'),
-                    ),
-                    TextButton(
-                      key: const Key('plain-signup-back-to-bean'),
-                      onPressed: _busy ? null : widget.onBackToBean,
-                      child: const Text('Start with Bean instead'),
-                    ),
-                  ],
+                Icon(
+                  Icons.mark_email_read_rounded,
+                  size: 46,
+                  color: HeyBeanTheme.accentStrong,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 18),
                 Text(
-                  'Plain signup',
-                  key: const Key('plain-signup-title'),
+                  'You’re on the early-access waitlist',
+                  textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 Text(
-                  'Create your account with a standard form. You can still use Bean once you are inside.',
-                  style: TextStyle(color: HeyBeanTheme.muted, height: 1.4),
+                  'HeyBean is being rolled out gradually by a solo developer so each new group can be supported well. We’ll email you as soon as your spot opens.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: HeyBeanTheme.muted,
+                    height: 1.5,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-                const SizedBox(height: 18),
-                TextField(
-                  key: const Key('plain-signup-name'),
-                  controller: _name,
-                  enabled: !_busy,
-                  textInputAction: TextInputAction.next,
-                  autofillHints: const [AutofillHints.name],
-                  decoration: const InputDecoration(labelText: 'Name'),
+                const SizedBox(height: 10),
+                Text(
+                  'You won’t be asked to choose a plan or pay while you wait.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: HeyBeanTheme.text,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  key: const Key('plain-signup-email'),
-                  controller: _email,
-                  enabled: !_busy,
-                  keyboardType: TextInputType.emailAddress,
-                  textInputAction: TextInputAction.next,
-                  autofillHints: const [AutofillHints.email],
-                  decoration: const InputDecoration(labelText: 'Email'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  key: const Key('plain-signup-password'),
-                  controller: _password,
-                  enabled: !_busy,
-                  obscureText: true,
-                  textInputAction: TextInputAction.done,
-                  autofillHints: const [AutofillHints.newPassword],
-                  onSubmitted: (_) => unawaited(_submit()),
-                  decoration: const InputDecoration(labelText: 'Password'),
-                ),
-                const SizedBox(height: 14),
-                _GuidedThemeModePicker(
-                  selected: _themeModeKey,
-                  enabled: !_busy,
-                  onSelected: _selectThemeMode,
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  _GuidedError(message: _error!),
-                ],
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  key: const Key('plain-signup-submit'),
-                  onPressed: _busy ? null : () => unawaited(_submit()),
-                  icon: _busy
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.arrow_forward_rounded),
-                  label: Text(_busy ? 'Creating account…' : 'Create account'),
+                const SizedBox(height: 22),
+                OutlinedButton(
+                  key: const Key('early-access-waitlist-back'),
+                  onPressed: onBack,
+                  child: const Text('Back to login'),
                 ),
               ],
             ),
@@ -867,38 +903,6 @@ class _GuidedThemeModePicker extends StatelessWidget {
   );
 }
 
-class _GuidedTourChoiceActions extends StatelessWidget {
-  const _GuidedTourChoiceActions({
-    required this.enabled,
-    required this.onTour,
-    required this.onSkip,
-  });
-
-  final bool enabled;
-  final VoidCallback onTour;
-  final VoidCallback onSkip;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Expanded(
-        child: FilledButton.icon(
-          key: const Key('guided-tour-start'),
-          onPressed: enabled ? onTour : null,
-          icon: const Icon(Icons.play_circle_rounded),
-          label: const Text('Take tour'),
-        ),
-      ),
-      const SizedBox(width: 10),
-      OutlinedButton(
-        key: const Key('guided-tour-skip'),
-        onPressed: enabled ? onSkip : null,
-        child: const Text('Skip tour'),
-      ),
-    ],
-  );
-}
-
 class _GuidedPlanPicker extends StatelessWidget {
   const _GuidedPlanPicker({
     required this.billingInterval,
@@ -906,7 +910,6 @@ class _GuidedPlanPicker extends StatelessWidget {
     required this.error,
     required this.onBillingChanged,
     required this.onSelect,
-    required this.onRedeemCoupon,
     required this.onContactEnterprise,
   });
 
@@ -915,7 +918,6 @@ class _GuidedPlanPicker extends StatelessWidget {
   final String? error;
   final ValueChanged<String> onBillingChanged;
   final ValueChanged<String> onSelect;
-  final Future<void> Function(String code) onRedeemCoupon;
   final VoidCallback onContactEnterprise;
 
   @override
@@ -966,12 +968,6 @@ class _GuidedPlanPicker extends StatelessWidget {
         ),
         const SizedBox(height: 12),
       ],
-      _CouponCodeCard(
-        key: const Key('guided-coupon-card'),
-        busy: busyPlan == 'coupon',
-        disabled: busyPlan != null && busyPlan != 'coupon',
-        onRedeem: onRedeemCoupon,
-      ),
     ],
   );
 }

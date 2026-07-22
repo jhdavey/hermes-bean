@@ -21,7 +21,7 @@
         <a href="/#features">Features</a>
         <a href="/#plans">Pricing</a>
         <a class="nav-login" href="/login">Log In</a>
-        <a class="nav-cta" href="/register">Create Free Account</a>
+        <a class="nav-cta" href="/#early-access">Request Early Access</a>
     </nav>
     <details class="mobile-menu">
         <summary aria-label="Open menu"><span class="mobile-menu-icon" aria-hidden="true"><span></span><span></span><span></span></span></summary>
@@ -31,7 +31,7 @@
             <a href="/#features">Features</a>
             <a href="/#plans">Pricing</a>
             <a href="/login">Log In</a>
-            <a class="mobile-menu-cta" href="/register">Create Free Account</a>
+            <a class="mobile-menu-cta" href="/#early-access">Request Early Access</a>
         </div>
     </details>
 </header>

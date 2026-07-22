@@ -17,7 +17,9 @@ use App\Notifications\ResetPasswordLink;
 use App\Rules\ClientTimezone;
 use App\Services\Bean\HermesUserHomeService;
 use App\Services\CouponCodeService;
+use App\Services\EarlyAccessService;
 use App\Services\PlanLimitService;
+use App\Services\ProductAccessService;
 use App\Services\WorkspaceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -70,7 +72,7 @@ class AuthController extends Controller
         ]);
     }
 
-    public function register(Request $request): JsonResponse
+    public function register(Request $request, EarlyAccessService $earlyAccess): JsonResponse
     {
         $request->merge([
             'email' => strtolower(trim((string) $request->input('email', ''))),
@@ -87,7 +89,21 @@ class AuthController extends Controller
             'timezone' => ['sometimes', 'nullable', new ClientTimezone],
         ]);
 
-        $user = DB::transaction(function () use ($data): User {
+        $signup = $earlyAccess->request(
+            $data['email'],
+            $data['name'],
+            $data['plan'] ?? null,
+            'app_register',
+        );
+        if ($signup->status === EarlyAccessService::STATUS_WAITLISTED) {
+            return response()->json([
+                'message' => $earlyAccess->payload($signup)['message'],
+                'code' => 'early_access_waitlisted',
+                'data' => $earlyAccess->payload($signup),
+            ], 202);
+        }
+
+        $user = DB::transaction(function () use ($data, $signup, $earlyAccess): User {
             $user = User::create([
                 'name' => $data['name'],
                 'email' => $data['email'],
@@ -100,15 +116,7 @@ class AuthController extends Controller
 
             app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
             app(HermesUserHomeService::class)->ensureForUser($user);
-            EarlyAccessSignup::updateOrCreate(
-                ['email' => $user->email],
-                [
-                    'name' => $user->name,
-                    'use_case' => null,
-                    'requested_plan' => $data['plan'] ?? null,
-                    'source' => 'app_register',
-                ],
-            );
+            $earlyAccess->markRegistered($signup, $user);
 
             return $user;
         });
@@ -297,11 +305,15 @@ class AuthController extends Controller
         $personalWorkspace = Workspace::where('personal_owner_user_id', $user->id)->first();
         $activeWorkspace = $workspaceService->resolveWorkspace($user);
         $earlyAccessSignup = EarlyAccessSignup::where('email', $user->email)->first();
+        $accessState = app(ProductAccessService::class)->state($user, $earlyAccessSignup);
         $user->setAttribute('personal_workspace', $personalWorkspace);
         $user->setAttribute('active_workspace', $activeWorkspace);
         $user->setAttribute('workspaces', $workspaceService->accessibleWorkspaces($user));
-        $user->setAttribute('is_early_access', $earlyAccessSignup !== null);
+        $user->setAttribute('is_early_access', in_array($earlyAccessSignup?->status, [EarlyAccessService::STATUS_ADMITTED, EarlyAccessService::STATUS_REGISTERED], true));
         $user->setAttribute('early_access_signup', $earlyAccessSignup);
+        $user->setAttribute('early_access_status', $earlyAccessSignup?->status);
+        $user->setAttribute('access_state', $accessState);
+        $user->setAttribute('trial_days', 7);
         $user->setAttribute('email_verified', $user->hasVerifiedEmail());
         $user->setAttribute('plan_limits', app(PlanLimitService::class)->publicLimitsFor($user));
 

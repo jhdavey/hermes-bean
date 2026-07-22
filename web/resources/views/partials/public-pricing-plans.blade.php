@@ -50,8 +50,8 @@
                         @endforeach
                     </ul>
                     <div class="plan-actions">
-                        <a class="button monthly-link" data-plan-link="{{ $plan['key'] }}" href="/register?plan={{ $plan['key'] }}&billing_interval=monthly">Create your free beta account <span aria-hidden="true">→</span></a>
-                        <a class="button yearly-link" href="/register?plan={{ $plan['key'] }}&billing_interval=yearly">Create your free beta account <span aria-hidden="true">→</span></a>
+                        <a class="button monthly-link" data-plan-link="{{ $plan['key'] }}" href="/register?plan={{ $plan['key'] }}&billing_interval=monthly">Request early access <span aria-hidden="true">→</span></a>
+                        <a class="button yearly-link" href="/register?plan={{ $plan['key'] }}&billing_interval=yearly">Request early access <span aria-hidden="true">→</span></a>
                     </div>
                     <p class="fine">$0.00 due today, cancel anytime</p>
                 </article>

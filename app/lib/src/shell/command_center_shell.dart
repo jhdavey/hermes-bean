@@ -62,7 +62,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   final Set<int> _pendingTaskIds = <int>{};
   bool _onboardingTourVisible = false;
   int _onboardingTourStep = 0;
-  bool _onboardingTourPendingPlanSelection = false;
   final Map<_OnboardingTourTarget, GlobalKey> _onboardingTourTargetKeys = {
     for (final target in _OnboardingTourTarget.values) target: GlobalKey(),
   };
@@ -164,7 +163,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _dashboardDataLoading = false;
     _onboardingTourVisible = false;
     _onboardingTourStep = 0;
-    _onboardingTourPendingPlanSelection = false;
     _beanAssistantOpen = false;
     _beanAssistantSending = false;
     _beanDockPushToTalkHeld = false;
@@ -736,6 +734,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       (error.statusCode == 401 || error.statusCode == 403);
 
   bool _userNeedsSignupPaywall(BeanUser user) {
+    if (user.accessState == 'active') return false;
+    if (user.accessState == 'subscription_required') return true;
     if (user.isAdmin) return false;
     if (user.subscriptionTier.trim().toLowerCase() == 'enterprise') {
       return false;
@@ -797,7 +797,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     BeanUser? knownUser,
     bool launchedFromRememberedToken = false,
     String? loadingStatusText,
-    bool deferSignupPaywall = false,
   }) async {
     _stopDashboardChangePolling();
     final authGeneration = ++_authGeneration;
@@ -813,7 +812,17 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final user = knownUser ?? await widget.apiClient.me();
       if (!_isCurrentAuthGeneration(authGeneration)) return;
       _applyUserTheme(user);
-      if (!deferSignupPaywall && _userNeedsSignupPaywall(user)) {
+      if (user.accessState == 'waitlisted') {
+        setState(() {
+          _clearDashboardData();
+          _user = user;
+          _phase = _AuthPhase.earlyAccessWaitlist;
+          _loadingStatusText = null;
+          _dashboardDataLoading = false;
+        });
+        return;
+      }
+      if (_userNeedsSignupPaywall(user)) {
         setState(() {
           _clearDashboardData();
           _user = user;
@@ -1072,39 +1081,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
   }
 
-  Future<void> _redeemCouponCodeForSignup(String code) async {
-    if (_checkoutBusyPlan != null) return;
-    final shouldLaunchTourAfterCoupon = _phase == _AuthPhase.guidedOnboarding;
-    setState(() {
-      _checkoutBusyPlan = 'coupon';
-      _checkoutError = null;
-    });
-    try {
-      await widget.apiClient.redeemCouponCode(code: code);
-      if (!mounted) return;
-      setState(() {
-        _checkoutBusyPlan = null;
-        _checkoutError = null;
-      });
-      await _loadSignedIn(loadingStatusText: 'Applying your coupon...');
-      if (shouldLaunchTourAfterCoupon &&
-          mounted &&
-          _phase == _AuthPhase.signedIn) {
-        _showOnboardingTour();
-      }
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _checkoutBusyPlan = null;
-        _checkoutError = beanFriendlyErrorMessage(
-          error,
-          action: 'apply your coupon code',
-        );
-      });
-      rethrow;
-    }
-  }
-
   Future<void> _continueAfterCheckout() async {
     setState(() => _checkoutError = null);
     await _loadSignedIn(loadingStatusText: 'Refreshing your subscription...');
@@ -1189,38 +1165,22 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     return BeanAuthResult(token: auth.token, user: user);
   }
 
-  Future<void> _launchGuidedLiveTour() async {
-    final user = _user;
-    if (user == null) return;
-    final pendingPlanSelection = _userNeedsSignupPaywall(user);
-    await _loadSignedIn(
-      knownUser: user,
-      loadingStatusText: 'Preparing your dashboard...',
-      deferSignupPaywall: pendingPlanSelection,
-    );
-    if (!mounted || _phase != _AuthPhase.signedIn) return;
-    _showOnboardingTour(pendingPlanSelection: pendingPlanSelection);
-  }
-
   String _onboardingTourSeenPreferenceKey(BeanUser user) =>
       '$_onboardingTourSeenPreferencePrefix.${user.id}';
 
-  void _showOnboardingTour({bool pendingPlanSelection = false}) {
-    _activateOnboardingTourStep(0, pendingPlanSelection: pendingPlanSelection);
+  void _showOnboardingTour() {
+    _activateOnboardingTourStep(0);
     if (_phase == _AuthPhase.signedIn) {
       unawaited(_loadSecondarySignedInData(authGeneration: _authGeneration));
     }
   }
 
-  void _activateOnboardingTourStep(int index, {bool? pendingPlanSelection}) {
+  void _activateOnboardingTourStep(int index) {
     final boundedIndex = index.clamp(0, _appOnboardingTourSteps.length - 1);
     final step = _appOnboardingTourSteps[boundedIndex];
     setState(() {
       _onboardingTourVisible = true;
       _onboardingTourStep = boundedIndex;
-      if (pendingPlanSelection != null) {
-        _onboardingTourPendingPlanSelection = pendingPlanSelection;
-      }
       _selectedDestination = step.destination;
       _clearPlanLimitError();
       if (step.destination == _HomeDestination.today) {
@@ -1245,12 +1205,10 @@ class _CommandCenterShellState extends State<CommandCenterShell>
 
   Future<void> _markOnboardingTourSeenAndClose() async {
     final user = _user;
-    final showPlanSelection = _onboardingTourPendingPlanSelection;
     if (mounted) {
       setState(() {
         _onboardingTourVisible = false;
         _onboardingTourStep = 0;
-        _onboardingTourPendingPlanSelection = false;
       });
     }
     if (user != null) {
@@ -1258,15 +1216,11 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       await prefs.setBool(_onboardingTourSeenPreferenceKey(user), true);
     }
     if (mounted) {
-      await _showPostTourFirstActionPrompt(
-        pendingPlanSelection: showPlanSelection,
-      );
+      await _showPostTourFirstActionPrompt();
     }
   }
 
-  Future<void> _showPostTourFirstActionPrompt({
-    required bool pendingPlanSelection,
-  }) async {
+  Future<void> _showPostTourFirstActionPrompt() async {
     final action = await showModalBottomSheet<_PostTourFirstAction>(
       context: context,
       showDragHandle: true,
@@ -1275,7 +1229,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     );
     if (!mounted) return;
     if (action == null) {
-      _finishPostTourFirstAction(pendingPlanSelection: pendingPlanSelection);
       return;
     }
 
@@ -1289,7 +1242,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     );
     if (!mounted) return;
     if (mode == null) {
-      _finishPostTourFirstAction(pendingPlanSelection: pendingPlanSelection);
       return;
     }
 
@@ -1299,14 +1251,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
 
     await _walkThroughFirstAction(action);
-  }
-
-  void _finishPostTourFirstAction({required bool pendingPlanSelection}) {
-    if (!mounted || !pendingPlanSelection) return;
-    setState(() {
-      _phase = _AuthPhase.planSelection;
-      _selectedDestination = _HomeDestination.commandCenter;
-    });
   }
 
   Future<void> _askBeanToStartFirstAction(_PostTourFirstAction action) async {
@@ -4362,9 +4306,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         busyPlan: _checkoutBusyPlan,
         checkoutError: _checkoutError,
         onCreateAccount: _registerFromGuidedOnboarding,
-        onLaunchLiveTour: _launchGuidedLiveTour,
         onSelectPlan: _startTrialCheckoutForInterval,
-        onRedeemCoupon: _redeemCouponCodeForSignup,
         onContactEnterprise: () {
           widget.launchExternalUrl(_enterpriseContactUrl);
         },
@@ -4375,6 +4317,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     }
     if (_phase == _AuthPhase.plainSignup) {
       return _PlainSignupScreen(
+        apiClient: widget.apiClient,
         onCreateAccount: _registerFromGuidedOnboarding,
         onAccountCreated: _openSignupPlanSelection,
         onBackToBean: _startGuidedOnboarding,
@@ -4388,13 +4331,15 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         busyPlan: _checkoutBusyPlan,
         error: _checkoutError,
         onSelectPlan: _startTrialCheckoutForInterval,
-        onRedeemCoupon: _redeemCouponCodeForSignup,
         onContactEnterprise: () {
           widget.launchExternalUrl(_enterpriseContactUrl);
         },
         onContinue: _continueAfterCheckout,
         onSignOut: _logout,
       );
+    }
+    if (_phase == _AuthPhase.earlyAccessWaitlist) {
+      return _EarlyAccessWaitlistScreen(onBack: _logout);
     }
     final user = _user!;
     _HeyBeanRuntimeServices.apiClient = widget.apiClient;

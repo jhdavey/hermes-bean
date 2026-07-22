@@ -118,6 +118,8 @@ class AuthAndAccountLifecycleTest extends TestCase
             'name' => 'Converted User',
             'email' => 'converted@example.com',
             'source' => 'app_register',
+            'status' => 'admitted',
+            'admitted_at' => now(),
         ]);
         $token = $this->apiToken('converted@example.com');
 
@@ -301,6 +303,14 @@ class AuthAndAccountLifecycleTest extends TestCase
             'password' => 'correct-horse-battery-staple',
             'password_confirmation' => 'correct-horse-battery-staple',
         ])->assertCreated()->json('data.token');
+
+        $this->withToken($token)->getJson('/api/today')
+            ->assertPaymentRequired()
+            ->assertJsonPath('code', 'subscription_required');
+
+        User::where('email', 'clean@example.com')->firstOrFail()
+            ->forceFill(['subscription_status' => 'trialing'])
+            ->save();
 
         $this->withToken($token)->getJson('/api/today')
             ->assertOk()

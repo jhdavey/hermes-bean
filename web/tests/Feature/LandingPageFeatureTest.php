@@ -29,7 +29,8 @@ class LandingPageFeatureTest extends TestCase
             ->assertOk()
             ->assertSee('<title>HeyBean – AI Executive Assistant for Work and Life</title>', false)
             ->assertSee('meta name="description" content="HeyBean helps busy professionals and parents organize calendars, tasks, reminders, and everyday follow-through across work and home."', false)
-            ->assertSee('HeyBean is currently in beta.', false)
+            ->assertSee('Limited early access:', false)
+            ->assertSee('24 of 100 spots left.', false)
             ->assertSee('AI EXECUTIVE ASSISTANCE FOR REAL LIFE', false)
             ->assertSee('class="hero-icon bean"', false)
             ->assertSee('.hero-icon.bean,.hero-icon.bean img{width:45px;height:45px}', false)
@@ -53,10 +54,11 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Bean works for you—and you stay in control.', false)
             ->assertSee('Let Bean take the next few things off your mind.', false)
             ->assertSee('images/heybean-landing-daily-control.png', false)
-            ->assertSee('Create your free beta account', false)
-            ->assertSee('Create Free Account', false)
+            ->assertSee('Request early access', false)
+            ->assertSee('I’m building HeyBean as a solo developer.', false)
+            ->assertSee('7-day free trial after plan selection', false)
             ->assertDontSee('class="public-brand"', false)
-            ->assertSee('href="/register"', false)
+            ->assertSee('href="/#early-access"', false)
             ->assertSee('href="/#how-it-works"', false)
             ->assertSee('href="/#features"', false)
             ->assertSee('href="/#plans"', false)
@@ -71,7 +73,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Choose the support your life needs.', false)
             ->assertSee('Most popular', false)
             ->assertSee('Unlimited notes with folders', false)
-            ->assertSee('Create your free beta account', false)
+            ->assertSee('Request early access', false)
             ->assertSee('href="/register?plan=base&billing_interval=monthly"', false)
             ->assertSee('href="/register?plan=premium&billing_interval=monthly"', false)
             ->assertSee('href="/register?plan=pro&billing_interval=monthly"', false)
@@ -136,11 +138,12 @@ class LandingPageFeatureTest extends TestCase
     public function test_visitors_can_request_early_access(): void
     {
         $this->post(route('early-access.store'), ['email' => 'harley@example.com'])
-            ->assertRedirect('/#early-access');
+            ->assertRedirect('/register?email=harley%40example.com');
 
         $this->assertDatabaseHas('early_access_signups', [
             'email' => 'harley@example.com',
             'source' => 'landing',
+            'status' => 'admitted',
         ]);
     }
 }

@@ -21,6 +21,61 @@ void main() {
     );
   });
 
+  test(
+    'early-access request preserves Laravel admission and static scarcity state',
+    () async {
+      BeanApiRequest? sent;
+      final client = BeanApiClient(
+        baseUrl: Uri.parse('https://example.test/api'),
+        transport: (request) async {
+          sent = request;
+          return BeanApiResponse(
+            202,
+            jsonEncode({
+              'data': {
+                'status': 'waitlisted',
+                'admitted': false,
+                'waitlisted': true,
+                'capacity': 100,
+                'display_remaining': 24,
+                'message': 'We will let you know when access opens.',
+              },
+            }),
+          );
+        },
+      );
+
+      final status = await client.requestEarlyAccess(
+        email: 'person@example.com',
+        name: 'Person',
+        source: 'flutter_bean_onboarding',
+      );
+
+      expect(sent?.path, '/early-access');
+      expect(sent?.body?['email'], 'person@example.com');
+      expect(status.waitlisted, isTrue);
+      expect(status.capacity, 100);
+      expect(status.displayRemaining, 24);
+    },
+  );
+
+  test('Laravel early-access users keep Flutter beta and access state', () {
+    final user = BeanUser.fromJson({
+      'id': 12,
+      'name': 'Beta Person',
+      'email': 'beta@example.com',
+      'is_early_access': true,
+      'early_access_status': 'registered',
+      'access_state': 'subscription_required',
+      'trial_days': 7,
+    });
+
+    expect(user.isBeta, isTrue);
+    expect(user.earlyAccessStatus, 'registered');
+    expect(user.accessState, 'subscription_required');
+    expect(user.trialDays, 7);
+  });
+
   test('direct productivity models preserve server fields', () {
     final task = BeanTask.fromJson({
       'id': 7,

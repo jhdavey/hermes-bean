@@ -1,8 +1,8 @@
 <?php
 
 use App\Http\Controllers\LandingBeanController;
-use App\Models\EarlyAccessSignup;
 use App\Models\User;
+use App\Services\EarlyAccessService;
 use App\Services\WorkspaceService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\Events\Verified;
@@ -106,25 +106,25 @@ Route::get('/workspace-invitations/{token}/accept', function (string $token) {
     }
 })->name('workspace-invitations.accept');
 
-Route::post('/early-access', function (Request $request) {
+Route::post('/early-access', function (Request $request, EarlyAccessService $earlyAccess) {
     $validated = $request->validate([
         'email' => ['required', 'email:rfc', 'max:255'],
         'plan' => ['sometimes', 'nullable', Rule::in(['base', 'premium', 'pro'])],
     ]);
     $requestedPlan = $validated['plan'] ?? null;
 
-    EarlyAccessSignup::updateOrCreate(
-        ['email' => strtolower($validated['email'])],
-        [
-            'name' => null,
-            'use_case' => null,
-            'requested_plan' => $requestedPlan,
-            'source' => $requestedPlan ? 'pricing' : 'landing',
-        ],
+    $signup = $earlyAccess->request(
+        $validated['email'],
+        null,
+        $requestedPlan,
+        $requestedPlan ? 'pricing' : 'landing',
     );
+    $payload = $earlyAccess->payload($signup);
 
-    return redirect('/#early-access')->with(
-        'early_access_status',
-        'Thank you for signing up! We’ll send you an email as soon as we can share the app with you! We look forward to your help with making Bean great!',
-    );
+    if ($payload['waitlisted']) {
+        return redirect('/#early-access')->with('early_access_status', $payload['message']);
+    }
+
+    return redirect('/register?email='.urlencode(strtolower($validated['email'])))
+        ->with('early_access_status', $payload['message']);
 })->name('early-access.store');

@@ -59,7 +59,7 @@ return [
         'publishable_key' => env('STRIPE_PUBLISHABLE_KEY'),
         'api_version' => env('STRIPE_API_VERSION', '2026-05-27.dahlia'),
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
-        'trial_days' => (int) env('STRIPE_TRIAL_DAYS', 7),
+        'trial_days' => 7,
         'prices' => [
             'base' => [
                 'monthly' => env('STRIPE_PRICE_BASE_MONTHLY', env('STRIPE_PRICE_BASE')),
