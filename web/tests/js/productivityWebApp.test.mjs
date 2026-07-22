@@ -91,6 +91,16 @@ test('month event pills fit their text without exceeding the date cell', () => {
     assert.match(calendarSource, /\.hb-month-event-title\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s);
 });
 
+test('beta bar and calendar month grid extend square to their edges', () => {
+    assert.match(cssRuleContaining(baseShellSource, '.hb-beta-banner'), /appearance:\s*none/);
+    assert.match(cssRuleContaining(baseShellSource, '.hb-beta-banner'), /border-radius:\s*0/);
+    assert.match(cssRuleContaining(dashboardSource, '.hb-calendar-card.hb-card-pad'), /padding:\s*0/);
+    assert.match(cssRuleContaining(dashboardSource, '.hb-calendar-card .hb-timeline'), /border-radius:\s*0/);
+    assert.match(cssRuleContaining(calendarSource, '.hb-month-grid'), /border-radius:\s*0/);
+    assert.match(cssRuleContaining(calendarSource, '.hb-month-cell'), /border-radius:\s*0/);
+    assert.match(cssRuleContaining(calendarSource, '.hb-month-weekday'), /border-radius:\s*0/);
+});
+
 test('critical items consistently render a gold star immediately before their title', () => {
     assert.match(source, /function criticalTitleMarkup\(item, title, className = ''\)/);
     assert.match(source, /<span class="\$\{classes\}">\$\{criticalStarMarkup\(item\)\}<span class="hb-critical-title-text">/);

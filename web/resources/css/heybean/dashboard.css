@@ -452,7 +452,10 @@
     border-radius: 0;
 }
 
-.hb-calendar-card.hb-card-pad,
+.hb-calendar-card.hb-card-pad {
+    padding: 0;
+}
+
 .hb-glance-card.hb-card-pad,
 .hb-today-tasks-card.hb-card-pad {
     padding: 3px;
@@ -500,7 +503,7 @@
 }
 
 .hb-calendar-card .hb-timeline {
-    border-radius: 14px;
+    border-radius: 0;
 }
 
 .hb-command-center-card {
