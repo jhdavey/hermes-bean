@@ -19,6 +19,21 @@ function cssRuleContaining(sourceText, selector) {
     return sourceText.slice(ruleStart, ruleEnd);
 }
 
+test('web signup starts with Bean chat and keeps a plain signup fallback', () => {
+    assert.match(source, /Start with Bean/);
+    assert.match(source, /Use plain signup form/);
+    assert.match(source, /plainSignupMarkup/);
+    assert.match(source, /hb-guided-chat-log/);
+    assert.match(source, /Hi, I’m Bean\. I’ll help get your HeyBean account set up/);
+    assert.match(source, /data-action="guided-onboarding"/);
+    assert.match(source, /data-action="plain-signup"/);
+    assert.match(source, /data-guided-tour-start/);
+    assert.match(source, /data-guided-tour-next/);
+    assert.match(source, /registerGuidedSignupAccount/);
+    assert.match(baseShellSource, /\.hb-guided-chat-composer/);
+    assert.match(baseShellSource, /\.hb-guided-chat-bubble-user/);
+});
+
 test('browser app retains direct productivity resources and command center', () => {
     for (const path of ['/tasks', '/reminders', '/calendar-events', '/notes', '/workspaces']) {
         assert.match(source, new RegExp(path.replace('/', '\\/')));

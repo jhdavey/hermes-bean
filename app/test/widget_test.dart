@@ -10,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  testWidgets('login and account setup retain the original forms', (
+  testWidgets('login starts Bean-led signup and exposes plain form fallback', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -31,13 +31,27 @@ void main() {
     expect(find.byKey(const Key('auth-password')), findsOneWidget);
     expect(find.byKey(const Key('remember-me-checkbox')), findsOneWidget);
     expect(find.byKey(const Key('forgot-login-action')), findsOneWidget);
+    expect(find.text('Start with Bean'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('guided-signup-action')));
-    await _pumpUntilFound(tester, find.byKey(const Key('guided-name-input')));
+    await _pumpUntilFound(
+      tester,
+      find.byKey(const Key('guided-onboarding-input')),
+    );
 
-    expect(find.text('Account setup'), findsOneWidget);
-    expect(find.byKey(const Key('guided-name-input')), findsOneWidget);
-    expect(find.text('Step 1 of 6'), findsOneWidget);
+    expect(find.textContaining('Hi, I’m Bean'), findsOneWidget);
+    expect(find.text('Use plain signup form'), findsOneWidget);
+    expect(find.byKey(const Key('guided-initial-bean-button')), findsOneWidget);
+    expect(find.byKey(const Key('guided-onboarding-send')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('guided-plain-signup-action')));
+    await _pumpUntilFound(tester, find.byKey(const Key('plain-signup-title')));
+
+    expect(find.text('Plain signup'), findsOneWidget);
+    expect(find.byKey(const Key('plain-signup-name')), findsOneWidget);
+    expect(find.byKey(const Key('plain-signup-email')), findsOneWidget);
+    expect(find.byKey(const Key('plain-signup-password')), findsOneWidget);
+    expect(find.text('Start with Bean instead'), findsOneWidget);
   });
 
   testWidgets(

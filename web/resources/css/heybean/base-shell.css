@@ -885,6 +885,145 @@
     display: none;
 }
 
+.hb-guided-chat-shell {
+    position: relative;
+}
+
+.hb-guided-chat-content {
+    padding-top: 20px;
+    gap: 14px;
+}
+
+.hb-guided-chat-log {
+    display: grid;
+    gap: 12px;
+    align-content: start;
+}
+
+.hb-guided-chat-bubble {
+    width: min(520px, 88%);
+    display: grid;
+    gap: 5px;
+    padding: 14px 16px;
+    border: 1px solid var(--hb-border);
+    border-radius: 22px;
+    box-shadow: var(--hb-shadow-soft);
+}
+
+.hb-guided-chat-bubble strong {
+    color: var(--hb-accent-strong);
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+}
+
+.hb-guided-chat-bubble span {
+    color: var(--hb-text);
+    font-size: 16px;
+    font-weight: 650;
+    line-height: 1.45;
+}
+
+.hb-guided-chat-bubble-bean {
+    justify-self: start;
+    background: var(--hb-surface2);
+}
+
+.hb-guided-chat-bubble-user {
+    justify-self: end;
+    background: color-mix(in srgb, var(--hb-accent) 13%, var(--hb-surface));
+    border-color: color-mix(in srgb, var(--hb-accent) 32%, var(--hb-border));
+}
+
+.hb-guided-chat-composer {
+    position: fixed;
+    left: 50%;
+    bottom: 20px;
+    z-index: 40;
+    width: min(720px, calc(100vw - 32px));
+    transform: translateX(-50%);
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 10px;
+    border: 1px solid color-mix(in srgb, var(--hb-accent) 28%, var(--hb-border));
+    border-radius: 28px;
+    background: var(--hb-surface);
+    box-shadow: var(--hb-shadow-strong);
+}
+
+.hb-guided-chat-composer img {
+    width: 42px;
+    height: 42px;
+    border-radius: 999px;
+}
+
+.hb-guided-chat-composer .hb-input {
+    min-height: 42px;
+    border: 0;
+    background: transparent;
+}
+
+.hb-guided-tour-card {
+    display: grid;
+    gap: 14px;
+    padding: 18px;
+}
+
+.hb-guided-tour-heading {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.hb-guided-tour-heading > span {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--hb-accent) 14%, var(--hb-surface2));
+}
+
+.hb-guided-tour-heading h2 {
+    margin: 0 0 5px;
+    color: var(--hb-text);
+}
+
+.hb-guided-tour-heading p {
+    margin: 0;
+    color: var(--hb-muted);
+    line-height: 1.5;
+}
+
+.hb-guided-tour-items,
+.hb-guided-tour-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.hb-guided-tour-items span {
+    padding: 8px 10px;
+    border-radius: 999px;
+    background: var(--hb-surface2);
+    color: var(--hb-text);
+    font-weight: 800;
+    font-size: 13px;
+}
+
+.hb-guided-tour-actions {
+    justify-content: space-between;
+}
+
+.hb-guided-tour-actions > span {
+    color: var(--hb-muted);
+    font-weight: 850;
+}
+
 .hb-guided-setup-card {
     width: min(100%, 720px);
     display: grid;

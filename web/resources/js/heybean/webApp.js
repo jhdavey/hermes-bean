@@ -58,6 +58,7 @@ export function mountHeyBeanWebApp(mount) {
         guidedSignupPassword: '',
         guidedSignupThemeMode: 'light',
         guidedSignupError: '',
+        guidedSignupTourStep: 0,
         subscriptionSummary: null,
         subscriptionCheckoutStatus: new URLSearchParams(window.location.search).get('checkout') || '',
         billingCheckoutStatus: initialBillingStatus,
@@ -285,8 +286,8 @@ export function mountHeyBeanWebApp(mount) {
         if (state.token) {
             await loadSignedIn();
         } else {
-            state.phase = initialMode === 'register' ? 'guidedOnboarding' : 'signedOut';
-            if (state.phase === 'guidedOnboarding') resetGuidedSignupState();
+            state.phase = initialMode === 'register' ? 'guidedOnboarding' : (initialMode === 'plain' ? 'plainSignup' : 'signedOut');
+            if (state.phase === 'guidedOnboarding' || state.phase === 'plainSignup') resetGuidedSignupState();
             render();
         }
     }
@@ -991,12 +992,13 @@ export function mountHeyBeanWebApp(mount) {
         state.guidedSignupPassword = '';
         state.guidedSignupThemeMode = options.themeMode || 'light';
         state.guidedSignupError = options.error || '';
+        state.guidedSignupTourStep = 0;
         state.busy = false;
         state.notice = options.notice || '';
     }
 
     function guidedSignupInputLocked() {
-        return state.busy || state.guidedSignupStep === 'plan';
+        return state.busy || ['tour', 'plan'].includes(state.guidedSignupStep);
     }
 
     function startGuidedSignup() {
@@ -1008,6 +1010,18 @@ export function mountHeyBeanWebApp(mount) {
             themeMode: state.guidedSignupThemeMode || 'light',
         });
         history.pushState({}, '', '/register');
+        render();
+    }
+
+    function startPlainSignup() {
+        state.authMode = 'register';
+        state.phase = 'plainSignup';
+        state.error = '';
+        state.notice = '';
+        resetGuidedSignupState({
+            themeMode: state.guidedSignupThemeMode || 'light',
+        });
+        history.pushState({}, '', '/register?mode=plain');
         render();
     }
 
@@ -1166,6 +1180,8 @@ export function mountHeyBeanWebApp(mount) {
             ? signedInMarkup()
             : state.phase === 'guidedOnboarding'
                 ? guidedOnboardingMarkup()
+            : state.phase === 'plainSignup'
+                ? plainSignupMarkup()
             : state.phase === 'subscription'
                 ? subscriptionSignupMarkup()
                 : signedOutMarkup();
@@ -1319,7 +1335,8 @@ export function mountHeyBeanWebApp(mount) {
                 <label class="hb-checkbox-row"><input type="checkbox" name="remember" ${state.remember ? 'checked' : ''}> Remember me</label>
                 <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Signing in…' : 'Sign in'}</button>
                 <div class="hb-link-row">
-                    <button class="hb-button-ghost" type="button" data-auth-mode="register">Create an account</button>
+                    <button class="hb-button-ghost" type="button" data-auth-mode="register">Start with Bean</button>
+                    <button class="hb-button-ghost" type="button" data-plain-signup>Use plain signup form</button>
                     <button class="hb-button-ghost" type="button" data-auth-mode="forgot">Forgot password?</button>
                 </div>
             </form>`;
@@ -1333,7 +1350,8 @@ export function mountHeyBeanWebApp(mount) {
                 <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Sending…' : 'Send reset link'}</button>
                 <div class="hb-link-row">
                     <button class="hb-button-ghost" type="button" data-auth-mode="login">Back to login</button>
-                    <button class="hb-button-ghost" type="button" data-auth-mode="register">Create an account</button>
+                    <button class="hb-button-ghost" type="button" data-auth-mode="register">Start with Bean</button>
+                    <button class="hb-button-ghost" type="button" data-plain-signup>Use plain signup form</button>
                 </div>
             </form>`;
     }
@@ -1342,7 +1360,6 @@ export function mountHeyBeanWebApp(mount) {
         event.preventDefault();
         if (guidedSignupInputLocked()) return;
         const step = state.guidedSignupStep;
-        if (!['name', 'email', 'password'].includes(step)) return;
         const input = event.currentTarget.querySelector('[name="value"]');
         const rawValue = String(input?.value || '');
         const value = step === 'password' ? rawValue : rawValue.trim();
@@ -1352,17 +1369,27 @@ export function mountHeyBeanWebApp(mount) {
             await handleGuidedSignupName(value);
             return;
         }
+        if (step === 'themeMode') {
+            selectGuidedThemeMode(value);
+            return;
+        }
         if (step === 'email') {
             await handleGuidedSignupEmail(value);
             return;
         }
-        await handleGuidedSignupPassword(value);
+        if (step === 'password') {
+            await handleGuidedSignupPassword(value);
+            return;
+        }
+        if (step === 'tourChoice') {
+            handleGuidedTourChoice(value);
+        }
     }
 
     async function handleGuidedSignupName(value) {
         const name = value.trim();
         if (name.length < 2) {
-            state.guidedSignupError = 'Please enter your name.';
+            state.guidedSignupError = 'Please enter the name you want Bean to use.';
             render();
             return;
         }
@@ -1371,9 +1398,21 @@ export function mountHeyBeanWebApp(mount) {
         render();
     }
 
+    function guidedThemeModeFromText(value) {
+        const normalized = String(value || '').trim().toLowerCase();
+        if (['system', 'device', 'automatic'].includes(normalized)) return 'auto';
+        if (['light', 'dark', 'auto'].includes(normalized)) return normalized;
+        return '';
+    }
+
     function selectGuidedThemeMode(key) {
-        if (!['light', 'dark', 'auto'].includes(key)) return;
-        state.guidedSignupThemeMode = key;
+        const normalized = guidedThemeModeFromText(key);
+        if (!normalized) {
+            state.guidedSignupError = 'Choose Light, Dark, or Auto.';
+            render();
+            return;
+        }
+        state.guidedSignupThemeMode = normalized;
         state.guidedSignupError = '';
         state.guidedSignupStep = 'email';
         render();
@@ -1383,7 +1422,7 @@ export function mountHeyBeanWebApp(mount) {
         const email = value.trim().toLowerCase();
         state.guidedSignupEmail = email;
         if (!looksLikeGuidedSignupEmail(email)) {
-            state.guidedSignupError = 'Enter a valid email address, such as name@example.com.';
+            state.guidedSignupError = 'That email does not look valid. Please text the address you want to use.';
             render();
             return;
         }
@@ -1393,7 +1432,7 @@ export function mountHeyBeanWebApp(mount) {
             const availability = await api('/auth/email-availability', { method: 'POST', body: { email } });
             state.busy = false;
             if (!availability.available) {
-                state.guidedSignupError = 'That email is already in use. Enter a different address.';
+                state.guidedSignupError = 'That email is already connected to an account. Please send Bean a different one.';
                 render();
                 return;
             }
@@ -1402,7 +1441,7 @@ export function mountHeyBeanWebApp(mount) {
             render();
         } catch (_) {
             state.busy = false;
-            state.guidedSignupError = 'The email could not be checked right now. Try again in a moment.';
+            state.guidedSignupError = 'I could not check that email right now. Please try again in a moment.';
             render();
         }
     }
@@ -1422,28 +1461,60 @@ export function mountHeyBeanWebApp(mount) {
         state.busy = true;
         render();
         try {
-            const result = await api('/auth/register', {
-                method: 'POST',
-                body: {
-                    name: state.guidedSignupName,
-                    email: state.guidedSignupEmail,
-                    password: value,
-                    password_confirmation: value,
-                    theme_mode: state.guidedSignupThemeMode,
-                    ...(state.selectedPlan ? { plan: state.selectedPlan } : {}),
-                    billing_interval: normalizedBillingInterval(state.selectedBillingInterval),
-                },
-            });
+            const result = await registerGuidedSignupAccount({ password: value });
             persistToken(result.token, true);
             state.user = result.user || null;
             state.subscriptionSummary = null;
             state.busy = false;
-            openGuidedPlanSelection();
+            state.guidedSignupStep = 'tourChoice';
+            render();
         } catch (error) {
             state.busy = false;
             state.guidedSignupError = friendlyError(error, 'create your account');
             render();
         }
+    }
+
+    async function registerGuidedSignupAccount({ password }) {
+        return api('/auth/register', {
+            method: 'POST',
+            body: {
+                name: state.guidedSignupName,
+                email: state.guidedSignupEmail,
+                password,
+                password_confirmation: password,
+                theme_mode: state.guidedSignupThemeMode,
+                ...(state.selectedPlan ? { plan: state.selectedPlan } : {}),
+                billing_interval: normalizedBillingInterval(state.selectedBillingInterval),
+            },
+        });
+    }
+
+    function handleGuidedTourChoice(value) {
+        const normalized = String(value || '').toLowerCase();
+        if (/\b(yes|yeah|yep|sure|show|tour)\b/.test(normalized)) {
+            state.guidedSignupStep = 'tour';
+            state.guidedSignupTourStep = 0;
+            state.guidedSignupError = '';
+            render();
+            return;
+        }
+        if (/\b(no|skip|straight|dashboard|plan)\b/.test(normalized)) {
+            openGuidedPlanSelection();
+            return;
+        }
+        state.guidedSignupError = 'Please answer yes for a quick tour, or no to go straight to plan setup.';
+        render();
+    }
+
+    function advanceGuidedTour() {
+        if (state.guidedSignupTourStep >= guidedTourSteps.length - 1) {
+            openGuidedPlanSelection();
+            return;
+        }
+        state.guidedSignupTourStep += 1;
+        state.guidedSignupError = '';
+        render();
     }
 
     function openGuidedPlanSelection() {
@@ -1457,107 +1528,90 @@ export function mountHeyBeanWebApp(mount) {
 
     function guidedOnboardingMarkup() {
         const step = state.guidedSignupStep;
-        const copy = {
-            name: {
-                eyebrow: 'Account setup',
-                title: 'What is your name?',
-                description: 'Enter the name you want shown in your account.',
-            },
-            themeMode: {
-                eyebrow: 'Appearance',
-                title: 'Choose a theme',
-                description: 'Select one option. You can change it later in Appearance settings.',
-            },
-            email: {
-                eyebrow: 'Account setup',
-                title: 'Add your email address',
-                description: 'This address is used to sign in and verify your account.',
-            },
-            password: {
-                eyebrow: 'Account security',
-                title: 'Create a password',
-                description: 'Use at least 12 characters. Your password is masked and sent only when you submit this form.',
-            },
-        }[step] || {
-            eyebrow: 'Setup',
-            title: 'Preparing the next step',
-            description: '',
-        };
-        const progressStep = 1;
         return `
             <div class="hb-app">
-                <main class="hb-guided-onboarding-shell">
+                <main class="hb-guided-onboarding-shell hb-guided-chat-shell">
                     <div class="hb-guided-onboarding-topbar">
                         <button class="hb-button-ghost" type="button" data-auth-mode="login">Login</button>
+                        <button class="hb-button-ghost" type="button" data-plain-signup>Use plain signup form</button>
                     </div>
                     <section class="hb-guided-onboarding-stage">
-                        <div class="hb-guided-onboarding-content" data-guided-content>
-                            <section class="hb-card hb-guided-setup-card">
-                                ${subscriptionProgressMarkup(progressStep)}
-                                <span class="hb-item-meta">${escapeHtml(copy.eyebrow)}</span>
-                                <h1>${escapeHtml(copy.title)}</h1>
-                                ${copy.description ? `<p class="hb-item-meta">${escapeHtml(copy.description)}</p>` : ''}
-                                ${guidedOnboardingFieldMarkup(step)}
-                                ${step === 'themeMode' ? guidedThemeModePanelMarkup() : ''}
-                                ${guidedOnboardingStatusMarkup()}
-                            </section>
+                        <div class="hb-guided-onboarding-content hb-guided-chat-content" data-guided-content>
+                            ${guidedChatTranscriptMarkup()}
+                            ${step === 'themeMode' ? guidedThemeModePanelMarkup() : ''}
+                            ${step === 'tourChoice' ? guidedTourChoicePanelMarkup() : ''}
+                            ${step === 'tour' ? guidedTourPanelMarkup() : ''}
+                            ${guidedOnboardingStatusMarkup()}
                         </div>
                     </section>
+                    ${['name', 'themeMode', 'email', 'password', 'tourChoice'].includes(step) ? guidedOnboardingComposerMarkup(step) : ''}
                 </main>
                 <div class="hb-guided-onboarding-bean-dock" aria-hidden="true"><img src="${escapeAttr(logoUrl)}" alt=""></div>
             </div>`;
     }
 
-    function guidedOnboardingFieldMarkup(step) {
-        if (!['name', 'email', 'password'].includes(step)) return '';
+    function guidedChatTranscriptMarkup() {
+        return `<section class="hb-guided-chat-log" aria-label="Bean signup conversation">
+            ${guidedChatMessages().map(guidedChatMessageMarkup).join('')}
+            ${state.busy ? '<div class="hb-guided-chat-bubble hb-guided-chat-bubble-bean"><strong>Bean</strong><span>Bean is thinking…</span></div>' : ''}
+        </section>`;
+    }
+
+    function guidedChatMessages() {
+        const messages = [
+            ['bean', 'Hi, I’m Bean. I’ll help get your HeyBean account set up. What name should I call you?'],
+        ];
+        if (state.guidedSignupName) {
+            messages.push(['user', state.guidedSignupName]);
+            messages.push(['bean', `Nice to meet you, ${state.guidedSignupName}. Do you prefer Light, Dark, or Auto mode? You can change this later in Appearance settings.`]);
+        }
+        if (state.guidedSignupStep !== 'name' && ['email', 'password', 'tourChoice', 'tour', 'plan'].includes(state.guidedSignupStep)) {
+            const mode = themeModesByKey.get(state.guidedSignupThemeMode) || themeModesByKey.get('auto');
+            messages.push(['user', mode.label]);
+            messages.push(['bean', `${mode.label} it is. What email address would you like to use for your account?`]);
+        }
+        if (state.guidedSignupEmail) {
+            messages.push(['user', state.guidedSignupEmail]);
+            if (['password', 'tourChoice', 'tour', 'plan'].includes(state.guidedSignupStep)) {
+                messages.push(['bean', 'Great. Now choose a password. Please text it here and I’ll keep it hidden.']);
+            }
+        }
+        if (['tourChoice', 'tour', 'plan'].includes(state.guidedSignupStep)) {
+            messages.push(['user', '************']);
+            messages.push(['bean', 'Your account has been created. Would you like me to show you how to use your dashboard, or should we go straight to plan setup?']);
+        }
+        if (state.guidedSignupStep === 'plan') {
+            messages.push(['bean', 'Last step: choose your plan so your free trial is ready.']);
+        }
+        return messages;
+    }
+
+    function guidedChatMessageMarkup([role, text]) {
+        const bean = role === 'bean';
+        return `<div class="hb-guided-chat-bubble ${bean ? 'hb-guided-chat-bubble-bean' : 'hb-guided-chat-bubble-user'}"><strong>${bean ? 'Bean' : 'You'}</strong><span>${escapeHtml(text)}</span></div>`;
+    }
+
+    function guidedOnboardingComposerMarkup(step) {
+        if (!['name', 'themeMode', 'email', 'password', 'tourChoice'].includes(step)) return '';
         const disabled = guidedSignupInputLocked();
         const field = {
-            name: {
-                label: 'Name',
-                type: 'text',
-                value: state.guidedSignupName,
-                autocomplete: 'name',
-                attrs: 'minlength="2" maxlength="255"',
-            },
-            email: {
-                label: 'Email address',
-                type: 'email',
-                value: state.guidedSignupEmail,
-                autocomplete: 'email',
-                attrs: 'maxlength="254"',
-            },
-            password: {
-                label: 'Password',
-                type: 'password',
-                value: '',
-                autocomplete: 'new-password',
-                attrs: 'minlength="12"',
-            },
+            name: { type: 'text', value: '', autocomplete: 'name', placeholder: 'Name', attrs: 'minlength="2" maxlength="255"' },
+            themeMode: { type: 'text', value: '', autocomplete: 'off', placeholder: 'Choose Light, Dark, or Auto...', attrs: '' },
+            email: { type: 'email', value: state.guidedSignupEmail, autocomplete: 'email', placeholder: 'Text your email address...', attrs: 'maxlength="254"' },
+            password: { type: 'password', value: '', autocomplete: 'new-password', placeholder: 'Text your password...', attrs: 'minlength="12"' },
+            tourChoice: { type: 'text', value: '', autocomplete: 'off', placeholder: 'Yes for tour, no for plan setup...', attrs: '' },
         }[step];
         return `
-            <form class="hb-form hb-guided-onboarding-form" data-action="guided-onboarding">
-                <label class="hb-label">${escapeHtml(field.label)}
-                    <input
-                        class="hb-input"
-                        name="value"
-                        type="${field.type}"
-                        value="${escapeAttr(field.value)}"
-                        autocomplete="${field.autocomplete}"
-                        ${field.attrs}
-                        required
-                        ${disabled ? 'disabled' : ''}
-                    >
-                </label>
-                <button class="hb-button" type="submit" ${disabled ? 'disabled' : ''}>${state.busy ? 'Saving…' : 'Continue'}</button>
+            <form class="hb-guided-chat-composer" data-action="guided-onboarding">
+                <img src="${escapeAttr(logoUrl)}" alt="Bean">
+                <input class="hb-input" name="value" type="${field.type}" value="${escapeAttr(field.value)}" autocomplete="${field.autocomplete}" placeholder="${escapeAttr(field.placeholder)}" ${field.attrs} required ${disabled ? 'disabled' : ''}>
+                <button class="hb-button" type="submit" ${disabled ? 'disabled' : ''}>${state.busy ? 'Saving…' : 'Send'}</button>
             </form>`;
     }
 
     function guidedOnboardingStatusMarkup() {
-        const parts = [];
-        if (state.guidedSignupError) {
-            parts.push(`<div class="hb-guided-onboarding-error">${escapeHtml(state.guidedSignupError)}</div>`);
-        }
-        return parts.join('');
+        if (!state.guidedSignupError) return '';
+        return `<div class="hb-guided-onboarding-error">${escapeHtml(state.guidedSignupError)}</div>`;
     }
 
     function guidedThemeModePanelMarkup() {
@@ -1568,6 +1622,102 @@ export function mountHeyBeanWebApp(mount) {
                     return `<button class="hb-guided-choice-chip ${state.guidedSignupThemeMode === key ? 'hb-guided-choice-chip-active' : ''}" type="button" data-guided-theme-mode="${escapeAttr(key)}" ${guidedSignupInputLocked() ? 'disabled' : ''}>${escapeHtml(mode.label)}</button>`;
                 }).join('')}
             </section>`;
+    }
+
+    function guidedTourChoicePanelMarkup() {
+        return `<section class="hb-guided-choice-panel hb-guided-tour-choice-panel">
+            <button class="hb-button" type="button" data-guided-tour-start>Take tour</button>
+            <button class="hb-button-secondary" type="button" data-guided-tour-skip>Skip tour</button>
+        </section>`;
+    }
+
+    const guidedTourSteps = [
+        { title: 'Command center', icon: icons.sparkles || '', text: "This is your command center. I'm always here to help. Tell me what you need, and above the chat you’ll see today’s events, tasks, and reminders.", items: ['Today', 'Tasks', 'Reminders'] },
+        { title: 'Calendar views', icon: icons.calendar || '', text: 'Calendar buttons help you move between today, day view, and month view without losing your place.', items: ['Today', 'Day view', 'Month view'] },
+        { title: 'Tasks', icon: icons.tasks || '', text: 'Tasks are for things you need to complete. I can create them from a sentence, and you can check them off when done.', items: ['Review launch notes', 'Order air filters', 'Send invoice'] },
+        { title: 'Reminders', icon: icons.reminders || '', text: 'Reminders are lightweight nudges. I can set quick time-based follow-up without cluttering your task list.', items: ['Take vitamins', 'Move laundry', 'Call Mom'] },
+        { title: 'Notes', icon: icons.notes || '', text: 'Notes hold plans, lists, and longer writing. Folders keep them organized, and formatting helps structure what matters.', items: ['House projects', 'Trip plan', 'Meeting notes'] },
+    ];
+
+    function guidedTourPanelMarkup() {
+        const index = Math.max(0, Math.min(state.guidedSignupTourStep, guidedTourSteps.length - 1));
+        const step = guidedTourSteps[index];
+        return `<section class="hb-card hb-guided-tour-card">
+            <div class="hb-guided-tour-heading"><span>${step.icon}</span><div><h2>${escapeHtml(step.title)}</h2><p>${escapeHtml(step.text)}</p></div></div>
+            <div class="hb-guided-tour-items">${step.items.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}</div>
+            <div class="hb-guided-tour-actions"><span>${index + 1} of ${guidedTourSteps.length}</span><button class="hb-button" type="button" data-guided-tour-next>${index === guidedTourSteps.length - 1 ? 'Plan setup' : 'Next'}</button></div>
+        </section>`;
+    }
+
+    function plainSignupMarkup() {
+        return `
+            <div class="hb-app">
+                <main class="hb-auth-wrap hb-auth-wrap-register">
+                    <section class="hb-card hb-auth-card hb-auth-card-register">
+                        <div class="hb-auth-title">
+                            <img src="${escapeAttr(logoUrl)}" alt="">
+                            <div><h1>Plain signup</h1><p class="hb-item-meta">Create your account with a standard form. You can still use Bean once you are inside.</p></div>
+                        </div>
+                        ${errorMarkup(state.error)}
+                        <form class="hb-form" data-action="plain-signup">
+                            ${labelInput('Name', 'name', 'text', state.guidedSignupName, 'required autocomplete="name" minlength="2" maxlength="255"')}
+                            ${labelInput('Email', 'email', 'email', state.guidedSignupEmail, 'required autocomplete="email" maxlength="254"')}
+                            ${labelInput('Password', 'password', 'password', '', 'required autocomplete="new-password" minlength="12"')}
+                            <section class="hb-guided-choice-panel" aria-label="Theme mode">
+                                ${['light', 'dark', 'auto'].map((key) => {
+                                    const mode = themeModesByKey.get(key);
+                                    return `<button class="hb-guided-choice-chip ${state.guidedSignupThemeMode === key ? 'hb-guided-choice-chip-active' : ''}" type="button" data-guided-theme-mode="${escapeAttr(key)}" ${state.busy ? 'disabled' : ''}>${escapeHtml(mode.label)}</button>`;
+                                }).join('')}
+                            </section>
+                            <button class="hb-button" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Creating account…' : 'Create account'}</button>
+                        </form>
+                        <div class="hb-link-row">
+                            <button class="hb-button-ghost" type="button" data-auth-mode="register">Start with Bean instead</button>
+                            <button class="hb-button-ghost" type="button" data-auth-mode="login">Back to login</button>
+                        </div>
+                    </section>
+                </main>
+            </div>`;
+    }
+
+    async function submitPlainSignup(event) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const name = String(form.elements.name?.value || '').trim();
+        const email = String(form.elements.email?.value || '').trim().toLowerCase();
+        const password = String(form.elements.password?.value || '');
+        state.guidedSignupName = name;
+        state.guidedSignupEmail = email;
+        state.error = '';
+        if (name.length < 2) {
+            state.error = 'Enter your name.';
+            render();
+            return;
+        }
+        if (!looksLikeGuidedSignupEmail(email)) {
+            state.error = 'Enter a valid email address.';
+            render();
+            return;
+        }
+        if (password.length < 12) {
+            state.error = 'Use at least 12 characters.';
+            render();
+            return;
+        }
+        state.busy = true;
+        render();
+        try {
+            const result = await registerGuidedSignupAccount({ password });
+            persistToken(result.token, true);
+            state.user = result.user || null;
+            state.subscriptionSummary = null;
+            state.busy = false;
+            openGuidedPlanSelection();
+        } catch (error) {
+            state.busy = false;
+            state.error = friendlyError(error, 'create your account');
+            render();
+        }
     }
 
     function subscriptionSignupMarkup() {
@@ -4419,10 +4569,20 @@ export function mountHeyBeanWebApp(mount) {
         }));
         mount.querySelectorAll('form[data-action="login"], form[data-action="forgot"]').forEach((form) => form.addEventListener('submit', submitAuth));
         mount.querySelector('[data-action="guided-onboarding"]')?.addEventListener('submit', submitGuidedOnboarding);
+        mount.querySelector('[data-action="plain-signup"]')?.addEventListener('submit', submitPlainSignup);
         mount.querySelectorAll('[data-guided-theme-mode]').forEach((button) => button.addEventListener('click', () => {
+            if (state.phase === 'plainSignup') {
+                state.guidedSignupThemeMode = guidedThemeModeFromText(button.dataset.guidedThemeMode || '') || state.guidedSignupThemeMode;
+                render();
+                return;
+            }
             if (guidedSignupInputLocked()) return;
             selectGuidedThemeMode(button.dataset.guidedThemeMode || '');
         }));
+        mount.querySelectorAll('[data-plain-signup]').forEach((button) => button.addEventListener('click', startPlainSignup));
+        mount.querySelectorAll('[data-guided-tour-start]').forEach((button) => button.addEventListener('click', () => { state.guidedSignupStep = 'tour'; state.guidedSignupTourStep = 0; render(); }));
+        mount.querySelectorAll('[data-guided-tour-skip]').forEach((button) => button.addEventListener('click', openGuidedPlanSelection));
+        mount.querySelectorAll('[data-guided-tour-next]').forEach((button) => button.addEventListener('click', advanceGuidedTour));
         mount.querySelectorAll('[data-dismiss-plan-limit-error]').forEach((button) => button.addEventListener('click', () => {
             state.error = '';
             render();

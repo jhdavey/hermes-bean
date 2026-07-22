@@ -176,7 +176,7 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                         key: const Key('guided-signup-action'),
                         onPressed: widget.busy ? null : widget.onStartSignup,
                         icon: Icon(Icons.person_add_alt_1_rounded),
-                        label: Text('Create account'),
+                        label: Text('Start with Bean'),
                         style: OutlinedButton.styleFrom(
                           minimumSize: const Size.fromHeight(48),
                           textStyle: const TextStyle(

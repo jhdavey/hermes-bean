@@ -4,6 +4,7 @@ enum _AuthPhase {
   loading,
   signedOut,
   guidedOnboarding,
+  plainSignup,
   planSelection,
   signedIn,
 }

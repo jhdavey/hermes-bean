@@ -1118,6 +1118,37 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     });
   }
 
+  void _startPlainSignup() {
+    setState(() {
+      _phase = _AuthPhase.plainSignup;
+      _error = null;
+      _authNotice = null;
+      _checkoutError = null;
+      _checkoutBusyPlan = null;
+    });
+  }
+
+  void _returnToSignedOutFromSignup() {
+    _applyUserTheme(null);
+    setState(() {
+      _phase = _AuthPhase.signedOut;
+      _error = null;
+      _authNotice = null;
+      _checkoutError = null;
+      _checkoutBusyPlan = null;
+    });
+  }
+
+  void _openSignupPlanSelection() {
+    setState(() {
+      _phase = _AuthPhase.planSelection;
+      _error = null;
+      _authNotice = null;
+      _checkoutError = null;
+      _checkoutBusyPlan = null;
+    });
+  }
+
   Future<BeanAuthResult> _registerFromGuidedOnboarding(
     String name,
     String email,
@@ -4258,14 +4289,17 @@ class _CommandCenterShellState extends State<CommandCenterShell>
           widget.launchExternalUrl(_enterpriseContactUrl);
         },
         onPreviewThemeMode: widget.onThemeModeChanged,
-        onBackToLogin: () {
-          _applyUserTheme(null);
-          setState(() {
-            _phase = _AuthPhase.signedOut;
-            _error = null;
-            _checkoutError = null;
-          });
-        },
+        onSkipToPlainSignup: _startPlainSignup,
+        onBackToLogin: _returnToSignedOutFromSignup,
+      );
+    }
+    if (_phase == _AuthPhase.plainSignup) {
+      return _PlainSignupScreen(
+        onCreateAccount: _registerFromGuidedOnboarding,
+        onAccountCreated: _openSignupPlanSelection,
+        onBackToBean: _startGuidedOnboarding,
+        onBackToLogin: _returnToSignedOutFromSignup,
+        onPreviewThemeMode: widget.onThemeModeChanged,
       );
     }
     if (_phase == _AuthPhase.planSelection) {
