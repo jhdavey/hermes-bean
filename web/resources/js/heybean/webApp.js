@@ -3283,7 +3283,7 @@ export function mountHeyBeanWebApp(mount) {
             <button class="hb-command-center-row hb-command-center-row-${escapeAttr(item.kind)}" type="button" ${dataAttr}${styleAttr}>
                 <span class="hb-command-center-time">${escapeHtml(item.timeLabel)}</span>
                 <span class="hb-command-center-copy">
-                    <strong>${escapeHtml(item.title || 'Untitled')}</strong>
+                    <strong>${criticalTitleMarkup(item, item.title || 'Untitled', 'hb-command-center-title')}</strong>
                     <small>${escapeHtml(item.subtitle || commandCenterKindLabel(item.kind))}</small>
                 </span>
                 ${notesIcon}
@@ -3324,6 +3324,7 @@ export function mountHeyBeanWebApp(mount) {
                 subtitle: eventLocationText(event),
                 hasNotes: Boolean(eventNotesText(event)),
                 color: itemColor(event),
+                isCritical: Boolean(event.is_critical || event.isCritical),
             });
         });
 
@@ -3345,6 +3346,7 @@ export function mountHeyBeanWebApp(mount) {
                 subtitle: overdue ? 'overdue' : '',
                 isOverdue: overdue,
                 color: itemColor(task),
+                isCritical: taskCritical(task),
             });
         });
 
@@ -3366,6 +3368,7 @@ export function mountHeyBeanWebApp(mount) {
                 subtitle: overdue ? 'overdue' : '',
                 isOverdue: overdue,
                 color: itemColor(reminder),
+                isCritical: reminderCritical(reminder),
             });
         });
 
@@ -3443,7 +3446,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function eventPillTitleMarkup(event = {}, className = 'hb-event-title', options = {}) {
-        return `<span class="${className}"><span class="hb-event-title-inner">${criticalStarMarkup(event)}${escapeHtml(eventTitleText(event))}</span>${eventPillIndicatorsMarkup(event, options)}</span>`;
+        return `<span class="${className}">${criticalTitleMarkup(event, eventTitleText(event), 'hb-event-title-inner')}${eventPillIndicatorsMarkup(event, options)}</span>`;
     }
 
     function glanceEventMarkup(event) {
@@ -3455,6 +3458,7 @@ export function mountHeyBeanWebApp(mount) {
             subtitle: eventLocationText(event),
             hasNotes: Boolean(eventNotesText(event)),
             color: itemColor(event),
+            isCritical: Boolean(event.is_critical || event.isCritical),
         });
     }
 
@@ -3554,20 +3558,20 @@ export function mountHeyBeanWebApp(mount) {
                 <div class="hb-critical-popover" role="menu">
                     <div class="hb-critical-list">
                         ${count === 0 ? criticalDropdownRowMarkup(icons.checkCircle, 'Nothing critical today', '') : ''}
-                        ${tasks.map((task) => criticalDropdownRowMarkup(icons.tasks, task.title || task.name || 'Untitled', criticalTaskSubtitle(task), `critical-task-item-${escapeAttr(task.id)}`)).join('')}
-                        ${reminders.map((reminder) => criticalDropdownRowMarkup(icons.reminders, reminder.title || reminder.name || 'Untitled', criticalReminderSubtitle(reminder), `critical-reminder-item-${escapeAttr(reminder.id)}`)).join('')}
-                        ${events.map((event) => criticalDropdownRowMarkup(icons.calendar, event.title || event.name || 'Untitled', criticalEventSubtitle(event), `critical-event-item-${escapeAttr(event.id)}`)).join('')}
+                        ${tasks.map((task) => criticalDropdownRowMarkup(icons.tasks, task.title || task.name || 'Untitled', criticalTaskSubtitle(task), `critical-task-item-${escapeAttr(task.id)}`, true)).join('')}
+                        ${reminders.map((reminder) => criticalDropdownRowMarkup(icons.reminders, reminder.title || reminder.name || 'Untitled', criticalReminderSubtitle(reminder), `critical-reminder-item-${escapeAttr(reminder.id)}`, true)).join('')}
+                        ${events.map((event) => criticalDropdownRowMarkup(icons.calendar, event.title || event.name || 'Untitled', criticalEventSubtitle(event), `critical-event-item-${escapeAttr(event.id)}`, true)).join('')}
                     </div>
                 </div>
             </details>`;
     }
 
-    function criticalDropdownRowMarkup(icon, title, subtitle = '', key = '') {
+    function criticalDropdownRowMarkup(icon, title, subtitle = '', key = '', isCritical = false) {
         return `
             <div class="hb-critical-row" ${key ? `data-critical-row="${key}"` : ''}>
                 <span class="hb-critical-row-icon" aria-hidden="true">${icon}</span>
                 <span class="hb-critical-row-copy">
-                    <strong>${escapeHtml(title)}</strong>
+                    <strong>${criticalTitleMarkup({ isCritical }, title)}</strong>
                     ${subtitle ? `<small>${escapeHtml(subtitle)}</small>` : ''}
                 </span>
             </div>`;
@@ -3728,7 +3732,7 @@ export function mountHeyBeanWebApp(mount) {
         return `
             <span class="hb-month-event-body">
                 <span class="hb-month-event-main">
-                    <span class="hb-month-event-title">${escapeHtml(eventTitleText(event))}</span>
+                    ${criticalTitleMarkup(event, eventTitleText(event), 'hb-month-event-title')}
                 </span>
             </span>`;
     }
@@ -3844,10 +3848,9 @@ export function mountHeyBeanWebApp(mount) {
         const expandable = kind === 'task' && (taskNotes || subtasks.length || (!completed && !taskParentId(item)));
         return `
             <article class="hb-item hb-item-${kind} ${completed ? 'hb-item-complete' : ''} ${overdue ? 'hb-item-overdue' : ''}" style="--hb-item-color:${escapeAttr(color)}">
-                ${kind === 'task' && critical ? '<span class="hb-star hb-item-critical-star">★</span>' : ''}
                 <label class="hb-check"><input type="checkbox" data-toggle-${kind}="${item.id}" ${completed ? 'checked' : ''}></label>
                 <button class="hb-item-main" type="button" data-edit-${kind}="${item.id}">
-                    <div class="hb-item-title">${kind !== 'task' && critical ? '<span class="hb-star">★</span>' : ''}<span>${escapeHtml(item.title || item.name || 'Untitled')}</span>${expandable ? `<span class="hb-task-expand-icon" data-toggle-task-details="${item.id}" aria-label="${expanded ? 'Hide task details' : 'Show task details'}">${expanded ? '▲' : '▼'}</span>` : ''}</div>
+                    <div class="hb-item-title">${criticalTitleMarkup({ isCritical: critical }, item.title || item.name || 'Untitled')}${expandable ? `<span class="hb-task-expand-icon" data-toggle-task-details="${item.id}" aria-label="${expanded ? 'Hide task details' : 'Show task details'}">${expanded ? '▲' : '▼'}</span>` : ''}</div>
                     ${subtitle ? `<div class="hb-item-meta">${escapeHtml(subtitle)}</div>` : ''}
                 </button>
                 ${expanded ? taskDetailsMarkup(item, taskNotes, subtasks) : ''}
@@ -3903,7 +3906,12 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function criticalStarMarkup(item) {
-        return item?.is_critical || item?.isCritical ? '<span class="hb-star hb-critical-star" aria-hidden="true">★</span> ' : '';
+        return item?.is_critical || item?.isCritical ? '<span class="hb-star hb-critical-star" role="img" aria-label="Critical">★</span>' : '';
+    }
+
+    function criticalTitleMarkup(item, title, className = '') {
+        const classes = ['hb-critical-title', className].filter(Boolean).join(' ');
+        return `<span class="${classes}">${criticalStarMarkup(item)}<span class="hb-critical-title-text">${escapeHtml(title)}</span></span>`;
     }
 
     function sectionTitle(icon, title, subtitle = '') {

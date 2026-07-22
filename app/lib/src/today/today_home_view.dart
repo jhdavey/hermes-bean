@@ -570,6 +570,7 @@ class _CriticalTaskBadge extends StatelessWidget {
                   _CriticalDropdownRow(
                     key: Key('critical-task-item-${task.id}'),
                     icon: Icons.checklist_rounded,
+                    isCritical: true,
                     title: task.title,
                     subtitle: _taskSubtitle(task),
                   ),
@@ -577,6 +578,7 @@ class _CriticalTaskBadge extends StatelessWidget {
                   _CriticalDropdownRow(
                     key: Key('critical-reminder-item-${reminder.id}'),
                     icon: Icons.notifications_active_rounded,
+                    isCritical: true,
                     title: reminder.title,
                     subtitle: _reminderSubtitle(reminder),
                   ),
@@ -584,6 +586,7 @@ class _CriticalTaskBadge extends StatelessWidget {
                   _CriticalDropdownRow(
                     key: Key('critical-event-item-${event.id}'),
                     icon: Icons.event_rounded,
+                    isCritical: true,
                     title: event.title,
                     subtitle: _eventSubtitle(event),
                   ),
@@ -616,11 +619,13 @@ class _CriticalDropdownRow extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
+    this.isCritical = false,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
+  final bool isCritical;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -634,14 +639,30 @@ class _CriticalDropdownRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: HeyBeanTheme.text,
-                  fontWeight: FontWeight.w800,
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (isCritical) ...[
+                    Icon(
+                      Icons.star_rounded,
+                      semanticLabel: 'Critical',
+                      size: 15,
+                      color: HeyBeanTheme.warning,
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: HeyBeanTheme.text,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
               ),
               if (subtitle.isNotEmpty)
                 Text(
@@ -2099,28 +2120,6 @@ class _MultiDayEventSpan extends StatelessWidget {
         clipBehavior: Clip.hardEdge,
         child: Stack(
           children: [
-            if (event.isCritical)
-              Positioned(
-                left: 8,
-                top: 8,
-                child: Icon(
-                  Icons.star_rounded,
-                  key: Key('event-critical-star-${event.id}'),
-                  color: HeyBeanTheme.warning,
-                  size: 14,
-                ),
-              ),
-            if (hasNotes)
-              Positioned(
-                left: event.isCritical ? 26 : 8,
-                top: 8,
-                child: Icon(
-                  Icons.notes_rounded,
-                  key: Key('event-notes-icon-${event.id}'),
-                  color: foregroundColor.withValues(alpha: .82),
-                  size: 13,
-                ),
-              ),
             for (var dayIndex = 0; dayIndex < daySpan; dayIndex++)
               Positioned(
                 left: dayIndex == 0 ? 0 : (dayIndex * columnWidth) - 6,
@@ -2134,36 +2133,29 @@ class _MultiDayEventSpan extends StatelessWidget {
                       (dayIndex == 0 ? 0 : (dayIndex * columnWidth) - 6),
                 ),
                 child: Padding(
-                  padding: EdgeInsets.only(
-                    left: dayIndex == 0
-                        ? 10 + (event.isCritical ? 18 : 0) + (hasNotes ? 18 : 0)
-                        : 10,
-                    right: 10,
-                  ),
+                  padding: EdgeInsets.only(left: 10, right: 10),
                   child: Align(
                     alignment: dayIndex == daySpan - 1
                         ? Alignment.centerRight
                         : dayIndex == 0
                         ? Alignment.centerLeft
                         : Alignment.center,
-                    child: Text(
-                      _multiDayEventLabelForDay(
-                        event,
-                        startDay.add(Duration(days: dayIndex)),
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    child: _MultiDayEventInlineTitle(
+                      event: event,
+                      day: startDay.add(Duration(days: dayIndex)),
+                      dayIndex: dayIndex,
                       textAlign: dayIndex == daySpan - 1
                           ? TextAlign.right
                           : dayIndex == 0
                           ? TextAlign.left
                           : TextAlign.center,
-                      style: TextStyle(
-                        color: foregroundColor,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        height: 1,
-                      ),
+                      mainAxisAlignment: dayIndex == daySpan - 1
+                          ? MainAxisAlignment.end
+                          : dayIndex == 0
+                          ? MainAxisAlignment.start
+                          : MainAxisAlignment.center,
+                      showNotes: hasNotes && dayIndex == 0,
+                      foregroundColor: foregroundColor,
                     ),
                   ),
                 ),
@@ -2171,6 +2163,88 @@ class _MultiDayEventSpan extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _MultiDayEventInlineTitle extends StatelessWidget {
+  const _MultiDayEventInlineTitle({
+    required this.event,
+    required this.day,
+    required this.dayIndex,
+    required this.textAlign,
+    required this.mainAxisAlignment,
+    required this.showNotes,
+    required this.foregroundColor,
+  });
+
+  final BeanCalendarEvent event;
+  final DateTime day;
+  final int dayIndex;
+  final TextAlign textAlign;
+  final MainAxisAlignment mainAxisAlignment;
+  final bool showNotes;
+  final Color foregroundColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final start = _parseCalendarEventDateTime(event.startsAt);
+    final end = _parseCalendarEventDateTime(event.endsAt);
+    final prefix = start != null && _sameCalendarDay(start, day)
+        ? _naturalTimeLabel(start)
+        : '';
+    final suffix = end != null && _sameCalendarDay(end, day)
+        ? _naturalTimeLabel(end)
+        : '';
+    final style = TextStyle(
+      color: foregroundColor,
+      fontSize: 12,
+      fontWeight: FontWeight.w800,
+      height: 1,
+    );
+
+    return Row(
+      mainAxisAlignment: mainAxisAlignment,
+      children: [
+        if (prefix.isNotEmpty) ...[
+          Text(prefix, maxLines: 1, style: style),
+          const SizedBox(width: 4),
+        ],
+        if (event.isCritical) ...[
+          Icon(
+            Icons.star_rounded,
+            key: dayIndex == 0
+                ? Key('event-critical-star-${event.id}')
+                : Key('event-critical-star-${event.id}-$dayIndex'),
+            semanticLabel: 'Critical',
+            color: HeyBeanTheme.warning,
+            size: 14,
+          ),
+          const SizedBox(width: 4),
+        ],
+        Flexible(
+          child: Text(
+            event.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: textAlign,
+            style: style,
+          ),
+        ),
+        if (suffix.isNotEmpty) ...[
+          const SizedBox(width: 4),
+          Text(suffix, maxLines: 1, style: style),
+        ],
+        if (showNotes) ...[
+          const SizedBox(width: 4),
+          Icon(
+            Icons.notes_rounded,
+            key: Key('event-notes-icon-${event.id}'),
+            color: foregroundColor.withValues(alpha: .82),
+            size: 13,
+          ),
+        ],
+      ],
     );
   }
 }
@@ -2350,17 +2424,9 @@ class _AllDayEventRow extends StatelessWidget {
                   Icon(
                     Icons.star_rounded,
                     key: Key('event-critical-star-${event.id}'),
+                    semanticLabel: 'Critical',
                     color: HeyBeanTheme.warning,
                     size: 14,
-                  ),
-                  const SizedBox(width: 4),
-                ],
-                if (_eventHasNotes(event)) ...[
-                  Icon(
-                    Icons.notes_rounded,
-                    key: Key('event-notes-icon-${event.id}'),
-                    color: foregroundColor.withValues(alpha: .82),
-                    size: 13,
                   ),
                   const SizedBox(width: 4),
                 ],
@@ -2377,6 +2443,15 @@ class _AllDayEventRow extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (_eventHasNotes(event)) ...[
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.notes_rounded,
+                    key: Key('event-notes-icon-${event.id}'),
+                    color: foregroundColor.withValues(alpha: .82),
+                    size: 13,
+                  ),
+                ],
               ],
             ),
           ),
@@ -2595,17 +2670,9 @@ class _TimelineEventBlock extends StatelessWidget {
                 Icon(
                   Icons.star_rounded,
                   key: Key('event-critical-star-${event.id}'),
+                  semanticLabel: 'Critical',
                   color: HeyBeanTheme.warning,
                   size: 14,
-                ),
-                const SizedBox(width: 4),
-              ],
-              if (_eventHasNotes(event)) ...[
-                Icon(
-                  Icons.notes_rounded,
-                  key: Key('event-notes-icon-${event.id}'),
-                  color: foregroundColor.withValues(alpha: .82),
-                  size: 13,
                 ),
                 const SizedBox(width: 4),
               ],
@@ -2640,6 +2707,15 @@ class _TimelineEventBlock extends StatelessWidget {
                   ],
                 ),
               ),
+              if (_eventHasNotes(event)) ...[
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.notes_rounded,
+                  key: Key('event-notes-icon-${event.id}'),
+                  color: foregroundColor.withValues(alpha: .82),
+                  size: 13,
+                ),
+              ],
             ],
           ),
         ),

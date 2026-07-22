@@ -429,6 +429,47 @@ class _CommandCenterDayHeader extends StatelessWidget {
   );
 }
 
+class _CommandCenterRowTitle extends StatelessWidget {
+  const _CommandCenterRowTitle({
+    required this.title,
+    required this.isCritical,
+    required this.criticalStarKey,
+  });
+
+  final String title;
+  final bool isCritical;
+  final Key criticalStarKey;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      if (isCritical) ...[
+        Icon(
+          Icons.star_rounded,
+          key: criticalStarKey,
+          semanticLabel: 'Critical',
+          size: 14,
+          color: HeyBeanTheme.warning.withValues(alpha: .90),
+        ),
+        const SizedBox(width: 3),
+      ],
+      Flexible(
+        child: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: HeyBeanTheme.text,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
 class _CommandCenterGlanceDayTile extends StatelessWidget {
   const _CommandCenterGlanceDayTile({
     required this.day,
@@ -443,7 +484,7 @@ class _CommandCenterGlanceDayTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     key: Key('command-center-glance-day-${_calendarDateKey(day.date)}'),
-    padding: const EdgeInsets.fromLTRB(7, 7, 7, 6),
+    padding: const EdgeInsets.only(top: 7, bottom: 6),
     decoration: BoxDecoration(
       border: showBottomDivider
           ? Border(bottom: BorderSide(color: _quietBorderColor(alpha: .46)))
@@ -452,11 +493,16 @@ class _CommandCenterGlanceDayTile extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _CommandCenterDayHeader(label: _commandCenterGlanceDayLabel(day.date)),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 7),
+          child: _CommandCenterDayHeader(
+            label: _commandCenterGlanceDayLabel(day.date),
+          ),
+        ),
         const SizedBox(height: 5),
         if (day.events.isEmpty)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 2),
             child: Text(
               'No events',
               style: TextStyle(
@@ -470,13 +516,10 @@ class _CommandCenterGlanceDayTile extends StatelessWidget {
           Column(
             children: [
               for (var index = 0; index < day.events.length; index++)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: _CommandCenterGlanceEventRow(
-                    event: day.events[index],
-                    showTopDivider: index > 0,
-                    onTap: () => onEventTap(day.events[index]),
-                  ),
+                _CommandCenterGlanceEventRow(
+                  event: day.events[index],
+                  showTopDivider: index > 0,
+                  onTap: () => onEventTap(day.events[index]),
                 ),
             ],
           ),
@@ -509,15 +552,20 @@ class _CommandCenterGlanceEventRow extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Container(
+          key: Key('command-center-glance-category-rail-${event.id}'),
           height: 42,
-          padding: const EdgeInsets.symmetric(horizontal: 6),
+          padding: const EdgeInsets.only(left: 8, right: 6),
           decoration: BoxDecoration(
-            border: showTopDivider
-                ? Border(top: BorderSide(color: _quietBorderColor(alpha: .30)))
-                : null,
+            border: Border(
+              left: BorderSide(color: color.withValues(alpha: .72), width: 3),
+              top: showTopDivider
+                  ? BorderSide(color: _quietBorderColor(alpha: .30))
+                  : BorderSide.none,
+            ),
           ),
           child: Row(
             children: [
+              const SizedBox(width: 8),
               SizedBox(
                 width: timeWidth,
                 child: _CommandCenterAgendaTimeLabel(
@@ -525,30 +573,17 @@ class _CommandCenterGlanceEventRow extends StatelessWidget {
                   allowStackedRange: true,
                 ),
               ),
-              const SizedBox(width: 5),
-              Container(
-                key: Key('command-center-glance-dot-${event.id}'),
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: .82),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      event.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: HeyBeanTheme.text,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
+                    _CommandCenterRowTitle(
+                      title: event.title,
+                      isCritical: event.isCritical,
+                      criticalStarKey: Key(
+                        'command-center-glance-critical-star-${event.id}',
                       ),
                     ),
                     const SizedBox(height: 1),
@@ -634,7 +669,8 @@ class _CommandCenterAgendaList extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(7, 7, 7, 5),
               child: _CommandCenterDayHeader(
                 key: const Key('command-center-today-header'),
-                label: _commandCenterGlanceDayLabel(DateTime.now()),
+                label:
+                    'Today - ${_commandCenterGlanceDayLabel(DateTime.now())}',
               ),
             ),
             if (todayItems.isEmpty) const _CommandCenterAgendaEmptyInline(),
@@ -679,6 +715,11 @@ class _CommandCenterAgendaRow extends StatelessWidget {
       _CommandCenterAgendaKind.reminder => 'Reminder',
     };
     final hasEventNotes = item.event != null && _eventHasNotes(item.event!);
+    final isCritical = switch (item.kind) {
+      _CommandCenterAgendaKind.event => item.event?.isCritical ?? false,
+      _CommandCenterAgendaKind.task => item.task?.isCritical ?? false,
+      _CommandCenterAgendaKind.reminder => item.reminder?.isCritical ?? false,
+    };
     const timeWidth = 50.0;
 
     return Material(
@@ -723,14 +764,11 @@ class _CommandCenterAgendaRow extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          item.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: HeyBeanTheme.text,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
+                        _CommandCenterRowTitle(
+                          title: item.title,
+                          isCritical: isCritical,
+                          criticalStarKey: Key(
+                            'command-center-agenda-critical-star-${item.key}',
                           ),
                         ),
                         const SizedBox(height: 1),
@@ -776,7 +814,7 @@ class _CommandCenterAgendaTimeLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rangeParts = allowStackedRange
-        ? label.split(RegExp(r'\s+[–-]\s+'))
+        ? label.split(RegExp(r'\s*[–-]\s*'))
         : const <String>[];
     final canStack =
         rangeParts.length == 2 &&

@@ -89,6 +89,92 @@ void main() {
   );
 
   testWidgets(
+    'command center upcoming rows use rails and contain time ranges',
+    (tester) async {
+      final api = _DashboardWithUpcomingEventApiClient();
+      await tester.pumpWidget(
+        HeyBeanApp(
+          apiClient: api,
+          tokenStore: _TestTokenStore(token: 'test-token'),
+          launchExternalUrl: (_) async => true,
+          updateAppIconBadge: (_) async {},
+          stripePaymentHandler: _TestStripePaymentHandler(),
+        ),
+      );
+      await _pumpUntilFound(
+        tester,
+        find.byKey(const Key('command-center-home')),
+      );
+
+      expect(find.textContaining('Today - '), findsOneWidget);
+      expect(
+        find.byKey(const Key('command-center-glance-dot-701')),
+        findsNothing,
+      );
+      expect(find.text('9:15'), findsOneWidget);
+      expect(find.text('11:45am'), findsOneWidget);
+      expect(
+        find.byKey(const Key('command-center-glance-critical-star-701')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('command-center-agenda-critical-star-task-702')),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .getTopLeft(
+              find.byKey(
+                const Key('command-center-agenda-critical-star-task-702'),
+              ),
+            )
+            .dx,
+        lessThan(
+          tester.getTopLeft(find.text('Critical command-center task')).dx,
+        ),
+      );
+      expect(
+        tester
+            .getTopLeft(
+              find.byKey(const Key('command-center-glance-critical-star-701')),
+            )
+            .dx,
+        lessThan(tester.getTopLeft(find.text('Upcoming category rail')).dx),
+      );
+      final rail = tester.widget<Container>(
+        find.byKey(const Key('command-center-glance-category-rail-701')),
+      );
+      final border = (rail.decoration! as BoxDecoration).border! as Border;
+      expect(border.left.width, 3);
+      expect(border.left.style, BorderStyle.solid);
+
+      await tester.tap(find.byKey(const Key('nav-tasks')));
+      await _pumpUntilFound(
+        tester,
+        find.byKey(const Key('task-critical-star-702')),
+      );
+      expect(
+        tester.getTopLeft(find.byKey(const Key('task-critical-star-702'))).dx,
+        lessThan(
+          tester.getTopLeft(find.text('Critical command-center task')).dx,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('nav-reminders')));
+      await _pumpUntilFound(
+        tester,
+        find.byKey(const Key('reminder-critical-star-703')),
+      );
+      expect(
+        tester
+            .getTopLeft(find.byKey(const Key('reminder-critical-star-703')))
+            .dx,
+        lessThan(tester.getTopLeft(find.text('Critical reminder')).dx),
+      );
+    },
+  );
+
+  testWidgets(
     'signed-in Bean center action opens assistant panel and sends messages',
     (tester) async {
       final api = _DashboardApiClient();
@@ -362,6 +448,68 @@ class _DashboardBootstrapFailingApiClient extends _DashboardApiClient {
     bool skipExternalSync = false,
   }) async {
     throw const FormatException('Expected test dashboard JSON shape');
+  }
+}
+
+class _DashboardWithUpcomingEventApiClient extends _DashboardApiClient {
+  @override
+  Future<List<BeanTask>> listTasks() async {
+    final today = DateTime.now();
+    final dueAt =
+        '${today.year.toString().padLeft(4, '0')}-'
+        '${today.month.toString().padLeft(2, '0')}-'
+        '${today.day.toString().padLeft(2, '0')}';
+
+    return [
+      BeanTask(
+        id: 702,
+        title: 'Critical command-center task',
+        dueAt: dueAt,
+        isCritical: true,
+        color: '#f59e0b',
+      ),
+    ];
+  }
+
+  @override
+  Future<List<BeanReminder>> listReminders() async {
+    final now = DateTime.now();
+    return [
+      BeanReminder(
+        id: 703,
+        title: 'Critical reminder',
+        dueAt: DateTime(now.year, now.month, now.day, 23, 45).toIso8601String(),
+        isCritical: true,
+        color: '#ec4899',
+      ),
+    ];
+  }
+
+  @override
+  Future<List<BeanCalendarEvent>> listCalendarEvents({
+    bool skipExternalSync = false,
+  }) async {
+    final tomorrow = DateTime.now().add(const Duration(days: 1));
+    final startsAt = DateTime(
+      tomorrow.year,
+      tomorrow.month,
+      tomorrow.day,
+      9,
+      15,
+    );
+
+    return [
+      BeanCalendarEvent(
+        id: 701,
+        title: 'Upcoming category rail',
+        startsAt: startsAt.toIso8601String(),
+        endsAt: startsAt
+            .add(const Duration(hours: 2, minutes: 30))
+            .toIso8601String(),
+        color: '#2563eb',
+        isCritical: true,
+      ),
+    ];
   }
 }
 

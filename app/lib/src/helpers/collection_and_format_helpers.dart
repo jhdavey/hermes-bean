@@ -414,18 +414,6 @@ String _compactTimeRangeLabel(DateTime start, DateTime end) {
   return '${startLabel.replaceFirst(RegExp('$startMeridiem\$'), '')}-$endLabel';
 }
 
-String _multiDayEventLabelForDay(BeanCalendarEvent event, DateTime day) {
-  final start = _parseCalendarEventDateTime(event.startsAt);
-  final end = _parseCalendarEventDateTime(event.endsAt);
-  if (start != null && _sameCalendarDay(start, day)) {
-    return '${_naturalTimeLabel(start)} ${event.title}';
-  }
-  if (end != null && _sameCalendarDay(end, day)) {
-    return '${event.title} ${_naturalTimeLabel(end)}';
-  }
-  return event.title;
-}
-
 String? _taskReminderInputToWireValue(String? value) {
   final trimmed = value?.trim() ?? '';
   if (trimmed.isEmpty) return null;

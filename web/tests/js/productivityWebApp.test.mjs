@@ -91,6 +91,19 @@ test('month event pills fit their text without exceeding the date cell', () => {
     assert.match(calendarSource, /\.hb-month-event-title\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s);
 });
 
+test('critical items consistently render a gold star immediately before their title', () => {
+    assert.match(source, /function criticalTitleMarkup\(item, title, className = ''\)/);
+    assert.match(source, /<span class="\$\{classes\}">\$\{criticalStarMarkup\(item\)\}<span class="hb-critical-title-text">/);
+    assert.match(source, /criticalTitleMarkup\(event, eventTitleText\(event\), 'hb-month-event-title'\)/);
+    assert.match(source, /criticalTitleMarkup\(item, item\.title \|\| 'Untitled', 'hb-command-center-title'\)/);
+    assert.match(source, /isCritical: taskCritical\(task\)/);
+    assert.match(source, /isCritical: reminderCritical\(reminder\)/);
+    assert.match(source, /criticalTitleMarkup\(\{ isCritical: critical \}, item\.title \|\| item\.name \|\| 'Untitled'\)/);
+    assert.match(dashboardSource, /\.hb-critical-title\s*\{[^}]*display:\s*inline-flex;[^}]*gap:\s*4px;/s);
+    assert.doesNotMatch(source, /hb-item-critical-star/);
+    assert.doesNotMatch(dashboardSource, /\.hb-item-critical-star/);
+});
+
 test('notes use a WYSIWYG Markdown editor with the complete formatting toolbar', () => {
     assert.match(source, /import\('\.\/noteMarkdownEditor\.js'\)/);
     assert.match(noteEditorSource, /import Editor from '@toast-ui\/editor'/);

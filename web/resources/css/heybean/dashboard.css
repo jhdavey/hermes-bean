@@ -313,7 +313,7 @@
 .hb-item-task .hb-item-main {
     min-height: 48px;
     align-content: start;
-    padding-right: 28px;
+    padding-right: 2px;
     padding-bottom: 18px;
 }
 
@@ -351,10 +351,23 @@
     text-decoration: line-through;
 }
 
-.hb-item-title span:last-child {
+.hb-critical-title {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.hb-critical-title-text {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.hb-item-title > .hb-critical-title,
+.hb-command-center-title {
+    flex: 0 1 auto;
 }
 
 .hb-item-meta {
@@ -376,16 +389,10 @@
 }
 
 .hb-star {
+    flex: 0 0 auto;
     color: var(--hb-critical-star);
     font-size: 16px;
     line-height: 1;
-}
-
-.hb-item-critical-star {
-    position: absolute;
-    top: 7px;
-    right: 10px;
-    pointer-events: none;
 }
 
 .hb-task-details {
@@ -600,6 +607,10 @@
     min-width: 0;
     display: grid;
     gap: 1px;
+}
+
+.hb-command-center-title {
+    max-width: 100%;
 }
 
 .hb-command-center-copy strong,

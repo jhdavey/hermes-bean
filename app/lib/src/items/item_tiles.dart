@@ -86,6 +86,18 @@ class _TaskItemTileState extends State<_TaskItemTile> {
                           children: [
                             Row(
                               children: [
+                                if (_taskIsCritical(task)) ...[
+                                  Icon(
+                                    Icons.star_rounded,
+                                    key: Key('task-critical-star-${task.id}'),
+                                    semanticLabel: 'Critical',
+                                    color: HeyBeanTheme.warning.withValues(
+                                      alpha: .88,
+                                    ),
+                                    size: 14,
+                                  ),
+                                  const SizedBox(width: 4),
+                                ],
                                 Expanded(
                                   child: Text(
                                     task.title,
@@ -220,17 +232,6 @@ class _TaskItemTileState extends State<_TaskItemTile> {
               ],
             ],
           ),
-          if (_taskIsCritical(task))
-            Positioned(
-              key: Key('task-critical-star-${task.id}'),
-              top: 1,
-              right: 4,
-              child: Icon(
-                Icons.star_rounded,
-                color: HeyBeanTheme.warning.withValues(alpha: .88),
-                size: 14,
-              ),
-            ),
         ],
       ),
     );
@@ -278,8 +279,16 @@ class _SubtaskRow extends StatelessWidget {
                     visualDensity: VisualDensity.compact,
                     activeColor: HeyBeanTheme.accentStrong,
                   ),
-            if (_taskIsCritical(task))
-              Icon(Icons.star_rounded, size: 14, color: HeyBeanTheme.warning),
+            if (_taskIsCritical(task)) ...[
+              Icon(
+                Icons.star_rounded,
+                key: Key('task-critical-star-${task.id}'),
+                semanticLabel: 'Critical',
+                size: 14,
+                color: HeyBeanTheme.warning,
+              ),
+              const SizedBox(width: 4),
+            ],
             Expanded(
               child: Text(
                 task.title,
@@ -360,6 +369,10 @@ class _ReminderItemTile extends StatelessWidget {
                             if (critical) ...[
                               Icon(
                                 Icons.star_rounded,
+                                key: Key(
+                                  'reminder-critical-star-${reminder.id}',
+                                ),
+                                semanticLabel: 'Critical',
                                 size: 14,
                                 color: HeyBeanTheme.warning.withValues(
                                   alpha: .88,
