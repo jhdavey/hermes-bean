@@ -83,6 +83,13 @@
     .public-pricing .plan .plan-actions .button {
         margin-top: 0;
     }
+    .public-pricing .features .is-unavailable {
+        color: #98a2b3;
+    }
+    .public-pricing .features .is-unavailable::before {
+        content: "—";
+        color: #98a2b3;
+    }
     .public-pricing .section-head p {
         margin: 16px auto 0;
         color: var(--pb-green-dark);

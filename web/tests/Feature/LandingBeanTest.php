@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\BeanUsageRecord;
 use App\Services\Bean\LandingBeanRuntimeService;
+use App\Services\PlanLimitService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
@@ -200,6 +201,9 @@ class LandingBeanTest extends TestCase
             'bean.landing.visitors_path' => $root.'/visitors',
             'bean.landing.timeout_seconds' => 5,
         ]);
+        app(PlanLimitService::class)->updatePlans([
+            'base' => ['workspace_limit' => 7],
+        ]);
 
         try {
             $result = app(LandingBeanRuntimeService::class)->respond('visitor-a', null, 'Hey Bean', '/');
@@ -217,6 +221,7 @@ class LandingBeanTest extends TestCase
             $this->assertStringContainsString('Do not position HeyBean as a general-purpose chatbot', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('show you how it works, walk through features or pricing, or give you a quick tour', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not ask about their use case unless they explicitly ask for a recommendation.', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('7 workspaces', File::get($home.'/skills/heybean-guide/SKILL.md'));
             touch($home.'/.last-used', now()->subHours(3)->timestamp);
             $this->assertSame(1, app(LandingBeanRuntimeService::class)->pruneInactive(2));
             $this->assertDirectoryDoesNotExist($home);

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Services\PlanLimitService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -69,13 +70,47 @@ class LandingPageFeatureTest extends TestCase
             ->assertOk()
             ->assertSee('Choose the support your life needs.', false)
             ->assertSee('Most popular', false)
-            ->assertSee('Unlimited Notes', false)
+            ->assertSee('Unlimited notes with folders', false)
             ->assertSee('Create your free beta account', false)
             ->assertSee('href="/register?plan=base&billing_interval=monthly"', false)
             ->assertSee('href="/register?plan=premium&billing_interval=monthly"', false)
             ->assertSee('href="/register?plan=pro&billing_interval=monthly"', false)
             ->assertDontSee('Enterprise', false)
             ->assertDontSee('For teams', false);
+    }
+
+    public function test_public_pricing_uses_the_current_admin_plan_limits(): void
+    {
+        app(PlanLimitService::class)->updatePlans([
+            'base' => [
+                'workspace_limit' => 7,
+                'calendar_connection_limit' => 4,
+                'connected_account_limit' => 3,
+                'history_days' => 45,
+                'note_limit' => 25,
+                'recurring_tasks_enabled' => true,
+                'recurring_reminders_enabled' => false,
+                'recurring_calendar_enabled' => true,
+                'email_reminders_enabled' => false,
+                'notes_enabled' => true,
+            ],
+        ]);
+
+        foreach (['/', '/pricing'] as $path) {
+            $this->get($path)
+                ->assertOk()
+                ->assertSeeInOrder([
+                    '7 workspaces',
+                    '4 connected calendars',
+                    '3 connected accounts',
+                    '45 days of searchable history',
+                    'Up to 25 notes',
+                    'Recurring tasks',
+                    'Recurring reminders not included',
+                    'Recurring calendar events',
+                    'Email reminders not included',
+                ], false);
+        }
     }
 
     public function test_browser_routes_render_the_app_mount(): void

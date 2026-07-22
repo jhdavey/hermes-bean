@@ -25,65 +25,37 @@
         @endif
 
         <div class="plans">
-            <article class="plan">
-                <h3>Base</h3>
-                <p class="for">Best for one person coordinating work and personal life.</p>
-                <div class="price"><span class="amount"><span class="monthly-price">$4.99</span><span class="yearly-price">$49.99</span></span><span class="period"><span class="monthly-period">/month</span><span class="yearly-period">/year</span></span></div>
-                <ul class="features">
-                    <li>2 workspaces for personal and shared planning</li>
-                    <li>Tasks, reminders, and calendar in one daily view</li>
-                    <li>1 connected calendar</li>
-                    <li>Up to 10 notes for plans, lists, and longer writing</li>
-                    <li>Push reminders for the things you cannot miss</li>
-                    <li>Recent calendar and task history</li>
-                </ul>
-                <div class="plan-actions">
-                    <a class="button monthly-link" data-plan-link="base" href="/register?plan=base&billing_interval=monthly">Create your free beta account <span aria-hidden="true">→</span></a>
-                    <a class="button yearly-link" href="/register?plan=base&billing_interval=yearly">Create your free beta account <span aria-hidden="true">→</span></a>
-                </div>
-                <p class="fine">$0.00 due today, cancel anytime</p>
-            </article>
-
-            <article class="plan popular">
-                <h3>Premium <span class="badge">Most popular</span></h3>
-                <p class="for">Best for busy households coordinating more people and responsibilities.</p>
-                <div class="price"><span class="amount"><span class="monthly-price">$19.99</span><span class="yearly-price">$199.99</span></span><span class="period"><span class="monthly-period">/month</span><span class="yearly-period">/year</span></span></div>
-                <ul class="features">
-                    <li>5 workspaces for home, work, school, and projects</li>
-                    <li>More space for everyday planning</li>
-                    <li>Push and email reminders working together</li>
-                    <li>Recurring tasks and reminders for repeated routines</li>
-                    <li>Unlimited Notes with folders for plans, lists, and longer writing</li>
-                    <li>Multiple calendar connections</li>
-                    <li>1 year of searchable context and history</li>
-                    <li>The best fit for most busy households</li>
-                </ul>
-                <div class="plan-actions">
-                    <a class="button monthly-link" data-plan-link="premium" href="/register?plan=premium&billing_interval=monthly">Create your free beta account <span aria-hidden="true">→</span></a>
-                    <a class="button yearly-link" href="/register?plan=premium&billing_interval=yearly">Create your free beta account <span aria-hidden="true">→</span></a>
-                </div>
-                <p class="fine">$0.00 due today, cancel anytime</p>
-            </article>
-
-            <article class="plan">
-                <h3>Pro</h3>
-                <p class="for">Best for complex schedules with more calendars, workspaces, and history.</p>
-                <div class="price"><span class="amount"><span class="monthly-price">$49.99</span><span class="yearly-price">$499.99</span></span><span class="period"><span class="monthly-period">/month</span><span class="yearly-period">/year</span></span></div>
-                <ul class="features">
-                    <li>Unlimited workspaces for every area of life</li>
-                    <li>Unlimited tasks, reminders, and events for high-volume days</li>
-                    <li>More room for connected calendars and workspace planning</li>
-                    <li>Unlimited connected accounts</li>
-                    <li>Unlimited Notes across every workspace</li>
-                    <li>Full calendar and task history</li>
-                    <li>Priority support</li>
-                </ul>
-                <div class="plan-actions">
-                    <a class="button monthly-link" data-plan-link="pro" href="/register?plan=pro&billing_interval=monthly">Create your free beta account <span aria-hidden="true">→</span></a>
-                    <a class="button yearly-link" href="/register?plan=pro&billing_interval=yearly">Create your free beta account <span aria-hidden="true">→</span></a>
-                </div>
-                <p class="fine">$0.00 due today, cancel anytime</p>
-            </article>
+            @foreach ($publicPricingPlans as $plan)
+                <article @class(['plan', 'popular' => $plan['popular']])>
+                    <h3>
+                        {{ $plan['name'] }}
+                        @if ($plan['popular'])
+                            <span class="badge">Most popular</span>
+                        @endif
+                    </h3>
+                    <p class="for">{{ $plan['description'] }}</p>
+                    <div class="price">
+                        <span class="amount">
+                            <span class="monthly-price">${{ $plan['monthly_price'] }}</span>
+                            <span class="yearly-price">${{ $plan['yearly_price'] }}</span>
+                        </span>
+                        <span class="period">
+                            <span class="monthly-period">/month</span>
+                            <span class="yearly-period">/year</span>
+                        </span>
+                    </div>
+                    <ul class="features">
+                        @foreach ($plan['features'] as $feature)
+                            <li @class(['is-unavailable' => ! $feature['included']])>{{ $feature['label'] }}</li>
+                        @endforeach
+                    </ul>
+                    <div class="plan-actions">
+                        <a class="button monthly-link" data-plan-link="{{ $plan['key'] }}" href="/register?plan={{ $plan['key'] }}&billing_interval=monthly">Create your free beta account <span aria-hidden="true">→</span></a>
+                        <a class="button yearly-link" href="/register?plan={{ $plan['key'] }}&billing_interval=yearly">Create your free beta account <span aria-hidden="true">→</span></a>
+                    </div>
+                    <p class="fine">$0.00 due today, cancel anytime</p>
+                </article>
+            @endforeach
         </div>
     </div>
 </section>

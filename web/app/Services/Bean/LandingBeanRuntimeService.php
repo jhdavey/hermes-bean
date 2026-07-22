@@ -2,6 +2,7 @@
 
 namespace App\Services\Bean;
 
+use App\Services\PublicPricingPlanService;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Process\Process;
@@ -10,6 +11,8 @@ use Throwable;
 class LandingBeanRuntimeService
 {
     private const USER_FACING_FAILURE = 'I am having trouble answering right now. Please try me again in a moment.';
+
+    public function __construct(private readonly PublicPricingPlanService $pricingPlans) {}
 
     /**
      * @return array{answer: string, hermes_session_id: string|null, ui_action: string|null}
@@ -117,7 +120,9 @@ YAML;
 
     private function guideSkill(): string
     {
-        return <<<'MD'
+        $pricingFacts = $this->pricingPlans->guideFacts();
+
+        return <<<MD
 ---
 name: heybean-guide
 description: Introduce public website visitors to HeyBean accurately and conversationally.
@@ -144,9 +149,8 @@ Do not repeat the full introduction later in the same conversation.
 - Bean turns natural-language requests into organized follow-through using calendar events, tasks, reminders, notes, and shared workspaces across work and home.
 - HeyBean supports the tools people already use; do not imply that visitors must replace every existing tool.
 - The product supports connected calendars, personal and shared planning, daily/monthly views, task tracking, reminders, and Markdown-backed notes that look like a normal word processor.
-- Base is $4.99 monthly or $49.99 yearly and includes two workspaces, one connected calendar, and up to ten notes.
-- Premium is $19.99 monthly or $199.99 yearly and includes five workspaces, multiple calendar connections, recurring tasks and reminders, and unlimited notes with folders.
-- Pro is $49.99 monthly or $499.99 yearly and includes unlimited workspaces, tasks, reminders, events, connected accounts, and notes, plus full history and priority support.
+- Current pricing and plan limits are listed below. These are generated from the same plan-limit settings used by the website; rely on them instead of older plan details:
+{$pricingFacts}
 - All plans currently include a free trial, show $0 due today, and can be cancelled anytime. Encourage visitors to confirm current details in the pricing section on the home page before subscribing.
 - Visitors can review plans in the home-page pricing section, create a free beta account at `/register`, or sign in at `/login`.
 

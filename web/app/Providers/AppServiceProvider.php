@@ -7,9 +7,11 @@ use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Observers\DashboardResourceObserver;
+use App\Services\PublicPricingPlanService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -25,6 +27,9 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->registerLandingBeanRateLimits();
+        View::composer('partials.public-pricing-plans', function ($view): void {
+            $view->with('publicPricingPlans', app(PublicPricingPlanService::class)->plans());
+        });
 
         Task::observe(DashboardResourceObserver::class);
         Reminder::observe(DashboardResourceObserver::class);
