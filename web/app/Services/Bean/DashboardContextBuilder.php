@@ -3,14 +3,17 @@
 namespace App\Services\Bean;
 
 use App\Models\BeanSession;
+use App\Models\BeanRun;
 use App\Models\CalendarEvent;
 use App\Models\Note;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\Bean\External\OpenMeteoWeatherService;
 use App\Services\WorkspaceService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Throwable;
 
 class DashboardContextBuilder
 {
@@ -19,6 +22,7 @@ class DashboardContextBuilder
     public function __construct(
         private readonly WorkspaceService $workspaces,
         private readonly BeanTimeContext $timeContext,
+        private readonly OpenMeteoWeatherService $weather,
     ) {}
 
     /** @return array<string, mixed> */
@@ -59,6 +63,7 @@ class DashboardContextBuilder
                 'reminders' => $this->remindersForDay($workspaceIds, $workspaceMap, $context, $tomorrow),
                 'calendar_events' => $this->eventsForDay($workspaceIds, $workspaceMap, $context, $tomorrow),
             ],
+            'weather' => $this->localWeatherForecast($session, $context),
             'upcoming' => [
                 'horizon_days' => self::UPCOMING_HORIZON_DAYS,
                 'tasks' => $this->upcomingTasks($workspaceIds, $workspaceMap, $context, self::UPCOMING_HORIZON_DAYS),
@@ -211,6 +216,61 @@ class DashboardContextBuilder
             ])
             ->values()
             ->all();
+    }
+
+    /** @param array{timezone:string} $context */
+    private function localWeatherForecast(BeanSession $session, array $context): array
+    {
+        $metadata = is_array($session->metadata) ? $session->metadata : [];
+        $location = data_get($metadata, 'client_location');
+        if (! is_array($location)) {
+            return [
+                'available' => false,
+                'reason' => 'client_location_missing',
+                'horizon_days' => 8,
+            ];
+        }
+
+        try {
+            $run = new BeanRun([
+                'bean_session_id' => $session->id,
+                'user_id' => $session->user_id,
+                'workspace_id' => $session->workspace_id,
+                'input' => 'voice dashboard context weather prehydration',
+                'metadata' => [
+                    'client_location' => $location,
+                    'time_context' => $context,
+                    'source' => 'dashboard_context',
+                ],
+            ]);
+            $run->setRelation('session', $session);
+            $forecast = $this->weather->forecast(['forecast_days' => 8], $run);
+        } catch (Throwable) {
+            return [
+                'available' => false,
+                'reason' => 'forecast_unavailable',
+                'horizon_days' => 8,
+            ];
+        }
+
+        if (($forecast['ok'] ?? false) !== true) {
+            return [
+                'available' => false,
+                'reason' => 'forecast_unavailable',
+                'horizon_days' => 8,
+            ];
+        }
+
+        return [
+            'available' => true,
+            'provider' => $forecast['provider'] ?? 'open-meteo',
+            'retrieved_at' => $forecast['retrieved_at'] ?? null,
+            'horizon_days' => 8,
+            'location' => $forecast['location'] ?? null,
+            'units' => $forecast['units'] ?? null,
+            'current' => $forecast['current'] ?? null,
+            'daily_forecast' => array_slice(is_array($forecast['daily_forecast'] ?? null) ? $forecast['daily_forecast'] : [], 0, 8),
+        ];
     }
 
     /** @param Collection<int|string, string> $workspaceMap */

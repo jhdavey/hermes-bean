@@ -141,9 +141,11 @@ PHP);
             ->values();
         $voiceLog = $logs->last();
         $this->assertContains('--toolsets', $voiceLog['argv']);
-        $this->assertContains('bean_dashboard,skills,memory,session_search,web', $voiceLog['argv']);
+        $this->assertContains('bean_dashboard,skills', $voiceLog['argv']);
+        $this->assertContains('--source', $voiceLog['argv']);
+        $this->assertContains('elevenlabs_agent', $voiceLog['argv']);
         $this->assertContains('--max-turns', $voiceLog['argv']);
-        $this->assertContains('24', $voiceLog['argv']);
+        $this->assertContains('8', $voiceLog['argv']);
     }
 
     public function test_voice_task_list_today_uses_hermes_fallback_not_a_to_do_specific_fast_path(): void
@@ -1027,6 +1029,71 @@ PHP);
 
         $this->assertDatabaseCount('bean_sessions', 1);
         Http::assertSentCount(1);
+    }
+
+    public function test_elevenlabs_conversation_token_prehydrates_local_weather_from_browser_location(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-21T16:00:00Z'));
+
+        config([
+            'services.elevenlabs.agent_enabled' => true,
+            'services.elevenlabs.api_key' => 'test-elevenlabs-key',
+            'services.elevenlabs.agent_id' => 'agent_test',
+        ]);
+        $token = $this->apiToken('bean-elevenlabs-weather-context@example.com');
+        $user = User::where('email', 'bean-elevenlabs-weather-context@example.com')->firstOrFail();
+        $session = app(BeanRuntimeService::class)->createSession($user, null, 'America/New_York');
+
+        Http::fake(function (HttpRequest $request) {
+            if (str_starts_with($request->url(), 'https://api.elevenlabs.io/v1/convai/conversation/token')) {
+                return Http::response(['token' => 'convai_test_token'], 200);
+            }
+
+            if (str_starts_with($request->url(), 'https://api.open-meteo.com/v1/forecast')) {
+                parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+                $this->assertSame('8', (string) ($query['forecast_days'] ?? ''));
+                $this->assertSame('35.5951', (string) ($query['latitude'] ?? ''));
+
+                return Http::response([
+                    'latitude' => 35.5951,
+                    'longitude' => -82.5515,
+                    'timezone' => 'America/New_York',
+                    'current_units' => ['temperature_2m' => '°F', 'wind_speed_10m' => 'mp/h'],
+                    'current' => ['time' => '2026-07-21T12:00', 'temperature_2m' => 72.4, 'apparent_temperature' => 73.1, 'relative_humidity_2m' => 64, 'precipitation' => 0.01, 'weather_code' => 2, 'wind_speed_10m' => 4.8],
+                    'daily_units' => ['precipitation_sum' => 'inch'],
+                    'daily' => [
+                        'time' => ['2026-07-21', '2026-07-22', '2026-07-23', '2026-07-24', '2026-07-25', '2026-07-26', '2026-07-27', '2026-07-28'],
+                        'weather_code' => [2, 61, 3, 0, 1, 2, 45, 95],
+                        'temperature_2m_max' => [81, 78, 80, 82, 84, 83, 79, 77],
+                        'temperature_2m_min' => [63, 62, 61, 64, 65, 66, 63, 60],
+                        'precipitation_probability_max' => [20, 70, 10, 0, 0, 20, 30, 80],
+                        'precipitation_sum' => [0.01, 0.4, 0, 0, 0, 0.02, 0.1, 0.5],
+                    ],
+                ], 200);
+            }
+
+            return Http::response([], 404);
+        });
+
+        $this->withToken($token)->postJson('/api/bean/elevenlabs/conversation-token', [
+            'session_id' => $session->id,
+            'client_timezone' => 'America/New_York',
+            'client_location' => [
+                'latitude' => 35.5951,
+                'longitude' => -82.5515,
+                'accuracy' => 25,
+                'source' => 'browser',
+                'captured_at' => now()->toIso8601String(),
+            ],
+        ])->assertOk()
+            ->assertJsonPath('data.dashboard_context.weather.available', true)
+            ->assertJsonPath('data.dashboard_context.weather.horizon_days', 8)
+            ->assertJsonPath('data.dashboard_context.weather.current.conditions', 'partly cloudy')
+            ->assertJsonPath('data.dashboard_context.weather.daily_forecast.1.date', '2026-07-22')
+            ->assertJsonPath('data.dashboard_context.weather.daily_forecast.1.conditions', 'rain: slight')
+            ->assertJsonPath('data.dashboard_context.weather.daily_forecast.7.date', '2026-07-28');
+
+        Http::assertSentCount(2);
     }
 
     public function test_dashboard_context_uses_user_timezone_and_does_not_cap_time_sensitive_resources(): void

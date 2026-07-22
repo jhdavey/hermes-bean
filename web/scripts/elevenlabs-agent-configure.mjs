@@ -39,13 +39,14 @@ Critical behavior:
 - Treat short backchannels like "okay", "yes", "thanks", "got it", and similar as conversational acknowledgements unless you have just asked a confirmation question that requires them.
 - Do not call tools for filler, accidental echo, silence, or your own speech.
 - A compact JSON dashboard_context is provided in the dynamic variable {{bean_dashboard_context}}. It contains fresh scoped read-only dashboard facts and a policy block.
-- dashboard_context includes the user's canonical timezone, today, tomorrow, overdue, recent notes, and a compact 31-day upcoming horizon for near-future tasks, reminders, and calendar events.
+- dashboard_context includes the user's canonical timezone, today, tomorrow, overdue, recent notes, local weather for today plus the next 7 days when browser location is available, and a compact 31-day upcoming horizon for near-future tasks, reminders, and calendar events.
 - Treat dashboard_context.timezone / the user's saved timezone as the source of truth for all local date and time references.
 - For simple read-only questions that can be answered completely from dashboard_context, including upcoming/this-week/date questions covered by the upcoming horizon, answer directly from dashboard_context without calling tools.
 - Use *_local timestamp fields from dashboard_context or askBean results when speaking times to the user. Do not speak UTC clock times as if they were local.
 - If dashboard_context is missing, stale, incomplete, uncertain, or the user asks to create, update, delete, search deeply, or act on private data, call askBean with the user's actual request.
 - For any real HeyBean dashboard action or fallback question, call the askBean client tool with the user's actual request.
-- Use askBean for creates, updates, deletes, searches, weather/forecast, and follow-up questions that are not fully answered by dashboard_context.
+- Use askBean for creates, updates, deletes, searches, and follow-up questions that are not fully answered by dashboard_context.
+- For weather/forecast questions, answer directly from dashboard_context.weather when it is available and fresh enough for the asked date; otherwise call askBean.
 - The askBean tool is the authoritative source of truth for private user data and actions. Do not invent dashboard facts.
 - When askBean returns an answer, speak that answer naturally without adding unsupported facts.
 - If askBean indicates a confirmation is needed, ask the user naturally for confirmation and use their next clear answer as part of the next askBean request.
@@ -95,12 +96,13 @@ function conversationConfig(toolId) {
             interruptionIgnoreTerms: ['okay', 'ok', 'yes', 'yeah', 'yep', 'thanks', 'thank you', 'got it', 'understood'],
             transcribeOnDisabledInterruptions: false,
             softTimeoutConfig: {
-                timeoutSeconds: -1,
-                message: 'Waiting.',
+                timeoutSeconds: 7,
+                message: 'Still working on that.',
                 additionalSoftTimeoutMessages: [],
-                useLlmGeneratedMessage: false,
+                useLlmGeneratedMessage: true,
                 randomizeFillers: false,
                 maxSoftTimeoutsPerGeneration: 1,
+                llmGeneratedMessagePromptOverride: 'Output one short, natural reassurance while you are still waiting on a tool or model response. Use 2-6 words. Do not provide facts, do not apologize, and do not ask a question. Examples of tone only: still looking, just a few more seconds, still working on that.',
             },
         },
         asr: {

@@ -464,6 +464,18 @@ export function mountHeyBeanWebApp(mount) {
         return location ? { client_location: location } : {};
     }
 
+    async function clientLocationPrehydrationPayload() {
+        const cachedAt = Date.parse(cachedClientLocation?.captured_at || '');
+        if (cachedClientLocation && Number.isFinite(cachedAt) && Date.now() - cachedAt < 15 * 60 * 1000) {
+            return { client_location: cachedClientLocation };
+        }
+        if (!navigator.permissions?.query) return {};
+        const permission = await navigator.permissions.query({ name: 'geolocation' }).catch(() => null);
+        if (permission?.state !== 'granted') return {};
+        const location = await browserLocationForWeather();
+        return location ? { client_location: location } : {};
+    }
+
     async function browserLocationForWeather() {
         const cachedAt = Date.parse(cachedClientLocation?.captured_at || '');
         if (cachedClientLocation && Number.isFinite(cachedAt) && Date.now() - cachedAt < 15 * 60 * 1000) {
@@ -5045,14 +5057,15 @@ export function mountHeyBeanWebApp(mount) {
     async function fetchBeanRealtimeSession() {
         if (beanRealtimeSessionUsable(beanRealtimeSessionCache)) return beanRealtimeSessionCache;
         if (beanRealtimeSessionPromise) return beanRealtimeSessionPromise;
-        beanRealtimeSessionPromise = api('/bean/elevenlabs/conversation-token', {
+        beanRealtimeSessionPromise = (async () => api('/bean/elevenlabs/conversation-token', {
             method: 'POST',
             body: {
                 session_id: state.bean.sessionId || null,
                 workspace_id: currentWorkspaceId(),
                 ...clientTimezonePayload(),
+                ...await clientLocationPrehydrationPayload(),
             },
-        })
+        }))()
             .then((session) => {
                 beanRealtimeSessionCache = session;
                 return session;

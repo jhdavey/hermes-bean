@@ -16,7 +16,7 @@ class OpenMeteoWeatherService
             return $location;
         }
 
-        $forecastDays = max(1, min(7, (int) ($arguments['forecast_days'] ?? $arguments['days'] ?? 3)));
+        $forecastDays = max(1, min(8, (int) ($arguments['forecast_days'] ?? $arguments['days'] ?? 3)));
         $timezone = trim((string) ($location['timezone'] ?? data_get($timeContext, 'timezone', '')));
         $timezone = $timezone !== '' ? $timezone : 'auto';
 

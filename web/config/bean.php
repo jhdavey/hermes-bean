@@ -21,7 +21,9 @@ return [
         'base_url' => env('BEAN_HERMES_BASE_URL', 'https://api.openai.com/v1'),
         'timeout_seconds' => (int) env('BEAN_HERMES_TIMEOUT_SECONDS', 120),
         'max_turns' => (int) env('BEAN_HERMES_MAX_TURNS', 24),
+        'voice_max_turns' => (int) env('BEAN_HERMES_VOICE_MAX_TURNS', 8),
         'toolsets' => env('BEAN_HERMES_TOOLSETS', 'bean_dashboard,skills,memory,session_search,web'),
+        'voice_toolsets' => env('BEAN_HERMES_VOICE_TOOLSETS', 'bean_dashboard,skills'),
         'skills' => env('BEAN_HERMES_SKILLS', 'bean-dashboard'),
         'php_binary' => env('BEAN_HERMES_PHP_BINARY', 'php'),
     ],
@@ -52,7 +54,7 @@ return [
         'elevenlabs_silence_end_call_seconds' => (int) env('ELEVENLABS_SILENCE_END_CALL_SECONDS', 15),
         'elevenlabs_followup_idle_close_seconds' => (int) env('ELEVENLABS_FOLLOWUP_IDLE_CLOSE_SECONDS', 15),
         'elevenlabs_agent_cost_per_minute_usd' => (float) env('ELEVENLABS_AGENT_COST_PER_MINUTE_USD', 0.08),
-        'elevenlabs_agent_credits_per_minute' => (float) env('ELEVENLABS_AGENT_CREDITS_PER_MINUTE', 10000 / 15),
+        'elevenlabs_agent_credits_per_minute' => (float) env('ELEVENLABS_AGENT_CREDITS_PER_MINUTE', 440),
         'openai_model_prices' => [
             'gpt-4.1-mini' => [
                 'input_per_1m' => (float) env('OPENAI_GPT_4_1_MINI_INPUT_PER_1M_USD', 0.40),

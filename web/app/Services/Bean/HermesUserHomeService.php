@@ -102,7 +102,7 @@ skills:
   template_vars: true
 YAML;
 
-        File::put($home.'/config.yaml', $config);
+        $this->putIfChanged($home.'/config.yaml', $config);
     }
 
     private function writeSkill(string $home): void
@@ -169,12 +169,12 @@ The tool returns structured JSON. Read it before responding. Confirm only action
 Use Hermes conversation memory for conversational continuity: “that one”, “same as before”, “make it shorter”, “what were we just discussing”. Use durable Hermes memory only for stable user preferences/facts. Dashboard facts must come from the dashboard tool because the app state can change.
 MD;
 
-        File::put($home.'/skills/bean-dashboard/SKILL.md', $skill);
+        $this->putIfChanged($home.'/skills/bean-dashboard/SKILL.md', $skill);
     }
 
     private function writePlugin(string $home): void
     {
-        File::put($home.'/plugins/bean-dashboard/plugin.yaml', <<<'YAML'
+        $this->putIfChanged($home.'/plugins/bean-dashboard/plugin.yaml', <<<'YAML'
 name: bean-dashboard
 version: "1.0.0"
 description: Scoped HeyBean dashboard tool bridge for per-user Bean agents.
@@ -182,7 +182,7 @@ provides_tools:
   - bean_dashboard
 YAML);
 
-        File::put($home.'/plugins/bean-dashboard/__init__.py', <<<'PY'
+        $this->putIfChanged($home.'/plugins/bean-dashboard/__init__.py', <<<'PY'
 """Bean dashboard Hermes plugin."""
 
 import json
@@ -261,5 +261,14 @@ def register(ctx):
         description="Scoped HeyBean dashboard tool bridge.",
     )
 PY);
+    }
+
+    private function putIfChanged(string $path, string $content): void
+    {
+        if (File::exists($path) && File::get($path) === $content) {
+            return;
+        }
+
+        File::put($path, $content);
     }
 }

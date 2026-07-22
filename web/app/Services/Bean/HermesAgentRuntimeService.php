@@ -175,11 +175,16 @@ class HermesAgentRuntimeService
     private function invokeHermes(string $home, ?string $sessionId, string $content, string $contextPath, ?string $source = null): array
     {
         $binary = (string) config('bean.hermes.binary', 'hermes');
-        $toolsets = (string) config('bean.hermes.toolsets', 'bean_dashboard,skills,memory,session_search,web');
+        $isVoiceToolRequest = $source === 'elevenlabs_agent';
+        $toolsets = (string) ($isVoiceToolRequest
+            ? config('bean.hermes.voice_toolsets', config('bean.hermes.toolsets', 'bean_dashboard,skills,memory,session_search,web'))
+            : config('bean.hermes.toolsets', 'bean_dashboard,skills,memory,session_search,web'));
         $skills = (string) config('bean.hermes.skills', 'bean-dashboard');
         $timeout = (int) config('bean.hermes.timeout_seconds', 120);
-        $maxTurns = (string) config('bean.hermes.max_turns', 24);
-        $source = (string) config('bean.hermes.source', 'bean');
+        $maxTurns = (string) ($isVoiceToolRequest
+            ? config('bean.hermes.voice_max_turns', config('bean.hermes.max_turns', 24))
+            : config('bean.hermes.max_turns', 24));
+        $hermesSource = (string) ($source ?: config('bean.hermes.source', 'bean'));
         $provider = (string) config('bean.hermes.provider', 'custom');
         $model = (string) config('bean.hermes.model', 'gpt-4.1-mini');
 
@@ -196,7 +201,7 @@ class HermesAgentRuntimeService
             $content,
             '--quiet',
             '--source',
-            $source,
+            $hermesSource,
             '--provider',
             $provider,
             '--model',
