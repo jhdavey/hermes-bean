@@ -26,7 +26,7 @@ const ASK_BEAN_TOOL_NAME = 'askBean';
 const AGENT_NAME = env.ELEVENLABS_AGENT_NAME || 'HeyBean Voice Agent';
 const timezone = env.BEAN_CLIENT_TIMEZONE || 'America/New_York';
 const voiceMaxDurationSeconds = Number(env.ELEVENLABS_MAX_DURATION_SECONDS || 60);
-const voiceInitialWaitSeconds = Number(env.ELEVENLABS_INITIAL_WAIT_SECONDS || env.ELEVENLABS_SILENCE_TIMEOUT_SECONDS || 9);
+const voiceInitialWaitSeconds = Number(env.ELEVENLABS_INITIAL_WAIT_SECONDS || env.ELEVENLABS_SILENCE_TIMEOUT_SECONDS || 5);
 const voiceSilenceEndCallSeconds = Number(env.ELEVENLABS_SILENCE_END_CALL_SECONDS || 15);
 const voiceTurnTimeoutSeconds = Number(env.ELEVENLABS_TURN_TIMEOUT_SECONDS || 15);
 
@@ -90,7 +90,7 @@ function conversationConfig(toolId) {
             turnTimeout: voiceTurnTimeoutSeconds,
             initialWaitTime: voiceInitialWaitSeconds,
             silenceEndCallTimeout: voiceSilenceEndCallSeconds,
-            turnEagerness: 'normal',
+            turnEagerness: 'eager',
             speculativeTurn: true,
             interruptionIgnoreTerms: ['okay', 'ok', 'yes', 'yeah', 'yep', 'thanks', 'thank you', 'got it', 'understood'],
             transcribeOnDisabledInterruptions: false,

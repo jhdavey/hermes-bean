@@ -12,7 +12,7 @@ Purpose: give future Hermes/agent sessions a compact, durable starting point for
 - Production host/path: `forge@heybean.org:/home/forge/heybean.org/current`
 - Production commit last verified in prior work: `3bd22b28 Speed up landing Bean and add homepage pricing`
 - Production known server-only state: untracked `.env`, `storage`, `web/storage`; do not clean production storage/env casually.
-- Production Bean voice timing last verified in prior work: `60/9/15/15` = max duration / ElevenLabs initial wait / silence end-call / follow-up idle close.
+- Production Bean voice timing last verified in prior work: `60/5/15/15` = max duration / ElevenLabs initial wait / silence end-call / follow-up idle close.
 
 ## Product/runtime direction
 
@@ -29,7 +29,7 @@ Purpose: give future Hermes/agent sessions a compact, durable starting point for
 - Browser wake phrase is local: “Hey Bean”. Local wake should activate capture but should not become a brittle parallel command brain.
 - ElevenLabs should own voice turn-taking; avoid client-side fallback layers that duplicate provider responsibility.
 - Credit/cost controls should not make Bean miss speech. Prefer metering, quotas, admin visibility, and a max session safety cap over rushed idle windows.
-- Current intended authenticated voice timing: max session `60s`, initial wait `9s`, silence end-call `15s`, follow-up idle `15s`.
+- Current intended authenticated voice timing: max session `60s`, initial wait `5s`, silence end-call `15s`, follow-up idle `15s`, with eager ElevenLabs turn-taking.
 - Wake-tail fragments like “what’s/can/spec” should not submit as commands. Prefer stable/full provider transcript or provider-native final turn behavior.
 
 ## Weather/external tools state

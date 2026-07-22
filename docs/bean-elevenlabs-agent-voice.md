@@ -61,7 +61,8 @@ Browser voice should remain provider-owned after wake detection:
 Authenticated app voice is intentionally short-lived but should not cut off natural speech:
 
 - ElevenLabs Agent `maxDurationSeconds` defaults to `60`.
-- Authenticated Agent initial wait defaults to `9` seconds.
+- Authenticated Agent initial wait defaults to `5` seconds so first-turn health checks such as “can you hear me?” do not sit in a long silence window.
+- Authenticated Agent turn eagerness defaults to `eager` while still leaving ElevenLabs in charge of turn-taking.
 - Authenticated Agent silence-end-call timeout defaults to `15` seconds.
 - The browser client closes abandoned first-turn sessions after about `9` seconds.
 - The browser client gives about a `15` second post-response follow-up grace while keeping the total Agent session capped at `60` seconds.

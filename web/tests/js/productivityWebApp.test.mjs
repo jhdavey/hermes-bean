@@ -271,11 +271,12 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(agentConfigSource, /provider: 'scribe_realtime'/);
     assert.match(agentConfigSource, /keywords: \['Hey Bean'/);
     assert.match(agentConfigSource, /voiceMaxDurationSeconds = Number\(env\.ELEVENLABS_MAX_DURATION_SECONDS \|\| 60\)/);
-    assert.match(agentConfigSource, /voiceInitialWaitSeconds = Number\(env\.ELEVENLABS_INITIAL_WAIT_SECONDS \|\| env\.ELEVENLABS_SILENCE_TIMEOUT_SECONDS \|\| 9\)/);
+    assert.match(agentConfigSource, /voiceInitialWaitSeconds = Number\(env\.ELEVENLABS_INITIAL_WAIT_SECONDS \|\| env\.ELEVENLABS_SILENCE_TIMEOUT_SECONDS \|\| 5\)/);
     assert.match(agentConfigSource, /voiceSilenceEndCallSeconds = Number\(env\.ELEVENLABS_SILENCE_END_CALL_SECONDS \|\| 15\)/);
     assert.match(agentConfigSource, /turnTimeout: voiceTurnTimeoutSeconds/);
     assert.match(agentConfigSource, /initialWaitTime: voiceInitialWaitSeconds/);
     assert.match(agentConfigSource, /silenceEndCallTimeout: voiceSilenceEndCallSeconds/);
+    assert.match(agentConfigSource, /turnEagerness: 'eager'/);
     assert.match(agentConfigSource, /speculativeTurn: true/);
     assert.match(agentConfigSource, /timeoutSeconds: -1/);
     assert.match(agentConfigSource, /message: 'Waiting\.'/);
