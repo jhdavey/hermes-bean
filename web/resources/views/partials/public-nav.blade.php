@@ -19,7 +19,7 @@
     <nav class="navlinks" aria-label="Primary navigation">
         <a href="/#how-it-works">How It Works</a>
         <a href="/#features">Features</a>
-        <a href="/pricing">Pricing</a>
+        <a href="/#plans">Pricing</a>
         <a class="nav-login" href="/login">Log In</a>
         <a class="nav-cta" href="/register">Create Free Account</a>
     </nav>
@@ -29,7 +29,7 @@
             <a href="/">Home</a>
             <a href="/#how-it-works">How It Works</a>
             <a href="/#features">Features</a>
-            <a href="/pricing">Pricing</a>
+            <a href="/#plans">Pricing</a>
             <a href="/login">Log In</a>
             <a class="mobile-menu-cta" href="/register">Create Free Account</a>
         </div>

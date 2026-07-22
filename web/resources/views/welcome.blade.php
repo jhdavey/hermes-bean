@@ -11,6 +11,7 @@
     <link rel="manifest" href="{{ asset('site-manifest.json') }}">
     <meta name="theme-color" content="#7bc98c">
     @include('partials.public-postbridge-styles')
+    @include('partials.public-pricing-styles')
     <style>
         .bean-demo-proof-shell{position:absolute;inset:0;z-index:3;pointer-events:none;color:#17231b;font-family:inherit}
         .bean-proof-screen{position:absolute;inset:0;border-radius:0;opacity:0;transform:translateX(18px);overflow:hidden;background:#edf8ec;box-shadow:none}
@@ -220,6 +221,8 @@
         </div>
     </section>
 
+    @include('partials.public-pricing-plans')
+
     <section class="cta-band final-cta">
         <div class="wrap">
             <h2>Let Bean take the next few things off your mind.</h2>
@@ -231,6 +234,7 @@
         </div>
     </section>
 
-    <footer class="wrap footer"><span>© {{ date('Y') }} HeyBean. AI executive assistance for real life.</span><span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Use</a> · <a href="/support">Support</a> · <a href="/pricing">Pricing</a> · <a href="/login">Log In</a></span></footer>
+    <footer class="wrap footer"><span>© {{ date('Y') }} HeyBean. AI executive assistance for real life.</span><span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Use</a> · <a href="/support">Support</a> · <a href="/#plans">Pricing</a> · <a href="/login">Log In</a></span></footer>
+    @include('partials.public-pricing-script')
 </body>
 </html>

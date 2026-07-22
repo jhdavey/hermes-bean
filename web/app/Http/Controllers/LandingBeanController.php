@@ -152,12 +152,14 @@ class LandingBeanController extends Controller
         ]);
         $visitorId = $this->visitorId($request);
         $request->session()->put('landing_bean.turn_count', $turnCount + 1);
+        $runtimeStartedAt = hrtime(true);
         $result = $this->runtime->respond(
             $visitorId,
             $request->session()->get('landing_bean.hermes_session_id'),
             $data['content'],
             $data['page_path'] ?? '/',
         );
+        $runtimeMs = (int) round((hrtime(true) - $runtimeStartedAt) / 1_000_000);
 
         if (is_string($result['hermes_session_id']) && $result['hermes_session_id'] !== '') {
             $request->session()->put('landing_bean.hermes_session_id', $result['hermes_session_id']);
@@ -171,11 +173,13 @@ class LandingBeanController extends Controller
             'max_turns' => $maxTurns,
             'page_path' => $data['page_path'] ?? '/',
             'ui_action' => $result['ui_action'] ?? null,
+            'runtime_ms' => $runtimeMs,
         ]);
 
         return response()->json(['data' => [
             'answer' => $result['answer'],
             'ui_action' => $result['ui_action'] ?? null,
+            'runtime_ms' => $runtimeMs,
         ]]);
     }
 

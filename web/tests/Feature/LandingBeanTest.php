@@ -81,7 +81,8 @@ class LandingBeanTest extends TestCase
             'page_path' => '/',
         ])->assertOk()
             ->assertJsonPath('data.answer', 'Hi, I’m Bean. I can help organize your day. Would you like a quick tour?')
-            ->assertJsonPath('data.ui_action', 'features');
+            ->assertJsonPath('data.ui_action', 'features')
+            ->assertJsonStructure(['data' => ['runtime_ms']]);
 
         $this->assertSame('landing-hermes-session-1', session('landing_bean.hermes_session_id'));
         $this->assertTrue(Str::isUuid((string) session('landing_bean.visitor_id')));
@@ -160,7 +161,14 @@ class LandingBeanTest extends TestCase
             'client_session_id' => 'landing-client-session-1',
             'page_path' => '/pricing',
             'source' => 'landing_page',
-            'payload' => ['transport' => 'elevenlabs_agent', 'reason' => 'client_idle_timeout'],
+            'payload' => [
+                'transport' => 'elevenlabs_agent',
+                'reason' => 'client_idle_timeout',
+                'wake_to_first_speech_ms' => 940,
+                'wake_to_first_speech_target_ms' => 1200,
+                'wake_to_first_speech_target_met' => true,
+                'hermes_runtime_samples_ms' => [812, 704],
+            ],
             'occurred_at' => $startedAt->copy()->addSeconds(60)->toIso8601String(),
             'occurred_at_ms' => 70_000,
         ])->assertCreated();
@@ -174,6 +182,9 @@ class LandingBeanTest extends TestCase
         $this->assertEqualsWithDelta(0.08, $usage->estimated_cost_usd, 0.0001);
         $this->assertSame('public_landing', $usage->metadata['segment'] ?? null);
         $this->assertSame('/pricing', $usage->metadata['page_path'] ?? null);
+        $this->assertSame(940, $usage->metadata['wake_to_first_speech_ms'] ?? null);
+        $this->assertTrue($usage->metadata['wake_to_first_speech_target_met'] ?? false);
+        $this->assertSame([812, 704], $usage->metadata['hermes_runtime_samples_ms'] ?? null);
     }
 
     public function test_landing_runtime_creates_an_isolated_tool_free_hermes_home(): void
@@ -204,7 +215,8 @@ class LandingBeanTest extends TestCase
             $this->assertStringContainsString('AI executive assistant for real life', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('busy professionals and parents', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not position HeyBean as a general-purpose chatbot', File::get($home.'/skills/heybean-guide/SKILL.md'));
-            $this->assertStringContainsString('how Bean works, explore the features or pricing, or take a quick tour', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('show you how it works, walk through features or pricing, or give you a quick tour', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('Do not ask about their use case unless they explicitly ask for a recommendation.', File::get($home.'/skills/heybean-guide/SKILL.md'));
             touch($home.'/.last-used', now()->subHours(3)->timestamp);
             $this->assertSame(1, app(LandingBeanRuntimeService::class)->pruneInactive(2));
             $this->assertDirectoryDoesNotExist($home);

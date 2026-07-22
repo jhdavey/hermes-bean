@@ -2,7 +2,11 @@ import { Conversation } from '@elevenlabs/client';
 import '../css/public-bean.css';
 
 const WAKE_PHRASE = 'Hey Bean';
+const WAKE_GREETING = 'Hi, I’m Bean, the voice assistant inside HeyBean. I can show you how it works, walk through features or pricing, or give you a quick tour. What would you like?';
 const IDLE_CLOSE_MS = 9000;
+const SESSION_PREFETCH_TTL_MS = 120000;
+const WAKE_SETTLE_MS = 160;
+const WAKE_TO_GREETING_TARGET_MS = 1200;
 let turnstileScriptPromise = null;
 
 document.querySelectorAll('[data-public-bean]').forEach((root) => mountPublicBean(root));
@@ -22,10 +26,14 @@ function mountPublicBean(root) {
     let lastActivityAt = 0;
     let lifecycleRevision = 0;
     let lastVoiceMode = '';
-    let pendingNavigation = null;
+    let prefetchedSessionPromise = null;
+    let prefetchedSessionAt = 0;
     let landingVoiceClientSessionId = '';
     let landingVoiceStartedAtMs = 0;
     let landingVoiceCloseLogged = true;
+    let landingWakeDetectedAtMs = 0;
+    let landingWakeToFirstSpeechMs = null;
+    let landingHermesRuntimeSamplesMs = [];
 
     const isCurrentLifecycle = (revision) => enabled && lifecycleRevision === revision;
 
@@ -61,13 +69,45 @@ function mountPublicBean(root) {
         wakeDetector = null;
     };
 
+    const clearPrefetchedSession = () => {
+        prefetchedSessionPromise = null;
+        prefetchedSessionAt = 0;
+    };
+
+    const requestVoiceSession = async () => {
+        const turnstileToken = await getTurnstileToken(root);
+        return postJson(root.dataset.conversationTokenUrl, {
+            client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+            page_path: window.location.pathname,
+            turnstile_token: turnstileToken,
+        });
+    };
+
+    const prefetchVoiceSession = () => {
+        const fresh = prefetchedSessionPromise && Date.now() - prefetchedSessionAt < SESSION_PREFETCH_TTL_MS;
+        if (fresh) return prefetchedSessionPromise;
+        clearPrefetchedSession();
+        prefetchedSessionAt = Date.now();
+        prefetchedSessionPromise = requestVoiceSession().catch((error) => {
+            clearPrefetchedSession();
+            throw error;
+        });
+        return prefetchedSessionPromise;
+    };
+
+    const takeVoiceSession = async () => {
+        const fresh = prefetchedSessionPromise && Date.now() - prefetchedSessionAt < SESSION_PREFETCH_TTL_MS;
+        const sessionPromise = fresh ? prefetchedSessionPromise : requestVoiceSession();
+        clearPrefetchedSession();
+        return sessionPromise;
+    };
+
     const stopVoiceConversation = async (reason = 'client_stop') => {
         stopIdleTimer();
         const activeConversation = conversation;
         if (voiceActive || activeConversation) logLandingVoiceClosed(reason);
         voiceActive = false;
         lastVoiceMode = '';
-        pendingNavigation = null;
         conversation = null;
         await activeConversation?.endSession?.().catch(() => {});
     };
@@ -78,6 +118,7 @@ function mountPublicBean(root) {
         starting = false;
         setStatus('disabled', 'Tap to enable');
         stopWakeListening();
+        clearPrefetchedSession();
         await stopVoiceConversation('disabled');
     };
 
@@ -123,6 +164,7 @@ function mountPublicBean(root) {
             permissionStream.getTracks().forEach((track) => track.stop());
             if (!isCurrentLifecycle(revision)) return;
             starting = false;
+            prefetchVoiceSession().catch(() => {});
             await restartWakeListening();
         } catch (_) {
             if (!isCurrentLifecycle(revision)) return;
@@ -140,6 +182,8 @@ function mountPublicBean(root) {
         const revision = lifecycleRevision;
         stopWakeListening();
         const tail = String(event.tail || extractWakeTail(event.transcript || '', WAKE_PHRASE)).trim();
+        landingWakeDetectedAtMs = Number(event.detectedAtMs) || Date.now();
+        landingWakeToFirstSpeechMs = null;
         setStatus('connecting', 'Hey Bean heard…');
         try {
             await startVoiceConversation(tail, revision);
@@ -167,7 +211,7 @@ function mountPublicBean(root) {
     function logLandingVoiceEvent(eventType, payload = {}, options = {}) {
         const url = root.dataset.voiceEventUrl;
         if (!url || !landingVoiceClientSessionId) return;
-        const occurredAtMs = Date.now();
+        const occurredAtMs = Number(options.occurredAtMs) || Date.now();
         fetch(url, {
             method: 'POST',
             credentials: 'same-origin',
@@ -202,23 +246,30 @@ function mountPublicBean(root) {
             reason,
             conversation_id: conversationIdentifier(conversation),
             started_event_client_ms: landingVoiceStartedAtMs || null,
+            wake_event_client_ms: landingWakeDetectedAtMs || null,
+            wake_to_first_speech_ms: landingWakeToFirstSpeechMs,
+            wake_to_first_speech_target_ms: WAKE_TO_GREETING_TARGET_MS,
+            wake_to_first_speech_target_met: landingWakeToFirstSpeechMs !== null
+                ? landingWakeToFirstSpeechMs <= WAKE_TO_GREETING_TARGET_MS
+                : null,
+            hermes_runtime_samples_ms: landingHermesRuntimeSamplesMs,
         }, { keepalive: true });
     }
 
     async function startVoiceConversation(wakeTail, revision) {
-        const turnstileToken = await getTurnstileToken(root);
-        const session = await postJson(root.dataset.conversationTokenUrl, {
-            client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
-            page_path: window.location.pathname,
-            turnstile_token: turnstileToken,
-        });
+        const session = await takeVoiceSession();
         if (!isCurrentLifecycle(revision)) return;
         if (!session?.token) throw new Error('Bean voice did not return a token.');
 
         landingVoiceClientSessionId = newLandingVoiceEventId();
         landingVoiceStartedAtMs = 0;
         landingVoiceCloseLogged = false;
+        landingHermesRuntimeSamplesMs = [];
         const voiceClientSessionId = landingVoiceClientSessionId;
+        logLandingVoiceEvent('wake_detected', {
+            label: WAKE_PHRASE,
+            wake_event_client_ms: landingWakeDetectedAtMs,
+        }, { occurredAtMs: landingWakeDetectedAtMs });
 
         const nextConversation = await Conversation.startSession({
             conversationToken: session.token,
@@ -226,6 +277,11 @@ function mountPublicBean(root) {
             textOnly: false,
             useWakeLock: true,
             userId: session.landing_session_id ? `bean-visitor-${session.landing_session_id}` : undefined,
+            overrides: {
+                agent: {
+                    firstMessage: wakeTail ? '' : WAKE_GREETING,
+                },
+            },
             dynamicVariables: {
                 bean_landing_page: window.location.pathname,
                 bean_client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
@@ -241,7 +297,11 @@ function mountPublicBean(root) {
                             content,
                             page_path: window.location.pathname,
                         });
-                        pendingNavigation = showLandingUiAction(response?.ui_action || parameters.destination);
+                        const runtimeMs = Number(response?.runtime_ms);
+                        if (Number.isFinite(runtimeMs) && runtimeMs >= 0) {
+                            landingHermesRuntimeSamplesMs.push(Math.round(runtimeMs));
+                        }
+                        showLandingUiAction(response?.ui_action || parameters.destination);
                         return String(response?.answer || 'I am having trouble answering right now.');
                     } catch (error) {
                         return String(error?.publicMessage || 'I am having trouble answering right now.');
@@ -252,12 +312,12 @@ function mountPublicBean(root) {
                 if (!isCurrentLifecycle(revision)) return;
                 voiceActive = true;
                 lastVoiceMode = '';
-                pendingNavigation = null;
                 landingVoiceStartedAtMs = Date.now();
                 landingVoiceCloseLogged = false;
                 lastActivityAt = Date.now();
                 logLandingVoiceEvent('voice_session_started', {
                     has_wake_tail: Boolean(wakeTail),
+                    wake_event_client_ms: landingWakeDetectedAtMs || null,
                     conversation_id: conversationIdentifier(conversation),
                 });
                 setStatus('listening', 'Listening…');
@@ -269,10 +329,13 @@ function mountPublicBean(root) {
                 voiceActive = false;
                 conversation = null;
                 lastVoiceMode = '';
-                pendingNavigation = null;
                 stopIdleTimer();
                 landingVoiceClientSessionId = '';
                 landingVoiceStartedAtMs = 0;
+                landingWakeDetectedAtMs = 0;
+                landingWakeToFirstSpeechMs = null;
+                landingHermesRuntimeSamplesMs = [];
+                prefetchVoiceSession().catch(() => {});
                 restartWakeListening();
             },
             onError: () => {
@@ -294,24 +357,23 @@ function mountPublicBean(root) {
             onModeChange: ({ mode } = {}) => {
                 if (!isCurrentLifecycle(revision)) return;
                 const nextMode = String(mode || '').toLowerCase();
-                const previousMode = lastVoiceMode;
                 lastVoiceMode = nextMode;
                 lastActivityAt = Date.now();
                 if (nextMode === 'speaking') {
                     stopIdleTimer();
                     setStatus('speaking', 'Speaking…');
+                    if (landingWakeToFirstSpeechMs === null && landingWakeDetectedAtMs > 0) {
+                        landingWakeToFirstSpeechMs = Date.now() - landingWakeDetectedAtMs;
+                        logLandingVoiceEvent('assistant_speech_started', {
+                            wake_event_client_ms: landingWakeDetectedAtMs,
+                            wake_to_first_speech_ms: landingWakeToFirstSpeechMs,
+                            target_ms: WAKE_TO_GREETING_TARGET_MS,
+                            target_met: landingWakeToFirstSpeechMs <= WAKE_TO_GREETING_TARGET_MS,
+                        });
+                    }
                 } else if (nextMode === 'listening') {
                     setStatus('listening', 'Listening…');
                     scheduleIdleClose();
-                    if (previousMode === 'speaking' && pendingNavigation) {
-                        const navigation = pendingNavigation;
-                        pendingNavigation = null;
-                        stopIdleTimer();
-                        setStatus('navigating', `Opening ${navigation.label}…`);
-                        window.setTimeout(() => {
-                            if (isCurrentLifecycle(revision)) window.location.assign(navigation.href);
-                        }, 250);
-                    }
                 }
             },
         });
@@ -322,8 +384,12 @@ function mountPublicBean(root) {
         conversation = nextConversation;
         voiceActive = true;
         lastActivityAt = Date.now();
-        setStatus('thinking', 'Thinking…');
-        conversation.sendUserMessage?.(wakeTail || WAKE_PHRASE);
+        if (wakeTail) {
+            setStatus('thinking', 'Thinking…');
+        } else if (lastVoiceMode !== 'speaking') {
+            setStatus('connecting', 'Bean is joining…');
+        }
+        if (wakeTail) conversation.sendUserMessage?.(wakeTail);
         conversation.sendUserActivity?.();
     }
 
@@ -364,13 +430,13 @@ function mountPublicBean(root) {
 function showLandingUiAction(action) {
     const targets = {
         features: { selector: '#features', href: '/#features', label: 'features' },
-        pricing: { selector: '#plans', href: '/pricing#plans', label: 'pricing' },
+        pricing: { selector: '#plans', href: '/#plans', label: 'pricing' },
     };
     const target = targets[String(action || '').toLowerCase()];
     if (!target) return null;
 
     const section = document.querySelector(target.selector);
-    if (!section) return { href: target.href, label: target.label };
+    if (!section) return null;
 
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
     section.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
@@ -476,8 +542,9 @@ async function createWakeDetector(phrase, onWake, onError) {
                     source: 'browser-speech-recognition',
                     transcript: lastTranscript,
                     tail: extractWakeTail(lastTranscript, phrase),
+                    detectedAtMs: Date.now(),
                 });
-            }, 450);
+            }, WAKE_SETTLE_MS);
         };
         recognition.onend = () => {
             recognition = null;

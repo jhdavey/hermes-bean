@@ -23,6 +23,7 @@ if (!apiKey) throw new Error('ELEVENLABS_API_KEY is required.');
 const client = new ElevenLabsClient({ apiKey });
 const TOOL_NAME = 'askLandingBean';
 const AGENT_NAME = env.ELEVENLABS_LANDING_AGENT_NAME || 'HeyBean Landing Guide';
+const WAKE_GREETING = 'Hi, I’m Bean, the voice assistant inside HeyBean. I can show you how it works, walk through features or pricing, or give you a quick tour. What would you like?';
 const timezone = env.BEAN_CLIENT_TIMEZONE || 'America/New_York';
 const landingLlm = env.ELEVENLABS_LANDING_LLM || 'gpt-4.1-nano';
 const maxDurationSeconds = Number(env.BEAN_LANDING_MAX_DURATION_SECONDS || env.ELEVENLABS_MAX_DURATION_SECONDS || 60);
@@ -37,8 +38,8 @@ const prompt = `You are the voice transport for Bean on the public HeyBean websi
 The visitor deliberately enabled their microphone and then woke you by saying “Hey Bean.” You own natural voice turn-taking, interruptions, silence, and follow-ups, while the askLandingBean client tool connects every meaningful visitor turn to the isolated public Hermes Bean runtime.
 
 Rules:
-- Keep your first message empty and wait for the client to submit the detected wake phrase.
-- When the client submits “Hey Bean,” call askLandingBean immediately with those exact words. Do not wait for another question and do not create the introduction yourself.
+- The configured first message handles an exact “Hey Bean” wake immediately. Do not add another greeting or introduction after it.
+- When the client submits words after the wake phrase, treat those words as the visitor's first request and call askLandingBean immediately.
 - For every meaningful visitor turn, including questions, topic choices, short answers to Bean's questions, signup interest, and unrelated requests, call askLandingBean with the visitor's actual words. The public Hermes runtime owns both answers and scope redirects.
 - Every askLandingBean call must include a destination. Use "features" when the visitor asks to see, hear about, or explore HeyBean features; use "pricing" when they ask to see, hear about, or compare pricing or plans; otherwise use "none". Never invent another destination.
 - Speak the returned answer naturally without adding product claims or private facts that are not in the answer.
@@ -56,9 +57,9 @@ const toolConfig = {
     name: TOOL_NAME,
     description: 'Send a public website visitor message to the isolated landing-page Hermes Bean runtime. This runtime has public product guidance only and no authenticated dashboard access.',
     expectsResponse: true,
-    responseTimeoutSecs: 30,
+    responseTimeoutSecs: 15,
     interruptionMode: 'disable_during_tool_and_turn',
-    preToolSpeech: 'auto',
+    preToolSpeech: 'off',
     toolErrorHandlingMode: 'hide',
     parameters: {
         type: 'object',
@@ -94,7 +95,7 @@ function conversationConfig(toolId) {
             turnTimeout: turnTimeoutSeconds,
             initialWaitTime: initialWaitSeconds,
             silenceEndCallTimeout: silenceEndCallSeconds,
-            turnEagerness: 'normal',
+            turnEagerness: 'eager',
             speculativeTurn: true,
             interruptionIgnoreTerms: ['okay', 'ok', 'thanks', 'thank you', 'got it'],
             transcribeOnDisabledInterruptions: false,
@@ -122,7 +123,7 @@ function conversationConfig(toolId) {
             clientEvents: ['audio', 'user_transcript', 'agent_response', 'interruption'],
         },
         agent: {
-            firstMessage: '',
+            firstMessage: WAKE_GREETING,
             language: 'en',
             disableFirstMessageInterruptions: false,
             prompt: {
@@ -130,7 +131,7 @@ function conversationConfig(toolId) {
                 llm: landingLlm,
                 enableReasoningSummary: false,
                 temperature: 0,
-                maxTokens: 180,
+                maxTokens: 140,
                 toolIds: [toolId],
                 timezone,
                 ignoreDefaultPersonality: true,
@@ -153,6 +154,13 @@ function platformSettings() {
             version: '1',
             focus: { isEnabled: true },
             promptInjection: { isEnabled: true },
+        },
+        overrides: {
+            conversationConfigOverride: {
+                agent: {
+                    firstMessage: true,
+                },
+            },
         },
         privacy: {
             recordVoice: false,

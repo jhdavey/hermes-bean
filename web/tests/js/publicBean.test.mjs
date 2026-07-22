@@ -27,7 +27,10 @@ test('landing Bean enables the microphone, listens for the wake phrase, and star
     assert.match(source, /recognition\.processLocally = true/);
     assert.match(source, /Conversation\.startSession/);
     assert.match(source, /conversationToken:\s*session\.token/);
-    assert.match(source, /sendUserMessage\?\.\(wakeTail \|\| WAKE_PHRASE\)/);
+    assert.match(source, /firstMessage:\s*wakeTail \? '' : WAKE_GREETING/);
+    assert.match(source, /if \(wakeTail\) conversation\.sendUserMessage\?\.\(wakeTail\)/);
+    assert.match(source, /prefetchVoiceSession\(\)\.catch/);
+    assert.match(source, /const WAKE_TO_GREETING_TARGET_MS = 1200/);
     assert.match(source, /const IDLE_CLOSE_MS = 9000/);
     assert.match(source, /askLandingBean/);
     assert.match(source, /root\.dataset\.conversationTokenUrl/);
@@ -36,7 +39,7 @@ test('landing Bean enables the microphone, listens for the wake phrase, and star
     assert.match(navigation, /data-voice-event-url/);
 
     const sessionAssignment = source.indexOf('conversation = nextConversation');
-    const wakeSubmission = source.indexOf('conversation.sendUserMessage?.(wakeTail || WAKE_PHRASE)');
+    const wakeSubmission = source.indexOf('conversation.sendUserMessage?.(wakeTail)');
     assert.ok(sessionAssignment >= 0);
     assert.ok(wakeSubmission > sessionAssignment);
 });
@@ -56,7 +59,9 @@ test('landing voice uses a dedicated ElevenLabs agent configuration and public H
     assert.match(agentConfig, /ELEVENLABS_LANDING_AGENT_ID/);
     assert.match(agentConfig, /askLandingBean/);
     assert.match(agentConfig, /isolated public Hermes Bean runtime/);
-    assert.match(agentConfig, /firstMessage:\s*''/);
+    assert.match(agentConfig, /firstMessage:\s*WAKE_GREETING/);
+    assert.match(agentConfig, /preToolSpeech:\s*'off'/);
+    assert.match(agentConfig, /firstMessage:\s*true/);
     assert.match(agentConfig, /llm:\s*landingLlm/);
     assert.match(agentConfig, /gpt-4\.1-nano/);
     assert.doesNotMatch(agentConfig, /reasoningEffort|thinkingBudget/);
@@ -82,10 +87,9 @@ test('landing Bean reveals allowlisted feature and pricing destinations', () => 
     assert.match(agentConfig, /required: \['message', 'destination'\]/);
     assert.match(agentConfig, /enum: \['none', 'features', 'pricing'\]/);
     assert.match(source, /features:\s*\{ selector: '#features', href: '\/#features'/);
-    assert.match(source, /pricing:\s*\{ selector: '#plans', href: '\/pricing#plans'/);
+    assert.match(source, /pricing:\s*\{ selector: '#plans', href: '\/#plans'/);
     assert.match(source, /scrollIntoView\(\{ behavior: reduceMotion \? 'auto' : 'smooth'/);
-    assert.match(source, /previousMode === 'speaking' && pendingNavigation/);
-    assert.match(source, /window\.location\.assign\(navigation\.href\)/);
+    assert.doesNotMatch(source, /pendingNavigation|window\.location\.assign/);
     assert.match(styles, /\.public-bean-guided-highlight/);
     assert.match(styles, /@keyframes public-bean-guided-highlight/);
 });
