@@ -5,6 +5,7 @@ When a session is working in this repository and the user asks about Bean, HeyBe
 ## Mandatory Bean UX continuity bootstrap
 
 1. Read:
+   - `docs/agent-project-state.md`
    - `docs/bean-world-class-ux-goal.md`
    - `docs/bean-world-class-ux-progress.json`
    - `docs/bean-ux-evaluation-scenarios.md`
