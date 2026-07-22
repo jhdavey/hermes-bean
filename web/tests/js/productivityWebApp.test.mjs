@@ -28,7 +28,11 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.match(source, /data-action="guided-onboarding"/);
     assert.match(source, /data-action="plain-signup"/);
     assert.match(source, /data-guided-tour-start/);
-    assert.match(source, /data-guided-tour-next/);
+    assert.match(source, /launchGuidedDashboardTour/);
+    assert.match(source, /activateOnboardingTourStep\(0\)/);
+    assert.doesNotMatch(source, /data-guided-tour-next/);
+    assert.doesNotMatch(source, /guidedTourPanelMarkup/);
+    assert.doesNotMatch(baseShellSource, /\.hb-guided-tour-card/);
     assert.match(source, /registerGuidedSignupAccount/);
     assert.match(baseShellSource, /\.hb-guided-chat-composer/);
     assert.match(baseShellSource, /\.hb-guided-chat-bubble-user/);

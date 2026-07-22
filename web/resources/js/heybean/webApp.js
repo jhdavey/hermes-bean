@@ -58,7 +58,6 @@ export function mountHeyBeanWebApp(mount) {
         guidedSignupPassword: '',
         guidedSignupThemeMode: 'light',
         guidedSignupError: '',
-        guidedSignupTourStep: 0,
         subscriptionSummary: null,
         subscriptionCheckoutStatus: new URLSearchParams(window.location.search).get('checkout') || '',
         billingCheckoutStatus: initialBillingStatus,
@@ -115,6 +114,7 @@ export function mountHeyBeanWebApp(mount) {
         onboardingJustCompleted: false,
         onboardingTourActive: false,
         onboardingTourStep: 0,
+        onboardingTourPendingPlanSelection: false,
         calendarRefreshing: false,
         dashboardDataLoading: false,
         taskFilter: 'active',
@@ -992,7 +992,6 @@ export function mountHeyBeanWebApp(mount) {
         state.guidedSignupPassword = '';
         state.guidedSignupThemeMode = options.themeMode || 'light';
         state.guidedSignupError = options.error || '';
-        state.guidedSignupTourStep = 0;
         state.busy = false;
         state.notice = options.notice || '';
     }
@@ -1382,7 +1381,7 @@ export function mountHeyBeanWebApp(mount) {
             return;
         }
         if (step === 'tourChoice') {
-            handleGuidedTourChoice(value);
+            await handleGuidedTourChoice(value);
         }
     }
 
@@ -1490,30 +1489,34 @@ export function mountHeyBeanWebApp(mount) {
         });
     }
 
-    function handleGuidedTourChoice(value) {
+    async function handleGuidedTourChoice(value) {
         const normalized = String(value || '').toLowerCase();
         if (/\b(yes|yeah|yep|sure|show|tour)\b/.test(normalized)) {
-            state.guidedSignupStep = 'tour';
-            state.guidedSignupTourStep = 0;
-            state.guidedSignupError = '';
-            render();
+            await launchGuidedDashboardTour();
             return;
         }
         if (/\b(no|skip|straight|dashboard|plan)\b/.test(normalized)) {
             openGuidedPlanSelection();
             return;
         }
-        state.guidedSignupError = 'Please answer yes for a quick tour, or no to go straight to plan setup.';
+        state.guidedSignupError = 'Please answer yes for a quick dashboard tour, or no to go straight to plan setup.';
         render();
     }
 
-    function advanceGuidedTour() {
-        if (state.guidedSignupTourStep >= guidedTourSteps.length - 1) {
-            openGuidedPlanSelection();
+    async function launchGuidedDashboardTour() {
+        if (state.busy) return;
+        state.busy = true;
+        state.guidedSignupError = '';
+        render();
+        history.pushState({}, '', '/app');
+        await loadSignedIn({ deferInitialRender: true });
+        state.busy = false;
+        if (state.phase !== 'signedIn') {
+            render();
             return;
         }
-        state.guidedSignupTourStep += 1;
-        state.guidedSignupError = '';
+        state.onboardingTourPendingPlanSelection = true;
+        activateOnboardingTourStep(0);
         render();
     }
 
@@ -1540,7 +1543,6 @@ export function mountHeyBeanWebApp(mount) {
                             ${guidedChatTranscriptMarkup()}
                             ${step === 'themeMode' ? guidedThemeModePanelMarkup() : ''}
                             ${step === 'tourChoice' ? guidedTourChoicePanelMarkup() : ''}
-                            ${step === 'tour' ? guidedTourPanelMarkup() : ''}
                             ${guidedOnboardingStatusMarkup()}
                         </div>
                     </section>
@@ -1628,24 +1630,6 @@ export function mountHeyBeanWebApp(mount) {
         return `<section class="hb-guided-choice-panel hb-guided-tour-choice-panel">
             <button class="hb-button" type="button" data-guided-tour-start>Take tour</button>
             <button class="hb-button-secondary" type="button" data-guided-tour-skip>Skip tour</button>
-        </section>`;
-    }
-
-    const guidedTourSteps = [
-        { title: 'Command center', icon: icons.sparkles || '', text: "This is your command center. I'm always here to help. Tell me what you need, and above the chat you’ll see today’s events, tasks, and reminders.", items: ['Today', 'Tasks', 'Reminders'] },
-        { title: 'Calendar views', icon: icons.calendar || '', text: 'Calendar buttons help you move between today, day view, and month view without losing your place.', items: ['Today', 'Day view', 'Month view'] },
-        { title: 'Tasks', icon: icons.tasks || '', text: 'Tasks are for things you need to complete. I can create them from a sentence, and you can check them off when done.', items: ['Review launch notes', 'Order air filters', 'Send invoice'] },
-        { title: 'Reminders', icon: icons.reminders || '', text: 'Reminders are lightweight nudges. I can set quick time-based follow-up without cluttering your task list.', items: ['Take vitamins', 'Move laundry', 'Call Mom'] },
-        { title: 'Notes', icon: icons.notes || '', text: 'Notes hold plans, lists, and longer writing. Folders keep them organized, and formatting helps structure what matters.', items: ['House projects', 'Trip plan', 'Meeting notes'] },
-    ];
-
-    function guidedTourPanelMarkup() {
-        const index = Math.max(0, Math.min(state.guidedSignupTourStep, guidedTourSteps.length - 1));
-        const step = guidedTourSteps[index];
-        return `<section class="hb-card hb-guided-tour-card">
-            <div class="hb-guided-tour-heading"><span>${step.icon}</span><div><h2>${escapeHtml(step.title)}</h2><p>${escapeHtml(step.text)}</p></div></div>
-            <div class="hb-guided-tour-items">${step.items.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}</div>
-            <div class="hb-guided-tour-actions"><span>${index + 1} of ${guidedTourSteps.length}</span><button class="hb-button" type="button" data-guided-tour-next>${index === guidedTourSteps.length - 1 ? 'Plan setup' : 'Next'}</button></div>
         </section>`;
     }
 
@@ -2893,10 +2877,15 @@ export function mountHeyBeanWebApp(mount) {
 
     function closeOnboardingTour(options = {}) {
         const openCalendarImport = options.openCalendarImport === true;
+        const pendingPlanSelection = state.onboardingTourPendingPlanSelection === true;
         markOnboardingTourSeen();
         state.onboardingTourActive = false;
         state.onboardingTourStep = 0;
-        if (openCalendarImport) {
+        state.onboardingTourPendingPlanSelection = false;
+        if (pendingPlanSelection) {
+            state.phase = 'subscription';
+            history.pushState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan || 'premium')}&billing_interval=${encodeURIComponent(normalizedBillingInterval(state.selectedBillingInterval))}`);
+        } else if (openCalendarImport) {
             state.selected = 'settings';
             state.modal = { type: 'external-calendar-import', providerKey: 'apple' };
         }
@@ -4580,9 +4569,8 @@ export function mountHeyBeanWebApp(mount) {
             selectGuidedThemeMode(button.dataset.guidedThemeMode || '');
         }));
         mount.querySelectorAll('[data-plain-signup]').forEach((button) => button.addEventListener('click', startPlainSignup));
-        mount.querySelectorAll('[data-guided-tour-start]').forEach((button) => button.addEventListener('click', () => { state.guidedSignupStep = 'tour'; state.guidedSignupTourStep = 0; render(); }));
+        mount.querySelectorAll('[data-guided-tour-start]').forEach((button) => button.addEventListener('click', () => { launchGuidedDashboardTour(); }));
         mount.querySelectorAll('[data-guided-tour-skip]').forEach((button) => button.addEventListener('click', openGuidedPlanSelection));
-        mount.querySelectorAll('[data-guided-tour-next]').forEach((button) => button.addEventListener('click', advanceGuidedTour));
         mount.querySelectorAll('[data-dismiss-plan-limit-error]').forEach((button) => button.addEventListener('click', () => {
             state.error = '';
             render();

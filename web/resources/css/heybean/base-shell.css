@@ -966,64 +966,6 @@
     background: transparent;
 }
 
-.hb-guided-tour-card {
-    display: grid;
-    gap: 14px;
-    padding: 18px;
-}
-
-.hb-guided-tour-heading {
-    display: flex;
-    gap: 12px;
-    align-items: flex-start;
-}
-
-.hb-guided-tour-heading > span {
-    width: 42px;
-    height: 42px;
-    display: grid;
-    place-items: center;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--hb-accent) 14%, var(--hb-surface2));
-}
-
-.hb-guided-tour-heading h2 {
-    margin: 0 0 5px;
-    color: var(--hb-text);
-}
-
-.hb-guided-tour-heading p {
-    margin: 0;
-    color: var(--hb-muted);
-    line-height: 1.5;
-}
-
-.hb-guided-tour-items,
-.hb-guided-tour-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-}
-
-.hb-guided-tour-items span {
-    padding: 8px 10px;
-    border-radius: 999px;
-    background: var(--hb-surface2);
-    color: var(--hb-text);
-    font-weight: 800;
-    font-size: 13px;
-}
-
-.hb-guided-tour-actions {
-    justify-content: space-between;
-}
-
-.hb-guided-tour-actions > span {
-    color: var(--hb-muted);
-    font-weight: 850;
-}
-
 .hb-guided-setup-card {
     width: min(100%, 720px);
     display: grid;

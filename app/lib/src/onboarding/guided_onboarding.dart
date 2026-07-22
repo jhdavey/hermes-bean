@@ -6,7 +6,6 @@ enum _GuidedOnboardingStep {
   email,
   password,
   tourChoice,
-  tour,
   plan,
 }
 
@@ -87,17 +86,11 @@ class _GuidedBeanOnboardingScreenState
   bool _beanThinking = false;
   String? _error;
   String _billingInterval = 'monthly';
-  int _tourIndex = 0;
 
   bool get _inputLocked =>
-      _busy ||
-      _beanThinking ||
-      _step == _GuidedOnboardingStep.tour ||
-      _step == _GuidedOnboardingStep.plan;
+      _busy || _beanThinking || _step == _GuidedOnboardingStep.plan;
 
-  bool get _showComposer =>
-      _step != _GuidedOnboardingStep.tour &&
-      _step != _GuidedOnboardingStep.plan;
+  bool get _showComposer => _step != _GuidedOnboardingStep.plan;
 
   @override
   void initState() {
@@ -168,7 +161,6 @@ class _GuidedBeanOnboardingScreenState
         await _handlePassword(override ?? value);
       case _GuidedOnboardingStep.tourChoice:
         await _handleTourChoice(value);
-      case _GuidedOnboardingStep.tour:
       case _GuidedOnboardingStep.plan:
         break;
     }
@@ -286,7 +278,7 @@ class _GuidedBeanOnboardingScreenState
     ).hasMatch(normalized);
     if (yes) {
       _addUser(value);
-      _startTour();
+      await _launchDashboardTour();
       return;
     }
     if (no) {
@@ -299,22 +291,24 @@ class _GuidedBeanOnboardingScreenState
     );
   }
 
-  void _startTour() {
+  Future<void> _launchDashboardTour() async {
+    if (_busy) return;
     setState(() {
-      _step = _GuidedOnboardingStep.tour;
-      _tourIndex = 0;
+      _busy = true;
       _error = null;
     });
-    _scrollToBottom();
-  }
-
-  Future<void> _nextTour() async {
-    if (_tourIndex >= _guidedTourSteps.length - 1) {
-      await _goToPlan();
-      return;
+    try {
+      await widget.onLaunchLiveTour();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = beanFriendlyErrorMessage(
+          error,
+          action: 'show your dashboard tour',
+        );
+      });
     }
-    setState(() => _tourIndex += 1);
-    _scrollToBottom();
   }
 
   Future<void> _goToPlan({bool skipTour = false}) async {
@@ -363,7 +357,6 @@ class _GuidedBeanOnboardingScreenState
     _GuidedOnboardingStep.email => 'Text your email address...',
     _GuidedOnboardingStep.password => 'Text your password...',
     _GuidedOnboardingStep.tourChoice => 'Yes for tour, no for plan setup...',
-    _GuidedOnboardingStep.tour => 'Tour in progress...',
     _GuidedOnboardingStep.plan => 'Select a plan above...',
   };
 
@@ -417,17 +410,9 @@ class _GuidedBeanOnboardingScreenState
                       _GuidedInlinePanel(
                         child: _GuidedTourChoiceActions(
                           enabled: !_inputLocked,
-                          onTour: _startTour,
+                          onTour: () => unawaited(_launchDashboardTour()),
                           onSkip: () => unawaited(_goToPlan(skipTour: true)),
                         ),
-                      ),
-                    if (_step == _GuidedOnboardingStep.tour)
-                      _GuidedTourPanel(
-                        step: _guidedTourSteps[_tourIndex],
-                        index: _tourIndex,
-                        total: _guidedTourSteps.length,
-                        enabled: !_busy,
-                        onNext: () => unawaited(_nextTour()),
                       ),
                     if (_step == _GuidedOnboardingStep.plan)
                       _GuidedPlanPicker(
@@ -911,167 +896,6 @@ class _GuidedTourChoiceActions extends StatelessWidget {
         child: const Text('Skip tour'),
       ),
     ],
-  );
-}
-
-class _GuidedTourStep {
-  const _GuidedTourStep({
-    required this.title,
-    required this.subtitle,
-    required this.beanScript,
-    required this.icon,
-    required this.items,
-  });
-
-  final String title;
-  final String subtitle;
-  final String beanScript;
-  final IconData icon;
-  final List<String> items;
-}
-
-const List<_GuidedTourStep> _guidedTourSteps = [
-  _GuidedTourStep(
-    title: 'Command center',
-    subtitle: 'Talk to Bean and see today update.',
-    beanScript:
-        "This is your command center. I'm always here to help. Tell me what you need, and above the chat you’ll see today’s events, tasks, and reminders.",
-    icon: Icons.dashboard_customize_rounded,
-    items: [
-      '7:30 AM School drop-off',
-      '12:15 PM Pay insurance',
-      '6:00 PM Dinner reminder',
-    ],
-  ),
-  _GuidedTourStep(
-    title: 'Calendar views',
-    subtitle: 'Jump between day and month.',
-    beanScript:
-        'Calendar buttons help you move between today, day view, and month view without losing your place.',
-    icon: Icons.calendar_month_rounded,
-    items: ['Today', 'Day view', 'Month view'],
-  ),
-  _GuidedTourStep(
-    title: 'Tasks',
-    subtitle: 'Create work, then check it off.',
-    beanScript:
-        'Tasks are for things you need to complete. I can create them from a sentence, and you can check them off when done.',
-    icon: Icons.task_alt_rounded,
-    items: ['Review launch notes', 'Order air filters', 'Send invoice'],
-  ),
-  _GuidedTourStep(
-    title: 'Reminders',
-    subtitle: 'Get nudged at the right time.',
-    beanScript:
-        'Reminders are lightweight nudges. I can set quick time-based follow-up without cluttering your task list.',
-    icon: Icons.notifications_active_rounded,
-    items: ['Take vitamins at 8 AM', 'Move laundry at 7 PM', 'Call Mom Sunday'],
-  ),
-  _GuidedTourStep(
-    title: 'Notes',
-    subtitle: 'Keep longer plans organized.',
-    beanScript:
-        'Notes hold plans, lists, and longer writing. Folders keep them organized, and formatting helps structure what matters.',
-    icon: Icons.article_rounded,
-    items: ['House projects', 'Trip plan', 'Meeting notes'],
-  ),
-];
-
-class _GuidedTourPanel extends StatelessWidget {
-  const _GuidedTourPanel({
-    required this.step,
-    required this.index,
-    required this.total,
-    required this.enabled,
-    required this.onNext,
-  });
-
-  final _GuidedTourStep step;
-  final int index;
-  final int total;
-  final bool enabled;
-  final VoidCallback onNext;
-
-  @override
-  Widget build(BuildContext context) => _GuidedInlinePanel(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            CircleAvatar(
-              backgroundColor: HeyBeanTheme.accent.withValues(alpha: .16),
-              child: Icon(step.icon, color: HeyBeanTheme.accentStrong),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    step.title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  Text(
-                    step.subtitle,
-                    style: TextStyle(color: HeyBeanTheme.muted),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        _GuidedOnboardingBubble(
-          message: _GuidedOnboardingMessage(bean: true, text: step.beanScript),
-        ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final item in step.items)
-              Chip(label: Text(item), avatar: Icon(step.icon, size: 16)),
-          ],
-        ),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: Row(
-                children: [
-                  for (var i = 0; i < total; i++) ...[
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      width: i == index ? 24 : 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: i == index
-                            ? HeyBeanTheme.accentStrong
-                            : HeyBeanTheme.border,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-                    if (i != total - 1) const SizedBox(width: 6),
-                  ],
-                ],
-              ),
-            ),
-            FilledButton.icon(
-              key: const Key('guided-tour-next'),
-              onPressed: enabled ? onNext : null,
-              icon: Icon(
-                index == total - 1
-                    ? Icons.check_rounded
-                    : Icons.arrow_forward_rounded,
-              ),
-              label: Text(index == total - 1 ? 'Plan setup' : 'Next'),
-            ),
-          ],
-        ),
-      ],
-    ),
   );
 }
 
