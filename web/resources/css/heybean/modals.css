@@ -426,3 +426,42 @@
     font-size: 12px;
     font-weight: 800;
 }
+
+.heybean-app-body .hb-post-tour-first-action-modal {
+    gap: 16px;
+}
+
+.heybean-app-body .hb-post-tour-action-grid {
+    display: grid;
+    gap: 10px;
+}
+
+.heybean-app-body .hb-post-tour-action-card {
+    width: 100%;
+    border: 1px solid var(--hb-border);
+    border-radius: 18px;
+    background: var(--hb-surface-soft);
+    color: var(--hb-text);
+    padding: 14px 16px;
+    text-align: left;
+    display: grid;
+    gap: 4px;
+    cursor: pointer;
+}
+
+.heybean-app-body .hb-post-tour-action-card:hover {
+    border-color: color-mix(in srgb, var(--hb-accent) 44%, var(--hb-border));
+    background: color-mix(in srgb, var(--hb-accent) 8%, var(--hb-surface-soft));
+}
+
+.heybean-app-body .hb-post-tour-action-card strong {
+    font-size: 15px;
+    font-weight: 900;
+}
+
+.heybean-app-body .hb-post-tour-action-card span {
+    color: var(--hb-muted);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.35;
+}

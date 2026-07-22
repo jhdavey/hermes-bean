@@ -115,6 +115,7 @@ export function mountHeyBeanWebApp(mount) {
         onboardingTourActive: false,
         onboardingTourStep: 0,
         onboardingTourPendingPlanSelection: false,
+        firstActionPendingPlanSelection: false,
         calendarRefreshing: false,
         dashboardDataLoading: false,
         taskFilter: 'active',
@@ -2875,20 +2876,14 @@ export function mountHeyBeanWebApp(mount) {
         activateOnboardingTourStep(0);
     }
 
-    function closeOnboardingTour(options = {}) {
-        const openCalendarImport = options.openCalendarImport === true;
+    function closeOnboardingTour() {
         const pendingPlanSelection = state.onboardingTourPendingPlanSelection === true;
         markOnboardingTourSeen();
         state.onboardingTourActive = false;
         state.onboardingTourStep = 0;
         state.onboardingTourPendingPlanSelection = false;
-        if (pendingPlanSelection) {
-            state.phase = 'subscription';
-            history.pushState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan || 'premium')}&billing_interval=${encodeURIComponent(normalizedBillingInterval(state.selectedBillingInterval))}`);
-        } else if (openCalendarImport) {
-            state.selected = 'settings';
-            state.modal = { type: 'external-calendar-import', providerKey: 'apple' };
-        }
+        state.firstActionPendingPlanSelection = pendingPlanSelection;
+        state.modal = { type: 'post-tour-first-action', step: 'choose' };
         window.cancelAnimationFrame(onboardingTourLayoutFrame);
         onboardingTourLayoutFrame = 0;
     }
@@ -2930,7 +2925,7 @@ export function mountHeyBeanWebApp(mount) {
                     <p>${escapeHtml(step.caption)}</p>
                     <div class="hb-onboarding-tour-actions">
                         <button class="hb-button-ghost" type="button" data-onboarding-tour-skip>Skip</button>
-                        <button class="hb-button" type="button" ${isLast ? 'data-onboarding-tour-finish' : 'data-onboarding-tour-next'}>${isLast ? 'Import calendar' : 'Next'}</button>
+                        <button class="hb-button" type="button" ${isLast ? 'data-onboarding-tour-finish' : 'data-onboarding-tour-next'}>${isLast ? 'Finish' : 'Next'}</button>
                     </div>
                 </article>
             </section>`;
@@ -4020,11 +4015,113 @@ export function mountHeyBeanWebApp(mount) {
         if (modal.type === 'issue-report-success') return issueReportSuccessModalMarkup();
         if (modal.type === 'external-calendar-connect') return externalCalendarConnectModalMarkup();
         if (modal.type === 'external-calendar-import') return externalCalendarImportModalMarkup(modal);
+        if (modal.type === 'post-tour-first-action') return postTourFirstActionModalMarkup(modal);
         if (modal.type === 'profile') return profileModalMarkup();
         if (modal.type === 'workspace') return workspaceModalMarkup(modal.mode, modal.workspace);
         if (modal.type === 'categories') return categoriesModalMarkup();
         if (modal.type === 'recurring-delete') return recurringDeleteModalMarkup(modal.item);
         return itemModalMarkup(modal.type, modal.item, modal.parentTask);
+    }
+
+    function postTourFirstActionModalMarkup(modal = {}) {
+        const step = modal.step === 'assist' ? 'assist' : 'choose';
+        const action = postTourFirstAction(modal.action);
+        if (step === 'assist') {
+            return `
+            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="post-tour-action-title">
+                <section class="hb-card hb-modal hb-post-tour-first-action-modal">
+                    ${sectionTitle(icons.bean || icons.activity, postTourFirstActionTitle(action), 'Want Bean to handle as much as possible, or walk you step by step while you complete it?')}
+                    <div class="hb-post-tour-action-grid">
+                        <button class="hb-button" type="button" data-post-tour-bean-do-it="${escapeAttr(action.key)}">Ask Bean to do it</button>
+                        <button class="hb-button-secondary" type="button" data-post-tour-walkthrough="${escapeAttr(action.key)}">Walk me step by step</button>
+                    </div>
+                    <div class="hb-modal-actions"><button class="hb-button-ghost" type="button" data-post-tour-first-action-skip>Skip this step</button></div>
+                </section>
+            </div>`;
+        }
+        return `
+            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="post-tour-first-action-title">
+                <section class="hb-card hb-modal hb-post-tour-first-action-modal">
+                    ${sectionTitle(icons.bean || icons.activity, 'What do you want to do first?', 'Bean can help you get momentum now. Pick a first action, or skip this step if you already know where you’re headed.')}
+                    <div class="hb-post-tour-action-grid">
+                        ${postTourFirstActions.map((item) => `
+                            <button class="hb-post-tour-action-card" type="button" data-post-tour-first-action="${escapeAttr(item.key)}">
+                                <strong>${escapeHtml(item.title)}</strong>
+                                <span>${escapeHtml(item.subtitle)}</span>
+                            </button>`).join('')}
+                    </div>
+                    <div class="hb-modal-actions"><button class="hb-button-ghost" type="button" data-post-tour-first-action-skip>Skip this step</button></div>
+                </section>
+            </div>`;
+    }
+
+    const postTourFirstActions = [
+        {
+            key: 'customize_dashboard',
+            title: 'Customize dashboard',
+            subtitle: 'Theme, notifications, workspace label, and calendar hours.',
+            beanPrompt: 'Help me customize my HeyBean dashboard. Ask one question at a time, then use available dashboard tools or guide me through Settings to set theme, notifications, workspace label, and calendar hours.',
+        },
+        {
+            key: 'import_calendar',
+            title: 'Import a calendar',
+            subtitle: 'Bring in Apple, Google, Outlook, Proton, Yahoo, or iCal.',
+            beanPrompt: 'Help me import my calendar into HeyBean. Ask what calendar provider or iCal link I use, then either do the import if you have enough information or walk me step by step.',
+        },
+        {
+            key: 'shared_workspace',
+            title: 'Create a shared workspace',
+            subtitle: 'Set up a household, project, or team space.',
+            beanPrompt: 'Help me create a shared workspace in HeyBean. Ask what to name it and who to invite, then create it if possible or walk me step by step.',
+        },
+    ];
+
+    function postTourFirstAction(key = '') {
+        return postTourFirstActions.find((item) => item.key === key) || postTourFirstActions[0];
+    }
+
+    function postTourFirstActionTitle(action) {
+        if (action.key === 'customize_dashboard') return 'Customize your dashboard';
+        if (action.key === 'import_calendar') return 'Import a calendar';
+        return 'Create a shared workspace';
+    }
+
+    function finishPostTourFirstAction() {
+        const pendingPlanSelection = state.firstActionPendingPlanSelection === true;
+        state.firstActionPendingPlanSelection = false;
+        state.modal = null;
+        if (pendingPlanSelection) {
+            state.phase = 'subscription';
+            history.pushState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan || 'premium')}&billing_interval=${encodeURIComponent(normalizedBillingInterval(state.selectedBillingInterval))}`);
+        }
+    }
+
+    async function askBeanToStartPostTourAction(actionKey) {
+        const action = postTourFirstAction(actionKey);
+        state.firstActionPendingPlanSelection = false;
+        state.modal = null;
+        state.bean.panelOpen = true;
+        state.notice = 'Bean is starting your first action.';
+        render();
+        await sendBeanMessageContent(action.beanPrompt);
+    }
+
+    function walkThroughPostTourAction(actionKey) {
+        const action = postTourFirstAction(actionKey);
+        state.firstActionPendingPlanSelection = false;
+        state.modal = null;
+        state.error = '';
+        if (action.key === 'customize_dashboard') {
+            state.selected = 'settings';
+            state.notice = 'Start in Settings: pick your theme, notifications, workspace label, and calendar hours. Bean can stay open if you want guidance.';
+        } else if (action.key === 'import_calendar') {
+            state.selected = 'settings';
+            state.modal = { type: 'external-calendar-import', providerKey: 'apple', title: 'First action: import your calendar' };
+        } else {
+            state.selected = 'settings';
+            state.modal = { type: 'workspace', mode: 'create', firstAction: true };
+            state.notice = 'Create the shared workspace, then invite the person you want to plan with.';
+        }
     }
 
     function externalCalendarConnectModalMarkup() {
@@ -4051,7 +4148,7 @@ export function mountHeyBeanWebApp(mount) {
         return `
             <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-label="Import external calendar">
                 <form class="hb-card hb-modal hb-form" data-modal-form="external-calendar-import">
-                    <h3>Import External Calendar</h3>
+                    <h3>${escapeHtml(modal.title || 'Import External Calendar')}</h3>
                     <p class="hb-item-meta">${escapeHtml(provider.description)} Events import into ${escapeHtml(workspaceName)}.</p>
                     ${modal.error ? `<div class="hb-error"><strong>Calendar import failed</strong><span>${escapeHtml(modal.error)}</span></div>` : ''}
                     <label class="hb-label">Calendar app
@@ -5529,6 +5626,11 @@ export function mountHeyBeanWebApp(mount) {
     async function sendBeanMessage(event) {
         event.preventDefault();
         const content = String(state.bean.input || mount.querySelector('[data-bean-input]')?.value || '').trim();
+        await sendBeanMessageContent(content);
+    }
+
+    async function sendBeanMessageContent(content) {
+        content = String(content || '').trim();
         if (!content || state.bean.busy) return;
         state.bean.busy = true;
         state.bean.input = '';
@@ -5710,7 +5812,7 @@ export function mountHeyBeanWebApp(mount) {
             render();
         });
         mount.querySelector('[data-onboarding-tour-finish]')?.addEventListener('click', () => {
-            closeOnboardingTour({ openCalendarImport: true });
+            closeOnboardingTour();
             render();
         });
         mount.querySelector('[data-admin-login]')?.addEventListener('click', () => {
@@ -6514,6 +6616,21 @@ export function mountHeyBeanWebApp(mount) {
             state.modal = null;
             render();
         }));
+        mount.querySelectorAll('[data-post-tour-first-action]').forEach((button) => button.addEventListener('click', () => {
+            state.modal = { type: 'post-tour-first-action', step: 'assist', action: button.dataset.postTourFirstAction };
+            render();
+        }));
+        mount.querySelector('[data-post-tour-bean-do-it]')?.addEventListener('click', (event) => {
+            askBeanToStartPostTourAction(event.currentTarget.dataset.postTourBeanDoIt);
+        });
+        mount.querySelector('[data-post-tour-walkthrough]')?.addEventListener('click', (event) => {
+            walkThroughPostTourAction(event.currentTarget.dataset.postTourWalkthrough);
+            render();
+        });
+        mount.querySelector('[data-post-tour-first-action-skip]')?.addEventListener('click', () => {
+            finishPostTourFirstAction();
+            render();
+        });
         mount.querySelectorAll('[data-modal-delete]').forEach((button) => button.addEventListener('click', deleteModalItem));
         mount.querySelectorAll('[data-recurring-delete-mode]').forEach((button) => button.addEventListener('click', confirmRecurringDelete));
         mount.querySelector('[data-modal-form]')?.addEventListener('submit', submitModal);

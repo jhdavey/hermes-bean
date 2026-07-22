@@ -1,5 +1,13 @@
 part of '../../main.dart';
 
+enum _PostTourFirstAction {
+  customizeDashboard,
+  importCalendar,
+  sharedWorkspace,
+}
+
+enum _PostTourFirstActionHelpMode { bean, walkthrough }
+
 class CommandCenterShell extends StatefulWidget {
   const CommandCenterShell({
     super.key,
@@ -55,7 +63,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   bool _onboardingTourVisible = false;
   int _onboardingTourStep = 0;
   bool _onboardingTourPendingPlanSelection = false;
-  bool _onboardingTourFinishWithImport = false;
   final Map<_OnboardingTourTarget, GlobalKey> _onboardingTourTargetKeys = {
     for (final target in _OnboardingTourTarget.values) target: GlobalKey(),
   };
@@ -158,7 +165,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     _onboardingTourVisible = false;
     _onboardingTourStep = 0;
     _onboardingTourPendingPlanSelection = false;
-    _onboardingTourFinishWithImport = false;
     _beanAssistantOpen = false;
     _beanAssistantSending = false;
     _beanDockPushToTalkHeld = false;
@@ -1050,7 +1056,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (shouldLaunchTourAfterCheckout &&
           mounted &&
           _phase == _AuthPhase.signedIn) {
-        _showOnboardingTour(finishWithImport: true);
+        _showOnboardingTour();
       }
     } catch (error) {
       if (!mounted) return;
@@ -1084,7 +1090,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       if (shouldLaunchTourAfterCoupon &&
           mounted &&
           _phase == _AuthPhase.signedIn) {
-        _showOnboardingTour(finishWithImport: true);
+        _showOnboardingTour();
       }
     } catch (error) {
       if (!mounted) return;
@@ -1199,25 +1205,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   String _onboardingTourSeenPreferenceKey(BeanUser user) =>
       '$_onboardingTourSeenPreferencePrefix.${user.id}';
 
-  void _showOnboardingTour({
-    bool pendingPlanSelection = false,
-    bool finishWithImport = false,
-  }) {
-    _activateOnboardingTourStep(
-      0,
-      pendingPlanSelection: pendingPlanSelection,
-      finishWithImport: finishWithImport,
-    );
+  void _showOnboardingTour({bool pendingPlanSelection = false}) {
+    _activateOnboardingTourStep(0, pendingPlanSelection: pendingPlanSelection);
     if (_phase == _AuthPhase.signedIn) {
       unawaited(_loadSecondarySignedInData(authGeneration: _authGeneration));
     }
   }
 
-  void _activateOnboardingTourStep(
-    int index, {
-    bool? pendingPlanSelection,
-    bool? finishWithImport,
-  }) {
+  void _activateOnboardingTourStep(int index, {bool? pendingPlanSelection}) {
     final boundedIndex = index.clamp(0, _appOnboardingTourSteps.length - 1);
     final step = _appOnboardingTourSteps[boundedIndex];
     setState(() {
@@ -1225,9 +1220,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       _onboardingTourStep = boundedIndex;
       if (pendingPlanSelection != null) {
         _onboardingTourPendingPlanSelection = pendingPlanSelection;
-      }
-      if (finishWithImport != null) {
-        _onboardingTourFinishWithImport = finishWithImport;
       }
       _selectedDestination = step.destination;
       _clearPlanLimitError();
@@ -1254,29 +1246,158 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   Future<void> _markOnboardingTourSeenAndClose() async {
     final user = _user;
     final showPlanSelection = _onboardingTourPendingPlanSelection;
-    final showImport = _onboardingTourFinishWithImport && !showPlanSelection;
     if (mounted) {
       setState(() {
         _onboardingTourVisible = false;
         _onboardingTourStep = 0;
         _onboardingTourPendingPlanSelection = false;
-        _onboardingTourFinishWithImport = false;
-        if (showPlanSelection) {
-          _phase = _AuthPhase.planSelection;
-          _selectedDestination = _HomeDestination.commandCenter;
-        }
       });
     }
     if (user != null) {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_onboardingTourSeenPreferenceKey(user), true);
     }
-    if (showImport && mounted) {
-      await _openExternalCalendarImportSheet();
+    if (mounted) {
+      await _showPostTourFirstActionPrompt(
+        pendingPlanSelection: showPlanSelection,
+      );
     }
   }
 
-  Future<void> _openExternalCalendarImportSheet() async {
+  Future<void> _showPostTourFirstActionPrompt({
+    required bool pendingPlanSelection,
+  }) async {
+    final action = await showModalBottomSheet<_PostTourFirstAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) =>
+          _PostTourFirstActionSheet(onSkip: () => Navigator.of(context).pop()),
+    );
+    if (!mounted) return;
+    if (action == null) {
+      _finishPostTourFirstAction(pendingPlanSelection: pendingPlanSelection);
+      return;
+    }
+
+    final mode = await showModalBottomSheet<_PostTourFirstActionHelpMode>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => _PostTourActionHelpSheet(
+        action: action,
+        onSkip: () => Navigator.of(context).pop(),
+      ),
+    );
+    if (!mounted) return;
+    if (mode == null) {
+      _finishPostTourFirstAction(pendingPlanSelection: pendingPlanSelection);
+      return;
+    }
+
+    if (mode == _PostTourFirstActionHelpMode.bean) {
+      await _askBeanToStartFirstAction(action);
+      return;
+    }
+
+    await _walkThroughFirstAction(action);
+  }
+
+  void _finishPostTourFirstAction({required bool pendingPlanSelection}) {
+    if (!mounted || !pendingPlanSelection) return;
+    setState(() {
+      _phase = _AuthPhase.planSelection;
+      _selectedDestination = _HomeDestination.commandCenter;
+    });
+  }
+
+  Future<void> _askBeanToStartFirstAction(_PostTourFirstAction action) async {
+    if (!mounted) return;
+    setState(() {
+      _beanAssistantOpen = true;
+      _beanAssistantError = null;
+      _beanDockStatus = _BeanDockStatusSnapshot.idle;
+    });
+    await _sendBeanAssistantMessage(
+      _postTourBeanPrompt(action),
+      source: 'flutter_onboarding_first_action',
+    );
+  }
+
+  Future<void> _walkThroughFirstAction(_PostTourFirstAction action) async {
+    switch (action) {
+      case _PostTourFirstAction.customizeDashboard:
+        setState(() {
+          _selectedDestination = _HomeDestination.settings;
+          _error = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Bean will walk you through Settings: pick a theme, notification preferences, workspace label, and calendar hours.',
+            ),
+          ),
+        );
+        return;
+      case _PostTourFirstAction.importCalendar:
+        setState(() {
+          _selectedDestination = _HomeDestination.settings;
+          _error = null;
+        });
+        await _openExternalCalendarImportSheet(
+          title: 'First action: import your calendar',
+        );
+        return;
+      case _PostTourFirstAction.sharedWorkspace:
+        setState(() {
+          _selectedDestination = _HomeDestination.settings;
+          _error = null;
+        });
+        await _showCreateSharedWorkspaceDialog();
+        return;
+    }
+  }
+
+  String _postTourBeanPrompt(_PostTourFirstAction action) {
+    switch (action) {
+      case _PostTourFirstAction.customizeDashboard:
+        return 'Help me customize my HeyBean dashboard. Ask one question at a time, then use available dashboard tools or guide me through Settings to set theme, notifications, workspace label, and calendar hours.';
+      case _PostTourFirstAction.importCalendar:
+        return 'Help me import my calendar into HeyBean. Ask what calendar provider or iCal link I use, then either do the import if you have enough information or walk me step by step.';
+      case _PostTourFirstAction.sharedWorkspace:
+        return 'Help me create a shared workspace in HeyBean. Ask what to name it and who to invite, then create it if possible or walk me step by step.';
+    }
+  }
+
+  Future<void> _showCreateSharedWorkspaceDialog() async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => const _WorkspaceTextInputDialog(
+        title: 'First action: create shared workspace',
+        labelText: 'Workspace name',
+        fieldKey: Key('post-tour-workspace-create-name-field'),
+        submitKey: Key('post-tour-workspace-create-save'),
+        submitLabel: 'Create workspace',
+      ),
+    );
+    if (!mounted || name == null || name.trim().isEmpty) return;
+    try {
+      await widget.apiClient.createWorkspace(name: name.trim());
+      await _loadSignedIn(loadingStatusText: 'Creating your workspace...');
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Workspace created.')));
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = beanFriendlyErrorMessage(error, action: 'create workspace');
+      });
+    }
+  }
+
+  Future<void> _openExternalCalendarImportSheet({
+    String title = 'Last step: import your calendar',
+  }) async {
     final user = _user;
     if (user == null) return;
     await showModalBottomSheet<void>(
@@ -1295,7 +1416,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
             child: _ExternalCalendarImportCard(
               apiClient: widget.apiClient,
               user: user,
-              title: 'Last step: import your calendar',
+              title: title,
               compact: true,
               onImported: () async {
                 await _refreshSignedInViews();
@@ -4222,11 +4343,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                 targetKeys: _onboardingTourTargetKeys,
                 primaryLabel:
                     _onboardingTourStep >= _appOnboardingTourSteps.length - 1
-                    ? (_onboardingTourFinishWithImport
-                          ? 'Import calendar'
-                          : _onboardingTourPendingPlanSelection
-                          ? 'Plan setup'
-                          : 'Finish')
+                    ? 'Finish'
                     : 'Next',
                 onNext: _advanceOnboardingTour,
                 onSkip: _dismissOnboardingTour,
@@ -4493,5 +4610,198 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         ),
       ),
     );
+  }
+}
+
+class _PostTourFirstActionSheet extends StatelessWidget {
+  const _PostTourFirstActionSheet({required this.onSkip});
+
+  final VoidCallback onSkip;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    child: Padding(
+      key: const Key('post-tour-first-action-sheet'),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Image.asset(
+                'assets/images/bean/bean-logo.png',
+                width: 38,
+                height: 38,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'What do you want to do first?',
+                  style: TextStyle(
+                    color: HeyBeanTheme.text,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Bean can help you get momentum now. Pick a first action, or skip this step if you already know where you’re headed.',
+            style: TextStyle(
+              color: HeyBeanTheme.muted,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _PostTourActionTile(
+            key: const Key('post-tour-customize-dashboard'),
+            icon: Icons.tune_rounded,
+            title: 'Customize dashboard',
+            subtitle:
+                'Theme, notifications, workspace label, and calendar hours.',
+            onTap: () => Navigator.of(
+              context,
+            ).pop(_PostTourFirstAction.customizeDashboard),
+          ),
+          _PostTourActionTile(
+            key: const Key('post-tour-import-calendar'),
+            icon: Icons.calendar_month_rounded,
+            title: 'Import a calendar',
+            subtitle:
+                'Bring in Apple, Google, Outlook, Proton, Yahoo, or iCal.',
+            onTap: () =>
+                Navigator.of(context).pop(_PostTourFirstAction.importCalendar),
+          ),
+          _PostTourActionTile(
+            key: const Key('post-tour-shared-workspace'),
+            icon: Icons.group_work_rounded,
+            title: 'Create a shared workspace',
+            subtitle: 'Set up a household, project, or team space.',
+            onTap: () =>
+                Navigator.of(context).pop(_PostTourFirstAction.sharedWorkspace),
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            key: const Key('post-tour-first-action-skip'),
+            onPressed: onSkip,
+            child: const Text('Skip this step'),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _PostTourActionHelpSheet extends StatelessWidget {
+  const _PostTourActionHelpSheet({required this.action, required this.onSkip});
+
+  final _PostTourFirstAction action;
+  final VoidCallback onSkip;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    child: Padding(
+      key: const Key('post-tour-action-help-sheet'),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            _postTourActionTitle(action),
+            style: TextStyle(
+              color: HeyBeanTheme.text,
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Want Bean to handle as much as possible, or walk you step by step while you complete it?',
+            style: TextStyle(
+              color: HeyBeanTheme.muted,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            key: const Key('post-tour-bean-do-it'),
+            onPressed: () =>
+                Navigator.of(context).pop(_PostTourFirstActionHelpMode.bean),
+            icon: const Icon(Icons.auto_awesome_rounded),
+            label: const Text('Ask Bean to do it'),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            key: const Key('post-tour-walkthrough'),
+            onPressed: () => Navigator.of(
+              context,
+            ).pop(_PostTourFirstActionHelpMode.walkthrough),
+            icon: const Icon(Icons.route_rounded),
+            label: const Text('Walk me step by step'),
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            key: const Key('post-tour-action-help-skip'),
+            onPressed: onSkip,
+            child: const Text('Skip this step'),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _PostTourActionTile extends StatelessWidget {
+  const _PostTourActionTile({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    color: HeyBeanTheme.surface,
+    elevation: 0,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(18),
+      side: BorderSide(color: HeyBeanTheme.border),
+    ),
+    child: ListTile(
+      leading: CircleAvatar(
+        backgroundColor: HeyBeanTheme.accent.withValues(alpha: .12),
+        foregroundColor: HeyBeanTheme.accentStrong,
+        child: Icon(icon),
+      ),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
+      subtitle: Text(subtitle),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: onTap,
+    ),
+  );
+}
+
+String _postTourActionTitle(_PostTourFirstAction action) {
+  switch (action) {
+    case _PostTourFirstAction.customizeDashboard:
+      return 'Customize your dashboard';
+    case _PostTourFirstAction.importCalendar:
+      return 'Import a calendar';
+    case _PostTourFirstAction.sharedWorkspace:
+      return 'Create a shared workspace';
   }
 }
