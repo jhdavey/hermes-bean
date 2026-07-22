@@ -192,6 +192,25 @@ void main() {
     expect(find.textContaining('That cannot be opened'), findsNothing);
   });
 
+  test('Flutter Bean voice permission is not shown as generic red failure', () {
+    final voiceSource = File(
+      'lib/src/bean/bean_assistant_panel.dart',
+    ).readAsStringSync();
+    final dockSource = File(
+      'lib/src/navigation/bottom_menu.dart',
+    ).readAsStringSync();
+    final podfile = File('ios/Podfile').readAsStringSync();
+
+    expect(voiceSource, contains('voice_microphone_permission_needed'));
+    expect(voiceSource, contains('Microphone permission needed'));
+    expect(voiceSource, contains("_BeanDockActivity.attention"));
+    expect(voiceSource, isNot(contains('Voice hit a problem')));
+    expect(dockSource, contains('attention'));
+    expect(dockSource, contains('0xFFFFF7E6'));
+    expect(dockSource, contains('0xFFF59E0B'));
+    expect(podfile, contains('PERMISSION_MICROPHONE=1'));
+  });
+
   test('restored screens retain forms, sheets, and modal editors', () {
     final sources = [
       File('lib/src/calendar/title_time_editor.dart').readAsStringSync(),

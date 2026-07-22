@@ -295,8 +295,9 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
             _voiceSpeaking = false;
           });
           _publishVoiceDock(
-            _BeanDockActivity.error,
-            label: 'Voice hit a problem',
+            _BeanDockActivity.attention,
+            label: 'Voice reset',
+            detail: 'Hold Bean and try again',
           );
           unawaited(
             widget.onVoiceEvent(
@@ -366,7 +367,8 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
     try {
       final permission = await permissions.Permission.microphone.request();
       if (!permission.isGranted) {
-        throw StateError('Microphone permission is required for Bean voice.');
+        _handleMicrophonePermissionDenied(permission);
+        return;
       }
 
       final realtime = await widget.onCreateElevenLabsSession();
@@ -414,7 +416,11 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
         _voiceAwaitingResponse = false;
         _voiceSpeaking = false;
       });
-      _publishVoiceDock(_BeanDockActivity.error, label: 'Voice hit a problem');
+      _publishVoiceDock(
+        _BeanDockActivity.attention,
+        label: 'Voice could not start',
+        detail: 'Hold Bean and try again',
+      );
       unawaited(
         widget.onVoiceEvent(
           'voice_session_error',
@@ -423,6 +429,37 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
         ),
       );
     }
+  }
+
+  void _handleMicrophonePermissionDenied(
+    permissions.PermissionStatus permission,
+  ) {
+    if (!mounted) return;
+    setState(() {
+      _voiceConnecting = false;
+      _voicePushToTalkHeld = false;
+      _voiceAwaitingResponse = false;
+      _voiceSpeaking = false;
+    });
+    final needsSettings =
+        permission.isPermanentlyDenied || permission.isRestricted;
+    _publishVoiceDock(
+      _BeanDockActivity.attention,
+      label: 'Microphone permission needed',
+      detail: needsSettings
+          ? 'Enable microphone in Settings'
+          : 'Allow microphone to talk to Bean',
+    );
+    unawaited(
+      widget.onVoiceEvent(
+        'voice_microphone_permission_needed',
+        label: permission.name,
+        payload: {
+          'transport': 'elevenlabs_agent',
+          'permission_status': permission.name,
+        },
+      ),
+    );
   }
 
   Future<void> _stopElevenLabsPushToTalk({bool cancelled = false}) async {

@@ -7,6 +7,7 @@ enum _BeanDockActivity {
   thinking,
   working,
   speaking,
+  attention,
   error,
 }
 
@@ -438,6 +439,8 @@ class _BeanDockStatusState extends State<_BeanDockStatus>
             decoration: BoxDecoration(
               color: widget.status.activity == _BeanDockActivity.error
                   ? const Color(0xFFFFF1F1)
+                  : widget.status.activity == _BeanDockActivity.attention
+                  ? const Color(0xFFFFF7E6)
                   : HeyBeanTheme.surface.withValues(alpha: .99),
               border: Border(
                 top: BorderSide(color: _quietBorderColor(alpha: .38)),
@@ -477,6 +480,9 @@ class _BeanDockStatusState extends State<_BeanDockStatus>
                           color:
                               widget.status.activity == _BeanDockActivity.error
                               ? const Color(0xFFB42318)
+                              : widget.status.activity ==
+                                    _BeanDockActivity.attention
+                              ? const Color(0xFF92400E)
                               : HeyBeanTheme.text,
                           fontSize: 13,
                           fontWeight: FontWeight.w900,
@@ -520,6 +526,7 @@ class _BeanDockStatusState extends State<_BeanDockStatus>
     _BeanDockActivity.thinking => 'Thinking',
     _BeanDockActivity.working => 'Working',
     _BeanDockActivity.speaking => 'Speaking',
+    _BeanDockActivity.attention => 'Bean needs attention',
     _BeanDockActivity.error => 'Bean needs attention',
     _BeanDockActivity.idle => '',
   };
@@ -529,6 +536,7 @@ class _BeanDockStatusState extends State<_BeanDockStatus>
     _BeanDockActivity.thinking => const Color(0xFF2563EB),
     _BeanDockActivity.working => HeyBeanTheme.accentStrong,
     _BeanDockActivity.speaking => const Color(0xFF7C3AED),
+    _BeanDockActivity.attention => const Color(0xFFF59E0B),
     _BeanDockActivity.error => const Color(0xFFB42318),
     _ => HeyBeanTheme.accentStrong,
   };
