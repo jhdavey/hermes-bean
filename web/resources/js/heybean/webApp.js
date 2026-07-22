@@ -253,6 +253,9 @@ export function mountHeyBeanWebApp(mount) {
     let beanSubmittedWakeTail = '';
     let beanPendingVoiceResponseTimer = 0;
     let beanPendingVoiceResponse = null;
+    let beanVoiceBackgroundHandoff = null;
+    const beanVoiceBackgroundHandoffMs = 10000;
+    const beanVoiceBackgroundHandoffMessage = 'This is taking a bit, so I’ll finish it in the background and come back when it’s ready.';
     const beanVoiceInitialIdleCloseMs = 9000;
     const beanVoiceFollowUpIdleCloseMs = 15000;
     let beanVoiceIdleTimer = 0;
@@ -5097,43 +5100,155 @@ export function mountHeyBeanWebApp(mount) {
         state.bean.statusText = 'Working…';
         render();
 
+        const requestPromise = (async () => api('/bean/messages', {
+            method: 'POST',
+            body: {
+                session_id: state.bean.sessionId || null,
+                workspace_id: currentWorkspaceId(),
+                content,
+                source: 'elevenlabs_agent',
+                ...clientTimezonePayload(),
+                ...await clientLocationPayload(content),
+            },
+        }))();
+
         try {
-            const data = await api('/bean/messages', {
-                method: 'POST',
-                body: {
-                    session_id: state.bean.sessionId || null,
-                    workspace_id: currentWorkspaceId(),
-                    content,
-                    source: 'elevenlabs_agent',
-                    ...clientTimezonePayload(),
-                    ...await clientLocationPayload(content),
-                },
-            });
-            state.bean.sessionId = data.session?.id || state.bean.sessionId;
-            state.bean.messages = normalizeList(data.messages);
-            state.bean.activity = normalizeList(data.activity);
-            state.bean.confirmations = normalizeList(data.confirmations);
-            scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
-            const answer = latestBeanAssistantMessage() || String(data.run?.output || '').trim() || 'Bean finished that.';
-            markBeanVoiceActivity();
-            logBeanVoiceLifecycleEvent('bean_response_received', { run_id: data.run?.id || null, failed: data.run?.status === 'failed', label: answer.slice(0, 160), transport: 'elevenlabs_agent', tool: 'askBean' });
-            clearBeanPendingVoiceResponse();
-            state.bean.busy = false;
-            render();
-            return answer;
-        } catch (error) {
-            logBeanVoiceLifecycleEvent('voice_request_error', {
+            const winner = await Promise.race([
+                requestPromise.then((data) => ({ type: 'completed', data })),
+                new Promise((resolve) => window.setTimeout(() => resolve({ type: 'background_handoff' }), beanVoiceBackgroundHandoffMs)),
+            ]);
+
+            if (winner.type === 'completed') {
+                return applyBeanVoiceToolResult(winner.data, content, 'foreground');
+            }
+
+            beanVoiceBackgroundHandoff = {
+                turnId,
+                content,
+                startedAt: Date.now(),
+                awaitingClose: true,
+            };
+            state.bean.statusText = 'Finishing in background…';
+            logBeanVoiceLifecycleEvent('voice_background_handoff_started', {
                 label: content.slice(0, 160),
-                error_name: String(error?.name || '').slice(0, 80),
-                error_status: error?.status || null,
-                error_message: String(error?.message || '').slice(0, 160),
                 transport: 'elevenlabs_agent',
                 tool: 'askBean',
+                handoff_ms: beanVoiceBackgroundHandoffMs,
             });
+            requestPromise
+                .then((data) => handleBeanBackgroundToolResult(data, content, turnId))
+                .catch((error) => handleBeanBackgroundToolError(error, content, turnId));
+            render();
+            return beanVoiceBackgroundHandoffMessage;
+        } catch (error) {
+            logBeanVoiceRequestError(error, content);
             clearBeanPendingVoiceResponse();
             state.bean.busy = false;
             return 'I hit a problem checking Bean. Please try that again.';
         }
+    }
+
+    function applyBeanVoiceToolResult(data, content, deliveryMode = 'foreground') {
+        state.bean.sessionId = data.session?.id || state.bean.sessionId;
+        state.bean.messages = normalizeList(data.messages);
+        state.bean.activity = normalizeList(data.activity);
+        state.bean.confirmations = normalizeList(data.confirmations);
+        scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
+        const answer = latestBeanAssistantMessage() || String(data.run?.output || '').trim() || 'Bean finished that.';
+        markBeanVoiceActivity();
+        logBeanVoiceLifecycleEvent('bean_response_received', {
+            run_id: data.run?.id || null,
+            failed: data.run?.status === 'failed',
+            label: answer.slice(0, 160),
+            transport: 'elevenlabs_agent',
+            tool: 'askBean',
+            delivery_mode: deliveryMode,
+        });
+        clearBeanPendingVoiceResponse();
+        state.bean.busy = false;
+        render();
+        return answer;
+    }
+
+    function logBeanVoiceRequestError(error, content, extra = {}) {
+        logBeanVoiceLifecycleEvent('voice_request_error', {
+            label: content.slice(0, 160),
+            error_name: String(error?.name || '').slice(0, 80),
+            error_status: error?.status || null,
+            error_message: String(error?.message || '').slice(0, 160),
+            transport: 'elevenlabs_agent',
+            tool: 'askBean',
+            ...extra,
+        });
+    }
+
+    function handleBeanBackgroundToolResult(data, content, turnId) {
+        const answer = applyBeanVoiceToolResult(data, content, 'background');
+        const runId = data.run?.id || null;
+        logBeanVoiceLifecycleEvent('voice_background_result_ready', {
+            run_id: runId,
+            label: answer.slice(0, 160),
+            transport: 'elevenlabs_agent',
+            original_turn_id: turnId,
+        });
+        deliverBeanBackgroundVoiceResult(answer, content, runId);
+    }
+
+    function handleBeanBackgroundToolError(error, content, turnId) {
+        logBeanVoiceRequestError(error, content, { delivery_mode: 'background', original_turn_id: turnId });
+        clearBeanPendingVoiceResponse();
+        state.bean.busy = false;
+        render();
+        deliverBeanBackgroundVoiceResult('I finished checking, but I hit a problem completing that request. Please try again.', content, null);
+    }
+
+    function isBeanBackgroundHandoffMessage(content) {
+        return /finish it in the background|come back when it/i.test(String(content || ''));
+    }
+
+    function closeBeanVoiceForBackgroundWork(reason = 'handoff_spoken') {
+        if (!beanVoiceBackgroundHandoff) return;
+        logBeanVoiceLifecycleEvent('voice_background_handoff_closed', {
+            reason,
+            label: beanVoiceBackgroundHandoff.content.slice(0, 160),
+            transport: 'elevenlabs_agent',
+        });
+        stopBeanVoiceSession({ keepStatus: true });
+        state.bean.busy = true;
+        state.bean.mode = 'working';
+        state.bean.statusText = 'Finishing in background…';
+        render();
+    }
+
+    function deliverBeanBackgroundVoiceResult(answer, originalRequest, runId = null) {
+        const content = String(answer || '').trim() || 'Bean finished that.';
+        beanVoiceBackgroundHandoff = null;
+        beanRealtimeSessionCache = null;
+        beanRealtimeSessionPromise = null;
+        if (state.bean.voiceActive || state.bean.voiceConnecting) {
+            stopBeanVoiceSession({ keepStatus: true });
+        }
+        state.bean.panelOpen = true;
+        state.bean.busy = false;
+        state.bean.mode = 'speaking';
+        state.bean.statusText = 'Bean is back…';
+        logBeanVoiceLifecycleEvent('voice_background_result_starting', {
+            run_id: runId,
+            label: content.slice(0, 160),
+            transport: 'elevenlabs_agent',
+        });
+        render();
+        startBeanVoiceSession({
+            firstMessage: content,
+            backgroundOriginalRequest: originalRequest,
+            backgroundRunId: runId,
+        })?.catch?.((error) => {
+            logBeanVoiceLifecycleEvent('voice_background_result_start_failed', {
+                run_id: runId,
+                label: String(error?.message || error).slice(0, 160),
+                transport: 'elevenlabs_agent',
+            });
+        });
     }
 
     function markBeanAudioPlaybackBlocked(reason, context = {}) {
@@ -5349,6 +5464,7 @@ export function mountHeyBeanWebApp(mount) {
             state.bean.sessionId = realtime.bean_session_id || state.bean.sessionId;
 
             const wakeTail = String(options?.wakeTail || '').trim();
+            const firstMessage = String(options?.firstMessage || '').trim();
             beanAudioPlaybackBlocked = false;
             beanElevenLabsConversation = await Conversation.startSession({
                 conversationToken: realtime.token,
@@ -5361,7 +5477,14 @@ export function mountHeyBeanWebApp(mount) {
                     bean_client_timezone: clientTimezonePayload().client_timezone || '',
                     bean_workspace_id: Number(currentWorkspaceId() || 0),
                     bean_dashboard_context: JSON.stringify(realtime.dashboard_context || {}),
+                    bean_background_original_request: String(options?.backgroundOriginalRequest || ''),
+                    bean_background_result: firstMessage,
                 },
+                overrides: firstMessage ? {
+                    agent: {
+                        firstMessage,
+                    },
+                } : undefined,
                 clientTools: {
                     askBean: askBeanFromElevenLabsAgent,
                 },
@@ -5384,9 +5507,14 @@ export function mountHeyBeanWebApp(mount) {
                     logBeanVoiceLifecycleEvent('voice_session_started', {
                         has_wake_event: Boolean(options?.wakeEvent),
                         has_wake_tail: Boolean(wakeTail),
+                        has_first_message: Boolean(firstMessage),
+                        background_run_id: options?.backgroundRunId || null,
                         transport: 'elevenlabs_agent',
                     });
-                    if (!state.bean.busy) {
+                    if (firstMessage) {
+                        state.bean.mode = 'speaking';
+                        state.bean.statusText = 'Bean is back…';
+                    } else if (!state.bean.busy) {
                         state.bean.mode = 'listening';
                         state.bean.statusText = 'Listening — speak to Bean';
                     }
@@ -5431,7 +5559,7 @@ export function mountHeyBeanWebApp(mount) {
                 onModeChange: ({ mode } = {}) => handleBeanElevenLabsMode(mode),
                 onStatusChange: ({ status } = {}) => {
                     if (status === 'connected') {
-                        state.bean.statusText = 'Listening — speak to Bean';
+                        if (!firstMessage) state.bean.statusText = 'Listening — speak to Bean';
                         if (wakeTail && isLikelyCompleteBeanWakeTail(wakeTail)) {
                             window.setTimeout(() => submitCompleteBeanWakeTail(wakeTail), beanWakeTailSubmitDelay(wakeTail, true));
                         }
@@ -5526,6 +5654,7 @@ export function mountHeyBeanWebApp(mount) {
 
         if (role === 'agent' || role === 'ai') {
             const pendingTurnId = beanVoiceClientTurnId;
+            const isBackgroundHandoff = beanVoiceBackgroundHandoff?.awaitingClose && isBeanBackgroundHandoffMessage(content);
             if (beanPendingVoiceResponse?.turnId === pendingTurnId) {
                 beanPendingVoiceResponse.resolved = true;
             }
@@ -5533,15 +5662,18 @@ export function mountHeyBeanWebApp(mount) {
             markBeanVoiceActivity();
             beanLastSpokenAnswer = content;
             beanLastSpokenAnswerAt = Date.now();
-            logBeanVoiceLifecycleEvent('bean_response_received', { label: content.slice(0, 160), transport: 'elevenlabs_agent', agent_managed_response: true });
+            logBeanVoiceLifecycleEvent('bean_response_received', { label: content.slice(0, 160), transport: 'elevenlabs_agent', agent_managed_response: true, background_handoff: isBackgroundHandoff });
             startBeanOutputVolumeProbe();
             resumeBeanElevenLabsAudioPlayback('agent_message');
             logBeanVoiceLifecycleEvent('assistant_speech_started', { label: content.slice(0, 160), transport: 'elevenlabs_agent' });
-            state.bean.messages = [...normalizeList(state.bean.messages), { role: 'assistant', content }];
+            const latestPersistedAssistant = latestBeanAssistantMessage();
+            if (latestPersistedAssistant !== content) {
+                state.bean.messages = [...normalizeList(state.bean.messages), { role: 'assistant', content }];
+            }
             state.bean.voiceTranscript = '';
-            state.bean.busy = false;
+            state.bean.busy = isBackgroundHandoff;
             state.bean.mode = 'speaking';
-            state.bean.statusText = 'Speaking…';
+            state.bean.statusText = isBackgroundHandoff ? 'Finishing in background…' : 'Speaking…';
             scheduleDashboardLiveRefresh([], { immediate: true, forceRender: true });
             render();
         }
@@ -5563,6 +5695,10 @@ export function mountHeyBeanWebApp(mount) {
         }
         if (normalizedMode === 'listening') {
             if (state.bean.voiceActive) {
+                if (beanVoiceBackgroundHandoff?.awaitingClose) {
+                    closeBeanVoiceForBackgroundWork('mode_listening_after_handoff');
+                    return;
+                }
                 markBeanVoiceActivity();
                 state.bean.mode = 'listening';
                 state.bean.statusText = 'Listening — speak to Bean';

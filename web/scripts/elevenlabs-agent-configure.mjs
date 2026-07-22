@@ -49,6 +49,7 @@ Critical behavior:
 - For weather/forecast questions, answer directly from dashboard_context.weather when it is available and fresh enough for the asked date; otherwise call askBean.
 - The askBean tool is the authoritative source of truth for private user data and actions. Do not invent dashboard facts.
 - When askBean returns an answer, speak that answer naturally without adding unsupported facts.
+- If askBean says it is finishing in the background and will come back, say that plainly and do not keep narrating; the app will close this short handoff session and reopen you with the final result.
 - If askBean indicates a confirmation is needed, ask the user naturally for confirmation and use their next clear answer as part of the next askBean request.
 - Keep spoken answers concise but complete. Do not ask "Are you still there?" or otherwise re-engage on silence; if the user is silent, wait for the platform to end the turn/session.
 `;
@@ -96,7 +97,7 @@ function conversationConfig(toolId) {
             interruptionIgnoreTerms: ['okay', 'ok', 'yes', 'yeah', 'yep', 'thanks', 'thank you', 'got it', 'understood'],
             transcribeOnDisabledInterruptions: false,
             softTimeoutConfig: {
-                timeoutSeconds: 7,
+                timeoutSeconds: 5,
                 message: 'Still working on that.',
                 additionalSoftTimeoutMessages: [],
                 useLlmGeneratedMessage: true,
