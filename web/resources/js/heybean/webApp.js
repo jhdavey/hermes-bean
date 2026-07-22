@@ -4969,13 +4969,13 @@ export function mountHeyBeanWebApp(mount) {
 
     function scheduleBeanVoiceIdleClose(reason = 'idle_timeout') {
         clearBeanVoiceIdleTimer();
-        if (!state.bean.voiceActive || state.bean.busy) return;
+        if (!state.bean.voiceActive || state.bean.busy || beanPendingVoiceResponse) return;
         const startedAt = Date.now();
         if (!beanLastVoiceActivityAt) beanLastVoiceActivityAt = startedAt;
         const idleCloseMs = beanVoiceRequestCount > 0 ? beanVoiceFollowUpIdleCloseMs : beanVoiceInitialIdleCloseMs;
         beanVoiceIdleTimer = window.setTimeout(() => {
             beanVoiceIdleTimer = 0;
-            if (!state.bean.voiceActive || state.bean.busy) return;
+            if (!state.bean.voiceActive || state.bean.busy || beanPendingVoiceResponse) return;
             const elapsedSinceActivity = Date.now() - Math.max(beanLastVoiceActivityAt, startedAt);
             if (elapsedSinceActivity < idleCloseMs) {
                 scheduleBeanVoiceIdleClose(`${reason}_after_activity`);
@@ -5079,6 +5079,10 @@ export function mountHeyBeanWebApp(mount) {
         logBeanVoiceLifecycleEvent('bean_request_sent', { label: content.slice(0, 160), transport: 'elevenlabs_agent', tool: 'askBean' });
         clearBeanVoiceIdleTimer();
         watchPendingBeanVoiceResponse(turnId, content);
+        state.bean.busy = true;
+        state.bean.mode = 'working';
+        state.bean.statusText = 'Working…';
+        render();
 
         try {
             const data = await api('/bean/messages', {
@@ -5101,6 +5105,7 @@ export function mountHeyBeanWebApp(mount) {
             markBeanVoiceActivity();
             logBeanVoiceLifecycleEvent('bean_response_received', { run_id: data.run?.id || null, failed: data.run?.status === 'failed', label: answer.slice(0, 160), transport: 'elevenlabs_agent', tool: 'askBean' });
             clearBeanPendingVoiceResponse();
+            state.bean.busy = false;
             render();
             return answer;
         } catch (error) {
@@ -5113,6 +5118,7 @@ export function mountHeyBeanWebApp(mount) {
                 tool: 'askBean',
             });
             clearBeanPendingVoiceResponse();
+            state.bean.busy = false;
             return 'I hit a problem checking Bean. Please try that again.';
         }
     }

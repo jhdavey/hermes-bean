@@ -328,6 +328,9 @@ test('Bean voice lets ElevenLabs Agent own turn-taking while the client tool cal
     assert.match(source, /function markBeanVoiceActivity/);
     assert.match(source, /beanVoiceRequestCount > 0 \? beanVoiceFollowUpIdleCloseMs : beanVoiceInitialIdleCloseMs/);
     assert.match(source, /elapsedSinceActivity < idleCloseMs/);
+    assert.match(source, /if \(!state\.bean\.voiceActive \|\| state\.bean\.busy \|\| beanPendingVoiceResponse\) return;/);
+    assert.match(source, /watchPendingBeanVoiceResponse\(turnId, content\);\n\s*state\.bean\.busy = true;\n\s*state\.bean\.mode = 'working';\n\s*state\.bean\.statusText = 'Working…';/);
+    assert.match(source, /clearBeanPendingVoiceResponse\(\);\n\s*state\.bean\.busy = false;\n\s*render\(\);\n\s*return answer;/);
     assert.match(source, /scheduleBeanVoiceIdleClose\(`\$\{reason\}_after_activity`\)/);
     assert.match(source, /markBeanVoiceActivity\(\);\n\s*logBeanVoiceLifecycleEvent\('bean_response_received'/);
     assert.match(source, /markBeanVoiceActivity\(\);\n\s*beanLastSpokenAnswer = content/);
