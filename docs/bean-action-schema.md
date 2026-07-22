@@ -32,6 +32,7 @@ The generic wrapper keeps Hermes flexible while Laravel remains strict at execut
 ## Supported action families
 
 - `dashboard.summary`
+- `settings.show`, `settings.update`
 - `time.now`
 - `external.lookup`
 - `external.weather`

@@ -1942,6 +1942,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     final dataVersion = _dashboardDataVersion;
     if (showLoading) setState(() => _dashboardDataLoading = true);
     final results = await Future.wait<Object>([
+      widget.apiClient.me(),
       _dashboardResourceOrFallback<List<BeanTask>>(
         name: 'tasks refresh',
         load: widget.apiClient.listTasks,
@@ -1991,15 +1992,18 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         dataVersion != _dashboardDataVersion) {
       return;
     }
-    final tasks = _tasksWithPendingWrites(results[0] as List<BeanTask>);
+    final user = results[0] as BeanUser;
+    _applyUserTheme(user);
+    final tasks = _tasksWithPendingWrites(results[1] as List<BeanTask>);
     final reminders = _remindersWithPendingWrites(
-      results[1] as List<BeanReminder>,
+      results[2] as List<BeanReminder>,
     );
     final calendar = _calendarEventsForDashboardState(
-      listed: results[2] as List<BeanCalendarEvent>,
+      listed: results[3] as List<BeanCalendarEvent>,
       summary: const [],
     );
     setState(() {
+      _user = user;
       _tasks = _dashboardListForMutationRefresh(
         refreshed: tasks,
         current: _tasks,
@@ -2021,12 +2025,12 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         deletedIds: _activePendingCalendarEventDeleteIds(),
         idFor: (event) => event.id,
       );
-      _noteFolders = _sortedNoteFolders(results[3] as List<BeanNoteFolder>);
-      _notes = _notesWithLocalDrafts(results[4] as List<BeanNote>);
-      _pastTasks = _tasksWithPendingWrites(results[5] as List<BeanTask>);
-      _eventCategories = results[6] as List<BeanEventCategory>;
-      _googleCalendarStatus = results[7] as GoogleCalendarSyncStatus;
-      _outlookCalendarStatus = results[8] as GoogleCalendarSyncStatus;
+      _noteFolders = _sortedNoteFolders(results[4] as List<BeanNoteFolder>);
+      _notes = _notesWithLocalDrafts(results[5] as List<BeanNote>);
+      _pastTasks = _tasksWithPendingWrites(results[6] as List<BeanTask>);
+      _eventCategories = results[7] as List<BeanEventCategory>;
+      _googleCalendarStatus = results[8] as GoogleCalendarSyncStatus;
+      _outlookCalendarStatus = results[9] as GoogleCalendarSyncStatus;
       _dashboardDataLoading = false;
       _error = null;
     });

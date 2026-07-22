@@ -264,6 +264,124 @@ PHP);
         $this->assertSame(1, Task::where('user_id', $user->id)->count());
     }
 
+    public function test_bean_dashboard_tool_can_show_and_update_safe_user_settings(): void
+    {
+        $this->apiToken('bean-settings-safe@example.com');
+        $user = User::where('email', 'bean-settings-safe@example.com')->firstOrFail();
+        $user->forceFill([
+            'theme_mode' => 'light',
+            'theme' => 'green',
+            'preferred_map_app' => 'google',
+            'timezone' => 'America/New_York',
+        ])->save();
+        $session = app(BeanRuntimeService::class)->createSession($user);
+        $run = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'status' => 'running',
+            'mode' => 'hermes',
+            'input' => 'switch my dashboard to dark mode',
+            'started_at' => now(),
+        ]);
+
+        $show = app(BeanDashboardToolBridgeService::class)->execute($this->signedToolContext($user, $session, $run), [
+            'action' => 'settings.show',
+            'arguments' => [],
+        ]);
+
+        $this->assertTrue((bool) ($show['ok'] ?? false));
+        $this->assertSame('settings.show', $show['action']);
+        $this->assertSame('light', $show['settings']['theme_mode']);
+
+        $result = app(BeanDashboardToolBridgeService::class)->execute($this->signedToolContext($user, $session, $run), [
+            'action' => 'settings.update',
+            'arguments' => ['theme_mode' => 'dark'],
+        ]);
+
+        $this->assertTrue((bool) ($result['ok'] ?? false));
+        $this->assertSame('settings.update', $result['action']);
+        $this->assertSame('dark', $result['settings']['theme_mode']);
+        $this->assertSame(['theme_mode'], $result['changed_fields']);
+        $this->assertSame('dark', $user->refresh()->theme_mode);
+        $this->assertDatabaseHas('bean_tool_calls', ['bean_run_id' => $run->id, 'action' => 'settings.update', 'status' => 'completed']);
+        $this->assertDatabaseHas('dashboard_changes', ['user_id' => $user->id, 'resource_type' => 'settings', 'action' => 'updated']);
+    }
+
+    public function test_bean_dashboard_tool_requires_confirmation_for_sensitive_settings(): void
+    {
+        $this->apiToken('bean-settings-sensitive@example.com');
+        $user = User::where('email', 'bean-settings-sensitive@example.com')->firstOrFail();
+        $user->forceFill(['timezone' => 'America/New_York'])->save();
+        $session = app(BeanRuntimeService::class)->createSession($user);
+        $run = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'status' => 'running',
+            'mode' => 'hermes',
+            'input' => 'change my timezone to Los Angeles',
+            'started_at' => now(),
+        ]);
+
+        $result = app(BeanDashboardToolBridgeService::class)->execute($this->signedToolContext($user, $session, $run), [
+            'action' => 'settings.update',
+            'arguments' => ['timezone' => 'America/Los_Angeles'],
+        ]);
+
+        $this->assertFalse((bool) ($result['ok'] ?? true));
+        $this->assertTrue((bool) ($result['requires_confirmation'] ?? false));
+        $this->assertStringContainsString('timezone', strtolower((string) $result['summary']));
+        $this->assertSame('America/New_York', $user->refresh()->timezone);
+        $this->assertDatabaseHas('bean_confirmation_requests', ['bean_run_id' => $run->id, 'action' => 'settings.update', 'status' => 'pending']);
+        $this->assertDatabaseHas('bean_tool_calls', ['bean_run_id' => $run->id, 'action' => 'settings.update', 'status' => 'waiting_confirmation']);
+
+        $notificationRun = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'status' => 'running',
+            'mode' => 'hermes',
+            'input' => 'turn off reminder emails',
+            'started_at' => now(),
+        ]);
+        $notificationResult = app(BeanDashboardToolBridgeService::class)->execute($this->signedToolContext($user, $session, $notificationRun), [
+            'action' => 'settings.update',
+            'arguments' => ['reminder_email' => false],
+        ]);
+        $this->assertTrue((bool) ($notificationResult['requires_confirmation'] ?? false));
+        $this->assertTrue((bool) $user->refresh()->notification_preferences['reminder_email']);
+    }
+
+    public function test_approved_sensitive_settings_update_is_applied(): void
+    {
+        $this->apiToken('bean-settings-confirmed@example.com');
+        $user = User::where('email', 'bean-settings-confirmed@example.com')->firstOrFail();
+        $user->forceFill(['timezone' => 'America/New_York'])->save();
+        $session = app(BeanRuntimeService::class)->createSession($user);
+        $run = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'status' => 'running',
+            'mode' => 'hermes',
+            'input' => 'change timezone after confirmation',
+            'started_at' => now(),
+        ]);
+
+        $pending = app(BeanDashboardToolBridgeService::class)->execute($this->signedToolContext($user, $session, $run), [
+            'action' => 'settings.update',
+            'arguments' => ['timezone' => 'America/Los_Angeles'],
+        ]);
+
+        $approved = app(BeanRuntimeService::class)->approveConfirmation($user, (int) $pending['confirmation_id']);
+
+        $this->assertTrue((bool) data_get($approved, 'result.ok'));
+        $this->assertSame('America/Los_Angeles', $user->refresh()->timezone);
+        $this->assertDatabaseHas('bean_confirmation_requests', ['id' => $pending['confirmation_id'], 'status' => 'approved']);
+        $this->assertDatabaseHas('bean_tool_calls', ['bean_run_id' => $run->id, 'action' => 'settings.update', 'status' => 'completed']);
+    }
+
     public function test_external_weather_uses_browser_coordinates_with_open_meteo_forecast(): void
     {
         $this->apiToken('bean-weather-coordinates@example.com');

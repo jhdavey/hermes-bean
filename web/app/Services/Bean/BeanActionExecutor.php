@@ -15,6 +15,7 @@ use App\Models\Workspace;
 use App\Models\WorkspaceItemLink;
 use App\Services\Bean\External\ExternalLookupService;
 use App\Services\Bean\External\OpenMeteoWeatherService;
+use App\Services\DashboardChangeNotifier;
 use App\Services\Domain\DomainResourceCatalog;
 use App\Services\Domain\DomainResourceService;
 use App\Services\WorkspaceService;
@@ -53,7 +54,7 @@ class BeanActionExecutor
         $this->activity->log($session, $run, 'tool_started', $this->labelFor($action), ['action' => $action, 'progress' => $this->progressSnapshot($action, 'running')]);
 
         try {
-            if ($this->isDestructive($action) && ! $confirmed) {
+            if ($this->requiresConfirmation($action, $arguments) && ! $confirmed) {
                 $confirmation = BeanConfirmationRequest::create([
                     'bean_session_id' => $session->id,
                     'bean_run_id' => $run->id,
@@ -72,6 +73,8 @@ class BeanActionExecutor
 
             $result = match ($action) {
                 'dashboard.summary' => $this->dashboardSummary($run),
+                'settings.show' => $this->settingsShow($run),
+                'settings.update' => $this->settingsUpdate($run, $arguments),
                 'resource.query' => $this->genericResourceQuery($run, $arguments),
                 'resource.relationships' => $this->resourceRelationships($run, $arguments),
                 'time.now' => $this->timeNow($run),
@@ -896,6 +899,231 @@ class BeanActionExecutor
         ], 'time_context' => $timeContext];
     }
 
+    private function settingsShow(BeanRun $run): array
+    {
+        $settings = $this->settingsSummary($this->user($run));
+
+        return ['ok' => true, 'settings' => $settings, 'supported_fields' => array_keys($settings), 'sensitive_fields' => $this->sensitiveSettingsFields()];
+    }
+
+    private function settingsUpdate(BeanRun $run, array $arguments): array
+    {
+        $user = $this->user($run);
+        $updates = $this->normalizedSettingsUpdates($arguments);
+        if ($updates === []) {
+            return ['ok' => false, 'error' => 'I need a supported setting and value to update. Supported settings include theme_mode, theme, preferred_map_app, timezone, name, email, and notification_preferences.'];
+        }
+
+        $invalid = array_diff(array_keys($updates), $this->supportedSettingsFields());
+        if ($invalid !== []) {
+            return ['ok' => false, 'error' => 'I cannot update that setting from Bean yet: '.implode(', ', $invalid).'.'];
+        }
+
+        $validated = [];
+        foreach ($updates as $field => $value) {
+            $normalized = $this->normalizeSettingValue($field, $value, $user);
+            if (is_array($normalized) && ($normalized['ok'] ?? null) === false) {
+                return $normalized;
+            }
+            $validated[$field] = $normalized;
+        }
+
+        if (array_key_exists('notification_preferences', $validated)) {
+            $preferences = $validated['notification_preferences'];
+            if (($preferences['reminder_email'] ?? false) && ! app(\App\Services\PlanLimitService::class)->canUseEmailReminders($user)) {
+                return ['ok' => false, 'error' => 'Email reminders are available on Premium, Pro, and Enterprise plans.'];
+            }
+        }
+
+        $before = $this->settingsSummary($user);
+        $user->fill($validated);
+        $user->save();
+        $user = $user->refresh();
+        $after = $this->settingsSummary($user);
+        $changed = collect(array_keys($validated))
+            ->filter(fn (string $field): bool => ($before[$field] ?? null) !== ($after[$field] ?? null))
+            ->values()
+            ->all();
+
+        if ($changed !== []) {
+            app(DashboardChangeNotifier::class)->notify(
+                userId: $user->id,
+                workspaceId: $run->workspace_id,
+                resourceType: 'settings',
+                action: 'updated',
+                resourceId: null,
+                payload: ['changed_fields' => $changed, 'settings' => array_intersect_key($after, array_flip($changed))]
+            );
+        }
+
+        return ['ok' => true, 'settings' => $after, 'changed_fields' => $changed];
+    }
+
+    private function settingsSummary(User $user): array
+    {
+        return [
+            'name' => (string) $user->name,
+            'email' => (string) $user->email,
+            'theme' => (string) ($user->theme ?: 'green'),
+            'theme_mode' => (string) ($user->theme_mode ?: 'auto'),
+            'preferred_map_app' => (string) ($user->preferred_map_app ?: 'google'),
+            'timezone' => $user->timezone,
+            'notification_preferences' => $user->notification_preferences,
+        ];
+    }
+
+    private function normalizedSettingsUpdates(array $arguments): array
+    {
+        $updates = [];
+        if (is_array($arguments['settings'] ?? null)) {
+            $updates = $arguments['settings'];
+        }
+        foreach ($arguments as $key => $value) {
+            if ($key === 'settings') continue;
+            $updates[$key] = $value;
+        }
+        $field = $arguments['field'] ?? $arguments['setting'] ?? $arguments['key'] ?? null;
+        if (is_string($field) && array_key_exists('value', $arguments)) {
+            $updates[$field] = $arguments['value'];
+        }
+        unset($updates['field'], $updates['setting'], $updates['key'], $updates['value']);
+
+        $aliases = [
+            'mode' => 'theme_mode',
+            'themeMode' => 'theme_mode',
+            'theme mode' => 'theme_mode',
+            'dark_mode' => 'theme_mode',
+            'dark mode' => 'theme_mode',
+            'accent' => 'theme',
+            'accent_color' => 'theme',
+            'accent color' => 'theme',
+            'map' => 'preferred_map_app',
+            'map_app' => 'preferred_map_app',
+            'map app' => 'preferred_map_app',
+            'preferred map' => 'preferred_map_app',
+            'notifications' => 'notification_preferences',
+            'notification preferences' => 'notification_preferences',
+            'email_notifications' => 'reminder_email',
+            'email notifications' => 'reminder_email',
+            'reminder emails' => 'reminder_email',
+            'reminder_email' => 'reminder_email',
+            'push_notifications' => 'reminder_push',
+            'push notifications' => 'reminder_push',
+            'reminder pushes' => 'reminder_push',
+            'reminder_push' => 'reminder_push',
+        ];
+
+        $normalized = [];
+        foreach ($updates as $key => $value) {
+            $fieldName = trim((string) $key);
+            $canonical = $aliases[$fieldName] ?? $aliases[strtolower(str_replace(['_', '-'], ' ', $fieldName))] ?? $fieldName;
+            if (in_array($canonical, ['reminder_email', 'reminder_push'], true)) {
+                $normalized['notification_preferences'] ??= [];
+                if (is_array($normalized['notification_preferences'])) {
+                    $normalized['notification_preferences'][$canonical] = $value;
+                }
+                continue;
+            }
+            if ($canonical === 'theme_mode' && is_bool($value)) {
+                $value = $value ? 'dark' : 'light';
+            }
+            $normalized[$canonical] = $value;
+        }
+
+        return $normalized;
+    }
+
+    private function supportedSettingsFields(): array
+    {
+        return ['name', 'email', 'theme', 'theme_mode', 'preferred_map_app', 'timezone', 'notification_preferences'];
+    }
+
+    private function sensitiveSettingsFields(): array
+    {
+        return ['email', 'timezone', 'notification_preferences'];
+    }
+
+    private function normalizeSettingValue(string $field, mixed $value, User $user): mixed
+    {
+        return match ($field) {
+            'name' => $this->settingString($value, 'name', 1, 255),
+            'email' => $this->settingEmail($value, $user),
+            'theme' => $this->settingIn($value, 'theme', ['green', 'gray', 'blue', 'purple', 'pink', 'red', 'orange', 'gold', 'teal', 'indigo']),
+            'theme_mode' => $this->settingIn($value, 'theme_mode', ['auto', 'light', 'dark']),
+            'preferred_map_app' => $this->settingIn($value, 'preferred_map_app', ['google', 'apple']),
+            'timezone' => $this->settingTimezone($value),
+            'notification_preferences' => $this->settingNotificationPreferences($value, $user),
+            default => ['ok' => false, 'error' => "Unsupported setting: {$field}"],
+        };
+    }
+
+    private function settingString(mixed $value, string $field, int $min, int $max): string|array
+    {
+        $text = trim((string) $value);
+        if (mb_strlen($text) < $min || mb_strlen($text) > $max) {
+            return ['ok' => false, 'error' => "The {$field} setting must be between {$min} and {$max} characters."];
+        }
+
+        return $text;
+    }
+
+    private function settingEmail(mixed $value, User $user): string|array
+    {
+        $email = strtolower(trim((string) $value));
+        if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['ok' => false, 'error' => 'That email address is not valid.'];
+        }
+        if (User::where('email', $email)->whereKeyNot($user->id)->exists()) {
+            return ['ok' => false, 'error' => 'That email address is already connected to another account.'];
+        }
+
+        return $email;
+    }
+
+    private function settingIn(mixed $value, string $field, array $allowed): string|array
+    {
+        $normalized = strtolower(trim((string) $value));
+        if ($field === 'theme_mode' && in_array($normalized, ['system', 'device', 'automatic'], true)) {
+            $normalized = 'auto';
+        }
+        if ($field === 'preferred_map_app' && in_array($normalized, ['apple maps', 'apple map'], true)) {
+            $normalized = 'apple';
+        }
+        if ($field === 'preferred_map_app' && in_array($normalized, ['google maps', 'google map'], true)) {
+            $normalized = 'google';
+        }
+        if (! in_array($normalized, $allowed, true)) {
+            return ['ok' => false, 'error' => "The {$field} setting must be one of: ".implode(', ', $allowed).'.'];
+        }
+
+        return $normalized;
+    }
+
+    private function settingTimezone(mixed $value): string|array|null
+    {
+        if ($value === null || trim((string) $value) === '') return null;
+        $timezone = trim((string) $value);
+        $isIanaTimezone = in_array($timezone, timezone_identifiers_list(\DateTimeZone::ALL), true);
+        $isUtcOffset = preg_match('/^[+-](?:(?:0\\d|1[0-3]):[0-5]\\d|14:00)$/', $timezone) === 1;
+        if (! $isIanaTimezone && ! $isUtcOffset) {
+            return ['ok' => false, 'error' => 'The timezone setting must be a valid IANA timezone such as America/New_York.'];
+        }
+
+        return $timezone;
+    }
+
+    private function settingNotificationPreferences(mixed $value, User $user): array
+    {
+        $input = is_array($value) ? $value : [];
+        foreach (['reminder_push', 'reminder_email'] as $key) {
+            if (array_key_exists($key, $input)) {
+                $input[$key] = filter_var($input[$key], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? (bool) $input[$key];
+            }
+        }
+
+        return array_merge(User::defaultNotificationPreferences(), $user->notification_preferences ?? [], array_intersect_key($input, array_flip(['reminder_push', 'reminder_email'])));
+    }
+
     private function timeNow(BeanRun $run): array
     {
         $timeContext = $this->timeContext->forRun($run);
@@ -997,13 +1225,31 @@ class BeanActionExecutor
         return $parts === [] ? '' : ' · '.implode(' · ', $parts);
     }
 
-    private function isDestructive(string $action): bool { return str_ends_with($action, '.delete'); }
-    private function confirmationSummary(string $action, array $arguments): string { return "Confirm before I run {$action}."; }
+    private function requiresConfirmation(string $action, array $arguments = []): bool
+    {
+        if (str_ends_with($action, '.delete')) return true;
+        if ($action !== 'settings.update') return false;
+
+        $fields = array_keys($this->normalizedSettingsUpdates($arguments));
+        return array_intersect($fields, $this->sensitiveSettingsFields()) !== [];
+    }
+
+    private function confirmationSummary(string $action, array $arguments): string
+    {
+        if ($action === 'settings.update') {
+            $fields = implode(', ', array_intersect(array_keys($this->normalizedSettingsUpdates($arguments)), $this->sensitiveSettingsFields()));
+            return 'Confirm before I update sensitive settings'.($fields !== '' ? ": {$fields}" : '.');
+        }
+
+        return "Confirm before I run {$action}.";
+    }
 
     private function labelFor(string $action): string
     {
         return match ($action) {
             'dashboard.summary' => 'Checking your dashboard',
+            'settings.show' => 'Checking your settings',
+            'settings.update' => 'Updating your settings',
             'resource.query', 'resource.relationships' => 'Looking through your workspace',
             'time.now' => 'Checking the current time',
             'external.lookup' => 'Looking that up',

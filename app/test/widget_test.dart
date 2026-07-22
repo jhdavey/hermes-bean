@@ -192,6 +192,17 @@ void main() {
     expect(find.textContaining('That cannot be opened'), findsNothing);
   });
 
+  test('Bean-triggered Flutter refresh reloads user settings and theme', () {
+    final shellSource = File(
+      'lib/src/shell/command_center_shell.dart',
+    ).readAsStringSync();
+
+    expect(shellSource, contains('Future<void> _refreshSignedInViews'));
+    expect(shellSource, contains('widget.apiClient.me()'));
+    expect(shellSource, contains('_applyUserTheme(user)'));
+    expect(shellSource, contains('setState(() {\n      _user = user;'));
+  });
+
   test('Flutter Bean voice permission is not shown as generic red failure', () {
     final voiceSource = File(
       'lib/src/bean/bean_assistant_panel.dart',

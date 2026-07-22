@@ -140,6 +140,7 @@ The tool returns structured JSON. Read it before responding. Confirm only action
 ## Supported action families
 
 - `dashboard.summary`
+- `settings.show`, `settings.update` for persisted user settings: `theme_mode`, `theme`, `preferred_map_app`, `timezone`, `name`, `email`, and `notification_preferences`. Safe appearance/map/name changes can run directly. Sensitive settings such as email, timezone, and notification preferences return `requires_confirmation` unless already confirmed.
 - `time.now`
 - `external.lookup`
 - `external.weather`
@@ -192,7 +193,7 @@ _SCHEMA = {
     "name": "bean_dashboard",
     "description": (
         "Use this for any private HeyBean dashboard data or mutations: tasks, reminders, "
-        "calendar events, notes, workspace-aware resource queries, dashboard summaries, "
+        "calendar events, notes, persisted user settings, workspace-aware resource queries, dashboard summaries, "
         "time context, weather/forecast, and source-backed external lookup. The tool is scoped to the current "
         "authenticated Bean user and returns verifiable structured results."
     ),
@@ -201,7 +202,7 @@ _SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "description": "Bean dashboard action, for example task.list, task.create, note.create, dashboard.summary, external.lookup, external.weather.",
+                "description": "Bean dashboard action, for example settings.update, task.list, task.create, note.create, dashboard.summary, external.lookup, external.weather.",
             },
             "arguments": {
                 "type": "object",
