@@ -33,6 +33,15 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.match(source, /normalizedSignupSource/);
     assert.match(source, /hb-guided-immersive-shell/);
     assert.match(source, /data-action="plain-signup"/);
+    assert.match(source, /function looksLikeInternalError/);
+    assert.match(source, /SQLSTATE\|PDOException\|QueryException/);
+    assert.match(source, /Could not \$\{action\} right now\. Please try again in a moment\./);
+    assert.match(source, /Number\(error\?\.status\) >= 500/);
+    assert.match(source, /function removePublicSignupBeanPresence/);
+    assert.match(source, /\.public-bean-presence-signup\[data-public-bean\]/);
+    assert.match(source, /root\.querySelector\('\[data-public-bean-toggle\]'\)\?\.click\(\)/);
+    assert.match(source, /removePublicSignupBeanPresence\(\);\n\s*state\.signupPaywallDeferred = true/);
+    assert.match(source, /removePublicSignupBeanPresence\(\);\n\s*state\.phase = 'waitlist'/);
     assert.match(source, /startOnboardingTourIfNeeded/);
     assert.match(source, /activateOnboardingTourStep\(0\)/);
     assert.match(source, /postTourFirstActionModalMarkup/);
@@ -70,6 +79,11 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.match(baseShellSource, /\.hb-guided-chat-composer/);
     assert.match(baseShellSource, /\.hb-guided-chat-bubble-user/);
     assert.match(baseShellSource, /\.hb-guided-immersive-app/);
+    assert.match(baseShellSource, /--hb-guided-atmosphere/);
+    assert.match(baseShellSource, /\.hb-guided-immersive-shell \.hb-guided-chat-composer \{[\s\S]*?position:\s*relative/);
+    assert.match(baseShellSource, /data-hb-theme-resolved="dark"\] \.hb-guided-immersive-app/);
+    assert.match(baseShellSource, /linear-gradient\(180deg, #090d12 0%, #10161d 48%, #151c24 100%\)/);
+    assert.match(baseShellSource, /\.hb-guided-chat-bubble:not\(:last-child\) span/);
     assert.match(baseShellSource, /hb-guided-bubble-arrive/);
     assert.match(baseShellSource, /backdrop-filter:\s*blur\(18px\)/);
 });

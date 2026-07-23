@@ -2,6 +2,7 @@ import { Conversation } from '@elevenlabs/client';
 import '../css/public-bean.css';
 
 const WAKE_GREETING = "Hey, I'm Bean, can you hear me?";
+const SIGNUP_WAKE_GREETING = "Hey, I'm Bean. Make sure your volume is up and your microphone is on. I’ll guide you through each signup step. When I ask for details, type them into the input and press Send. What is your first and last name?";
 const IDLE_CLOSE_MS = 15000;
 const WAKE_TO_GREETING_TARGET_MS = 1200;
 let turnstileScriptPromise = null;
@@ -148,7 +149,7 @@ function mountPublicBean(root) {
         enabled = true;
         landingWakeDetectedAtMs = Date.now();
         landingWakeToFirstSpeechMs = null;
-        setStatus('starting', 'Turn volume on. Allow mic.');
+        setStatus('starting', signupOnboardingContext ? 'Volume on. Allow mic.' : 'Turn volume on. Allow mic.');
         let micAllowed = false;
         try {
             if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone is unavailable.');
@@ -260,7 +261,7 @@ function mountPublicBean(root) {
             userId: session.landing_session_id ? `bean-visitor-${session.landing_session_id}` : undefined,
             overrides: {
                 agent: {
-                    firstMessage: WAKE_GREETING,
+                    firstMessage: signupOnboardingContext ? SIGNUP_WAKE_GREETING : WAKE_GREETING,
                 },
             },
             dynamicVariables: {

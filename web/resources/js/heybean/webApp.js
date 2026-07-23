@@ -1513,6 +1513,7 @@ export function mountHeyBeanWebApp(mount) {
             state.subscriptionSummary = null;
             state.busy = false;
             if (state.user?.access_state === 'waitlisted' || state.user?.accessState === 'waitlisted') {
+                removePublicSignupBeanPresence();
                 state.phase = 'waitlist';
                 state.guidedSignupError = '';
                 render();
@@ -1543,7 +1544,20 @@ export function mountHeyBeanWebApp(mount) {
         });
     }
 
+    function removePublicSignupBeanPresence() {
+        const root = document.querySelector('.public-bean-presence-signup[data-public-bean]');
+        if (!root) return;
+        const active = root.dataset.mode && root.dataset.mode !== 'disabled';
+        if (active) {
+            root.querySelector('[data-public-bean-toggle]')?.click();
+            window.setTimeout(() => root.remove(), 120);
+            return;
+        }
+        root.remove();
+    }
+
     function startSignupDashboardPreview(result = {}) {
+        removePublicSignupBeanPresence();
         state.signupPaywallDeferred = true;
         state.subscriptionCheckoutStatus = '';
         state.subscriptionSummary = null;
@@ -1736,6 +1750,7 @@ export function mountHeyBeanWebApp(mount) {
             state.subscriptionSummary = null;
             state.busy = false;
             if (state.user?.access_state === 'waitlisted' || state.user?.accessState === 'waitlisted') {
+                removePublicSignupBeanPresence();
                 state.phase = 'waitlist';
                 render();
                 return;
@@ -10745,9 +10760,16 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function friendlyError(error, action) {
-        const message = error?.message || 'Something went wrong.';
+        const message = String(error?.message || 'Something went wrong.');
         if (/failed to fetch/i.test(message)) return `Could not ${action}. Check your connection and try again.`;
+        if (Number(error?.status) >= 500 || looksLikeInternalError(message)) {
+            return `Could not ${action} right now. Please try again in a moment.`;
+        }
         return message;
+    }
+
+    function looksLikeInternalError(message) {
+        return /\b(SQLSTATE|PDOException|QueryException|Illuminate\\|Stack trace|Connection:|Database:|select \* from|no such table|undefined table|syntax error|\/Users\/|\/home\/forge\/)\b/i.test(String(message || ''));
     }
 
     function errorMarkup(message) {

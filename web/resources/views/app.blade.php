@@ -33,7 +33,7 @@
                 <span class="public-bean-icon"><img src="{{ asset('images/bean-logo.png') }}" alt="Bean"></span>
                 <span class="public-bean-status" data-public-bean-status aria-live="polite">Tap to talk</span>
             </button>
-            <span class="public-bean-help" data-public-bean-help>Turn your volume on, then allow microphone access.</span>
+            <span class="public-bean-help" data-public-bean-help>Turn your volume on and allow microphone access. Bean will talk you through signup, but type answers into the box.</span>
             <span class="public-bean-turnstile" data-public-bean-turnstile hidden></span>
         </div>
         @vite('resources/js/publicBean.js')

@@ -373,6 +373,12 @@
 
 .public-bean-presence-signup[data-mode="starting"] .public-bean-help,
 .public-bean-presence-signup[data-mode="connecting"] .public-bean-help {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
+.public-bean-presence-signup[data-mode="listening"] .public-bean-help {
+    opacity: 1;
     transform: translate(-50%, 0);
 }
 

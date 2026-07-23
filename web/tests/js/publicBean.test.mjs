@@ -79,8 +79,10 @@ test('landing Bean starts voice directly from an explicit tap with a hearing che
     assert.match(source, /Conversation\.startSession/);
     assert.match(source, /conversationToken:\s*session\.token/);
     assert.match(source, /Hey, I'm Bean, can you hear me\?/);
+    assert.match(source, /SIGNUP_WAKE_GREETING/);
+    assert.match(source, /Make sure your volume is up and your microphone is on/);
     assert.match(agentConfig, /help you start signup whenever you’re ready/);
-    assert.match(source, /firstMessage:\s*WAKE_GREETING/);
+    assert.match(source, /firstMessage:\s*signupOnboardingContext \? SIGNUP_WAKE_GREETING : WAKE_GREETING/);
     assert.doesNotMatch(source, /SpeechRecognition|Just say “Hey Bean|createWakeDetector|extractWakeTail|prefetchVoiceSession|restartWakeListening/);
     assert.match(source, /Demo cooldown — try again shortly/);
     assert.doesNotMatch(source, /Demo limit reached/);
@@ -112,6 +114,7 @@ test('register flow keeps the same tap-to-talk Bean control and uses signup voic
     assert.match(appView, /Tap to talk/);
     assert.doesNotMatch(appView, /Hey! I'm over here!|data-public-bean-cue|public-bean-cue-arrow/);
     assert.match(appView, /resources\/js\/publicBean\.js/);
+    assert.match(appView, /Turn your volume on and allow microphone access\. Bean will talk you through signup/);
     assert.match(source, /publicBeanContext\(root\) === 'signup_onboarding'/);
     assert.match(source, /page_context:\s*publicBeanContext\(root\)/);
     assert.match(source, /bean_public_context:\s*publicBeanContext\(root\)/);
@@ -120,6 +123,7 @@ test('register flow keeps the same tap-to-talk Bean control and uses signup voic
     assert.match(source, /function focusSignupOnboardingInput/);
     assert.match(source, /Tell the visitor to type their password in the input and press Send, not to say it out loud/);
     assert.match(source, /await stopVoiceConversation\('disabled'\)/);
+    assert.match(styles, /\.public-bean-presence-signup\[data-mode="listening"\] \.public-bean-help/);
     assert.match(agentConfig, /showSignupInput/);
     assert.match(agentConfig, /type answers into the input and press Send/);
     assert.match(agentConfig, /Tap Bean anytime to mute me and continue by text/);
