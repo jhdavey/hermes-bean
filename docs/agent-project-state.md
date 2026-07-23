@@ -1,16 +1,16 @@
 # HeyBean Agent Project State
 
-Last updated: 2026-07-23T15:01:45Z
+Last updated: 2026-07-23T21:19:59Z
 
 Purpose: give future Hermes/agent sessions a compact, durable starting point for HeyBean work without relying on chat context. Read this file before coding when the task touches Bean, HeyBean, voice UX, runtime/tooling, deployment, or project direction.
 
 ## Current repository/deploy state
 
 - Local project path: `/Users/joshuadavey/development/projects/hermes-bean`
-- Main branch at last update: `71d9234f Fix Bean voice handoff and natural event times`
+- Main branch at last update: `e4167612 Add signup Bean voice guide`
 - Local working tree at last update was clean after the voice/calendar bugfix docs update.
 - Production host/path: `forge@heybean.org:/home/forge/heybean.org/current`
-- Production commit last verified in prior work: `71d9234f Fix Bean voice handoff and natural event times`
+- Production commit last verified in prior work: `e4167612 Add signup Bean voice guide`
 - Production known server-only state: untracked `.env`, `storage`, `web/storage`; do not clean production storage/env casually.
 - Production Bean voice timing last verified in prior work: authenticated `60/5/10/15/15` = max duration / provider soft timeout / background handoff / silence end-call / follow-up idle close. Public landing voice uses a separate fast ElevenLabs Landing Guide that answers directly with public facts and only calls an action-only section tool.
 - Public landing Bean onboarding is single-path tap-to-talk: visitors click/tap the fixed top-left Bean control (`Tap to talk`) with the handwritten cue `Hey! I'm over here!`; they do not choose preset options or enter an email on the landing page. Public Bean starts the fast ElevenLabs Landing Guide, first says `Hey, I'm Bean, can you hear me?`, then answers questions, gives a short conversational tour, or opens `/register?from=bean` when the visitor agrees to start signup. The same tap-to-talk Bean control is present on `/register` with `signup_onboarding` context: Bean talks through the deterministic signup, focuses/highlights the current input, tells users to type name/email/password into the input and press Send, and tapping Bean mutes/ends voice so the user can continue by text. The `/register?from=bean` app onboarding intro omits the repeated `Hi, I’m Bean.` and asks `What is your first and last name?`; normal `/register` keeps `Hi, I’m Bean.` The waitlist stop stays after account creation/name/theme/email/password. Admitted users see the dashboard tour and first-action choice/skip before the subscription paywall; the backend product API gate remains subscription-required until Stripe trial/active status. Public/onboarding Bean never collects passwords or payment details by voice.
