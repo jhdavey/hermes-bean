@@ -10,6 +10,7 @@ const dashboardSource = await readFile(new URL('../../resources/css/heybean/dash
 const calendarSource = await readFile(new URL('../../resources/css/heybean/calendar.css', import.meta.url), 'utf8');
 const notesSource = await readFile(new URL('../../resources/css/heybean/notes.css', import.meta.url), 'utf8');
 const baseShellSource = await readFile(new URL('../../resources/css/heybean/base-shell.css', import.meta.url), 'utf8');
+const typographyOverridesSource = await readFile(new URL('../../resources/css/heybean/typography-overrides.css', import.meta.url), 'utf8');
 
 function cssRuleContaining(sourceText, selector) {
     const selectorIndex = sourceText.indexOf(selector);
@@ -103,11 +104,16 @@ test('all-day month events use date-only exclusive end bounds', () => {
 test('beta bar and calendar month grid extend square to their edges', () => {
     assert.match(cssRuleContaining(baseShellSource, '.hb-beta-banner'), /appearance:\s*none/);
     assert.match(cssRuleContaining(baseShellSource, '.hb-beta-banner'), /border-radius:\s*0/);
+    assert.match(cssRuleContaining(typographyOverridesSource, '.heybean-app-body .hb-beta-banner'), /border-radius:\s*0/);
+    assert.match(cssRuleContaining(typographyOverridesSource, '.heybean-app-body .hb-beta-banner'), /margin:\s*0/);
     assert.match(cssRuleContaining(dashboardSource, '.hb-calendar-card.hb-card-pad'), /padding:\s*0/);
     assert.match(cssRuleContaining(dashboardSource, '.hb-calendar-card .hb-timeline'), /border-radius:\s*0/);
     assert.match(cssRuleContaining(calendarSource, '.hb-month-grid'), /border-radius:\s*0/);
     assert.match(cssRuleContaining(calendarSource, '.hb-month-cell'), /border-radius:\s*0/);
     assert.match(cssRuleContaining(calendarSource, '.hb-month-weekday'), /border-radius:\s*0/);
+    assert.match(cssRuleContaining(typographyOverridesSource, '.heybean-app-body .hb-card.hb-calendar-card'), /border-radius:\s*0/);
+    assert.match(typographyOverridesSource, /\.heybean-app-body \.hb-card\.hb-calendar-card\.hb-card-pad\s*\{[^}]*padding:\s*0;[^}]*overflow:\s*hidden;/s);
+    assert.match(typographyOverridesSource, /\.heybean-app-body \.hb-calendar-card \.hb-calendar,[^}]*\.heybean-app-body \.hb-calendar-card \.hb-month-grid\s*\{[^}]*gap:\s*0;/s);
 });
 
 test('critical items consistently render a gold star immediately before their title', () => {

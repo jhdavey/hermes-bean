@@ -98,3 +98,35 @@
 .heybean-app-body .hb-note-title-input {
     font-weight: 500;
 }
+
+/* Final cascade overrides for full-bleed square app chrome. These intentionally
+   live in the last imported HeyBean stylesheet so generic button/card rules do
+   not re-round the beta banner or month calendar surface in production builds. */
+.heybean-app-body .hb-beta-banner {
+    display: block;
+    width: 100%;
+    margin: 0;
+    border-radius: 0;
+}
+
+.heybean-app-body .hb-card.hb-calendar-card,
+.heybean-app-body .hb-card.hb-calendar-card.hb-card-pad,
+.heybean-app-body .hb-calendar-card .hb-calendar,
+.heybean-app-body .hb-calendar-card .hb-month-view,
+.heybean-app-body .hb-calendar-card .hb-month-grid,
+.heybean-app-body .hb-calendar-card .hb-month-weekday,
+.heybean-app-body .hb-calendar-card .hb-month-cell,
+.heybean-app-body .hb-calendar-card .hb-timeline {
+    border-radius: 0;
+}
+
+.heybean-app-body .hb-card.hb-calendar-card.hb-card-pad {
+    padding: 0;
+    overflow: hidden;
+}
+
+.heybean-app-body .hb-calendar-card .hb-calendar,
+.heybean-app-body .hb-calendar-card .hb-month-view,
+.heybean-app-body .hb-calendar-card .hb-month-grid {
+    gap: 0;
+}
