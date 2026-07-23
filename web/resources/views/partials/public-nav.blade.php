@@ -16,9 +16,9 @@
         </button>
         <button class="public-bean-cue" type="button" data-public-bean-cue aria-label="Talk with Bean">
             <span>Hey! I'm over here!</span>
-            <svg viewBox="0 0 96 68" focusable="false" aria-hidden="true">
-                <path class="public-bean-cue-arrow" d="M86 58 C58 50 34 30 11 8"></path>
-                <path class="public-bean-cue-head" d="M13 8 L28 8 M13 8 L16 23"></path>
+            <svg viewBox="0 0 88 88" focusable="false" aria-hidden="true">
+                <path class="public-bean-cue-arrow" d="M78 76 C56 66 48 51 40 36"></path>
+                <path class="public-bean-cue-head" d="M40 36 L34 53 M40 36 L55 44"></path>
             </svg>
         </button>
         <span class="public-bean-help" data-public-bean-help>Turn your volume on, then allow microphone access.</span>

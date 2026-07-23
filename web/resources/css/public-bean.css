@@ -55,10 +55,10 @@
 
 .public-bean-cue svg {
     position: absolute;
-    top: -34px;
-    left: -34px;
-    width: 96px;
-    height: 68px;
+    top: -60px;
+    left: -96px;
+    width: 88px;
+    height: 88px;
     overflow: visible;
     fill: none;
     stroke: currentColor;
@@ -261,10 +261,10 @@
     }
 
     .public-bean-cue svg {
-        top: -28px;
-        left: -24px;
-        width: 76px;
-        height: 54px;
+        top: -48px;
+        left: -80px;
+        width: 70px;
+        height: 70px;
     }
 
     .public-bean-status {
