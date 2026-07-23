@@ -1714,7 +1714,7 @@ export function mountHeyBeanWebApp(mount) {
                         <img src="${escapeAttr(logoUrl)}" alt="Bean">
                         <div><h1>Your account is created</h1><p class="hb-item-meta">You’re on the early-access waitlist.</p></div>
                     </div>
-                    <div class="hb-success"><strong>Your place is saved.</strong><span>I’m a solo developer and I’m onboarding people gradually so I can keep HeyBean reliable. We’ll email you as soon as access opens. You won’t be asked to choose a plan or pay while you wait.</span></div>
+                    <div class="hb-success"><strong>Your place is saved.</strong><span>Unfortunately, it looks like we’re currently at capacity. Since we’re doing a controlled rollout, I’ll add you to the waitlist and let you know when we can continue onboarding. It’s usually within 1–2 days. You won’t choose a plan or pay while you wait.</span></div>
                     <div class="hb-link-row"><a class="hb-button-secondary" href="/">Back to HeyBean</a><button class="hb-button-ghost" type="button" data-subscribe-logout>Use another email</button></div>
                 </section>
             </main>

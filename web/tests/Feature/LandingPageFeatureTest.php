@@ -61,11 +61,12 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('images/heybean-tour-command-center-bean.png', false)
             ->assertSee('images/heybean-tour-calendar-tasks.png', false)
             ->assertSee('images/heybean-tour-customization-themes.png', false)
-            ->assertSee('Request early access', false)
-            ->assertSee('I’m building HeyBean as a solo developer.', false)
+            ->assertSee('Start with Bean', false)
+            ->assertDontSee('Reserve your early-access spot', false)
+            ->assertDontSee('name="email" type="email"', false)
             ->assertSee('7-day free trial after plan selection', false)
             ->assertDontSee('class="public-brand"', false)
-            ->assertSee('href="/#early-access"', false)
+            ->assertSee('href="/register?from=bean"', false)
             ->assertSee('href="/#how-it-works"', false)
             ->assertSee('href="/#features"', false)
             ->assertSee('href="/#plans"', false)
@@ -81,7 +82,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Choose the support your life needs.', false)
             ->assertSee('Most popular', false)
             ->assertSee('Unlimited notes with folders', false)
-            ->assertSee('Request early access', false)
+            ->assertSee('Start with Bean', false)
             ->assertSee('href="/register?plan=base&billing_interval=monthly"', false)
             ->assertSee('href="/register?plan=premium&billing_interval=monthly"', false)
             ->assertSee('href="/register?plan=pro&billing_interval=monthly"', false)
@@ -144,7 +145,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('data-selected-billing-interval="monthly"', false);
     }
 
-    public function test_visitors_can_request_early_access(): void
+    public function test_legacy_early_access_endpoint_still_continues_to_account_creation(): void
     {
         $this->post(route('early-access.store'), ['email' => 'harley@example.com'])
             ->assertRedirect('/register?email=harley%40example.com');
@@ -156,7 +157,7 @@ class LandingPageFeatureTest extends TestCase
         ]);
     }
 
-    public function test_waitlisted_visitors_continue_to_account_creation(): void
+    public function test_legacy_waitlisted_visitors_continue_to_account_creation(): void
     {
         DB::table('early_access_rollouts')->where('key', 'public_beta')->update([
             'admitted_count' => 100,

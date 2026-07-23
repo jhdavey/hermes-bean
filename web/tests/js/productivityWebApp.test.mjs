@@ -50,6 +50,11 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.doesNotMatch(source, /guidedTourPanelMarkup/);
     assert.doesNotMatch(baseShellSource, /\.hb-guided-tour-card/);
     assert.match(source, /registerGuidedSignupAccount/);
+    assert.match(source, /state\.phase = 'waitlist'/);
+    assert.match(source, /currently at capacity/);
+    assert.match(source, /controlled rollout/);
+    assert.match(source, /usually within 1–2 days/);
+    assert.ok(source.indexOf("state.phase = 'waitlist'") < source.indexOf('openGuidedPlanSelection()'));
     assert.match(baseShellSource, /\.hb-guided-chat-composer/);
     assert.match(baseShellSource, /\.hb-guided-chat-bubble-user/);
 });

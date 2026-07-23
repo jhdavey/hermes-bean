@@ -15,21 +15,12 @@
             <span class="public-bean-status" data-public-bean-status aria-live="polite">Tap to talk</span>
         </button>
         <button class="public-bean-cue" type="button" data-public-bean-cue aria-label="Talk with Bean">
-            <span>Talk to Bean now</span>
+            <span>Tap to talk to Bean</span>
             <svg viewBox="0 0 88 88" focusable="false" aria-hidden="true">
                 <path class="public-bean-cue-arrow" d="M78 76 C56 66 48 51 40 36"></path>
                 <path class="public-bean-cue-head" d="M40 36 L34 53 M40 36 L55 44"></path>
             </svg>
         </button>
-        <div class="public-bean-prompt" data-public-bean-prompt aria-label="Bean quick-start choices">
-            <strong>Bean can help right now.</strong>
-            <span>Talk through the product, ask a question, or let Bean help you start signup.</span>
-            <div class="public-bean-intents">
-                <button type="button" data-public-bean-intent="quick_tour">Quick tour</button>
-                <button type="button" data-public-bean-intent="question">Ask Bean</button>
-                <button type="button" data-public-bean-intent="signup">Help me sign up</button>
-            </div>
-        </div>
         <span class="public-bean-help" data-public-bean-help>Turn your volume on, then allow microphone access.</span>
         <span class="public-bean-turnstile" data-public-bean-turnstile hidden></span>
     </div>
@@ -39,7 +30,7 @@
         <a href="/#features">Features</a>
         <a href="/#plans">Pricing</a>
         <a class="nav-login" href="/login">Log In</a>
-        <a class="nav-cta" href="/#early-access">Request Early Access</a>
+        <a class="nav-cta" href="/register?from=bean">Start with Bean</a>
     </nav>
     <details class="mobile-menu">
         <summary aria-label="Open menu"><span class="mobile-menu-icon" aria-hidden="true"><span></span><span></span><span></span></span></summary>
@@ -49,7 +40,7 @@
             <a href="/#features">Features</a>
             <a href="/#plans">Pricing</a>
             <a href="/login">Log In</a>
-            <a class="mobile-menu-cta" href="/#early-access">Request Early Access</a>
+            <a class="mobile-menu-cta" href="/register?from=bean">Start with Bean</a>
         </div>
     </details>
 </header>

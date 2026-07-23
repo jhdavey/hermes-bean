@@ -12,11 +12,7 @@ test('public pages expose a compact Bean control without the authenticated chat 
     assert.match(navigation, /data-public-bean/);
     assert.match(navigation, /Tap to talk/);
     assert.match(navigation, /data-public-bean-status/);
-    assert.match(navigation, /Talk to Bean now/);
-    assert.match(navigation, /Bean can help right now\./);
-    assert.match(navigation, /data-public-bean-intent="quick_tour"/);
-    assert.match(navigation, /data-public-bean-intent="question"/);
-    assert.match(navigation, /data-public-bean-intent="signup"/);
+    assert.match(navigation, /Tap to talk to Bean/);
     assert.match(navigation, /data-public-bean-cue/);
     assert.match(navigation, /aria-label="Talk with Bean"/);
     assert.match(navigation, /Turn your volume on, then allow microphone access\./);
@@ -29,11 +25,7 @@ test('public pages expose a compact Bean control without the authenticated chat 
     assert.match(styles, /font-family: "Bradley Hand", "Comic Sans MS", "Marker Felt", cursive/);
     assert.match(styles, /\.public-bean-cue-arrow/);
     assert.match(styles, /\.public-bean-help/);
-    assert.match(styles, /\.public-bean-prompt/);
-    assert.match(styles, /\.public-bean-presence\[data-mode="disabled"\]:not\(\[data-scrolled="true"\]\) \.public-bean-prompt/);
-    assert.match(styles, /\.public-bean-presence\[data-mode="disabled"\]:not\(\[data-scrolled="true"\]\) \.public-bean-cue/);
-    assert.match(styles, /\.public-bean-presence\[data-mode\]:not\(\[data-mode="disabled"\]\) \.public-bean-prompt/);
-    assert.match(styles, /\.public-bean-intents/);
+    assert.doesNotMatch(styles, /\.public-bean-prompt|\.public-bean-intents/);
     assert.match(styles, /\.public-bean-cue:focus-visible/);
 });
 
@@ -83,7 +75,7 @@ test('landing Bean starts voice directly from an explicit tap with a hearing che
     assert.match(source, /Conversation\.startSession/);
     assert.match(source, /conversationToken:\s*session\.token/);
     assert.match(source, /Hey, I'm Bean, can you hear me\?/);
-    assert.match(agentConfig, /help you start signup when you’re ready/);
+    assert.match(agentConfig, /help you start signup whenever you’re ready/);
     assert.match(source, /firstMessage:\s*WAKE_GREETING/);
     assert.doesNotMatch(source, /SpeechRecognition|Just say “Hey Bean|createWakeDetector|extractWakeTail|prefetchVoiceSession|restartWakeListening/);
     assert.match(source, /Demo cooldown — try again shortly/);
@@ -92,12 +84,8 @@ test('landing Bean starts voice directly from an explicit tap with a hearing che
     assert.match(source, /const IDLE_CLOSE_MS = 15000/);
     assert.match(source, /voice_start_requested/);
     assert.match(source, /tap_to_start/);
-    assert.match(source, /normalizeLandingIntent/);
-    assert.match(source, /bean_landing_intent:\s*requestedIntent/);
-    assert.match(source, /requested_intent:\s*requestedIntent \|\| null/);
-    assert.match(source, /data-public-bean-intent/);
-    assert.match(source, /Please give me the quick three-stop tour/);
-    assert.match(source, /Please help me sign up for HeyBean/);
+    assert.doesNotMatch(source, /normalizeLandingIntent|bean_landing_intent|requested_intent|data-public-bean-intent/);
+    assert.doesNotMatch(source, /Please give me the quick three-stop tour|Please help me sign up for HeyBean/);
     assert.match(source, /showLandingSection/);
     assert.match(source, /askLandingBean/);
     assert.match(source, /root\.dataset\.conversationTokenUrl/);
@@ -134,10 +122,7 @@ test('landing voice uses a dedicated fast ElevenLabs guide with an action-only p
     assert.match(agentConfig, /Primary goal:/);
     assert.match(agentConfig, /Help the visitor experience Bean as quickly as possible/);
     assert.match(agentConfig, /not like a nagging salesperson/);
-    assert.match(agentConfig, /The selected quick-start intent from the page is: \{\{bean_landing_intent\}\}/);
-    assert.match(agentConfig, /\{\{bean_landing_intent\}\} is "quick_tour"/);
-    assert.match(agentConfig, /\{\{bean_landing_intent\}\} is "signup"/);
-    assert.match(agentConfig, /\{\{bean_landing_intent\}\} is "question"/);
+    assert.doesNotMatch(agentConfig, /bean_landing_intent|quick-start intent/);
     assert.match(agentConfig, /expectsResponse:\s*false/);
     assert.match(agentConfig, /firstMessage:\s*true/);
     assert.match(agentConfig, /llm:\s*landingLlm/);
@@ -170,13 +155,14 @@ test('landing Bean reveals the three-step quick tour plus signup and pricing des
     assert.match(agentConfig, /enum: \['command_center', 'calendar_tasks', 'customization', 'features', 'pricing', 'signup', 'onboarding', 'how_it_works'\]/);
     assert.match(agentConfig, /keep it to exactly three short stops/);
     assert.match(agentConfig, /destination "onboarding"/);
-    assert.match(agentConfig, /hard-coded Bean-guided onboarding can take over/);
-    assert.match(agentConfig, /After the customization stop, end with a complete closing sentence and stop/);
-    assert.match(agentConfig, /do not transition into pricing/);
-    assert.match(agentConfig, /The third stop must not ask another follow-up or offer pricing/);
+    assert.match(agentConfig, /make it sound conversational instead of scripted/);
+    assert.match(agentConfig, /Do not repeat the same question twice/);
+    assert.match(agentConfig, /do not say “Want the next stop\?” more than once/);
+    assert.match(agentConfig, /Great — let’s get you started/);
+    assert.match(agentConfig, /Do not say handoff, transfer, another Bean, or explain implementation/);
     assert.match(agentConfig, /destination "command_center"/);
-    assert.match(agentConfig, /show "calendar_tasks"/);
-    assert.match(agentConfig, /show "customization"/);
+    assert.match(agentConfig, /destination "calendar_tasks"/);
+    assert.match(agentConfig, /destination "customization"/);
     assert.doesNotMatch(agentConfig, /walk through features or pricing/);
     assert.doesNotMatch(agentConfig, /notes \("notes"\)|shared workspaces \("workspaces"\)|then Bean itself \("bean"\)/);
 
@@ -192,8 +178,6 @@ test('landing Bean reveals the three-step quick tour plus signup and pricing des
         themes: '#tour-customization',
         features: '#features',
         pricing: '#plans',
-        signup: '#early-access',
-        onboarding: '#early-access',
     };
 
     for (const [destination, selector] of Object.entries(destinations)) {
@@ -216,8 +200,9 @@ test('landing Bean reveals the three-step quick tour plus signup and pricing des
     assert.match(source, /document\.querySelector\(target\.scrollSelector\) \|\| section/);
     assert.match(source, /window\.scrollTo\(\{ top: Math\.max\(0, top\), behavior: reduceMotion \? 'auto' : 'smooth' \}\)/);
     assert.match(source, /scrollTarget\.classList\.add\('public-bean-guided-highlight'\)/);
-    assert.match(source, /href: '\/register\?from=bean'/);
-    assert.match(source, /navigateDelay:\s*2800/);
+    assert.match(source, /signup:\s*\{ href: '\/register\?from=bean'/);
+    assert.match(source, /onboarding:\s*\{ href: '\/register\?from=bean'/);
+    assert.match(source, /navigateDelay:\s*0/);
     assert.match(source, /window\.location\.href = target\.href/);
     assert.match(source, /mountTourImageZoom\(\)/);
     assert.match(source, /closest\?\.\('\.tour-screenshot-card'\)/);

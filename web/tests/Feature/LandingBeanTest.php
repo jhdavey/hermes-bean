@@ -23,11 +23,9 @@ class LandingBeanTest extends TestCase
             $response->assertOk()
                 ->assertSee('data-public-bean', false)
                 ->assertSee('Tap to talk')
-                ->assertSee('Talk to Bean now', false)
-                ->assertSee('Bean can help right now.', false)
-                ->assertSee('data-public-bean-intent="quick_tour"', false)
-                ->assertSee('data-public-bean-intent="question"', false)
-                ->assertSee('data-public-bean-intent="signup"', false)
+                ->assertSee('Tap to talk to Bean', false)
+                ->assertDontSee('Bean can help right now.', false)
+                ->assertDontSee('data-public-bean-intent', false)
                 ->assertSee('Turn your volume on, then allow microphone access.', false)
                 ->assertDontSee('audio processed by ElevenLabs')
                 ->assertSee('assets/publicBean-', false)
@@ -246,16 +244,17 @@ class LandingBeanTest extends TestCase
             $this->assertStringContainsString('AI executive assistant for real life', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('busy professionals and parents', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not position HeyBean as a general-purpose chatbot', File::get($home.'/skills/heybean-guide/SKILL.md'));
-            $this->assertStringContainsString('give you the short tour, answer questions, or help you start signup', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('give you a quick tour, answer questions, or help you start signup', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not ask about their use case unless they explicitly ask for a recommendation.', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Help the visitor experience Bean as quickly as possible', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('not like a nagging salesperson', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('keep it to exactly three short stops', File::get($home.'/skills/heybean-guide/SKILL.md'));
-            $this->assertStringContainsString('hard-coded Bean-guided onboarding can take over', File::get($home.'/skills/heybean-guide/SKILL.md'));
-            $this->assertStringContainsString('After the customization stop, end with a complete closing sentence and stop', File::get($home.'/skills/heybean-guide/SKILL.md'));
-            $this->assertStringContainsString('do not transition into pricing', File::get($home.'/skills/heybean-guide/SKILL.md'));
-            $this->assertStringContainsString('The third stop must not ask another follow-up or offer pricing', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('make it sound conversational instead of scripted', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('Do not repeat the same question twice', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('Great — let’s get you started', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('Do not say handoff, transfer, another Bean, or explain implementation', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringNotContainsString('walk through features or pricing', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringNotContainsString('hard-coded Bean-guided onboarding can take over', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Supported values are: `command_center`, `calendar_tasks`, `customization`, `features`, `pricing`, `signup`, `onboarding`, and `how_it_works`', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('7 workspaces', File::get($home.'/skills/heybean-guide/SKILL.md'));
             touch($home.'/.last-used', now()->subHours(3)->timestamp);
