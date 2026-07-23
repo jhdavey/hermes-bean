@@ -1,7 +1,6 @@
 <section class="section early-access-section" id="early-access">
     <div class="wrap early-access-layout">
         <div class="early-access-copy">
-            <span class="section-kicker" style="text-align:left">LIMITED EARLY ACCESS</span>
             <div class="early-access-count"><strong>24</strong> of 100 spots left</div>
             <h2>A careful rollout, so Bean can get better with every person.</h2>
             <p>I’m building HeyBean as a solo developer. I’m opening access gradually so I can support each new group, learn what needs work, and keep the experience reliable.</p>

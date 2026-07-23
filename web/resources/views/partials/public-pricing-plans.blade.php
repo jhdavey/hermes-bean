@@ -4,7 +4,6 @@
 <section class="pricing-panel public-pricing" id="plans" aria-labelledby="pricing-heading">
     <div class="wrap">
         <div class="section-head">
-            <span class="section-kicker">Pricing</span>
             <h2 id="pricing-heading">Choose the support your life needs.</h2>
             <p>{{ $trialDays }}-day free trial · Cancel anytime</p>
         </div>

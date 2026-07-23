@@ -32,7 +32,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('meta name="description" content="HeyBean helps busy professionals and parents organize calendars, tasks, reminders, and everyday follow-through across work and home."', false)
             ->assertSee('Limited early access:', false)
             ->assertSee('24 of 100 spots left.', false)
-            ->assertSee('AI EXECUTIVE ASSISTANCE FOR REAL LIFE', false)
+            ->assertDontSee('AI EXECUTIVE ASSISTANCE FOR REAL LIFE', false)
             ->assertSee('class="hero-icon bean"', false)
             ->assertSee('.hero-icon.bean,.hero-icon.bean img{width:45px;height:45px}', false)
             ->assertSee('Stop carrying every detail yourself.', false)
@@ -67,6 +67,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertDontSee('Used by <strong>', false)
             ->assertDontSee('id="reviews"', false)
             ->assertDontSee('Get Early Access', false)
+            ->assertDontSee('class="section-kicker', false)
             ->assertSee('AI executive assistance for real life.', false);
 
         $this->get('/pricing')
@@ -79,7 +80,8 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('href="/register?plan=premium&billing_interval=monthly"', false)
             ->assertSee('href="/register?plan=pro&billing_interval=monthly"', false)
             ->assertDontSee('Enterprise', false)
-            ->assertDontSee('For teams', false);
+            ->assertDontSee('For teams', false)
+            ->assertDontSee('class="section-kicker', false);
     }
 
     public function test_public_pricing_uses_the_current_admin_plan_limits(): void

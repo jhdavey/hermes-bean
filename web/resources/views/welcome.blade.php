@@ -45,7 +45,6 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
             </span>
         </div>
-        <span class="section-kicker hero-kicker">AI EXECUTIVE ASSISTANCE FOR REAL LIFE</span>
         <h1>Stop carrying every detail yourself.</h1>
         <p class="hero-subhead">HeyBean is the AI executive assistant for busy professionals and parents. Tell Bean what needs to happen, and it turns your requests into calendar events, tasks, reminders, and follow-ups across work and home.</p>
         <div class="hero-actions">
@@ -63,7 +62,6 @@
     <section class="section soft problem-section" id="how-it-works">
         <div class="wrap problem-layout">
             <div class="problem-copy">
-                <span class="section-kicker" style="text-align:left">THE MENTAL LOAD</span>
                 <h2>Built for people balancing a career, a household, and everything between them.</h2>
                 <p>Work deadlines, appointments, school forms, family plans, errands, and follow-ups rarely live in one place. Your calendar holds some of them. Your messages and notes hold others. And too many still depend on you remembering them.</p>
                 <p class="problem-closing">Bean gives you one assistant for organizing what needs to happen next.</p>
@@ -89,7 +87,6 @@
         <div class="wrap">
             <div class="feature-row">
                 <div class="feature-copy">
-                    <span class="section-kicker" style="text-align:left">BEAN ASSISTANT</span>
                     <h3>Ask once. Bean organizes what happens next.</h3>
                     <p>Bean doesn’t just answer questions. It turns what you tell it into an organized plan using your calendar, tasks, and reminders.</p>
                 </div>
@@ -148,7 +145,6 @@
                     </figure>
                 </div>
                 <div class="feature-copy">
-                    <span class="section-kicker" style="text-align:left">CAPTURE</span>
                     <h3>Capture it before it slips away.</h3>
                     <p>Tell Bean what you need to remember while it is still on your mind. Bean can turn a quick request into an event, task, reminder, or simple plan without making you stop and organize everything yourself.</p>
                     <ul class="feature-list">
@@ -166,7 +162,6 @@
                     </figure>
                 </div>
                 <div class="feature-copy">
-                    <span class="section-kicker" style="text-align:left">COORDINATION</span>
                     <h3>Keep work and home moving together.</h3>
                     <p>Your responsibilities may belong to different parts of your life, but they still compete for the same time and attention. Bean helps you coordinate calendars, tasks, people, and reminders without treating household management like another job.</p>
                     <ul class="feature-list">
@@ -185,7 +180,6 @@
                     </figure>
                 </div>
                 <div class="feature-copy">
-                    <span class="section-kicker" style="text-align:left">DAILY FOLLOW-THROUGH</span>
                     <h3>Open Bean and know what needs your attention.</h3>
                     <p>See what is scheduled, what is due, and what still needs a nudge across work, family, appointments, errands, and recurring responsibilities.</p>
                     <ul class="feature-list">
@@ -202,13 +196,11 @@
     <section class="section clarity-section">
         <div class="wrap clarity-grid">
             <article class="clarity-card">
-                <span class="section-kicker" style="text-align:left">LESS MANUAL ORGANIZING</span>
                 <h2>More than a place to store another list.</h2>
                 <p>A traditional task manager waits for you to enter, organize, and maintain everything. Bean helps turn what you say into structured follow-through—so using the system does not become another responsibility.</p>
                 <strong>You can still review and edit everything. You just do not have to organize every detail manually.</strong>
             </article>
             <article class="clarity-card trust-card">
-                <span class="section-kicker" style="text-align:left">YOU STAY IN CONTROL</span>
                 <h2>Bean works for you—and you stay in control.</h2>
                 <p>Review important changes before they happen, see what Bean has organized, and decide which information and services Bean can access.</p>
                 <ul class="feature-list">
