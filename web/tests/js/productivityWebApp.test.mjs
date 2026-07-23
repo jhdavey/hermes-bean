@@ -25,7 +25,8 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.match(source, /Use plain signup form/);
     assert.match(source, /plainSignupMarkup/);
     assert.match(source, /hb-guided-chat-log/);
-    assert.match(source, /Hi, I’m Bean\. I’ll help get your HeyBean account set up/);
+    assert.match(source, /fromLandingBean/);
+    assert.match(source, /I’ll help get your HeyBean account set up\. What is your first and last name\?/);
     assert.match(source, /data-action="guided-onboarding"/);
     assert.match(source, /data-action="plain-signup"/);
     assert.match(source, /startOnboardingTourIfNeeded/);
@@ -41,6 +42,12 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.match(source, /data-post-tour-first-action/);
     assert.match(source, /data-post-tour-bean-do-it/);
     assert.match(source, /data-post-tour-walkthrough/);
+    assert.match(source, /signupPaywallDeferred/);
+    assert.match(source, /startSignupDashboardPreview/);
+    assert.match(source, /activateOnboardingTourStep\(0\)/);
+    assert.match(source, /openDeferredSignupPaywall\('Choose a plan to continue into your dashboard\.'/);
+    assert.ok(source.indexOf('startSignupDashboardPreview(result)') < source.indexOf('openGuidedPlanSelection()'));
+    assert.ok(source.indexOf('closeOnboardingTour()') < source.indexOf('finishPostTourFirstAction()'));
     assert.ok(source.indexOf('data-post-tour-walkthrough') < source.indexOf('data-post-tour-bean-do-it'));
     assert.doesNotMatch(source, /Skip this step/);
     assert.match(source, /sendBeanMessageContent\(action\.beanPrompt\)/);
@@ -54,7 +61,8 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.match(source, /currently at capacity/);
     assert.match(source, /controlled rollout/);
     assert.match(source, /usually within 1–2 days/);
-    assert.ok(source.indexOf("state.phase = 'waitlist'") < source.indexOf('openGuidedPlanSelection()'));
+    assert.doesNotMatch(source, /You won’t choose a plan or pay while you wait/);
+    assert.ok(source.indexOf("state.phase = 'waitlist'") < source.indexOf('startSignupDashboardPreview(result)'));
     assert.match(baseShellSource, /\.hb-guided-chat-composer/);
     assert.match(baseShellSource, /\.hb-guided-chat-bubble-user/);
 });

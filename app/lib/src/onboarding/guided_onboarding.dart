@@ -63,7 +63,7 @@ class _GuidedBeanOnboardingScreenState
     const _GuidedOnboardingMessage(
       bean: true,
       text:
-          'Hi, I’m Bean. HeyBean is opening early access gradually, with 24 of the first 100 spots left. I’ll help reserve yours and set up your account. What name should I call you?',
+          'Hi, I’m Bean. HeyBean is opening early access gradually, with 24 of the first 100 spots left. I’ll help reserve yours and set up your account. What is your first and last name?',
     ),
   ];
 
@@ -256,7 +256,7 @@ class _GuidedBeanOnboardingScreenState
       if (auth.user.accessState == 'waitlisted') {
         setState(() => _step = _GuidedOnboardingStep.waitlist);
         await _respondBean(
-          'Your account is created and your place on the early-access waitlist is saved. I’m being rolled out gradually by a solo developer so every new group can be supported well. We’ll email you as soon as your spot opens, and you won’t be asked to choose a plan or pay while you wait.',
+          'Unfortunately, it looks like we’re currently at capacity. Since we’re doing a controlled rollout, I’ll add you to the waitlist and let you know when we can continue onboarding. It’s usually within 1–2 days.',
         );
         return;
       }
@@ -633,21 +633,12 @@ class _EarlyAccessWaitlistScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'You’re on the early-access waitlist. HeyBean is being rolled out gradually by a solo developer so each new group can be supported well. We’ll email you as soon as your spot opens.',
+                  'Unfortunately, it looks like we’re currently at capacity. Since we’re doing a controlled rollout, I’ll add you to the waitlist and let you know when we can continue onboarding. It’s usually within 1–2 days.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: HeyBeanTheme.muted,
                     height: 1.5,
                     fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'You won’t be asked to choose a plan or pay while you wait.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: HeyBeanTheme.text,
-                    fontWeight: FontWeight.w800,
                   ),
                 ),
                 const SizedBox(height: 22),

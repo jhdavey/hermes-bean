@@ -28,7 +28,7 @@ Public landing / pricing / legal page
   -> after the visitor confirms yes, Bean gives the normal intro and continues
   -> Agent answers directly with GPT-4.1 Nano and public product/pricing facts
   -> optional action-only client tool: showLandingSection({ destination })
-  -> explicit signup agreement opens /register?from=bean so hard-coded app onboarding continues as Bean
+  -> explicit signup agreement opens /register?from=bean so hard-coded app onboarding continues as Bean and asks for first/last name without repeating “Hi, I’m Bean”
   -> no authenticated dashboard plugin, account data, private tools, or Hermes turn on the voice hot path
 ```
 

@@ -23,7 +23,7 @@ class LandingBeanTest extends TestCase
             $response->assertOk()
                 ->assertSee('data-public-bean', false)
                 ->assertSee('Tap to talk')
-                ->assertSee('Tap to talk to Bean', false)
+                ->assertSee('Hey! I\'m over here!🔍️️', false)
                 ->assertDontSee('Bean can help right now.', false)
                 ->assertDontSee('data-public-bean-intent', false)
                 ->assertSee('Turn your volume on, then allow microphone access.', false)

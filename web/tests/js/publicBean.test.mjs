@@ -12,7 +12,7 @@ test('public pages expose a compact Bean control without the authenticated chat 
     assert.match(navigation, /data-public-bean/);
     assert.match(navigation, /Tap to talk/);
     assert.match(navigation, /data-public-bean-status/);
-    assert.match(navigation, /Tap to talk to Bean/);
+    assert.match(navigation, /Hey! I'm over here!🔍️️/);
     assert.match(navigation, /data-public-bean-cue/);
     assert.match(navigation, /aria-label="Talk with Bean"/);
     assert.match(navigation, /Turn your volume on, then allow microphone access\./);

@@ -38,6 +38,7 @@ export function reconcileAllDayEndDateInput(startValue, endValue) {
 export function mountHeyBeanWebApp(mount) {
     const logoUrl = mount.dataset.logo || '/images/bean-logo.png';
     const initialMode = mount.dataset.authMode || 'login';
+    const fromLandingBean = mount.dataset.fromLandingBean === 'true';
     const initialSelectedPlan = ['base', 'premium', 'pro'].includes(mount.dataset.selectedPlan) ? mount.dataset.selectedPlan : '';
     const initialBillingInterval = mount.dataset.selectedBillingInterval === 'yearly' ? 'yearly' : 'monthly';
     const initialBillingStatus = new URLSearchParams(window.location.search).get('billing') || '';
@@ -113,6 +114,7 @@ export function mountHeyBeanWebApp(mount) {
         outlookStatus: null,
         outlookAuthUrl: '',
         onboardingJustCompleted: false,
+        signupPaywallDeferred: false,
         onboardingTourActive: false,
         onboardingTourStep: 0,
         calendarRefreshing: false,
@@ -1506,7 +1508,7 @@ export function mountHeyBeanWebApp(mount) {
                 return;
             }
             state.guidedSignupStep = 'plan';
-            openGuidedPlanSelection();
+            startSignupDashboardPreview(result);
         } catch (error) {
             state.busy = false;
             state.guidedSignupError = friendlyError(error, 'create your account');
@@ -1527,6 +1529,36 @@ export function mountHeyBeanWebApp(mount) {
                 billing_interval: normalizedBillingInterval(state.selectedBillingInterval),
             },
         });
+    }
+
+    function startSignupDashboardPreview(result = {}) {
+        state.signupPaywallDeferred = true;
+        state.subscriptionCheckoutStatus = '';
+        state.subscriptionSummary = null;
+        state.selectedPlan = result.selected_plan || state.selectedPlan || 'premium';
+        state.selectedBillingInterval = normalizedBillingInterval(result.selected_billing_interval || state.selectedBillingInterval);
+        state.phase = 'signedIn';
+        state.selected = 'today';
+        state.showMonth = false;
+        state.dashboardDataLoading = false;
+        state.error = '';
+        state.notice = '';
+        state.modal = null;
+        history.pushState({}, '', '/app?welcome=1');
+        activateOnboardingTourStep(0);
+        render();
+    }
+
+    function openDeferredSignupPaywall(message = 'Choose a plan to continue with HeyBean.') {
+        if (!state.signupPaywallDeferred && !userNeedsSignupPaywall()) return false;
+        state.signupPaywallDeferred = false;
+        state.onboardingTourActive = false;
+        state.onboardingTourStep = 0;
+        state.modal = null;
+        state.error = '';
+        state.notice = message;
+        openGuidedPlanSelection();
+        return true;
     }
 
     function openGuidedPlanSelection() {
@@ -1569,7 +1601,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function guidedChatMessages() {
         const messages = [
-            ['bean', 'Hi, I’m Bean. I’ll help get your HeyBean account set up. What name should I call you?'],
+            ['bean', `${fromLandingBean ? '' : 'Hi, I’m Bean. '}I’ll help get your HeyBean account set up. What is your first and last name?`],
         ];
         if (state.guidedSignupName) {
             messages.push(['user', state.guidedSignupName]);
@@ -1698,7 +1730,7 @@ export function mountHeyBeanWebApp(mount) {
                 render();
                 return;
             }
-            openGuidedPlanSelection();
+            startSignupDashboardPreview(result);
         } catch (error) {
             state.busy = false;
             state.error = friendlyError(error, 'create your account');
@@ -1714,7 +1746,7 @@ export function mountHeyBeanWebApp(mount) {
                         <img src="${escapeAttr(logoUrl)}" alt="Bean">
                         <div><h1>Your account is created</h1><p class="hb-item-meta">You’re on the early-access waitlist.</p></div>
                     </div>
-                    <div class="hb-success"><strong>Your place is saved.</strong><span>Unfortunately, it looks like we’re currently at capacity. Since we’re doing a controlled rollout, I’ll add you to the waitlist and let you know when we can continue onboarding. It’s usually within 1–2 days. You won’t choose a plan or pay while you wait.</span></div>
+                    <div class="hb-success"><strong>Your place is saved.</strong><span>Unfortunately, it looks like we’re currently at capacity. Since we’re doing a controlled rollout, I’ll add you to the waitlist and let you know when we can continue onboarding. It’s usually within 1–2 days.</span></div>
                     <div class="hb-link-row"><a class="hb-button-secondary" href="/">Back to HeyBean</a><button class="hb-button-ghost" type="button" data-subscribe-logout>Use another email</button></div>
                 </section>
             </main>
@@ -4120,11 +4152,13 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function finishPostTourFirstAction() {
+        if (openDeferredSignupPaywall('Choose a plan to continue into your dashboard.')) return;
         state.modal = null;
     }
 
     async function askBeanToStartPostTourAction(actionKey) {
         const action = postTourFirstAction(actionKey);
+        if (openDeferredSignupPaywall(`Choose a plan to continue, then Bean can help you ${postTourFirstActionTitle(action).toLowerCase()}.`)) return;
         state.modal = null;
         state.bean.panelOpen = true;
         state.notice = 'Bean is starting your first action.';
@@ -4134,6 +4168,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function walkThroughPostTourAction(actionKey) {
         const action = postTourFirstAction(actionKey);
+        if (openDeferredSignupPaywall(`Choose a plan to continue, then Bean can walk you through ${postTourFirstActionTitle(action).toLowerCase()}.`)) return;
         state.modal = null;
         state.error = '';
         if (action.key === 'customize_dashboard') {
@@ -6862,6 +6897,9 @@ export function mountHeyBeanWebApp(mount) {
             if (event.target.classList.contains('hb-modal-backdrop')) {
                 if (state.modal?.type === 'register-early-access-success') {
                     window.location.href = '/';
+                    return;
+                }
+                if (state.modal?.type === 'post-tour-first-action' && openDeferredSignupPaywall('Choose a plan to continue into your dashboard.')) {
                     return;
                 }
                 state.modal = null;
