@@ -7,8 +7,10 @@
 .public-bean-presence {
     --public-bean-accent: 82, 168, 105;
     --public-bean-ring-angle: 0deg;
-    position: relative;
-    z-index: 36;
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 54px);
+    left: max(24px, calc((100vw - var(--pb-max, 1152px)) / 2 + 24px));
+    z-index: 70;
     min-width: 0;
     display: inline-flex;
     align-items: center;
@@ -19,6 +21,13 @@
     box-shadow: 0 8px 22px rgba(16, 24, 40, .08);
     isolation: isolate;
     transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
+}
+
+.public-bean-nav-spacer {
+    flex: 0 0 124px;
+    width: 124px;
+    height: 42px;
+    pointer-events: none;
 }
 
 .public-bean-cue {
@@ -253,6 +262,16 @@
 }
 
 @media (max-width: 620px) {
+    .public-bean-presence {
+        top: calc(env(safe-area-inset-top, 0px) + 54px);
+        left: 17px;
+    }
+
+    .public-bean-nav-spacer {
+        flex-basis: 124px;
+        width: 124px;
+    }
+
     .public-bean-cue {
         top: calc(100% + 28px);
         left: 54px;

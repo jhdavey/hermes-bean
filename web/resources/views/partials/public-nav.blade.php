@@ -24,6 +24,7 @@
         <span class="public-bean-help" data-public-bean-help>Turn your volume on, then allow microphone access.</span>
         <span class="public-bean-turnstile" data-public-bean-turnstile hidden></span>
     </div>
+    <span class="public-bean-nav-spacer" aria-hidden="true"></span>
     <nav class="navlinks" aria-label="Primary navigation">
         <a href="/#how-it-works">How It Works</a>
         <a href="/#features">Features</a>

@@ -15,6 +15,7 @@ test('public pages expose a compact Bean control without the authenticated chat 
     assert.match(navigation, /data-public-bean-cue/);
     assert.match(navigation, /aria-label="Talk with Bean"/);
     assert.match(navigation, /Turn your volume on, then allow microphone access\./);
+    assert.match(navigation, /public-bean-nav-spacer/);
     assert.doesNotMatch(navigation, /data-bean-panel|hb-bean-chat/);
     assert.match(styles, /\.public-bean-presence/);
     assert.match(styles, /background:\s*rgba\(255, 255, 255/);
@@ -24,6 +25,20 @@ test('public pages expose a compact Bean control without the authenticated chat 
     assert.match(styles, /\.public-bean-cue-arrow/);
     assert.match(styles, /\.public-bean-help/);
     assert.match(styles, /\.public-bean-cue:focus-visible/);
+});
+
+test('landing Bean stays fixed in the top-left viewport while page content scrolls', () => {
+    const presence = styles.match(/\.public-bean-presence \{([\s\S]*?)\n\}/)?.[1] || '';
+    const spacer = styles.match(/\.public-bean-nav-spacer \{([\s\S]*?)\n\}/)?.[1] || '';
+    assert.match(presence, /position:\s*fixed/);
+    assert.match(presence, /top:\s*calc\(env\(safe-area-inset-top, 0px\) \+ 54px\)/);
+    assert.match(presence, /left:\s*max\(24px, calc\(\(100vw - var\(--pb-max, 1152px\)\) \/ 2 \+ 24px\)\)/);
+    assert.match(presence, /z-index:\s*70/);
+    assert.match(spacer, /flex:\s*0 0 124px/);
+    assert.match(spacer, /height:\s*42px/);
+
+    const mobileBlock = styles.match(/@media \(max-width: 620px\) \{([\s\S]*?)@media \(max-width: 390px\)/)?.[1] || '';
+    assert.match(mobileBlock, /\.public-bean-presence \{[\s\S]*?left:\s*17px/);
 });
 
 test('landing Bean handwritten cue keeps the arrow separate and more upward than leftward', () => {
