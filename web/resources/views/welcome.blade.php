@@ -138,7 +138,7 @@
 
     <section class="section soft" id="features">
         <div class="wrap">
-            <div class="feature-row reverse">
+            <div class="feature-row reverse" id="tour-tasks">
                 <div class="feature-media">
                     <figure class="mock-card landing-screenshot-card" aria-label="HeyBean task and reminder screenshot">
                         <img class="landing-screenshot" src="{{ asset('images/heybean-landing-task-management.png') }}?v={{ filemtime(public_path('images/heybean-landing-task-management.png')) }}" width="762" height="434" loading="lazy" alt="HeyBean task view showing work and personal commitments with dates and follow-ups">
@@ -155,7 +155,7 @@
                 </div>
             </div>
 
-            <div class="feature-row">
+            <div class="feature-row" id="tour-calendar">
                 <div class="feature-media">
                     <figure class="mock-card landing-screenshot-card" aria-label="HeyBean scheduling screenshot">
                         <img class="landing-screenshot" src="{{ asset('images/heybean-landing-scheduling.png') }}?v={{ filemtime(public_path('images/heybean-landing-scheduling.png')) }}" width="614" height="558" loading="lazy" alt="HeyBean calendar showing coordinated work and personal plans across the month">
@@ -173,7 +173,7 @@
                 </div>
             </div>
 
-            <div class="feature-row reverse">
+            <div class="feature-row reverse" id="tour-daily">
                 <div class="feature-media">
                     <figure class="mock-card landing-screenshot-card" aria-label="HeyBean daily follow-through screenshot">
                         <img class="landing-screenshot" src="{{ asset('images/heybean-landing-daily-control.png') }}?v={{ filemtime(public_path('images/heybean-landing-daily-control.png')) }}" width="598" height="702" loading="lazy" alt="HeyBean daily view showing events, tasks, reminders, and notes">
@@ -190,6 +190,29 @@
                     </ul>
                 </div>
             </div>
+        </div>
+    </section>
+
+    <section class="section" id="tour-context">
+        <div class="wrap clarity-grid">
+            <article class="clarity-card" id="tour-notes">
+                <h2>Notes keep context beside the plan.</h2>
+                <p>Use Markdown-backed notes that feel like a normal word processor, so plans, decisions, and follow-up details can live beside the tasks and calendar items they belong to.</p>
+                <ul class="feature-list">
+                    <li>Capture meeting notes, household details, and project context.</li>
+                    <li>Keep supporting information close to daily follow-through.</li>
+                    <li>Edit notes directly instead of managing a separate notes tool.</li>
+                </ul>
+            </article>
+            <article class="clarity-card trust-card" id="tour-workspaces">
+                <h2>Shared workspaces separate work, home, and recurring plans.</h2>
+                <p>Organize responsibilities by workspace so the same assistant can help with professional deadlines, household logistics, and shared routines without mixing every context together.</p>
+                <ul class="feature-list">
+                    <li>Coordinate calendars, tasks, reminders, and notes by workspace.</li>
+                    <li>Share planning context with the people involved.</li>
+                    <li>Choose which calendars and workspaces Bean can use.</li>
+                </ul>
+            </article>
         </div>
     </section>
 

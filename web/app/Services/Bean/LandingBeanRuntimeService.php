@@ -11,6 +11,19 @@ use Throwable;
 class LandingBeanRuntimeService
 {
     private const USER_FACING_FAILURE = 'I am having trouble answering right now. Please try me again in a moment.';
+    private const UI_ACTIONS = [
+        'how_it_works',
+        'bean',
+        'daily',
+        'calendar',
+        'tasks',
+        'reminders',
+        'notes',
+        'workspaces',
+        'features',
+        'pricing',
+        'signup',
+    ];
 
     public function __construct(private readonly PublicPricingPlanService $pricingPlans) {}
 
@@ -161,9 +174,10 @@ Do not repeat the full introduction later in the same conversation.
 - If the visitor asks how Bean works, explain that they can speak or type naturally and Bean coordinates calendars, tasks, reminders, and follow-through inside their signed-in account, while important or sensitive actions remain visible to them.
 - If they ask about features, briefly group the answer into capture, work-and-home coordination, daily follow-through, notes, shared workspaces, and connected calendars. Ask which group matters most to them, then put `[[BEAN_UI:features]]` on its own final line so the website can show the features section.
 - If they ask about pricing, compare the three plans directly in no more than 70 spoken words, then put `[[BEAN_UI:pricing]]` on its own final line so the website can show the pricing section. Do not ask about their use case unless they explicitly ask for a recommendation.
-- If they ask for a quick tour, give a short verbal tour in this order: the daily command center, calendar views, tasks and reminders, notes, shared workspaces, then Bean. Pause after two or three areas and invite a question before continuing.
+- If they ask for a quick tour, guide the visible page one area at a time. Start with the daily command center and put `[[BEAN_UI:daily]]` on its own final line. If they ask to continue, move through calendar views (`calendar`), tasks and reminders (`tasks`), notes (`notes`), shared workspaces (`workspaces`), then Bean itself (`bean`).
+- When a response is mainly about a specific visible area, put a matching `[[BEAN_UI:...]]` marker on its own final line. Supported values are: `how_it_works`, `bean`, `daily`, `calendar`, `tasks`, `reminders`, `notes`, `workspaces`, `features`, `pricing`, and `signup`.
 - A verbal tour may span several turns. Do not rush through every feature in one long response.
-- The two `BEAN_UI` markers are silent control metadata, never part of the spoken answer. Use only the exact allowlisted `features` and `pricing` values, and only when the response is substantively about that requested area.
+- `BEAN_UI` markers are silent control metadata, never part of the spoken answer. Use only the exact allowlisted values above, and only when the response is substantively about that requested area.
 - The website, not you, performs the movement. You may say you are showing the relevant section, but never claim it succeeded or describe any other visual action.
 
 ## Conversation rules
@@ -265,7 +279,7 @@ MD;
         $uiAction = null;
         $output = preg_replace_callback('/\[\[BEAN_UI:([a-z0-9_-]+)\]\]/iu', function (array $matches) use (&$uiAction): string {
             $candidate = strtolower($matches[1]);
-            if (in_array($candidate, ['features', 'pricing'], true)) {
+            if (in_array($candidate, self::UI_ACTIONS, true)) {
                 $uiAction = $candidate;
             }
 

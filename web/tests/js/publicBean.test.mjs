@@ -5,6 +5,7 @@ import test from 'node:test';
 const source = await readFile(new URL('../../resources/js/publicBean.js', import.meta.url), 'utf8');
 const styles = await readFile(new URL('../../resources/css/public-bean.css', import.meta.url), 'utf8');
 const navigation = await readFile(new URL('../../resources/views/partials/public-nav.blade.php', import.meta.url), 'utf8');
+const landing = await readFile(new URL('../../resources/views/welcome.blade.php', import.meta.url), 'utf8');
 const agentConfig = await readFile(new URL('../../scripts/elevenlabs-landing-agent-configure.mjs', import.meta.url), 'utf8');
 
 test('public pages expose a compact Bean control without the authenticated chat panel', () => {
@@ -141,13 +142,39 @@ test('landing Bean supports optional bot verification without exposing a secret'
     assert.doesNotMatch(navigation, /TURNSTILE_SECRET|secret_key/);
 });
 
-test('landing Bean reveals allowlisted feature and pricing destinations', () => {
+test('landing Bean reveals allowlisted feature, tour, signup, and pricing destinations', () => {
     assert.match(source, /showLandingUiAction\(parameters\.destination \|\| parameters\.section \|\| parameters\.action\)/);
     assert.match(source, /showLandingUiAction\(response\?\.ui_action \|\| parameters\.destination\)/);
     assert.match(agentConfig, /required: \['destination'\]/);
-    assert.match(agentConfig, /enum: \['features', 'pricing'\]/);
-    assert.match(source, /features:\s*\{ selector: '#features', href: '\/#features'/);
-    assert.match(source, /pricing:\s*\{ selector: '#plans', scrollSelector: '#plans \.plans', href: '\/#plans', label: 'pricing', offset: 24 \}/);
+    assert.match(agentConfig, /enum: \['how_it_works', 'bean', 'daily', 'calendar', 'tasks', 'reminders', 'notes', 'workspaces', 'features', 'pricing', 'signup'\]/);
+    assert.match(agentConfig, /Start with the daily command center and call showLandingSection with destination "daily"/);
+    assert.match(agentConfig, /move through calendar views \("calendar"\), tasks and reminders \("tasks"\), notes \("notes"\), shared workspaces \("workspaces"\), then Bean itself \("bean"\)/);
+
+    const destinations = {
+        how_it_works: '#how-it-works',
+        bean: '#bean-demo',
+        daily: '#tour-daily',
+        calendar: '#tour-calendar',
+        tasks: '#tour-tasks',
+        reminders: '#tour-tasks',
+        notes: '#tour-notes',
+        workspaces: '#tour-workspaces',
+        features: '#features',
+        pricing: '#plans',
+        signup: '#early-access',
+    };
+
+    for (const [destination, selector] of Object.entries(destinations)) {
+        assert.match(source, new RegExp(`${destination}:\\s*\\{ selector: '${selector.replace('#', '#')}'`));
+        assert.match(source, new RegExp(`href: '/${selector}'`));
+    }
+
+    for (const id of ['tour-tasks', 'tour-calendar', 'tour-daily', 'tour-context', 'tour-notes', 'tour-workspaces']) {
+        assert.match(landing, new RegExp(`id="${id}"`));
+    }
+    assert.match(landing, /Notes keep context beside the plan\./);
+    assert.match(landing, /Shared workspaces separate work, home, and recurring plans\./);
+    assert.match(source, /const key = String\(action \|\| ''\)\.toLowerCase\(\)\.trim\(\)\.replace\(\/\[\\s-\]\+\/g, '_'\)/);
     assert.match(source, /document\.querySelector\(target\.scrollSelector\) \|\| section/);
     assert.match(source, /window\.scrollTo\(\{ top: Math\.max\(0, top\), behavior: reduceMotion \? 'auto' : 'smooth' \}\)/);
     assert.doesNotMatch(source, /section\.scrollIntoView/);

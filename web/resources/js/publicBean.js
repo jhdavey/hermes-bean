@@ -374,10 +374,20 @@ function mountPublicBean(root) {
 
 function showLandingUiAction(action) {
     const targets = {
-        features: { selector: '#features', href: '/#features', label: 'features' },
+        how_it_works: { selector: '#how-it-works', href: '/#how-it-works', label: 'how it works', offset: 118 },
+        bean: { selector: '#bean-demo', href: '/#bean-demo', label: 'Bean', offset: 118 },
+        daily: { selector: '#tour-daily', href: '/#tour-daily', label: 'daily command center', offset: 118 },
+        calendar: { selector: '#tour-calendar', href: '/#tour-calendar', label: 'calendar views', offset: 118 },
+        tasks: { selector: '#tour-tasks', href: '/#tour-tasks', label: 'tasks and reminders', offset: 118 },
+        reminders: { selector: '#tour-tasks', href: '/#tour-tasks', label: 'tasks and reminders', offset: 118 },
+        notes: { selector: '#tour-notes', href: '/#tour-notes', label: 'notes', offset: 118 },
+        workspaces: { selector: '#tour-workspaces', href: '/#tour-workspaces', label: 'shared workspaces', offset: 118 },
+        features: { selector: '#features', href: '/#features', label: 'features', offset: 118 },
         pricing: { selector: '#plans', scrollSelector: '#plans .plans', href: '/#plans', label: 'pricing', offset: 24 },
+        signup: { selector: '#early-access', href: '/#early-access', label: 'early access', offset: 118 },
     };
-    const target = targets[String(action || '').toLowerCase()];
+    const key = String(action || '').toLowerCase().trim().replace(/[\s-]+/g, '_');
+    const target = targets[key];
     if (!target) return null;
 
     const section = document.querySelector(target.selector);

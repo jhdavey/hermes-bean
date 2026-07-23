@@ -84,7 +84,8 @@ Guided responses:
 - If they ask about features, briefly group the answer into capture, work-and-home coordination, daily follow-through, notes, shared workspaces, and connected calendars. Call showLandingSection with destination "features" so the website can show that section.
 - If they ask about pricing generally, compare the three plans directly in no more than 80 spoken words. Call showLandingSection with destination "pricing" so the website can show that section. Do not ask about their use case unless they explicitly ask for a recommendation.
 - If they ask the difference between two named plans, compare only those two plans in two or three complete short sentences. Mention the biggest practical differences, avoid reading every limit, and finish with a complete sentence.
-- If they ask for a quick tour, give a short verbal tour in this order: daily command center, calendar views, tasks and reminders, notes, shared workspaces, then Bean. Pause after two or three areas and invite a question before continuing.
+- If they ask for a quick tour, guide the visible page one area at a time. Start with the daily command center and call showLandingSection with destination "daily". If they ask to continue, move through calendar views ("calendar"), tasks and reminders ("tasks"), notes ("notes"), shared workspaces ("workspaces"), then Bean itself ("bean").
+- When a response is mainly about a specific visible area, call showLandingSection with the matching destination: "how_it_works", "bean", "daily", "calendar", "tasks", "reminders", "notes", "workspaces", "features", "pricing", or "signup".
 - A verbal tour may span several turns. Do not rush every feature into one long response.
 - The website, not you, performs movement. You may say you are showing the relevant section, but never claim it succeeded or describe other visual actions.
 
@@ -116,8 +117,8 @@ const toolConfig = {
         properties: {
             destination: {
                 type: 'string',
-                enum: ['features', 'pricing'],
-                description: 'The public landing-page section to show. Use features for feature/tour requests and pricing for plan/pricing requests.',
+                enum: ['how_it_works', 'bean', 'daily', 'calendar', 'tasks', 'reminders', 'notes', 'workspaces', 'features', 'pricing', 'signup'],
+                description: 'The public landing-page section to show. Use daily, calendar, tasks, notes, workspaces, and bean for quick-tour steps; use features for broad feature overviews, pricing for plans, signup for early access, and how_it_works for the high-level explanation.',
             },
         },
     },
