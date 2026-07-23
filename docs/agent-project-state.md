@@ -1,6 +1,6 @@
 # HeyBean Agent Project State
 
-Last updated: 2026-07-23T01:27:41Z
+Last updated: 2026-07-23T13:35:00Z
 
 Purpose: give future Hermes/agent sessions a compact, durable starting point for HeyBean work without relying on chat context. Read this file before coding when the task touches Bean, HeyBean, voice UX, runtime/tooling, deployment, or project direction.
 
@@ -12,7 +12,7 @@ Purpose: give future Hermes/agent sessions a compact, durable starting point for
 - Production host/path: `forge@heybean.org:/home/forge/heybean.org/current`
 - Production commit last verified in prior work: `71d9234f Fix Bean voice handoff and natural event times`
 - Production known server-only state: untracked `.env`, `storage`, `web/storage`; do not clean production storage/env casually.
-- Production Bean voice timing last verified in prior work: `60/5/10/15/15` = max duration / provider soft timeout / background handoff / silence end-call / follow-up idle close.
+- Production Bean voice timing last verified in prior work: authenticated `60/5/10/15/15` = max duration / provider soft timeout / background handoff / silence end-call / follow-up idle close. Public landing voice uses a separate fast ElevenLabs Landing Guide that answers directly with public facts and only calls an action-only section tool.
 
 ## Product/runtime direction
 
@@ -20,7 +20,7 @@ Purpose: give future Hermes/agent sessions a compact, durable starting point for
 - Laravel owns auth/safety boundary, scoped app/dashboard tools, TimeContext normalization, instrumentation, usage metering, and UI mirroring.
 - Hermes/model owns conversation, memory, reasoning, tool choice, and final wording.
 - Bean should preserve conversational context for app-data follow-ups; do not answer unrelated generic time/date facts when prior context implies a resource query.
-- Public landing Bean remains isolated from private dashboard/app tools.
+- Public landing Bean remains isolated from private dashboard/app tools. Public landing voice should use the fast ElevenLabs Landing Guide directly for bounded product/pricing questions; do not put Hermes on that voice hot path unless the scope becomes private/account-specific.
 - Authenticated Bean can use scoped dashboard/resource actions through the Laravel-owned tool bridge.
 
 ## Voice UX direction

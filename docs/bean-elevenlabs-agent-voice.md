@@ -24,10 +24,9 @@ Public landing / pricing / legal page
   -> local “Hey Bean” wake detection
   -> /bean/landing/conversation-token (session + CSRF + rate limited)
   -> dedicated ElevenLabs Landing Guide agent
-  -> Agent calls client tool: askLandingBean({ message, destination })
-  -> /bean/landing/messages
-  -> isolated per-browser Hermes home with the heybean-guide skill only
-  -> no authenticated dashboard plugin, account data, or private tools
+  -> Agent answers directly with GPT-4.1 Nano and public product/pricing facts
+  -> optional action-only client tool: showLandingSection({ destination })
+  -> no authenticated dashboard plugin, account data, private tools, or Hermes turn on the voice hot path
 ```
 
 ## Required env
@@ -53,7 +52,7 @@ The landing guide is disabled on every page load and requires an explicit visito
 
 Browser voice should remain provider-owned after wake detection:
 
-- Local browser code owns only privacy state, microphone permission, wake detection, event logging, and the `askBean`/`askLandingBean` client-tool bridge.
+- Local browser code owns only privacy state, microphone permission, wake detection, event logging, the authenticated `askBean` client-tool bridge, and the public landing `showLandingSection` UI action bridge.
 - ElevenLabs owns realtime STT/TTS, turn-taking, interruptions, backchannels, silence, and follow-ups.
 - Laravel owns conversation tokens, auth/session/rate limits, usage metering, the Bean runtime bridge, and dashboard/tool safety.
 - Hermes owns reasoning, memory, tool choice, and final wording for authenticated Bean requests.
@@ -103,7 +102,7 @@ The authenticated command creates or updates:
 
 If no `ELEVENLABS_AGENT_ID` is present, the script creates a new agent and prints the id. Put that id in `.env` as `ELEVENLABS_AGENT_ID`, enable `ELEVENLABS_AGENT_ENABLED=true`, then cache Laravel config.
 
-The landing command creates or updates a separate `askLandingBean` client tool and public voice agent. If no `ELEVENLABS_LANDING_AGENT_ID` is present, save the printed id in `.env` under that name before caching Laravel config. The public runtime deliberately has no `bean_dashboard` tool and cannot access authenticated data.
+The landing command creates or updates a separate action-only `showLandingSection` client tool and public voice agent. If no `ELEVENLABS_LANDING_AGENT_ID` is present, save the printed id in `.env` under that name before caching Laravel config. The public voice prompt is populated with current public product/pricing facts at configure time and deliberately has no `bean_dashboard` tool, authenticated account access, or Hermes turn on the voice hot path.
 
 The landing command also applies provider-side controls: authentication-only conversation tokens, GPT-4.1 Nano without a reasoning layer, a concurrency and daily call cap with bursting disabled, focus and prompt-injection guardrails, no voice recording, and zero-day transcript/audio retention. Laravel independently applies session, IP, global, message, and per-conversation turn limits. Configure both Cloudflare Turnstile keys to require a managed bot challenge before Laravel mints an ElevenLabs token.
 

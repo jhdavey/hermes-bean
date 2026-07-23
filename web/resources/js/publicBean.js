@@ -2,7 +2,7 @@ import { Conversation } from '@elevenlabs/client';
 import '../css/public-bean.css';
 
 const WAKE_PHRASE = 'Hey Bean';
-const WAKE_GREETING = 'Hi, I’m Bean, the voice assistant inside HeyBean. I can show you how it works, walk through features or pricing, or give you a quick tour. What would you like?';
+const WAKE_GREETING = 'Hi, I’m Bean, the voice assistant inside HeyBean. I can show you how it works, walk through features or pricing, or give you a quick tour. How can I help?';
 const IDLE_CLOSE_MS = 9000;
 const SESSION_PREFETCH_TTL_MS = 120000;
 const WAKE_SETTLE_MS = 160;
@@ -97,9 +97,20 @@ function mountPublicBean(root) {
 
     const takeVoiceSession = async () => {
         const fresh = prefetchedSessionPromise && Date.now() - prefetchedSessionAt < SESSION_PREFETCH_TTL_MS;
-        const sessionPromise = fresh ? prefetchedSessionPromise : requestVoiceSession();
+        const sessionPromise = fresh ? prefetchedSessionPromise : null;
         clearPrefetchedSession();
-        return sessionPromise;
+        if (sessionPromise) {
+            try {
+                return await sessionPromise;
+            } catch (_) {
+                // A background prefetch can hit a transient/session limit before the
+                // visitor actually wakes Bean. Retry once with a fresh token request
+                // so stale prefetch failures do not flash a false red demo-limit
+                // state while a new ElevenLabs session is otherwise able to start.
+            }
+        }
+
+        return requestVoiceSession();
     };
 
     const stopVoiceConversation = async (reason = 'client_stop') => {
@@ -287,6 +298,12 @@ function mountPublicBean(root) {
                 bean_client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
             },
             clientTools: {
+                showLandingSection: async (parameters = {}) => {
+                    showLandingUiAction(parameters.destination || parameters.section || parameters.action);
+                    return 'Section shown.';
+                },
+                // Backward compatibility while the hosted Landing Guide agent is
+                // being updated from the older Hermes-backed public voice flow.
                 askLandingBean: async (parameters = {}) => {
                     const content = String(parameters.message || parameters.content || '').trim();
                     if (!content) return 'I did not hear a complete question.';

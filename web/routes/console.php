@@ -7,6 +7,7 @@ use App\Services\Bean\Quality\BeanUxBenchmarkService;
 use App\Services\Bean\Quality\BeanUxScenarioCatalogService;
 use App\Services\Bean\Quality\BeanUxScenarioEvaluationService;
 use App\Services\PlanHistoryService;
+use App\Services\PublicPricingPlanService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -41,6 +42,12 @@ Artisan::command('bean:landing-prune {--hours=}', function (LandingBeanRuntimeSe
 
     return self::SUCCESS;
 })->purpose('Delete expired anonymous landing Bean Hermes homes');
+
+Artisan::command('bean:landing-guide-facts', function (PublicPricingPlanService $pricingPlans): int {
+    $this->line($pricingPlans->guideFacts());
+
+    return self::SUCCESS;
+})->purpose('Print public HeyBean guide facts for the ElevenLabs Landing Guide prompt');
 
 Artisan::command('admin:user {email} {--password=} {--name=Hey Bean Admin}', function (string $email): int {
     $password = (string) ($this->option('password') ?: env('ADMIN_PASSWORD', ''));

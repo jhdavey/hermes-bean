@@ -27,11 +27,15 @@ test('landing Bean enables the microphone, listens for the wake phrase, and star
     assert.match(source, /recognition\.processLocally = true/);
     assert.match(source, /Conversation\.startSession/);
     assert.match(source, /conversationToken:\s*session\.token/);
+    assert.match(source, /How can I help\?/);
     assert.match(source, /firstMessage:\s*wakeTail \? '' : WAKE_GREETING/);
     assert.match(source, /if \(wakeTail\) conversation\.sendUserMessage\?\.\(wakeTail\)/);
     assert.match(source, /prefetchVoiceSession\(\)\.catch/);
+    assert.match(source, /return await sessionPromise/);
+    assert.match(source, /return requestVoiceSession\(\)/);
     assert.match(source, /const WAKE_TO_GREETING_TARGET_MS = 1200/);
     assert.match(source, /const IDLE_CLOSE_MS = 9000/);
+    assert.match(source, /showLandingSection/);
     assert.match(source, /askLandingBean/);
     assert.match(source, /root\.dataset\.conversationTokenUrl/);
     assert.match(source, /root\.dataset\.messageUrl/);
@@ -55,12 +59,15 @@ test('landing Bean can be disabled while wake or voice startup is still pending'
     assert.ok(disableBody.indexOf("setStatus('disabled', 'Tap to enable')") < disableBody.indexOf("await stopVoiceConversation('disabled')"));
 });
 
-test('landing voice uses a dedicated ElevenLabs agent configuration and public Hermes tool', () => {
+test('landing voice uses a dedicated fast ElevenLabs guide with an action-only public section tool', () => {
     assert.match(agentConfig, /ELEVENLABS_LANDING_AGENT_ID/);
-    assert.match(agentConfig, /askLandingBean/);
-    assert.match(agentConfig, /isolated public Hermes Bean runtime/);
+    assert.match(agentConfig, /showLandingSection/);
+    assert.match(source, /showLandingSection:\s*async/);
+    assert.match(agentConfig, /answer directly with the facts below using the configured fast model/);
+    assert.match(agentConfig, /Do not call a response\/reasoning tool for normal questions/);
+    assert.match(agentConfig, /bean:landing-guide-facts/);
     assert.match(agentConfig, /firstMessage:\s*WAKE_GREETING/);
-    assert.match(agentConfig, /preToolSpeech:\s*'off'/);
+    assert.match(agentConfig, /expectsResponse:\s*false/);
     assert.match(agentConfig, /firstMessage:\s*true/);
     assert.match(agentConfig, /llm:\s*landingLlm/);
     assert.match(agentConfig, /gpt-4\.1-nano/);
@@ -83,9 +90,10 @@ test('landing Bean supports optional bot verification without exposing a secret'
 });
 
 test('landing Bean reveals allowlisted feature and pricing destinations', () => {
+    assert.match(source, /showLandingUiAction\(parameters\.destination \|\| parameters\.section \|\| parameters\.action\)/);
     assert.match(source, /showLandingUiAction\(response\?\.ui_action \|\| parameters\.destination\)/);
-    assert.match(agentConfig, /required: \['message', 'destination'\]/);
-    assert.match(agentConfig, /enum: \['none', 'features', 'pricing'\]/);
+    assert.match(agentConfig, /required: \['destination'\]/);
+    assert.match(agentConfig, /enum: \['features', 'pricing'\]/);
     assert.match(source, /features:\s*\{ selector: '#features', href: '\/#features'/);
     assert.match(source, /pricing:\s*\{ selector: '#plans', href: '\/#plans'/);
     assert.match(source, /scrollIntoView\(\{ behavior: reduceMotion \? 'auto' : 'smooth'/);
