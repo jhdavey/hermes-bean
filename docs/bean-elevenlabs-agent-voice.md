@@ -65,6 +65,7 @@ Authenticated app voice is intentionally short-lived but should not cut off natu
 - Authenticated Agent turn eagerness defaults to `eager` while still leaving ElevenLabs in charge of turn-taking.
 - Authenticated Agent silence-end-call timeout defaults to `15` seconds.
 - The browser client closes abandoned first-turn sessions after about `9` seconds.
+- Long authenticated `askBean` tool calls hand off after about `10` seconds: ElevenLabs speaks a short background handoff, the app waits a minimum spoken window before closing that session, Laravel/Hermes continues the work, then the app opens a normal new Agent session and sends `BACKGROUND_RESULT_DELIVERY: ...` via `sendUserMessage` so Bean speaks the final result and keeps listening for follow-up.
 - The browser client gives about a `15` second post-response follow-up grace while keeping the total Agent session capped at `60` seconds.
 
 Public landing voice remains tighter by default because it is unauthenticated:

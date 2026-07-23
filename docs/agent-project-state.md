@@ -1,18 +1,18 @@
 # HeyBean Agent Project State
 
-Last updated: 2026-07-22T03:16:04Z
+Last updated: 2026-07-23T01:27:41Z
 
 Purpose: give future Hermes/agent sessions a compact, durable starting point for HeyBean work without relying on chat context. Read this file before coding when the task touches Bean, HeyBean, voice UX, runtime/tooling, deployment, or project direction.
 
 ## Current repository/deploy state
 
 - Local project path: `/Users/joshuadavey/development/projects/hermes-bean`
-- Main branch at last update: `88f56d35 docs: add HeyBean agent project state`
-- Local working tree at last update had an intentional docs cleanup in progress.
+- Main branch at last update: `71d9234f Fix Bean voice handoff and natural event times`
+- Local working tree at last update was clean after the voice/calendar bugfix docs update.
 - Production host/path: `forge@heybean.org:/home/forge/heybean.org/current`
-- Production commit last verified in prior work: `3bd22b28 Speed up landing Bean and add homepage pricing`
+- Production commit last verified in prior work: `71d9234f Fix Bean voice handoff and natural event times`
 - Production known server-only state: untracked `.env`, `storage`, `web/storage`; do not clean production storage/env casually.
-- Production Bean voice timing last verified in prior work: `60/5/15/15` = max duration / ElevenLabs initial wait / silence end-call / follow-up idle close.
+- Production Bean voice timing last verified in prior work: `60/5/10/15/15` = max duration / provider soft timeout / background handoff / silence end-call / follow-up idle close.
 
 ## Product/runtime direction
 
@@ -31,6 +31,7 @@ Purpose: give future Hermes/agent sessions a compact, durable starting point for
 - Credit/cost controls should not make Bean miss speech. Prefer metering, quotas, admin visibility, and a max session safety cap over rushed idle windows.
 - Current intended authenticated voice timing: max session `60s`, initial wait `5s`, silence end-call `15s`, follow-up idle `15s`, with eager ElevenLabs turn-taking.
 - Wake-tail fragments like “what’s/can/spec” should not submit as commands. Prefer stable/full provider transcript or provider-native final turn behavior.
+- Long voice tool calls now use a 5s provider soft timeout and 10s background handoff. The handoff session is kept open long enough to finish speaking before closure; the final result returns in a fresh ElevenLabs session via `sendUserMessage('BACKGROUND_RESULT_DELIVERY: ...')`, not `overrides.agent.firstMessage`.
 
 ## Weather/external tools state
 
