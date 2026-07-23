@@ -9,34 +9,42 @@ const agentConfig = await readFile(new URL('../../scripts/elevenlabs-landing-age
 
 test('public pages expose a compact Bean control without the authenticated chat panel', () => {
     assert.match(navigation, /data-public-bean/);
-    assert.match(navigation, /Tap to enable/);
+    assert.match(navigation, /Tap to talk/);
     assert.match(navigation, /data-public-bean-status/);
+    assert.match(navigation, /Hey! I'm over here!/);
+    assert.match(navigation, /data-public-bean-cue/);
+    assert.match(navigation, /aria-label="Talk with Bean"/);
+    assert.match(navigation, /Turn your volume on, then allow microphone access\./);
     assert.doesNotMatch(navigation, /data-bean-panel|hb-bean-chat/);
     assert.match(styles, /\.public-bean-presence/);
     assert.match(styles, /background:\s*rgba\(255, 255, 255/);
     assert.match(styles, /\.public-bean-status/);
+    assert.match(styles, /\.public-bean-cue/);
+    assert.match(styles, /font-family: "Bradley Hand", "Comic Sans MS", "Marker Felt", cursive/);
+    assert.match(styles, /\.public-bean-cue-arrow/);
+    assert.match(styles, /\.public-bean-help/);
+    assert.match(styles, /\.public-bean-cue:focus-visible/);
 });
 
-test('landing Bean enables the microphone, listens for the wake phrase, and starts ElevenLabs voice', () => {
+test('landing Bean starts voice directly from an explicit tap with a hearing check', () => {
     assert.match(source, /let enabled = false/);
     assert.doesNotMatch(source, /localStorage\.getItem|localStorage\.setItem/);
     assert.match(source, /navigator\.mediaDevices\.getUserMedia\(\{ audio: true \}\)/);
-    assert.match(source, /Just say “Hey Bean…”/);
-    assert.match(source, /window\.SpeechRecognition/);
-    assert.match(source, /processLocally:\s*true/);
-    assert.match(source, /recognition\.processLocally = true/);
+    assert.match(source, /Turn volume on\. Allow mic\./);
+    assert.match(source, /await startVoiceConversation\(revision\)/);
+    assert.match(source, /cue\?\.addEventListener\('click'/);
     assert.match(source, /Conversation\.startSession/);
     assert.match(source, /conversationToken:\s*session\.token/);
-    assert.match(source, /How can I help\?/);
-    assert.match(source, /firstMessage:\s*wakeTail \? '' : WAKE_GREETING/);
-    assert.match(source, /if \(wakeTail\) conversation\.sendUserMessage\?\.\(wakeTail\)/);
-    assert.match(source, /prefetchVoiceSession\(\)\.catch/);
-    assert.match(source, /return await sessionPromise/);
-    assert.match(source, /return requestVoiceSession\(\)/);
+    assert.match(source, /Hey, I'm Bean, can you hear me\?/);
+    assert.match(agentConfig, /How can I help\?/);
+    assert.match(source, /firstMessage:\s*WAKE_GREETING/);
+    assert.doesNotMatch(source, /SpeechRecognition|Just say “Hey Bean|createWakeDetector|extractWakeTail|prefetchVoiceSession|restartWakeListening/);
     assert.match(source, /Demo cooldown — try again shortly/);
     assert.doesNotMatch(source, /Demo limit reached/);
     assert.match(source, /const WAKE_TO_GREETING_TARGET_MS = 1200/);
-    assert.match(source, /const IDLE_CLOSE_MS = 9000/);
+    assert.match(source, /const IDLE_CLOSE_MS = 15000/);
+    assert.match(source, /voice_start_requested/);
+    assert.match(source, /tap_to_start/);
     assert.match(source, /showLandingSection/);
     assert.match(source, /askLandingBean/);
     assert.match(source, /root\.dataset\.conversationTokenUrl/);
@@ -44,21 +52,20 @@ test('landing Bean enables the microphone, listens for the wake phrase, and star
     assert.match(source, /root\.dataset\.voiceEventUrl/);
     assert.match(navigation, /data-voice-event-url/);
 
-    const sessionAssignment = source.indexOf('conversation = nextConversation');
-    const wakeSubmission = source.indexOf('conversation.sendUserMessage?.(wakeTail)');
-    assert.ok(sessionAssignment >= 0);
-    assert.ok(wakeSubmission > sessionAssignment);
+    const permissionRequest = source.indexOf('navigator.mediaDevices.getUserMedia({ audio: true })');
+    const voiceStart = source.indexOf('await startVoiceConversation(revision)');
+    assert.ok(permissionRequest >= 0);
+    assert.ok(voiceStart > permissionRequest);
 });
 
-test('landing Bean can be disabled while wake or voice startup is still pending', () => {
+test('landing Bean can be disabled while voice startup is still pending', () => {
     assert.match(source, /let lifecycleRevision = 0/);
     assert.match(source, /const isCurrentLifecycle = \(revision\) => enabled && lifecycleRevision === revision/);
-    assert.match(source, /if \(!isCurrentLifecycle\(revision\)\) \{\s*detector\.stop\?\.\(\);\s*return;/);
     assert.match(source, /if \(!isCurrentLifecycle\(revision\)\) \{\s*await nextConversation\?\.endSession\?\.\(\)\.catch/);
 
     const disableBody = source.match(/const disable = async \(\) => \{([\s\S]*?)\n    \};/)?.[1] || '';
-    assert.ok(disableBody.indexOf("setStatus('disabled', 'Tap to enable')") >= 0);
-    assert.ok(disableBody.indexOf("setStatus('disabled', 'Tap to enable')") < disableBody.indexOf("await stopVoiceConversation('disabled')"));
+    assert.ok(disableBody.indexOf("setStatus('disabled', 'Tap to talk')") >= 0);
+    assert.ok(disableBody.indexOf("setStatus('disabled', 'Tap to talk')") < disableBody.indexOf("await stopVoiceConversation('disabled')"));
 });
 
 test('landing voice uses a dedicated fast ElevenLabs guide with an action-only public section tool', () => {
@@ -69,6 +76,9 @@ test('landing voice uses a dedicated fast ElevenLabs guide with an action-only p
     assert.match(agentConfig, /Do not call a response\/reasoning tool for normal questions/);
     assert.match(agentConfig, /bean:landing-guide-facts/);
     assert.match(agentConfig, /firstMessage:\s*WAKE_GREETING/);
+    assert.match(agentConfig, /Hey, I'm Bean, can you hear me\?/);
+    assert.match(agentConfig, /If the visitor responds yes, yeah, yep, I can/);
+    assert.match(agentConfig, /Great — I'm Bean, the voice assistant inside HeyBean/);
     assert.match(agentConfig, /expectsResponse:\s*false/);
     assert.match(agentConfig, /firstMessage:\s*true/);
     assert.match(agentConfig, /llm:\s*landingLlm/);

@@ -1,6 +1,6 @@
 # HeyBean Agent Project State
 
-Last updated: 2026-07-23T13:35:00Z
+Last updated: 2026-07-23T15:01:45Z
 
 Purpose: give future Hermes/agent sessions a compact, durable starting point for HeyBean work without relying on chat context. Read this file before coding when the task touches Bean, HeyBean, voice UX, runtime/tooling, deployment, or project direction.
 
@@ -13,6 +13,7 @@ Purpose: give future Hermes/agent sessions a compact, durable starting point for
 - Production commit last verified in prior work: `71d9234f Fix Bean voice handoff and natural event times`
 - Production known server-only state: untracked `.env`, `storage`, `web/storage`; do not clean production storage/env casually.
 - Production Bean voice timing last verified in prior work: authenticated `60/5/10/15/15` = max duration / provider soft timeout / background handoff / silence end-call / follow-up idle close. Public landing voice uses a separate fast ElevenLabs Landing Guide that answers directly with public facts and only calls an action-only section tool.
+- Public landing Bean onboarding is tap-to-start: a handwritten cue says `Hey! I'm over here!` and points at the Bean button; tapping either cue or Bean reminds the visitor to turn volume on/allow mic, starts the Landing Guide, first says `Hey, I'm Bean, can you hear me?`, and gives the normal intro only after the visitor confirms they can hear it.
 
 ## Product/runtime direction
 
@@ -26,7 +27,7 @@ Purpose: give future Hermes/agent sessions a compact, durable starting point for
 ## Voice UX direction
 
 - Production browser voice uses ElevenLabs Agent/Conversational AI for realtime STT/TTS/turn-taking.
-- Browser wake phrase is local: “Hey Bean”. Local wake should activate capture but should not become a brittle parallel command brain.
+- Authenticated app browser wake phrase is local: “Hey Bean”. Local wake should activate capture but should not become a brittle parallel command brain. Public landing Bean intentionally uses tap-to-start instead of wake detection to simplify first-time visitor success.
 - ElevenLabs should own voice turn-taking; avoid client-side fallback layers that duplicate provider responsibility.
 - Credit/cost controls should not make Bean miss speech. Prefer metering, quotas, admin visibility, and a max session safety cap over rushed idle windows.
 - Current intended authenticated voice timing: max session `60s`, initial wait `5s`, silence end-call `15s`, follow-up idle `15s`, with eager ElevenLabs turn-taking.

@@ -1,11 +1,8 @@
 import { Conversation } from '@elevenlabs/client';
 import '../css/public-bean.css';
 
-const WAKE_PHRASE = 'Hey Bean';
-const WAKE_GREETING = 'Hi, I’m Bean, the voice assistant inside HeyBean. I can show you how it works, walk through features or pricing, or give you a quick tour. How can I help?';
-const IDLE_CLOSE_MS = 9000;
-const SESSION_PREFETCH_TTL_MS = 120000;
-const WAKE_SETTLE_MS = 160;
+const WAKE_GREETING = "Hey, I'm Bean, can you hear me?";
+const IDLE_CLOSE_MS = 15000;
 const WAKE_TO_GREETING_TARGET_MS = 1200;
 let turnstileScriptPromise = null;
 
@@ -14,11 +11,11 @@ document.querySelectorAll('[data-public-bean]').forEach((root) => mountPublicBea
 function mountPublicBean(root) {
     const button = root.querySelector('[data-public-bean-toggle]');
     const status = root.querySelector('[data-public-bean-status]');
+    const cue = root.querySelector('[data-public-bean-cue]');
     if (!button || !status) return;
 
     // Public Bean is intentionally opt-in on every page load.
     let enabled = false;
-    let wakeDetector = null;
     let conversation = null;
     let starting = false;
     let voiceActive = false;
@@ -26,8 +23,7 @@ function mountPublicBean(root) {
     let lastActivityAt = 0;
     let lifecycleRevision = 0;
     let lastVoiceMode = '';
-    let prefetchedSessionPromise = null;
-    let prefetchedSessionAt = 0;
+
     let landingVoiceClientSessionId = '';
     let landingVoiceStartedAtMs = 0;
     let landingVoiceCloseLogged = true;
@@ -42,7 +38,7 @@ function mountPublicBean(root) {
         status.textContent = text;
         status.title = text;
         button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
-        button.setAttribute('aria-label', enabled ? 'Disable landing page Bean' : 'Enable landing page Bean');
+        button.setAttribute('aria-label', enabled ? 'End landing page Bean' : 'Talk with landing page Bean');
     };
 
     const stopIdleTimer = () => {
@@ -60,18 +56,11 @@ function mountPublicBean(root) {
                 scheduleIdleClose();
                 return;
             }
-            stopVoiceConversation('client_idle_timeout').finally(() => restartWakeListening());
+            stopVoiceConversation('client_idle_timeout').finally(() => {
+                enabled = false;
+                setStatus('disabled', 'Tap to talk');
+            });
         }, IDLE_CLOSE_MS);
-    };
-
-    const stopWakeListening = () => {
-        wakeDetector?.stop?.();
-        wakeDetector = null;
-    };
-
-    const clearPrefetchedSession = () => {
-        prefetchedSessionPromise = null;
-        prefetchedSessionAt = 0;
     };
 
     const requestVoiceSession = async () => {
@@ -83,35 +72,6 @@ function mountPublicBean(root) {
         });
     };
 
-    const prefetchVoiceSession = () => {
-        const fresh = prefetchedSessionPromise && Date.now() - prefetchedSessionAt < SESSION_PREFETCH_TTL_MS;
-        if (fresh) return prefetchedSessionPromise;
-        clearPrefetchedSession();
-        prefetchedSessionAt = Date.now();
-        prefetchedSessionPromise = requestVoiceSession().catch((error) => {
-            clearPrefetchedSession();
-            throw error;
-        });
-        return prefetchedSessionPromise;
-    };
-
-    const takeVoiceSession = async () => {
-        const fresh = prefetchedSessionPromise && Date.now() - prefetchedSessionAt < SESSION_PREFETCH_TTL_MS;
-        const sessionPromise = fresh ? prefetchedSessionPromise : null;
-        clearPrefetchedSession();
-        if (sessionPromise) {
-            try {
-                return await sessionPromise;
-            } catch (_) {
-                // A background prefetch can hit a transient/session limit before the
-                // visitor actually wakes Bean. Retry once with a fresh token request
-                // so stale prefetch failures do not flash a false red demo-limit
-                // state while a new ElevenLabs session is otherwise able to start.
-            }
-        }
-
-        return requestVoiceSession();
-    };
 
     const stopVoiceConversation = async (reason = 'client_stop') => {
         stopIdleTimer();
@@ -127,40 +87,8 @@ function mountPublicBean(root) {
         lifecycleRevision += 1;
         enabled = false;
         starting = false;
-        setStatus('disabled', 'Tap to enable');
-        stopWakeListening();
-        clearPrefetchedSession();
+        setStatus('disabled', 'Tap to talk');
         await stopVoiceConversation('disabled');
-    };
-
-    const restartWakeListening = async () => {
-        if (!enabled || starting || wakeDetector || voiceActive) return;
-        const revision = lifecycleRevision;
-        let detector = null;
-        try {
-            setStatus('starting', 'Starting microphone…');
-            detector = await createWakeDetector(WAKE_PHRASE, handleWake, () => {
-                if (!isCurrentLifecycle(revision)) return;
-                wakeDetector = null;
-                setStatus('error', 'Microphone permission needed');
-            });
-            if (!isCurrentLifecycle(revision)) {
-                detector.stop?.();
-                return;
-            }
-            wakeDetector = detector;
-            await detector.start();
-            if (!isCurrentLifecycle(revision)) {
-                if (wakeDetector === detector) wakeDetector = null;
-                detector.stop?.();
-                return;
-            }
-            setStatus('wake_listening', 'Just say “Hey Bean…”');
-        } catch (_) {
-            if (wakeDetector === detector) wakeDetector = null;
-            detector?.stop?.();
-            if (isCurrentLifecycle(revision)) setStatus('error', 'Wake word unavailable');
-        }
     };
 
     const enable = async () => {
@@ -168,43 +96,35 @@ function mountPublicBean(root) {
         const revision = ++lifecycleRevision;
         starting = true;
         enabled = true;
-        setStatus('starting', 'Enabling microphone…');
+        landingWakeDetectedAtMs = Date.now();
+        landingWakeToFirstSpeechMs = null;
+        setStatus('starting', 'Turn volume on. Allow mic.');
+        let micAllowed = false;
         try {
             if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone is unavailable.');
             const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
             permissionStream.getTracks().forEach((track) => track.stop());
+            micAllowed = true;
             if (!isCurrentLifecycle(revision)) return;
             starting = false;
-            prefetchVoiceSession().catch(() => {});
-            await restartWakeListening();
-        } catch (_) {
+            setStatus('connecting', 'Connecting Bean…');
+            await startVoiceConversation(revision);
+        } catch (error) {
             if (!isCurrentLifecycle(revision)) return;
+            await stopVoiceConversation('connect_error');
             enabled = false;
             starting = false;
             lifecycleRevision += 1;
-            setStatus('error', 'Tap to allow microphone');
+            if (error?.status === 429) {
+                setStatus('error', 'Demo cooldown — try again shortly');
+            } else {
+                setStatus('error', micAllowed ? 'Bean could not connect' : 'Tap to allow microphone');
+            }
         } finally {
             if (lifecycleRevision === revision) starting = false;
         }
     };
 
-    async function handleWake(event = {}) {
-        if (!enabled || voiceActive || starting) return;
-        const revision = lifecycleRevision;
-        stopWakeListening();
-        const tail = String(event.tail || extractWakeTail(event.transcript || '', WAKE_PHRASE)).trim();
-        landingWakeDetectedAtMs = Number(event.detectedAtMs) || Date.now();
-        landingWakeToFirstSpeechMs = null;
-        setStatus('connecting', 'Hey Bean heard…');
-        try {
-            await startVoiceConversation(tail, revision);
-        } catch (error) {
-            if (!isCurrentLifecycle(revision)) return;
-            await stopVoiceConversation('connect_error');
-            setStatus('error', error?.status === 429 ? 'Demo cooldown — try again shortly' : 'Bean could not connect');
-            window.setTimeout(() => restartWakeListening(), 1500);
-        }
-    }
 
     function newLandingVoiceEventId(prefix = 'landing-voice') {
         return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -267,8 +187,8 @@ function mountPublicBean(root) {
         }, { keepalive: true });
     }
 
-    async function startVoiceConversation(wakeTail, revision) {
-        const session = await takeVoiceSession();
+    async function startVoiceConversation(revision) {
+        const session = await requestVoiceSession();
         if (!isCurrentLifecycle(revision)) return;
         if (!session?.token) throw new Error('Bean voice did not return a token.');
 
@@ -277,8 +197,8 @@ function mountPublicBean(root) {
         landingVoiceCloseLogged = false;
         landingHermesRuntimeSamplesMs = [];
         const voiceClientSessionId = landingVoiceClientSessionId;
-        logLandingVoiceEvent('wake_detected', {
-            label: WAKE_PHRASE,
+        logLandingVoiceEvent('voice_start_requested', {
+            label: 'tap_to_start',
             wake_event_client_ms: landingWakeDetectedAtMs,
         }, { occurredAtMs: landingWakeDetectedAtMs });
 
@@ -290,7 +210,7 @@ function mountPublicBean(root) {
             userId: session.landing_session_id ? `bean-visitor-${session.landing_session_id}` : undefined,
             overrides: {
                 agent: {
-                    firstMessage: wakeTail ? '' : WAKE_GREETING,
+                    firstMessage: WAKE_GREETING,
                 },
             },
             dynamicVariables: {
@@ -333,7 +253,7 @@ function mountPublicBean(root) {
                 landingVoiceCloseLogged = false;
                 lastActivityAt = Date.now();
                 logLandingVoiceEvent('voice_session_started', {
-                    has_wake_tail: Boolean(wakeTail),
+                    start_method: 'tap',
                     wake_event_client_ms: landingWakeDetectedAtMs || null,
                     conversation_id: conversationIdentifier(conversation),
                 });
@@ -352,8 +272,8 @@ function mountPublicBean(root) {
                 landingWakeDetectedAtMs = 0;
                 landingWakeToFirstSpeechMs = null;
                 landingHermesRuntimeSamplesMs = [];
-                prefetchVoiceSession().catch(() => {});
-                restartWakeListening();
+                enabled = false;
+                setStatus('disabled', 'Tap to talk');
             },
             onError: () => {
                 if (!isCurrentLifecycle(revision)) return;
@@ -401,12 +321,9 @@ function mountPublicBean(root) {
         conversation = nextConversation;
         voiceActive = true;
         lastActivityAt = Date.now();
-        if (wakeTail) {
-            setStatus('thinking', 'Thinking…');
-        } else if (lastVoiceMode !== 'speaking') {
+        if (lastVoiceMode !== 'speaking') {
             setStatus('connecting', 'Bean is joining…');
         }
-        if (wakeTail) conversation.sendUserMessage?.(wakeTail);
         conversation.sendUserActivity?.();
     }
 
@@ -415,12 +332,16 @@ function mountPublicBean(root) {
         else enable();
     });
 
+    cue?.addEventListener('click', () => {
+        if (enabled) disable();
+        else enable();
+    });
+
     window.addEventListener('pagehide', () => {
-        stopWakeListening();
         stopVoiceConversation('pagehide');
     }, { once: true });
 
-    setStatus('disabled', 'Tap to enable');
+    setStatus('disabled', 'Tap to talk');
 
     async function postJson(url, body) {
         const response = await fetch(url, {
@@ -517,94 +438,4 @@ function loadTurnstile() {
     });
 
     return turnstileScriptPromise;
-}
-
-async function createWakeDetector(phrase, onWake, onError) {
-    if (window.HeyBeanLocalWakeDetector?.create) {
-        return window.HeyBeanLocalWakeDetector.create({ phrase, onWake });
-    }
-
-    const Recognition = window.SpeechRecognition;
-    if (!Recognition || typeof Recognition.available !== 'function') {
-        throw new Error('Local speech recognition is unavailable.');
-    }
-    const localOptions = { langs: ['en-US'], processLocally: true };
-    let availability = await Recognition.available(localOptions).catch(() => 'unavailable');
-    if (availability === 'downloadable' && typeof Recognition.install === 'function') {
-        await Recognition.install(localOptions).catch(() => false);
-        availability = await Recognition.available(localOptions).catch(() => 'unavailable');
-    }
-    if (availability !== 'available') throw new Error('Local speech recognition is unavailable.');
-    const normalizedPhrase = normalizeWakeTranscript(phrase);
-    let recognition = null;
-    let stopped = true;
-    let restartTimer = 0;
-    let wakeTimer = 0;
-    let lastTranscript = '';
-
-    const startRecognition = () => {
-        if (stopped) return;
-        recognition = new Recognition();
-        recognition.lang = 'en-US';
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.processLocally = true;
-        recognition.onresult = (event) => {
-            lastTranscript = Array.from(event.results || [])
-                .slice(event.resultIndex || 0)
-                .map((result) => result?.[0]?.transcript || '')
-                .join(' ');
-            if (!normalizeWakeTranscript(lastTranscript).includes(normalizedPhrase)) return;
-            window.clearTimeout(wakeTimer);
-            wakeTimer = window.setTimeout(() => {
-                onWake?.({
-                    source: 'browser-speech-recognition',
-                    transcript: lastTranscript,
-                    tail: extractWakeTail(lastTranscript, phrase),
-                    detectedAtMs: Date.now(),
-                });
-            }, WAKE_SETTLE_MS);
-        };
-        recognition.onend = () => {
-            recognition = null;
-            if (!stopped) restartTimer = window.setTimeout(startRecognition, 300);
-        };
-        recognition.onerror = (event) => {
-            if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
-                stopped = true;
-                onError?.(event);
-            }
-        };
-        recognition.start();
-    };
-
-    return {
-        async start() {
-            stopped = false;
-            startRecognition();
-        },
-        stop() {
-            stopped = true;
-            window.clearTimeout(restartTimer);
-            window.clearTimeout(wakeTimer);
-            recognition?.stop?.();
-            recognition = null;
-        },
-    };
-}
-
-function normalizeWakeTranscript(value) {
-    return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function extractWakeTail(transcript, phrase) {
-    const raw = String(transcript || '').trim();
-    const normalizedPhrase = normalizeWakeTranscript(phrase);
-    const words = raw.split(/\s+/);
-    for (let index = 0; index < words.length; index += 1) {
-        const candidate = normalizeWakeTranscript(words.slice(index).join(' '));
-        if (!candidate.startsWith(normalizedPhrase)) continue;
-        return words.slice(index + normalizedPhrase.split(' ').length).join(' ').trim();
-    }
-    return '';
 }

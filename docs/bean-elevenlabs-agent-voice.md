@@ -20,10 +20,12 @@ Public Laravel pages use a separate boundary:
 
 ```text
 Public landing / pricing / legal page
-  -> explicit visitor click to enable mic
-  -> local “Hey Bean” wake detection
+  -> explicit visitor tap on the Bean button
+  -> browser reminds the visitor to turn volume on and allow mic access
   -> /bean/landing/conversation-token (session + CSRF + rate limited)
   -> dedicated ElevenLabs Landing Guide agent
+  -> first spoken turn: “Hey, I'm Bean, can you hear me?”
+  -> after the visitor confirms yes, Bean gives the normal intro and continues
   -> Agent answers directly with GPT-4.1 Nano and public product/pricing facts
   -> optional action-only client tool: showLandingSection({ destination })
   -> no authenticated dashboard plugin, account data, private tools, or Hermes turn on the voice hot path
@@ -46,13 +48,13 @@ CLOUDFLARE_TURNSTILE_SITE_KEY=...
 CLOUDFLARE_TURNSTILE_SECRET_KEY=...
 ```
 
-The landing guide is disabled on every page load and requires an explicit visitor click before requesting microphone access. Enabling the mic starts only local wake detection; ElevenLabs usage begins when the wake phrase starts a ConvAI/WebRTC session. Landing cost/abuse controls are configured with `BEAN_LANDING_*` environment variables documented in `web/.env.example`.
+The landing guide is disabled on every page load and requires an explicit visitor tap before requesting microphone access. The public landing flow does not require a separate wake phrase: tapping Bean starts the short ConvAI/WebRTC session after browser mic permission, then Bean performs a “can you hear me?” check before the normal intro. Landing cost/abuse controls are configured with `BEAN_LANDING_*` environment variables documented in `web/.env.example`.
 
 ## Voice ownership and cost controls
 
 Browser voice should remain provider-owned after wake detection:
 
-- Local browser code owns only privacy state, microphone permission, wake detection, event logging, the authenticated `askBean` client-tool bridge, and the public landing `showLandingSection` UI action bridge.
+- Local browser code owns only privacy state, microphone permission, app voice wake detection, public landing tap-to-start onboarding, event logging, the authenticated `askBean` client-tool bridge, and the public landing `showLandingSection` UI action bridge.
 - ElevenLabs owns realtime STT/TTS, turn-taking, interruptions, backchannels, silence, and follow-ups.
 - Laravel owns conversation tokens, auth/session/rate limits, usage metering, the Bean runtime bridge, and dashboard/tool safety.
 - Hermes owns reasoning, memory, tool choice, and final wording for authenticated Bean requests.
@@ -70,8 +72,9 @@ Authenticated app voice is intentionally short-lived but should not cut off natu
 Public landing voice remains tighter by default because it is unauthenticated:
 
 - Landing max duration defaults to `60` seconds.
+- Landing first message is the hearing check, not the full intro.
 - Landing initial wait defaults to `5` seconds.
-- Landing silence-end-call timeout defaults to `5` seconds.
+- Landing silence-end-call timeout defaults to `8` seconds unless production env overrides it higher.
 - Landing max meaningful visitor turns defaults to `20`.
 - Landing browser/session/IP/global rate limits are enforced before minting conversation tokens.
 
@@ -120,7 +123,7 @@ The app no longer uses:
 - `/elevenlabs-voice-poc`
 - `bean_voice_bridge_sessions`
 
-The only retained local voice responsibility is wake-word detection before starting the ElevenLabs Agent session and authenticated execution of the `askBean` client tool.
+Authenticated app voice retains local wake-word detection before starting the ElevenLabs Agent session. Public landing voice uses explicit tap-to-start onboarding instead. Authenticated execution of the `askBean` client tool remains a local browser responsibility.
 
 ## Verification
 

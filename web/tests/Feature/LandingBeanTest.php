@@ -22,7 +22,9 @@ class LandingBeanTest extends TestCase
 
             $response->assertOk()
                 ->assertSee('data-public-bean', false)
-                ->assertSee('Tap to enable')
+                ->assertSee('Tap to talk')
+                ->assertSee("Hey! I'm over here!", false)
+                ->assertSee('Turn your volume on, then allow microphone access.', false)
                 ->assertDontSee('audio processed by ElevenLabs')
                 ->assertSee('assets/publicBean-', false)
                 ->assertDontSee('data-bean-panel', false)

@@ -44,7 +44,7 @@ if (!apiKey) throw new Error('ELEVENLABS_API_KEY is required.');
 const client = new ElevenLabsClient({ apiKey });
 const TOOL_NAME = 'showLandingSection';
 const AGENT_NAME = env.ELEVENLABS_LANDING_AGENT_NAME || 'HeyBean Landing Guide';
-const WAKE_GREETING = 'Hi, I’m Bean, the voice assistant inside HeyBean. I can show you how it works, walk through features or pricing, or give you a quick tour. How can I help?';
+const WAKE_GREETING = "Hey, I'm Bean, can you hear me?";
 const timezone = env.BEAN_CLIENT_TIMEZONE || 'America/New_York';
 const landingLlm = env.ELEVENLABS_LANDING_LLM || 'gpt-4.1-nano';
 const maxDurationSeconds = Number(env.BEAN_LANDING_MAX_DURATION_SECONDS || env.ELEVENLABS_MAX_DURATION_SECONDS || 60);
@@ -58,11 +58,13 @@ const pricingFacts = landingGuideFacts();
 
 const prompt = `You are Bean, the concise public voice guide on the HeyBean website.
 
-The visitor deliberately enabled their microphone and woke you by saying “Hey Bean.” You own natural voice turn-taking, interruptions, silence, and follow-ups. This public landing conversation is simple and bounded: answer directly with the facts below using the configured fast model. Do not call a response/reasoning tool for normal questions.
+The visitor deliberately tapped the Bean button and allowed their microphone. You own natural voice turn-taking, interruptions, silence, and follow-ups. This public landing conversation is simple and bounded: answer directly with the facts below using the configured fast model. Do not call a response/reasoning tool for normal questions.
 
 First greeting:
-- The configured first message handles an exact “Hey Bean” wake immediately. Do not add another greeting or repeat the introduction after it.
-- If the visitor includes words after the wake phrase, treat those words as their first request and answer directly.
+- The configured first message is exactly: “Hey, I'm Bean, can you hear me?”
+- If the visitor responds yes, yeah, yep, I can, or another clear confirmation that they hear you, say: “Great — I'm Bean, the voice assistant inside HeyBean. I can show you how it works, walk through features or pricing, or give you a quick tour. How can I help?”
+- If the visitor says no, not really, or that they cannot hear you, briefly tell them to make sure their volume is on and try tapping Bean again.
+- If the visitor asks a real HeyBean question instead of answering the hearing check, answer the question directly and continue normally.
 
 Public product facts:
 - HeyBean is the AI executive assistant for real life, built for busy professionals and parents carrying substantial work, family, household, or personal responsibilities.

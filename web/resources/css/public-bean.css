@@ -21,6 +21,81 @@
     transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
 }
 
+.public-bean-cue {
+    position: absolute;
+    top: calc(100% + 10px);
+    left: 54px;
+    z-index: 5;
+    width: 176px;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: #304235;
+    font-family: "Bradley Hand", "Comic Sans MS", "Marker Felt", cursive;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: .01em;
+    text-align: left;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, .86);
+    cursor: pointer;
+    transform: rotate(-5deg);
+}
+
+.public-bean-cue span {
+    display: inline-block;
+    padding: 3px 4px;
+}
+
+.public-bean-cue:focus-visible {
+    outline: 2px solid rgba(var(--public-bean-accent), .62);
+    outline-offset: 4px;
+    border-radius: 10px;
+}
+
+.public-bean-cue svg {
+    position: absolute;
+    top: -48px;
+    left: -47px;
+    width: 96px;
+    height: 68px;
+    overflow: visible;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transform: rotate(-3deg);
+}
+
+.public-bean-cue-arrow {
+    stroke-width: 3.2;
+}
+
+.public-bean-cue-head {
+    stroke-width: 3.4;
+}
+
+.public-bean-help {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    z-index: 6;
+    width: min(280px, 78vw);
+    padding: 9px 11px;
+    border: 1px solid rgba(var(--public-bean-accent), .24);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .97);
+    box-shadow: 0 12px 28px rgba(16, 24, 40, .14);
+    color: #304235;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.25;
+    opacity: 0;
+    transform: translateY(-4px);
+    pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease;
+}
+
 .public-bean-control {
     min-width: 0;
     min-height: 42px;
@@ -123,6 +198,17 @@
     animation: public-bean-pulse 1.8s ease-in-out infinite;
 }
 
+.public-bean-presence[data-mode="starting"] .public-bean-help,
+.public-bean-presence[data-mode="connecting"] .public-bean-help {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.public-bean-presence[data-mode]:not([data-mode="disabled"]) .public-bean-cue {
+    opacity: 0;
+    visibility: hidden;
+}
+
 .public-bean-presence[data-mode="connecting"] .public-bean-ring,
 .public-bean-presence[data-mode="thinking"] .public-bean-ring,
 .public-bean-presence[data-mode="navigating"] .public-bean-ring {
@@ -167,6 +253,20 @@
 }
 
 @media (max-width: 620px) {
+    .public-bean-cue {
+        top: calc(100% + 8px);
+        left: 38px;
+        width: 132px;
+        font-size: 14px;
+    }
+
+    .public-bean-cue svg {
+        top: -39px;
+        left: -34px;
+        width: 76px;
+        height: 54px;
+    }
+
     .public-bean-status {
         max-width: 132px;
     }
@@ -174,6 +274,10 @@
 }
 
 @media (max-width: 390px) {
+    .public-bean-cue {
+        display: none;
+    }
+
     .public-bean-control {
         padding-right: 10px;
     }
