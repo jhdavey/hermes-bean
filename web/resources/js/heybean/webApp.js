@@ -1640,7 +1640,7 @@ export function mountHeyBeanWebApp(mount) {
             password: { type: 'password', value: '', autocomplete: 'new-password', placeholder: 'Text your password...', attrs: 'minlength="12"' },
         }[step];
         return `
-            <form class="hb-guided-chat-composer" data-action="guided-onboarding">
+            <form class="hb-guided-chat-composer" data-action="guided-onboarding" data-guided-onboarding-step="${escapeAttr(step)}">
                 <img src="${escapeAttr(logoUrl)}" alt="Bean">
                 <input class="hb-input" name="value" type="${field.type}" value="${escapeAttr(field.value)}" autocomplete="${field.autocomplete}" placeholder="${escapeAttr(field.placeholder)}" ${field.attrs} required ${disabled ? 'disabled' : ''}>
                 <button class="hb-button" type="submit" ${disabled ? 'disabled' : ''}>${state.busy ? 'Saving…' : 'Send'}</button>

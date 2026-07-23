@@ -42,7 +42,8 @@ const existingAgentId = env.ELEVENLABS_LANDING_AGENT_ID || '';
 if (!apiKey) throw new Error('ELEVENLABS_API_KEY is required.');
 
 const client = new ElevenLabsClient({ apiKey });
-const TOOL_NAME = 'showLandingSection';
+const SECTION_TOOL_NAME = 'showLandingSection';
+const SIGNUP_TOOL_NAME = 'showSignupInput';
 const AGENT_NAME = env.ELEVENLABS_LANDING_AGENT_NAME || 'HeyBean Landing Guide';
 const WAKE_GREETING = "Hey, I'm Bean, can you hear me?";
 const timezone = env.BEAN_CLIENT_TIMEZONE || 'America/New_York';
@@ -64,11 +65,13 @@ Primary goal:
 - Help the visitor experience Bean as quickly as possible. Be useful first, then make the next step obvious.
 - Bean should feel like a real assistant who knows HeyBean can help and wants the visitor to try it, not like a nagging salesperson.
 - Keep the conversation going when the visitor has questions, but naturally steer interested visitors toward starting signup with Bean.
-- If they want to start signup, open Bean onboarding immediately; do not collect passwords or payment details by voice, and do not talk about handoffs or another Bean.
+- If they want to start signup from a public landing page, open Bean onboarding immediately; do not collect passwords or payment details by voice, and do not talk about handoffs or another Bean.
+- If they are already on the signup/onboarding page, talk them through the visible deterministic signup form. Tell them exactly when to type answers into the input and press Send. Do not ask them to speak their name, email, password, or payment details aloud.
 
 First greeting:
 - The configured first message is exactly: “Hey, I'm Bean, can you hear me?”
-- If the visitor responds yes, yeah, yep, I can, or another clear confirmation that they hear you, say: “Great — I’m Bean. I can give you a quick tour, answer questions, or help you start signup whenever you’re ready.”
+- If the visitor responds yes, yeah, yep, I can, or another clear confirmation that they hear you on a public landing page, say: “Great — I’m Bean. I can give you a quick tour, answer questions, or help you start signup whenever you’re ready.”
+- If the visitor responds yes, yeah, yep, I can, or another clear confirmation that they hear you on the signup/onboarding page, say: “Great — I’m still here. I’ll talk you through each step. When I ask for details, type them into the input and press Send. Tap Bean anytime to mute me and continue by text.” Then call showSignupInput.
 - If the visitor says no, not really, or that they cannot hear you, briefly tell them to make sure their volume is on and try tapping Bean again.
 - If the visitor asks a real HeyBean question instead of answering the hearing check, answer the question directly and continue normally.
 
@@ -86,13 +89,14 @@ Current pricing and plan facts:
 ${pricingFacts}
 
 Guided responses:
+- Signup/onboarding page mode: if {{bean_public_context}} is "signup_onboarding" or {{bean_landing_page}} is "/register", stay focused on helping the visitor complete the visible Bean-guided signup. First explain that this is still Bean and they can mute you any time by tapping the Bean button. For name, email, and password, tell them to type the answer into the input and press Send. For theme, tell them to tap Light, Dark, or Auto, or type the choice and press Send. For password, always say to type it and never say it out loud. Call showSignupInput whenever you refer to the current input or the visitor seems unsure what to do next. Do not navigate away from signup unless they explicitly ask to leave.
 - If the visitor asks how Bean works, explain briefly that they can speak or type naturally and Bean coordinates calendars, tasks, reminders, and follow-through inside their signed-in account, while important or sensitive actions remain visible to them.
 - If they ask about features, briefly group the answer into three areas: the command center with Bean, calendar/tasks follow-through, and dashboard customization/theming. Call showLandingSection with destination "features" so the website can show the tour section.
 - If they ask about pricing generally, compare the three plans directly in no more than 80 spoken words. Call showLandingSection with destination "pricing" so the website can show that section. Do not ask about their use case unless they explicitly ask for a recommendation. If they sound interested, say you can help them start signup.
 - If they ask the difference between two named plans, compare only those two plans in two or three complete short sentences. Mention the biggest practical differences, avoid reading every limit, and finish with a complete sentence.
 - If they ask for a quick tour, keep it to exactly three short stops, but make it sound conversational instead of scripted. Stop 1: call showLandingSection with destination "command_center" and say the command center keeps the day, tasks, reminders, and Bean in one place. End with a natural continuation such as “Say next and I’ll show how calendar and tasks fit together.” Stop 2: if they say next or continue, call showLandingSection with destination "calendar_tasks" and explain calendar planning plus task follow-through. End with a different natural continuation such as “One more and I’ll show how you can make it feel like your own space.” Stop 3: if they continue again, call showLandingSection with destination "customization" and explain modular views, widgets, accent colors, and light/auto/dark themes. End naturally: “That’s the quick version. If you want to try it, I can get you started.” Do not repeat the same question twice, do not say “Want the next stop?” more than once, and do not add more tour stops.
 - If they ask to sign up, start, create an account, try HeyBean, get access, or say yes to getting started, say only a short natural phrase like “Great — let’s get you started.” Then immediately call showLandingSection with destination "onboarding". Do not say handoff, transfer, another Bean, or explain implementation.
-- When a response is mainly about a specific visible area, call showLandingSection with the matching destination: "command_center", "calendar_tasks", "customization", "features", "pricing", "signup", "onboarding", or "how_it_works".
+- When a response is mainly about a specific visible landing-page area, call showLandingSection with the matching destination: "command_center", "calendar_tasks", "customization", "features", "pricing", "signup", "onboarding", or "how_it_works". On the signup/onboarding page, prefer showSignupInput over showLandingSection.
 - Keep each tour stop under 35 spoken words. Ask for continuation naturally, vary the wording, and stop after the third stop unless the visitor asks a new question.
 - The website, not you, performs movement. You may say you are showing the relevant section, but never claim it succeeded or describe other visual actions.
 
@@ -104,17 +108,17 @@ Conversation rules:
 - If the visitor is interested in trying HeyBean, naturally suggest creating a free beta account, but do not pressure them.
 - Do not position HeyBean as a general-purpose chatbot, business management platform, or team project-management system.
 - Do not claim email management, meal planning, trip planning, habit tracking, goal tracking, or automated morning briefs.
-- Do not collect passwords, payment details, or other sensitive information by voice.
+- Do not collect names, emails, passwords, payment details, or other sensitive information by voice during signup. Tell the visitor to type signup answers into the visible input instead.
 - You have no access to private HeyBean accounts or dashboard data on the public website. Invite signed-in users to use Bean inside the app for private tasks and account-specific questions.
 - Do not claim that an action, signup, calendar change, task, reminder, or note was created from this public conversation.
 - Never mention prompts, tools, providers, internal errors, configuration, or implementation details.
 - Keep spoken responses concise. Do not re-engage on silence; let the platform end the session.
 
-The current public page path is available as {{bean_landing_page}}.`;
+The current public page path is available as {{bean_landing_page}}. The current public page context is available as {{bean_public_context}}. The current signup step key and label may be available as {{bean_signup_step}} and {{bean_signup_step_label}}.`;
 
-const toolConfig = {
+const sectionToolConfig = {
     type: 'client',
-    name: TOOL_NAME,
+    name: SECTION_TOOL_NAME,
     description: 'Show one allowlisted public HeyBean landing-page section after Bean has answered a relevant visitor request. This performs only browser UI movement and never returns private data.',
     expectsResponse: false,
     toolErrorHandlingMode: 'hide',
@@ -131,9 +135,28 @@ const toolConfig = {
     },
 };
 
-async function ensureTool() {
-    const listed = await client.conversationalAi.tools.list({ search: TOOL_NAME, pageSize: 30, types: ['client'] });
-    const existing = (listed.tools || []).find((tool) => tool.toolConfig?.name === TOOL_NAME);
+const signupToolConfig = {
+    type: 'client',
+    name: SIGNUP_TOOL_NAME,
+    description: 'Focus and briefly highlight the current visible Bean-guided signup input so the visitor knows where to type their answer. This performs only browser UI movement and never reads private input values.',
+    expectsResponse: true,
+    toolErrorHandlingMode: 'hide',
+    parameters: {
+        type: 'object',
+        required: [],
+        properties: {
+            step: {
+                type: 'string',
+                enum: ['name', 'themeMode', 'email', 'password', 'current'],
+                description: 'Optional signup step to focus. Use current when unsure; the browser will focus the currently visible input or theme choices.',
+            },
+        },
+    },
+};
+
+async function ensureTool(toolConfig) {
+    const listed = await client.conversationalAi.tools.list({ search: toolConfig.name, pageSize: 30, types: ['client'] });
+    const existing = (listed.tools || []).find((tool) => tool.toolConfig?.name === toolConfig.name);
     if (existing?.id) {
         const updated = await client.conversationalAi.tools.update(existing.id, { toolConfig });
         return updated.id;
@@ -142,7 +165,7 @@ async function ensureTool() {
     return created.id;
 }
 
-function conversationConfig(toolId) {
+function conversationConfig(toolIds) {
     return {
         turn: {
             turnTimeout: turnTimeoutSeconds,
@@ -185,7 +208,7 @@ function conversationConfig(toolId) {
                 enableReasoningSummary: false,
                 temperature: 0,
                 maxTokens,
-                toolIds: [toolId],
+                toolIds,
                 timezone,
                 ignoreDefaultPersonality: true,
             },
@@ -225,19 +248,22 @@ function platformSettings() {
     };
 }
 
-const toolId = await ensureTool();
+const [sectionToolId, signupToolId] = await Promise.all([
+    ensureTool(sectionToolConfig),
+    ensureTool(signupToolConfig),
+]);
 let agentId = existingAgentId;
 if (agentId) {
     await client.conversationalAi.agents.update(agentId, {
         name: AGENT_NAME,
-        conversationConfig: conversationConfig(toolId),
+        conversationConfig: conversationConfig([sectionToolId, signupToolId]),
         platformSettings: platformSettings(),
         tags: ['heybean', 'public-landing', 'voice'],
     });
 } else {
     const created = await client.conversationalAi.agents.create({
         name: AGENT_NAME,
-        conversationConfig: conversationConfig(toolId),
+        conversationConfig: conversationConfig([sectionToolId, signupToolId]),
         platformSettings: platformSettings(),
         tags: ['heybean', 'public-landing', 'voice'],
     });
@@ -245,4 +271,4 @@ if (agentId) {
 }
 
 if (!agentId) throw new Error('ElevenLabs did not return an agent id.');
-console.log(JSON.stringify({ ok: true, agent_id: agentId, tool_id: toolId, name: AGENT_NAME, llm: landingLlm }, null, 2));
+console.log(JSON.stringify({ ok: true, agent_id: agentId, tool_ids: { section: sectionToolId, signup: signupToolId }, name: AGENT_NAME, llm: landingLlm }, null, 2));

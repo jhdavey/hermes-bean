@@ -138,7 +138,11 @@ class LandingPageFeatureTest extends TestCase
     public function test_public_pricing_and_registration_destinations_are_available(): void
     {
         $this->get('/pricing')->assertOk();
-        $this->get('/register')->assertOk()->assertSee('id="heybean-web-app"', false);
+        $this->get('/register')->assertOk()
+            ->assertSee('id="heybean-web-app"', false)
+            ->assertSee('data-public-bean-context="signup_onboarding"', false)
+            ->assertSee('Tap to talk')
+            ->assertSee('assets/publicBean-', false);
         $this->get('/register?plan=premium&billing_interval=monthly')
             ->assertOk()
             ->assertSee('data-selected-plan="premium"', false)

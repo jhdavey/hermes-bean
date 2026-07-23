@@ -53,6 +53,8 @@ function mountPublicBean(root) {
     const status = root.querySelector('[data-public-bean-status]');
     const cue = root.querySelector('[data-public-bean-cue]');
     if (!button || !status) return;
+    const signupOnboardingContext = publicBeanContext(root) === 'signup_onboarding';
+    const beanLabel = signupOnboardingContext ? 'Bean signup guide' : 'landing page Bean';
 
     // Public Bean is intentionally opt-in on every page load.
     let enabled = false;
@@ -85,7 +87,7 @@ function mountPublicBean(root) {
         status.textContent = text;
         status.title = text;
         button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
-        button.setAttribute('aria-label', enabled ? 'End landing page Bean' : 'Talk with landing page Bean');
+        button.setAttribute('aria-label', enabled ? `Mute ${beanLabel}` : `Talk with ${beanLabel}`);
     };
 
     const stopIdleTimer = () => {
@@ -115,6 +117,7 @@ function mountPublicBean(root) {
         return postJson(root.dataset.conversationTokenUrl, {
             client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
             page_path: window.location.pathname,
+            page_context: publicBeanContext(root),
             turnstile_token: turnstileToken,
         });
     };
@@ -262,13 +265,21 @@ function mountPublicBean(root) {
             },
             dynamicVariables: {
                 bean_landing_page: window.location.pathname,
+                bean_public_context: publicBeanContext(root),
+                bean_signup_step: currentSignupOnboardingStep().key,
+                bean_signup_step_label: currentSignupOnboardingStep().label,
                 bean_client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
             },
             clientTools: {
                 showLandingSection: async (parameters = {}) => {
-                    showLandingUiAction(parameters.destination || parameters.section || parameters.action);
+                    const destination = parameters.destination || parameters.section || parameters.action;
+                    if (signupOnboardingContext && ['signup', 'onboarding', 'register', 'input'].includes(String(destination || '').toLowerCase())) {
+                        return focusSignupOnboardingInput(parameters);
+                    }
+                    showLandingUiAction(destination);
                     return 'Section shown.';
                 },
+                showSignupInput: async (parameters = {}) => focusSignupOnboardingInput(parameters),
                 // Backward compatibility while the hosted Landing Guide agent is
                 // being updated from the older Hermes-backed public voice flow.
                 askLandingBean: async (parameters = {}) => {
@@ -411,6 +422,56 @@ function mountPublicBean(root) {
         }
         return payload.data || payload;
     }
+}
+
+function publicBeanContext(root) {
+    const explicit = String(root?.dataset?.publicBeanContext || '').trim().toLowerCase();
+    if (explicit) return explicit;
+    return window.location.pathname === '/register' ? 'signup_onboarding' : 'landing';
+}
+
+function currentSignupOnboardingStep() {
+    const form = document.querySelector('[data-action="guided-onboarding"]');
+    const key = String(form?.dataset?.guidedOnboardingStep || '').trim();
+    const fallbackKey = document.querySelector('[data-guided-theme-mode]') ? 'themeMode' : '';
+    const stepKey = key || fallbackKey || 'unknown';
+    const labels = {
+        name: 'first and last name',
+        themeMode: 'theme preference',
+        email: 'email address',
+        password: 'password',
+        plan: 'plan selection',
+        unknown: 'current signup answer',
+    };
+    return { key: stepKey, label: labels[stepKey] || labels.unknown };
+}
+
+function focusSignupOnboardingInput(parameters = {}) {
+    const step = currentSignupOnboardingStep();
+    const requestedStep = String(parameters.step || parameters.destination || '').trim();
+    const target = document.querySelector('[data-action="guided-onboarding"] [name="value"]')
+        || document.querySelector('[data-guided-theme-mode]')
+        || document.querySelector('.hb-guided-chat-composer')
+        || document.querySelector('.hb-guided-choice-panel')
+        || document.querySelector('[data-guided-content]');
+
+    if (!target) return 'The signup input is not visible yet. Tell the visitor they can keep typing in the signup form.';
+
+    const highlightTarget = target.closest?.('.hb-guided-chat-composer, .hb-guided-choice-panel, [data-guided-content]') || target;
+    highlightTarget.classList.remove('public-bean-guided-highlight');
+    window.requestAnimationFrame(() => highlightTarget.classList.add('public-bean-guided-highlight'));
+    window.setTimeout(() => highlightTarget.classList.remove('public-bean-guided-highlight'), 2400);
+    target.focus?.({ preventScroll: false });
+    target.scrollIntoView?.({ block: 'center', behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ? 'auto' : 'smooth' });
+
+    const typedStep = requestedStep ? ` Requested step: ${requestedStep}.` : '';
+    if (step.key === 'password') {
+        return `Focused the password input.${typedStep} Tell the visitor to type their password in the input and press Send, not to say it out loud.`;
+    }
+    if (step.key === 'themeMode') {
+        return `Focused the theme choices.${typedStep} Tell the visitor to tap Light, Dark, or Auto, or type the choice into the input and press Send.`;
+    }
+    return `Focused the ${step.label} input.${typedStep} Tell the visitor to type their ${step.label} in the input and press Send.`;
 }
 
 function showLandingUiAction(action) {

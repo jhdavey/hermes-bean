@@ -14,6 +14,33 @@
 <body class="heybean-app-body">
     @if (request()->is('register'))
         @include('partials.public-beta-banner')
+        <div
+            class="public-bean-presence"
+            data-public-bean
+            data-public-bean-context="signup_onboarding"
+            data-mode="disabled"
+            data-csrf-token="{{ csrf_token() }}"
+            data-conversation-token-url="{{ route('bean.landing.conversation-token') }}"
+            data-message-url="{{ route('bean.landing.messages') }}"
+            data-voice-event-url="{{ route('bean.landing.voice-events') }}"
+            data-turnstile-site-key="{{ config('services.turnstile.site_key') }}"
+        >
+            <span class="public-bean-ring" aria-hidden="true"></span>
+            <button class="public-bean-control" type="button" data-public-bean-toggle aria-pressed="false" aria-label="Talk with Bean">
+                <span class="public-bean-icon"><img src="{{ asset('images/bean-logo.png') }}" alt="Bean"></span>
+                <span class="public-bean-status" data-public-bean-status aria-live="polite">Tap to talk</span>
+            </button>
+            <button class="public-bean-cue" type="button" data-public-bean-cue aria-label="Talk with Bean">
+                <span>Hey! I'm over here!</span>
+                <svg viewBox="0 0 88 88" focusable="false" aria-hidden="true">
+                    <path class="public-bean-cue-arrow" d="M78 76 C56 66 48 51 40 36"></path>
+                    <path class="public-bean-cue-head" d="M40 36 L34 53 M40 36 L55 44"></path>
+                </svg>
+            </button>
+            <span class="public-bean-help" data-public-bean-help>Turn your volume on, then allow microphone access.</span>
+            <span class="public-bean-turnstile" data-public-bean-turnstile hidden></span>
+        </div>
+        @vite('resources/js/publicBean.js')
     @endif
     <div
         id="heybean-web-app"

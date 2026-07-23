@@ -28,6 +28,7 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.match(source, /fromLandingBean/);
     assert.match(source, /I’ll help get your HeyBean account set up\. What is your first and last name\?/);
     assert.match(source, /data-action="guided-onboarding"/);
+    assert.match(source, /data-guided-onboarding-step="\$\{escapeAttr\(step\)\}"/);
     assert.match(source, /data-action="plain-signup"/);
     assert.match(source, /startOnboardingTourIfNeeded/);
     assert.match(source, /activateOnboardingTourStep\(0\)/);

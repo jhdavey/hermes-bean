@@ -15,7 +15,7 @@
             <span class="public-bean-status" data-public-bean-status aria-live="polite">Tap to talk</span>
         </button>
         <button class="public-bean-cue" type="button" data-public-bean-cue aria-label="Talk with Bean">
-            <span>Hey! I'm over here!🔍️️</span>
+            <span>Hey! I'm over here!</span>
             <svg viewBox="0 0 88 88" focusable="false" aria-hidden="true">
                 <path class="public-bean-cue-arrow" d="M78 76 C56 66 48 51 40 36"></path>
                 <path class="public-bean-cue-head" d="M40 36 L34 53 M40 36 L55 44"></path>

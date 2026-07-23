@@ -5,6 +5,7 @@ import test from 'node:test';
 const source = await readFile(new URL('../../resources/js/publicBean.js', import.meta.url), 'utf8');
 const styles = await readFile(new URL('../../resources/css/public-bean.css', import.meta.url), 'utf8');
 const navigation = await readFile(new URL('../../resources/views/partials/public-nav.blade.php', import.meta.url), 'utf8');
+const appView = await readFile(new URL('../../resources/views/app.blade.php', import.meta.url), 'utf8');
 const landing = await readFile(new URL('../../resources/views/welcome.blade.php', import.meta.url), 'utf8');
 const agentConfig = await readFile(new URL('../../scripts/elevenlabs-landing-agent-configure.mjs', import.meta.url), 'utf8');
 
@@ -12,7 +13,7 @@ test('public pages expose a compact Bean control without the authenticated chat 
     assert.match(navigation, /data-public-bean/);
     assert.match(navigation, /Tap to talk/);
     assert.match(navigation, /data-public-bean-status/);
-    assert.match(navigation, /Hey! I'm over here!🔍️️/);
+    assert.match(navigation, /Hey! I'm over here!/);
     assert.match(navigation, /data-public-bean-cue/);
     assert.match(navigation, /aria-label="Talk with Bean"/);
     assert.match(navigation, /Turn your volume on, then allow microphone access\./);
@@ -87,6 +88,7 @@ test('landing Bean starts voice directly from an explicit tap with a hearing che
     assert.doesNotMatch(source, /normalizeLandingIntent|bean_landing_intent|requested_intent|data-public-bean-intent/);
     assert.doesNotMatch(source, /Please give me the quick three-stop tour|Please help me sign up for HeyBean/);
     assert.match(source, /showLandingSection/);
+    assert.match(source, /showSignupInput/);
     assert.match(source, /askLandingBean/);
     assert.match(source, /root\.dataset\.conversationTokenUrl/);
     assert.match(source, /root\.dataset\.messageUrl/);
@@ -97,6 +99,27 @@ test('landing Bean starts voice directly from an explicit tap with a hearing che
     const voiceStart = source.indexOf('await startVoiceConversation(revision)');
     assert.ok(permissionRequest >= 0);
     assert.ok(voiceStart > permissionRequest);
+});
+
+test('register flow keeps the same tap-to-talk Bean control and uses signup voice context', () => {
+    assert.match(appView, /request\(\)->is\('register'\)/);
+    assert.match(appView, /data-public-bean-context="signup_onboarding"/);
+    assert.match(appView, /data-public-bean-toggle/);
+    assert.match(appView, /Tap to talk/);
+    assert.match(appView, /Hey! I'm over here!/);
+    assert.match(appView, /resources\/js\/publicBean\.js/);
+    assert.match(source, /publicBeanContext\(root\) === 'signup_onboarding'/);
+    assert.match(source, /page_context:\s*publicBeanContext\(root\)/);
+    assert.match(source, /bean_public_context:\s*publicBeanContext\(root\)/);
+    assert.match(source, /bean_signup_step:\s*currentSignupOnboardingStep\(\)\.key/);
+    assert.match(source, /bean_signup_step_label:\s*currentSignupOnboardingStep\(\)\.label/);
+    assert.match(source, /function focusSignupOnboardingInput/);
+    assert.match(source, /Tell the visitor to type their password in the input and press Send, not to say it out loud/);
+    assert.match(source, /await stopVoiceConversation\('disabled'\)/);
+    assert.match(agentConfig, /showSignupInput/);
+    assert.match(agentConfig, /type answers into the input and press Send/);
+    assert.match(agentConfig, /Tap Bean anytime to mute me and continue by text/);
+    assert.match(agentConfig, /Do not collect names, emails, passwords, payment details/);
 });
 
 test('landing Bean can be disabled while voice startup is still pending', () => {
@@ -112,7 +135,9 @@ test('landing Bean can be disabled while voice startup is still pending', () => 
 test('landing voice uses a dedicated fast ElevenLabs guide with an action-only public section tool', () => {
     assert.match(agentConfig, /ELEVENLABS_LANDING_AGENT_ID/);
     assert.match(agentConfig, /showLandingSection/);
+    assert.match(agentConfig, /showSignupInput/);
     assert.match(source, /showLandingSection:\s*async/);
+    assert.match(source, /showSignupInput:\s*async/);
     assert.match(agentConfig, /answer directly with the facts below using the configured fast model/);
     assert.match(agentConfig, /Do not call a response\/reasoning tool for normal questions/);
     assert.match(agentConfig, /bean:landing-guide-facts/);
@@ -124,6 +149,7 @@ test('landing voice uses a dedicated fast ElevenLabs guide with an action-only p
     assert.match(agentConfig, /not like a nagging salesperson/);
     assert.doesNotMatch(agentConfig, /bean_landing_intent|quick-start intent/);
     assert.match(agentConfig, /expectsResponse:\s*false/);
+    assert.match(agentConfig, /expectsResponse:\s*true/);
     assert.match(agentConfig, /firstMessage:\s*true/);
     assert.match(agentConfig, /llm:\s*landingLlm/);
     assert.match(agentConfig, /gpt-4\.1-nano/);
@@ -149,7 +175,8 @@ test('landing Bean supports optional bot verification without exposing a secret'
 });
 
 test('landing Bean reveals the three-step quick tour plus signup and pricing destinations', () => {
-    assert.match(source, /showLandingUiAction\(parameters\.destination \|\| parameters\.section \|\| parameters\.action\)/);
+    assert.match(source, /const destination = parameters\.destination \|\| parameters\.section \|\| parameters\.action/);
+    assert.match(source, /focusSignupOnboardingInput\(parameters\)/);
     assert.match(source, /showLandingUiAction\(response\?\.ui_action \|\| parameters\.destination\)/);
     assert.match(agentConfig, /required: \['destination'\]/);
     assert.match(agentConfig, /enum: \['command_center', 'calendar_tasks', 'customization', 'features', 'pricing', 'signup', 'onboarding', 'how_it_works'\]/);
