@@ -7,7 +7,7 @@ Purpose: give future Hermes/agent sessions a compact, durable starting point for
 ## Current repository/deploy state
 
 - Local project path: `/Users/joshuadavey/development/projects/hermes-bean`
-- Main branch at last update: `9877fa00 Polish signup Bean onboarding flow`
+- Main branch behavior at last update: `9877fa00 Polish signup Bean onboarding flow` plus doc-only state update.
 - Local working tree at last update was clean after the signup Bean onboarding polish deploy.
 - Production host/path: `forge@heybean.org:/home/forge/heybean.org/current`
 - Production commit last verified in prior work: `9877fa0078ec68dbc0d63c739f689beaa73aedc6`
