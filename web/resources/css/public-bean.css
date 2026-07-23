@@ -382,6 +382,24 @@
     transform: translate(-50%, 0);
 }
 
+.heybean-app-body[data-hb-theme-resolved="dark"] .public-bean-presence-signup {
+    border-color: rgba(var(--public-bean-accent), .34);
+    background: rgba(13, 19, 26, .88);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, .30), inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .public-bean-presence-signup .public-bean-control {
+    color: #d9e1ea;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .public-bean-presence-signup .public-bean-help,
+.heybean-app-body[data-hb-theme-resolved="dark"] .public-bean-presence-signup .public-bean-turnstile {
+    border-color: rgba(var(--public-bean-accent), .24);
+    background: rgba(13, 19, 26, .94);
+    color: #d9e1ea;
+    box-shadow: 0 14px 32px rgba(0, 0, 0, .34);
+}
+
 @media (max-width: 620px) {
     .public-bean-presence-signup {
         top: calc(env(safe-area-inset-top, 0px) + 42px);

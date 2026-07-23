@@ -121,6 +121,12 @@ test('register flow keeps the same tap-to-talk Bean control and uses signup voic
     assert.match(source, /bean_signup_step:\s*currentSignupOnboardingStep\(\)\.key/);
     assert.match(source, /bean_signup_step_label:\s*currentSignupOnboardingStep\(\)\.label/);
     assert.match(source, /function focusSignupOnboardingInput/);
+    assert.match(source, /bean:signup-progress/);
+    assert.match(source, /conversation\.sendUserMessage\(prompt\)/);
+    assert.match(source, /SIGNUP_PROGRESS_UPDATE:/);
+    assert.match(source, /Do not repeat typed names, email addresses, or passwords/);
+    assert.match(source, /bean:signup-activity/);
+    assert.match(source, /conversation\.sendUserActivity\(\)/);
     assert.match(source, /Tell the visitor to type their password in the input and press Send, not to say it out loud/);
     assert.match(source, /await stopVoiceConversation\('disabled'\)/);
     assert.match(styles, /\.public-bean-presence-signup\[data-mode="listening"\] \.public-bean-help/);
@@ -167,6 +173,9 @@ test('landing voice uses a dedicated fast ElevenLabs guide with an action-only p
     assert.doesNotMatch(agentConfig, /reasoningEffort|thinkingBudget/);
     assert.match(agentConfig, /maxDurationSeconds/);
     assert.match(agentConfig, /env\.ELEVENLABS_MAX_DURATION_SECONDS \|\| 60/);
+    assert.match(agentConfig, /env\.ELEVENLABS_SILENCE_TIMEOUT_SECONDS \|\| 30/);
+    assert.match(agentConfig, /SIGNUP_PROGRESS_UPDATE/);
+    assert.match(agentConfig, /private UI state from the browser/);
     assert.match(agentConfig, /silenceEndCallTimeout:\s*silenceEndCallSeconds/);
     assert.match(agentConfig, /dailyLimit:\s*dailyConversationLimit/);
     assert.match(agentConfig, /enableAuth:\s*true/);

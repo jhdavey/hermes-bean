@@ -1432,6 +1432,25 @@ export function mountHeyBeanWebApp(mount) {
         }
     }
 
+    function dispatchSignupVoiceProgress(detail = {}) {
+        window.dispatchEvent(new CustomEvent('bean:signup-progress', {
+            detail: {
+                source: 'guided_onboarding',
+                ...detail,
+            },
+        }));
+    }
+
+    function dispatchSignupVoiceActivity(detail = {}) {
+        window.dispatchEvent(new CustomEvent('bean:signup-activity', {
+            detail: {
+                source: 'guided_onboarding',
+                step: state.guidedSignupStep,
+                ...detail,
+            },
+        }));
+    }
+
     async function handleGuidedSignupName(value) {
         const name = value.trim();
         if (name.length < 2) {
@@ -1442,6 +1461,11 @@ export function mountHeyBeanWebApp(mount) {
         state.guidedSignupName = name;
         state.guidedSignupStep = 'themeMode';
         render();
+        dispatchSignupVoiceProgress({
+            completed_step: 'name',
+            next_step: 'themeMode',
+            instruction: 'The visitor typed their name. Briefly acknowledge it without repeating the name, then guide them to choose Light, Dark, or Auto.',
+        });
     }
 
     function guidedThemeModeFromText(value) {
@@ -1462,6 +1486,13 @@ export function mountHeyBeanWebApp(mount) {
         state.guidedSignupError = '';
         state.guidedSignupStep = 'email';
         render();
+        const selectedMode = themeModesByKey.get(normalized)?.label || normalized;
+        dispatchSignupVoiceProgress({
+            completed_step: 'themeMode',
+            next_step: 'email',
+            selected_option: selectedMode,
+            instruction: 'The visitor selected a theme mode. Briefly confirm the choice, then guide them to type their email address into the input and press Send.',
+        });
     }
 
     async function handleGuidedSignupEmail(value) {
@@ -1485,6 +1516,11 @@ export function mountHeyBeanWebApp(mount) {
             state.guidedSignupEmail = availability.email;
             state.guidedSignupStep = 'password';
             render();
+            dispatchSignupVoiceProgress({
+                completed_step: 'email',
+                next_step: 'password',
+                instruction: 'The visitor typed an available email address. Do not say the address out loud. Guide them to type a password in the input, press Send, and never speak the password aloud.',
+            });
         } catch (_) {
             state.busy = false;
             state.guidedSignupError = 'I could not check that email right now. Please try again in a moment.';
@@ -1506,6 +1542,11 @@ export function mountHeyBeanWebApp(mount) {
         state.guidedSignupPassword = value;
         state.busy = true;
         render();
+        dispatchSignupVoiceProgress({
+            completed_step: 'password',
+            next_step: 'creatingAccount',
+            instruction: 'The visitor typed a password. Do not mention the password. Briefly say you are creating the account and that you will continue after the account is ready.',
+        });
         try {
             const result = await registerGuidedSignupAccount({ password: value });
             persistToken(result.token, true);
@@ -1513,7 +1554,12 @@ export function mountHeyBeanWebApp(mount) {
             state.subscriptionSummary = null;
             state.busy = false;
             if (state.user?.access_state === 'waitlisted' || state.user?.accessState === 'waitlisted') {
-                removePublicSignupBeanPresence();
+                dispatchSignupVoiceProgress({
+                    completed_step: 'account',
+                    next_step: 'waitlist',
+                    instruction: 'The account was created but the rollout is currently at capacity. Briefly explain that the visitor is on the waitlist and will hear back in usually 1–2 days. Do not mention plan selection or payment.',
+                });
+                removePublicSignupBeanPresence({ delayMs: 3600 });
                 state.phase = 'waitlist';
                 state.guidedSignupError = '';
                 render();
@@ -1544,20 +1590,34 @@ export function mountHeyBeanWebApp(mount) {
         });
     }
 
-    function removePublicSignupBeanPresence() {
+    function removePublicSignupBeanPresence(options = {}) {
         const root = document.querySelector('.public-bean-presence-signup[data-public-bean]');
         if (!root) return;
         const active = root.dataset.mode && root.dataset.mode !== 'disabled';
-        if (active) {
-            root.querySelector('[data-public-bean-toggle]')?.click();
-            window.setTimeout(() => root.remove(), 120);
+        const delayMs = active ? Math.max(0, Number(options.delayMs || 120)) : 0;
+        const removeRoot = () => root.remove();
+        if (active && delayMs > 0) {
+            window.setTimeout(() => {
+                root.querySelector('[data-public-bean-toggle]')?.click();
+                window.setTimeout(removeRoot, 120);
+            }, delayMs);
             return;
         }
-        root.remove();
+        if (active) {
+            root.querySelector('[data-public-bean-toggle]')?.click();
+            window.setTimeout(removeRoot, 120);
+            return;
+        }
+        removeRoot();
     }
 
     function startSignupDashboardPreview(result = {}) {
-        removePublicSignupBeanPresence();
+        dispatchSignupVoiceProgress({
+            completed_step: 'account',
+            next_step: 'dashboardPreview',
+            instruction: 'The account is ready. Briefly say you are opening the dashboard preview and will show the first few steps before the plan screen.',
+        });
+        removePublicSignupBeanPresence({ delayMs: 3600 });
         state.signupPaywallDeferred = true;
         state.subscriptionCheckoutStatus = '';
         state.subscriptionSummary = null;
@@ -1640,7 +1700,7 @@ export function mountHeyBeanWebApp(mount) {
         if (state.guidedSignupEmail) {
             messages.push(['user', state.guidedSignupEmail]);
             if (['password', 'plan'].includes(state.guidedSignupStep)) {
-                messages.push(['bean', 'Great. Now choose a password. Please text it here and I’ll keep it hidden.']);
+                messages.push(['bean', 'Great. Now choose a password. Type it here and press Send — don’t say it out loud.']);
             }
         }
         if (state.guidedSignupStep === 'plan') {
@@ -1661,8 +1721,8 @@ export function mountHeyBeanWebApp(mount) {
         const field = {
             name: { type: 'text', value: '', autocomplete: 'name', placeholder: 'Name', attrs: 'minlength="2" maxlength="255"' },
             themeMode: { type: 'text', value: '', autocomplete: 'off', placeholder: 'Choose Light, Dark, or Auto...', attrs: '' },
-            email: { type: 'email', value: state.guidedSignupEmail, autocomplete: 'email', placeholder: 'Text your email address...', attrs: 'maxlength="254"' },
-            password: { type: 'password', value: '', autocomplete: 'new-password', placeholder: 'Text your password...', attrs: 'minlength="12"' },
+            email: { type: 'email', value: state.guidedSignupEmail, autocomplete: 'email', placeholder: 'Type your email address...', attrs: 'maxlength="254"' },
+            password: { type: 'password', value: '', autocomplete: 'new-password', placeholder: 'Type your password...', attrs: 'minlength="12"' },
         }[step];
         return `
             <form class="hb-guided-chat-composer" data-action="guided-onboarding" data-guided-onboarding-step="${escapeAttr(step)}">
@@ -4739,7 +4799,10 @@ export function mountHeyBeanWebApp(mount) {
             render();
         }));
         mount.querySelectorAll('form[data-action="login"], form[data-action="forgot"]').forEach((form) => form.addEventListener('submit', submitAuth));
-        mount.querySelector('[data-action="guided-onboarding"]')?.addEventListener('submit', submitGuidedOnboarding);
+        const guidedOnboardingForm = mount.querySelector('[data-action="guided-onboarding"]');
+        guidedOnboardingForm?.addEventListener('submit', submitGuidedOnboarding);
+        guidedOnboardingForm?.querySelector('[name="value"]')?.addEventListener('input', () => dispatchSignupVoiceActivity({ reason: 'typing' }));
+        guidedOnboardingForm?.querySelector('[name="value"]')?.addEventListener('focus', () => dispatchSignupVoiceActivity({ reason: 'focus' }));
         mount.querySelector('[data-action="plain-signup"]')?.addEventListener('submit', submitPlainSignup);
         mount.querySelectorAll('[data-guided-theme-mode]').forEach((button) => button.addEventListener('click', () => {
             if (state.phase === 'plainSignup') {

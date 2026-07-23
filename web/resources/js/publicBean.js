@@ -386,6 +386,64 @@ function mountPublicBean(root) {
         conversation.sendUserActivity?.();
     }
 
+    function signupProgressPrompt(detail = {}) {
+        const completed = signupStepLabel(detail.completed_step || 'current');
+        const next = signupStepLabel(detail.next_step || currentSignupOnboardingStep().key);
+        const selected = detail.selected_option ? ` Selected option: ${String(detail.selected_option).slice(0, 40)}.` : '';
+        const instruction = String(detail.instruction || '').slice(0, 420);
+        return [
+            'SIGNUP_PROGRESS_UPDATE:',
+            `Completed step: ${completed}.`,
+            `Next visible step: ${next}.`,
+            selected,
+            instruction,
+            'Respond as Bean in one or two short spoken sentences. Do not ask the visitor to speak signup details aloud. Do not repeat typed names, email addresses, or passwords. Call showSignupInput if the visitor should type or choose something visible.',
+        ].filter(Boolean).join(' ');
+    }
+
+    function signupStepLabel(key) {
+        const labels = {
+            name: 'full name',
+            themeMode: 'theme choice',
+            email: 'email address',
+            password: 'password',
+            creatingAccount: 'creating account',
+            account: 'account created',
+            waitlist: 'waitlist',
+            dashboardPreview: 'dashboard preview',
+            plan: 'plan screen',
+            current: currentSignupOnboardingStep().label,
+        };
+        return labels[key] || currentSignupOnboardingStep().label || 'current signup step';
+    }
+
+    function sendSignupProgressToVoice(detail = {}) {
+        if (!signupOnboardingContext || !voiceActive || !conversation?.sendUserMessage) return;
+        const prompt = signupProgressPrompt(detail);
+        lastActivityAt = Date.now();
+        stopIdleTimer();
+        setStatus('thinking', 'Guiding…');
+        logLandingVoiceEvent('signup_progress_sent', {
+            completed_step: detail.completed_step || null,
+            next_step: detail.next_step || null,
+        });
+        conversation.sendUserActivity?.();
+        conversation.sendUserMessage(prompt);
+    }
+
+    let lastSignupActivityPingAt = 0;
+    function sendSignupActivityToVoice() {
+        if (!signupOnboardingContext || !voiceActive || !conversation?.sendUserActivity) return;
+        const now = Date.now();
+        if (now - lastSignupActivityPingAt < 2500) return;
+        lastSignupActivityPingAt = now;
+        lastActivityAt = now;
+        conversation.sendUserActivity();
+    }
+
+    window.addEventListener('bean:signup-progress', (event) => sendSignupProgressToVoice(event.detail || {}));
+    window.addEventListener('bean:signup-activity', () => sendSignupActivityToVoice());
+
     button.addEventListener('click', () => {
         if (enabled) disable();
         else enable();
