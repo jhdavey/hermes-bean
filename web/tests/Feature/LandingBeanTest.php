@@ -60,6 +60,13 @@ class LandingBeanTest extends TestCase
         });
     }
 
+    public function test_landing_voice_session_limits_allow_short_retry_bursts(): void
+    {
+        $this->assertSame(4, (int) config('bean.landing.sessions_per_minute'));
+        $this->assertSame(12, (int) config('bean.landing.sessions_per_hour'));
+        $this->assertSame(40, (int) config('bean.landing.sessions_per_day'));
+    }
+
     public function test_landing_message_uses_an_anonymous_session_scoped_runtime(): void
     {
         $this->mock(LandingBeanRuntimeService::class, function ($mock): void {

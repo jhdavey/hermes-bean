@@ -49,8 +49,9 @@ const timezone = env.BEAN_CLIENT_TIMEZONE || 'America/New_York';
 const landingLlm = env.ELEVENLABS_LANDING_LLM || 'gpt-4.1-nano';
 const maxDurationSeconds = Number(env.BEAN_LANDING_MAX_DURATION_SECONDS || env.ELEVENLABS_MAX_DURATION_SECONDS || 60);
 const initialWaitSeconds = Number(env.BEAN_LANDING_INITIAL_WAIT_SECONDS || env.ELEVENLABS_INITIAL_WAIT_SECONDS || env.ELEVENLABS_SILENCE_TIMEOUT_SECONDS || 5);
-const silenceEndCallSeconds = Number(env.BEAN_LANDING_SILENCE_END_CALL_SECONDS || env.ELEVENLABS_SILENCE_END_CALL_SECONDS || env.ELEVENLABS_SILENCE_TIMEOUT_SECONDS || 5);
+const silenceEndCallSeconds = Number(env.BEAN_LANDING_SILENCE_END_CALL_SECONDS || env.ELEVENLABS_SILENCE_END_CALL_SECONDS || env.ELEVENLABS_SILENCE_TIMEOUT_SECONDS || 8);
 const turnTimeoutSeconds = Number(env.BEAN_LANDING_TURN_TIMEOUT_SECONDS || env.ELEVENLABS_TURN_TIMEOUT_SECONDS || 15);
+const maxTokens = Number(env.ELEVENLABS_LANDING_MAX_TOKENS || 260);
 const dailyConversationLimit = Number(env.BEAN_LANDING_GLOBAL_SESSIONS_PER_DAY || 150);
 const concurrencyLimit = Number(env.BEAN_LANDING_CONCURRENCY_LIMIT || 8);
 const pricingFacts = landingGuideFacts();
@@ -79,7 +80,8 @@ ${pricingFacts}
 Guided responses:
 - If the visitor asks how Bean works, explain briefly that they can speak or type naturally and Bean coordinates calendars, tasks, reminders, and follow-through inside their signed-in account, while important or sensitive actions remain visible to them.
 - If they ask about features, briefly group the answer into capture, work-and-home coordination, daily follow-through, notes, shared workspaces, and connected calendars. Call showLandingSection with destination "features" so the website can show that section.
-- If they ask about pricing, compare the three plans directly in no more than 70 spoken words. Call showLandingSection with destination "pricing" so the website can show that section. Do not ask about their use case unless they explicitly ask for a recommendation.
+- If they ask about pricing generally, compare the three plans directly in no more than 80 spoken words. Call showLandingSection with destination "pricing" so the website can show that section. Do not ask about their use case unless they explicitly ask for a recommendation.
+- If they ask the difference between two named plans, compare only those two plans in two or three complete short sentences. Mention the biggest practical differences, avoid reading every limit, and finish with a complete sentence.
 - If they ask for a quick tour, give a short verbal tour in this order: daily command center, calendar views, tasks and reminders, notes, shared workspaces, then Bean. Pause after two or three areas and invite a question before continuing.
 - A verbal tour may span several turns. Do not rush every feature into one long response.
 - The website, not you, performs movement. You may say you are showing the relevant section, but never claim it succeeded or describe other visual actions.
@@ -172,7 +174,7 @@ function conversationConfig(toolId) {
                 llm: landingLlm,
                 enableReasoningSummary: false,
                 temperature: 0,
-                maxTokens: 140,
+                maxTokens,
                 toolIds: [toolId],
                 timezone,
                 ignoreDefaultPersonality: true,

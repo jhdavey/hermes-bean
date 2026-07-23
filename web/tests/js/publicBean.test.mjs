@@ -33,6 +33,8 @@ test('landing Bean enables the microphone, listens for the wake phrase, and star
     assert.match(source, /prefetchVoiceSession\(\)\.catch/);
     assert.match(source, /return await sessionPromise/);
     assert.match(source, /return requestVoiceSession\(\)/);
+    assert.match(source, /Demo cooldown — try again shortly/);
+    assert.doesNotMatch(source, /Demo limit reached/);
     assert.match(source, /const WAKE_TO_GREETING_TARGET_MS = 1200/);
     assert.match(source, /const IDLE_CLOSE_MS = 9000/);
     assert.match(source, /showLandingSection/);
@@ -71,6 +73,9 @@ test('landing voice uses a dedicated fast ElevenLabs guide with an action-only p
     assert.match(agentConfig, /firstMessage:\s*true/);
     assert.match(agentConfig, /llm:\s*landingLlm/);
     assert.match(agentConfig, /gpt-4\.1-nano/);
+    assert.match(agentConfig, /const maxTokens = Number\(env\.ELEVENLABS_LANDING_MAX_TOKENS \|\| 260\)/);
+    assert.match(agentConfig, /maxTokens,/);
+    assert.match(agentConfig, /difference between two named plans/);
     assert.doesNotMatch(agentConfig, /reasoningEffort|thinkingBudget/);
     assert.match(agentConfig, /maxDurationSeconds/);
     assert.match(agentConfig, /env\.ELEVENLABS_MAX_DURATION_SECONDS \|\| 60/);
@@ -95,8 +100,10 @@ test('landing Bean reveals allowlisted feature and pricing destinations', () => 
     assert.match(agentConfig, /required: \['destination'\]/);
     assert.match(agentConfig, /enum: \['features', 'pricing'\]/);
     assert.match(source, /features:\s*\{ selector: '#features', href: '\/#features'/);
-    assert.match(source, /pricing:\s*\{ selector: '#plans', href: '\/#plans'/);
-    assert.match(source, /scrollIntoView\(\{ behavior: reduceMotion \? 'auto' : 'smooth'/);
+    assert.match(source, /pricing:\s*\{ selector: '#plans', scrollSelector: '#plans \.plans', href: '\/#plans', label: 'pricing', offset: 24 \}/);
+    assert.match(source, /document\.querySelector\(target\.scrollSelector\) \|\| section/);
+    assert.match(source, /window\.scrollTo\(\{ top: Math\.max\(0, top\), behavior: reduceMotion \? 'auto' : 'smooth' \}\)/);
+    assert.doesNotMatch(source, /section\.scrollIntoView/);
     assert.doesNotMatch(source, /pendingNavigation|window\.location\.assign/);
     assert.match(styles, /\.public-bean-guided-highlight/);
     assert.match(styles, /@keyframes public-bean-guided-highlight/);

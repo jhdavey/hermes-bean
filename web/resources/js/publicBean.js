@@ -201,7 +201,7 @@ function mountPublicBean(root) {
         } catch (error) {
             if (!isCurrentLifecycle(revision)) return;
             await stopVoiceConversation('connect_error');
-            setStatus('error', error?.status === 429 ? 'Demo limit reached' : 'Bean could not connect');
+            setStatus('error', error?.status === 429 ? 'Demo cooldown — try again shortly' : 'Bean could not connect');
             window.setTimeout(() => restartWakeListening(), 1500);
         }
     }
@@ -447,17 +447,19 @@ function mountPublicBean(root) {
 function showLandingUiAction(action) {
     const targets = {
         features: { selector: '#features', href: '/#features', label: 'features' },
-        pricing: { selector: '#plans', href: '/#plans', label: 'pricing' },
+        pricing: { selector: '#plans', scrollSelector: '#plans .plans', href: '/#plans', label: 'pricing', offset: 24 },
     };
     const target = targets[String(action || '').toLowerCase()];
     if (!target) return null;
 
     const section = document.querySelector(target.selector);
     if (!section) return null;
+    const scrollTarget = target.scrollSelector ? (document.querySelector(target.scrollSelector) || section) : section;
 
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
-    section.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
-    const cue = section.querySelector('.feature-copy, .section-head') || section;
+    const top = scrollTarget.getBoundingClientRect().top + window.scrollY - (target.offset || 0);
+    window.scrollTo({ top: Math.max(0, top), behavior: reduceMotion ? 'auto' : 'smooth' });
+    const cue = scrollTarget.querySelector?.('.feature-copy, .section-head') || scrollTarget;
     cue.classList.remove('public-bean-guided-highlight');
     window.requestAnimationFrame(() => cue.classList.add('public-bean-guided-highlight'));
     window.setTimeout(() => cue.classList.remove('public-bean-guided-highlight'), 2400);

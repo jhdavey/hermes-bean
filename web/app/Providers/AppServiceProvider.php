@@ -51,7 +51,7 @@ class AppServiceProvider extends ServiceProvider
             $ipKey = hash('sha256', (string) $request->ip());
 
             return [
-                Limit::perMinute(1)->by("landing-bean:session:minute:{$sessionKey}")->response($visitorResponse),
+                Limit::perMinute(max(1, (int) config('bean.landing.sessions_per_minute', 4)))->by("landing-bean:session:minute:{$sessionKey}")->response($visitorResponse),
                 Limit::perHour(max(1, (int) config('bean.landing.sessions_per_hour', 3)))->by("landing-bean:session:hour:{$sessionKey}")->response($visitorResponse),
                 Limit::perDay(max(1, (int) config('bean.landing.sessions_per_day', 6)))->by("landing-bean:session:day:{$sessionKey}")->response($visitorResponse),
                 Limit::perHour(max(1, (int) config('bean.landing.ip_sessions_per_hour', 12)))->by("landing-bean:ip:hour:{$ipKey}")->response($visitorResponse),
