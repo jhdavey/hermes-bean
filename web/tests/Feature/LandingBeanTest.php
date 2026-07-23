@@ -73,14 +73,14 @@ class LandingBeanTest extends TestCase
     {
         $this->get('/')->assertOk()
             ->assertSee('id="bean-demo"', false)
-            ->assertSee('id="tour-tasks"', false)
-            ->assertSee('id="tour-calendar"', false)
-            ->assertSee('id="tour-daily"', false)
-            ->assertSee('id="tour-context"', false)
-            ->assertSee('id="tour-notes"', false)
-            ->assertSee('id="tour-workspaces"', false)
-            ->assertSee('Notes keep context beside the plan.', false)
-            ->assertSee('Shared workspaces separate work, home, and recurring plans.', false);
+            ->assertSee('id="tour-command-center"', false)
+            ->assertSee('id="tour-calendar-tasks"', false)
+            ->assertSee('id="tour-customization"', false)
+            ->assertSee('heybean-tour-command-center-bean.png', false)
+            ->assertSee('heybean-tour-calendar-tasks.png', false)
+            ->assertSee('heybean-tour-customization-themes.png', false)
+            ->assertSee('Quick interactive tour', false)
+            ->assertSee('Modular dashboard + themes', false);
     }
 
     public function test_landing_message_uses_an_anonymous_session_scoped_runtime(): void
@@ -216,7 +216,7 @@ class LandingBeanTest extends TestCase
         $root = storage_path('framework/testing/landing-bean-'.Str::uuid());
         $binary = $root.'/fake-hermes';
         File::ensureDirectoryExists($root);
-        File::put($binary, "#!/bin/sh\nprintf 'Hello from Bean. Let me show the daily command center.\\n[[BEAN_UI:unsupported]]\\n[[BEAN_UI:daily]]\\nSession ID: public-session-1\\n'\n");
+        File::put($binary, "#!/bin/sh\nprintf 'Hello from Bean. Let me show the command center with Bean.\\n[[BEAN_UI:unsupported]]\\n[[BEAN_UI:command_center]]\\nSession ID: public-session-1\\n'\n");
         chmod($binary, 0755);
 
         config([
@@ -232,9 +232,9 @@ class LandingBeanTest extends TestCase
             $result = app(LandingBeanRuntimeService::class)->respond('visitor-a', null, 'Hey Bean', '/');
             $home = $root.'/visitors/'.hash('sha256', 'visitor-a');
 
-            $this->assertSame('Hello from Bean. Let me show the daily command center.', $result['answer']);
+            $this->assertSame('Hello from Bean. Let me show the command center with Bean.', $result['answer']);
             $this->assertSame('public-session-1', $result['hermes_session_id']);
-            $this->assertSame('daily', $result['ui_action']);
+            $this->assertSame('command_center', $result['ui_action']);
             $this->assertFileExists($home.'/skills/heybean-guide/SKILL.md');
             $this->assertStringNotContainsString('bean_dashboard', File::get($home.'/config.yaml'));
             $this->assertStringNotContainsString('session_search', File::get($home.'/config.yaml'));
@@ -244,8 +244,8 @@ class LandingBeanTest extends TestCase
             $this->assertStringContainsString('Do not position HeyBean as a general-purpose chatbot', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('show you how it works, walk through features or pricing, or give you a quick tour', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not ask about their use case unless they explicitly ask for a recommendation.', File::get($home.'/skills/heybean-guide/SKILL.md'));
-            $this->assertStringContainsString('Start with the daily command center', File::get($home.'/skills/heybean-guide/SKILL.md'));
-            $this->assertStringContainsString('Supported values are: `how_it_works`, `bean`, `daily`, `calendar`, `tasks`, `reminders`, `notes`, `workspaces`, `features`, `pricing`, and `signup`', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('keep it to exactly three short stops', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('Supported values are: `command_center`, `calendar_tasks`, `customization`, `features`, `pricing`, `signup`, and `how_it_works`', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('7 workspaces', File::get($home.'/skills/heybean-guide/SKILL.md'));
             touch($home.'/.last-used', now()->subHours(3)->timestamp);
             $this->assertSame(1, app(LandingBeanRuntimeService::class)->pruneInactive(2));

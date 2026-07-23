@@ -142,23 +142,27 @@ test('landing Bean supports optional bot verification without exposing a secret'
     assert.doesNotMatch(navigation, /TURNSTILE_SECRET|secret_key/);
 });
 
-test('landing Bean reveals allowlisted feature, tour, signup, and pricing destinations', () => {
+test('landing Bean reveals the three-step quick tour plus signup and pricing destinations', () => {
     assert.match(source, /showLandingUiAction\(parameters\.destination \|\| parameters\.section \|\| parameters\.action\)/);
     assert.match(source, /showLandingUiAction\(response\?\.ui_action \|\| parameters\.destination\)/);
     assert.match(agentConfig, /required: \['destination'\]/);
-    assert.match(agentConfig, /enum: \['how_it_works', 'bean', 'daily', 'calendar', 'tasks', 'reminders', 'notes', 'workspaces', 'features', 'pricing', 'signup'\]/);
-    assert.match(agentConfig, /Start with the daily command center and call showLandingSection with destination "daily"/);
-    assert.match(agentConfig, /move through calendar views \("calendar"\), tasks and reminders \("tasks"\), notes \("notes"\), shared workspaces \("workspaces"\), then Bean itself \("bean"\)/);
+    assert.match(agentConfig, /enum: \['command_center', 'calendar_tasks', 'customization', 'features', 'pricing', 'signup', 'how_it_works'\]/);
+    assert.match(agentConfig, /keep it to exactly three short stops/);
+    assert.match(agentConfig, /destination "command_center"/);
+    assert.match(agentConfig, /show "calendar_tasks"/);
+    assert.match(agentConfig, /show "customization"/);
+    assert.doesNotMatch(agentConfig, /notes \("notes"\)|shared workspaces \("workspaces"\)|then Bean itself \("bean"\)/);
 
     const destinations = {
         how_it_works: '#how-it-works',
-        bean: '#bean-demo',
-        daily: '#tour-daily',
-        calendar: '#tour-calendar',
-        tasks: '#tour-tasks',
-        reminders: '#tour-tasks',
-        notes: '#tour-notes',
-        workspaces: '#tour-workspaces',
+        bean: '#tour-command-center',
+        command_center: '#tour-command-center',
+        calendar_tasks: '#tour-calendar-tasks',
+        calendar: '#tour-calendar-tasks',
+        tasks: '#tour-calendar-tasks',
+        customization: '#tour-customization',
+        dashboard: '#tour-customization',
+        themes: '#tour-customization',
         features: '#features',
         pricing: '#plans',
         signup: '#early-access',
@@ -169,14 +173,26 @@ test('landing Bean reveals allowlisted feature, tour, signup, and pricing destin
         assert.match(source, new RegExp(`href: '/${selector}'`));
     }
 
-    for (const id of ['tour-tasks', 'tour-calendar', 'tour-daily', 'tour-context', 'tour-notes', 'tour-workspaces']) {
+    for (const id of ['tour-command-center', 'tour-calendar-tasks', 'tour-customization']) {
         assert.match(landing, new RegExp(`id="${id}"`));
     }
-    assert.match(landing, /Notes keep context beside the plan\./);
-    assert.match(landing, /Shared workspaces separate work, home, and recurring plans\./);
+    assert.match(landing, /heybean-tour-command-center-bean\.png/);
+    assert.match(landing, /heybean-tour-calendar-tasks\.png/);
+    assert.match(landing, /heybean-tour-customization-themes\.png/);
+    assert.match(landing, /Quick interactive tour/);
+    assert.match(landing, /Modular dashboard \+ themes/);
+    assert.doesNotMatch(landing, /id="tour-notes"|id="tour-workspaces"|id="tour-context"/);
     assert.match(source, /const key = String\(action \|\| ''\)\.toLowerCase\(\)\.trim\(\)\.replace\(\/\[\\s-\]\+\/g, '_'\)/);
     assert.match(source, /document\.querySelector\(target\.scrollSelector\) \|\| section/);
     assert.match(source, /window\.scrollTo\(\{ top: Math\.max\(0, top\), behavior: reduceMotion \? 'auto' : 'smooth' \}\)/);
+    assert.match(source, /scrollTarget\.classList\.add\('public-bean-guided-highlight'\)/);
+    assert.match(source, /mountTourImageZoom\(\)/);
+    assert.match(source, /closest\?\.\('\.tour-screenshot-card'\)/);
+    assert.match(source, /className = 'tour-image-zoom'/);
+    assert.match(source, /aria-modal', 'true'/);
+    assert.match(landing, /\.tour-image-zoom/);
+    assert.match(landing, /cursor:zoom-in/);
+    assert.doesNotMatch(source, /overlay\.innerHTML/);
     assert.doesNotMatch(source, /section\.scrollIntoView/);
     assert.doesNotMatch(source, /pendingNavigation|window\.location\.assign/);
     assert.match(styles, /\.public-bean-guided-highlight/);

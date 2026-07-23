@@ -7,6 +7,46 @@ const WAKE_TO_GREETING_TARGET_MS = 1200;
 let turnstileScriptPromise = null;
 
 document.querySelectorAll('[data-public-bean]').forEach((root) => mountPublicBean(root));
+mountTourImageZoom();
+
+function mountTourImageZoom() {
+    document.addEventListener('click', (event) => {
+        const card = event.target?.closest?.('.tour-screenshot-card');
+        if (!card) return;
+        const image = card.querySelector('img');
+        if (!image) return;
+        event.preventDefault();
+        openTourImageZoom(image);
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        document.querySelector('.tour-image-zoom')?.remove();
+    });
+}
+
+function openTourImageZoom(image) {
+    document.querySelector('.tour-image-zoom')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'tour-image-zoom';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', image.alt || 'HeyBean tour screenshot');
+    const close = document.createElement('button');
+    close.className = 'tour-image-zoom-close';
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Close screenshot zoom');
+    close.textContent = '×';
+    const zoomedImage = document.createElement('img');
+    zoomedImage.src = image.currentSrc || image.src;
+    zoomedImage.alt = image.alt || '';
+    overlay.append(close, zoomedImage);
+    overlay.addEventListener('click', (event) => {
+        if (event.target === overlay || event.target.closest('.tour-image-zoom-close')) overlay.remove();
+    });
+    document.body.appendChild(overlay);
+    close.focus();
+}
 
 function mountPublicBean(root) {
     const button = root.querySelector('[data-public-bean-toggle]');
@@ -375,13 +415,14 @@ function mountPublicBean(root) {
 function showLandingUiAction(action) {
     const targets = {
         how_it_works: { selector: '#how-it-works', href: '/#how-it-works', label: 'how it works', offset: 118 },
-        bean: { selector: '#bean-demo', href: '/#bean-demo', label: 'Bean', offset: 118 },
-        daily: { selector: '#tour-daily', href: '/#tour-daily', label: 'daily command center', offset: 118 },
-        calendar: { selector: '#tour-calendar', href: '/#tour-calendar', label: 'calendar views', offset: 118 },
-        tasks: { selector: '#tour-tasks', href: '/#tour-tasks', label: 'tasks and reminders', offset: 118 },
-        reminders: { selector: '#tour-tasks', href: '/#tour-tasks', label: 'tasks and reminders', offset: 118 },
-        notes: { selector: '#tour-notes', href: '/#tour-notes', label: 'notes', offset: 118 },
-        workspaces: { selector: '#tour-workspaces', href: '/#tour-workspaces', label: 'shared workspaces', offset: 118 },
+        bean: { selector: '#tour-command-center', href: '/#tour-command-center', label: 'command center with Bean', offset: 118 },
+        command_center: { selector: '#tour-command-center', href: '/#tour-command-center', label: 'command center with Bean', offset: 118 },
+        calendar_tasks: { selector: '#tour-calendar-tasks', href: '/#tour-calendar-tasks', label: 'calendar and tasks', offset: 118 },
+        calendar: { selector: '#tour-calendar-tasks', href: '/#tour-calendar-tasks', label: 'calendar and tasks', offset: 118 },
+        tasks: { selector: '#tour-calendar-tasks', href: '/#tour-calendar-tasks', label: 'calendar and tasks', offset: 118 },
+        customization: { selector: '#tour-customization', href: '/#tour-customization', label: 'dashboard customization', offset: 118 },
+        dashboard: { selector: '#tour-customization', href: '/#tour-customization', label: 'dashboard customization', offset: 118 },
+        themes: { selector: '#tour-customization', href: '/#tour-customization', label: 'dashboard customization', offset: 118 },
         features: { selector: '#features', href: '/#features', label: 'features', offset: 118 },
         pricing: { selector: '#plans', scrollSelector: '#plans .plans', href: '/#plans', label: 'pricing', offset: 24 },
         signup: { selector: '#early-access', href: '/#early-access', label: 'early access', offset: 118 },
@@ -399,8 +440,15 @@ function showLandingUiAction(action) {
     window.scrollTo({ top: Math.max(0, top), behavior: reduceMotion ? 'auto' : 'smooth' });
     const cue = scrollTarget.querySelector?.('.feature-copy, .section-head') || scrollTarget;
     cue.classList.remove('public-bean-guided-highlight');
-    window.requestAnimationFrame(() => cue.classList.add('public-bean-guided-highlight'));
-    window.setTimeout(() => cue.classList.remove('public-bean-guided-highlight'), 2400);
+    scrollTarget.classList.remove('public-bean-guided-highlight');
+    window.requestAnimationFrame(() => {
+        cue.classList.add('public-bean-guided-highlight');
+        scrollTarget.classList.add('public-bean-guided-highlight');
+    });
+    window.setTimeout(() => {
+        cue.classList.remove('public-bean-guided-highlight');
+        scrollTarget.classList.remove('public-bean-guided-highlight');
+    }, 2400);
 
     return null;
 }

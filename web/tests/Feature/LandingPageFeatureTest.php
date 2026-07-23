@@ -21,6 +21,9 @@ class LandingPageFeatureTest extends TestCase
             'images/heybean-landing-scheduling.png',
             'images/heybean-landing-task-management.png',
             'images/heybean-landing-daily-control.png',
+            'images/heybean-tour-command-center-bean.png',
+            'images/heybean-tour-calendar-tasks.png',
+            'images/heybean-tour-customization-themes.png',
             'images/iphone16promax-template.png',
         ] as $asset) {
             $this->assertFileExists(public_path($asset));
@@ -44,9 +47,10 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('Focus block: Acme proposal', false)
             ->assertSee('Task: Follow up with Jordan', false)
             ->assertSee('Reminder: Ava’s school form', false)
-            ->assertSee('Capture it before it slips away.', false)
-            ->assertSee('Keep work and home moving together.', false)
-            ->assertSee('Open Bean and know what needs your attention.', false)
+            ->assertSee('Quick interactive tour', false)
+            ->assertSee('Open your day with Bean already in reach.', false)
+            ->assertSee('Plan the calendar and the work in the same system.', false)
+            ->assertSee('Make the dashboard match how you actually work.', false)
             ->assertSee('id="plans"', false)
             ->assertSee('Choose the support your life needs.', false)
             ->assertSee('Most popular', false)
@@ -54,7 +58,9 @@ class LandingPageFeatureTest extends TestCase
             ->assertSee('More than a place to store another list.', false)
             ->assertSee('Bean works for you—and you stay in control.', false)
             ->assertSee('Let Bean take the next few things off your mind.', false)
-            ->assertSee('images/heybean-landing-daily-control.png', false)
+            ->assertSee('images/heybean-tour-command-center-bean.png', false)
+            ->assertSee('images/heybean-tour-calendar-tasks.png', false)
+            ->assertSee('images/heybean-tour-customization-themes.png', false)
             ->assertSee('Request early access', false)
             ->assertSee('I’m building HeyBean as a solo developer.', false)
             ->assertSee('7-day free trial after plan selection', false)
