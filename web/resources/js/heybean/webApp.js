@@ -254,7 +254,9 @@ export function mountHeyBeanWebApp(mount) {
     let beanPendingVoiceResponseTimer = 0;
     let beanPendingVoiceResponse = null;
     let beanVoiceBackgroundHandoff = null;
+    let beanVoiceBackgroundHandoffCloseTimer = 0;
     const beanVoiceBackgroundHandoffMs = 10000;
+    const beanVoiceBackgroundHandoffMinSpeakMs = 6500;
     const beanVoiceBackgroundHandoffMessage = 'This is taking a bit, so I’ll finish it in the background and come back when it’s ready.';
     const beanVoiceInitialIdleCloseMs = 9000;
     const beanVoiceFollowUpIdleCloseMs = 15000;
@@ -5206,8 +5208,25 @@ export function mountHeyBeanWebApp(mount) {
         return /finish it in the background|come back when it/i.test(String(content || ''));
     }
 
+    function clearBeanVoiceBackgroundHandoffCloseTimer() {
+        if (beanVoiceBackgroundHandoffCloseTimer) window.clearTimeout(beanVoiceBackgroundHandoffCloseTimer);
+        beanVoiceBackgroundHandoffCloseTimer = 0;
+    }
+
+    function scheduleBeanVoiceBackgroundHandoffClose(reason = 'handoff_spoken') {
+        if (!beanVoiceBackgroundHandoff?.awaitingClose) return;
+        clearBeanVoiceBackgroundHandoffCloseTimer();
+        const spokenAt = beanVoiceBackgroundHandoff.spokenAt || Date.now();
+        const delay = Math.max(0, beanVoiceBackgroundHandoffMinSpeakMs - (Date.now() - spokenAt));
+        beanVoiceBackgroundHandoffCloseTimer = window.setTimeout(() => {
+            beanVoiceBackgroundHandoffCloseTimer = 0;
+            closeBeanVoiceForBackgroundWork(reason);
+        }, delay);
+    }
+
     function closeBeanVoiceForBackgroundWork(reason = 'handoff_spoken') {
         if (!beanVoiceBackgroundHandoff) return;
+        clearBeanVoiceBackgroundHandoffCloseTimer();
         logBeanVoiceLifecycleEvent('voice_background_handoff_closed', {
             reason,
             label: beanVoiceBackgroundHandoff.content.slice(0, 160),
@@ -5239,7 +5258,7 @@ export function mountHeyBeanWebApp(mount) {
         });
         render();
         startBeanVoiceSession({
-            firstMessage: content,
+            backgroundResultMessage: content,
             backgroundOriginalRequest: originalRequest,
             backgroundRunId: runId,
         })?.catch?.((error) => {
@@ -5464,7 +5483,10 @@ export function mountHeyBeanWebApp(mount) {
             state.bean.sessionId = realtime.bean_session_id || state.bean.sessionId;
 
             const wakeTail = String(options?.wakeTail || '').trim();
-            const firstMessage = String(options?.firstMessage || '').trim();
+            const backgroundResultMessage = String(options?.backgroundResultMessage || '').trim();
+            const backgroundDeliveryPrompt = backgroundResultMessage
+                ? `BACKGROUND_RESULT_DELIVERY: ${backgroundResultMessage}`
+                : '';
             beanAudioPlaybackBlocked = false;
             beanElevenLabsConversation = await Conversation.startSession({
                 conversationToken: realtime.token,
@@ -5478,13 +5500,8 @@ export function mountHeyBeanWebApp(mount) {
                     bean_workspace_id: Number(currentWorkspaceId() || 0),
                     bean_dashboard_context: JSON.stringify(realtime.dashboard_context || {}),
                     bean_background_original_request: String(options?.backgroundOriginalRequest || ''),
-                    bean_background_result: firstMessage,
+                    bean_background_result: backgroundResultMessage,
                 },
-                overrides: firstMessage ? {
-                    agent: {
-                        firstMessage,
-                    },
-                } : undefined,
                 clientTools: {
                     askBean: askBeanFromElevenLabsAgent,
                 },
@@ -5507,11 +5524,12 @@ export function mountHeyBeanWebApp(mount) {
                     logBeanVoiceLifecycleEvent('voice_session_started', {
                         has_wake_event: Boolean(options?.wakeEvent),
                         has_wake_tail: Boolean(wakeTail),
-                        has_first_message: Boolean(firstMessage),
+                        has_first_message: false,
+                        has_background_result: Boolean(backgroundDeliveryPrompt),
                         background_run_id: options?.backgroundRunId || null,
                         transport: 'elevenlabs_agent',
                     });
-                    if (firstMessage) {
+                    if (backgroundDeliveryPrompt) {
                         state.bean.mode = 'speaking';
                         state.bean.statusText = 'Bean is back…';
                     } else if (!state.bean.busy) {
@@ -5520,6 +5538,24 @@ export function mountHeyBeanWebApp(mount) {
                     }
                     render();
                     resumeBeanElevenLabsAudioPlayback('connect');
+
+                    if (backgroundDeliveryPrompt) {
+                        window.setTimeout(() => {
+                            try {
+                                beanElevenLabsConversation?.sendUserMessage?.(backgroundDeliveryPrompt);
+                                logBeanVoiceLifecycleEvent('voice_background_result_prompt_sent', {
+                                    background_run_id: options?.backgroundRunId || null,
+                                    transport: 'elevenlabs_agent',
+                                });
+                            } catch (error) {
+                                logBeanVoiceLifecycleEvent('voice_background_result_prompt_failed', {
+                                    background_run_id: options?.backgroundRunId || null,
+                                    label: String(error?.message || error).slice(0, 160),
+                                    transport: 'elevenlabs_agent',
+                                });
+                            }
+                        }, 250);
+                    }
 
                     if (wakeTail && isLikelyCompleteBeanWakeTail(wakeTail)) {
                         window.setTimeout(() => {
@@ -5559,7 +5595,7 @@ export function mountHeyBeanWebApp(mount) {
                 onModeChange: ({ mode } = {}) => handleBeanElevenLabsMode(mode),
                 onStatusChange: ({ status } = {}) => {
                     if (status === 'connected') {
-                        if (!firstMessage) state.bean.statusText = 'Listening — speak to Bean';
+                        if (!backgroundDeliveryPrompt) state.bean.statusText = 'Listening — speak to Bean';
                         if (wakeTail && isLikelyCompleteBeanWakeTail(wakeTail)) {
                             window.setTimeout(() => submitCompleteBeanWakeTail(wakeTail), beanWakeTailSubmitDelay(wakeTail, true));
                         }
@@ -5578,6 +5614,7 @@ export function mountHeyBeanWebApp(mount) {
     function stopBeanVoiceSession(options = {}) {
         const wasActive = state.bean.voiceActive || state.bean.voiceConnecting;
         clearBeanPendingWakeTail();
+        clearBeanVoiceBackgroundHandoffCloseTimer();
         beanSubmittedWakeTail = '';
         clearBeanPendingVoiceResponse();
         clearBeanVoiceIdleTimer();
@@ -5666,6 +5703,10 @@ export function mountHeyBeanWebApp(mount) {
             startBeanOutputVolumeProbe();
             resumeBeanElevenLabsAudioPlayback('agent_message');
             logBeanVoiceLifecycleEvent('assistant_speech_started', { label: content.slice(0, 160), transport: 'elevenlabs_agent' });
+            if (isBackgroundHandoff && beanVoiceBackgroundHandoff) {
+                beanVoiceBackgroundHandoff.spokenAt = Date.now();
+                scheduleBeanVoiceBackgroundHandoffClose('handoff_min_speech_elapsed');
+            }
             const latestPersistedAssistant = latestBeanAssistantMessage();
             if (latestPersistedAssistant !== content) {
                 state.bean.messages = [...normalizeList(state.bean.messages), { role: 'assistant', content }];
@@ -5696,7 +5737,7 @@ export function mountHeyBeanWebApp(mount) {
         if (normalizedMode === 'listening') {
             if (state.bean.voiceActive) {
                 if (beanVoiceBackgroundHandoff?.awaitingClose) {
-                    closeBeanVoiceForBackgroundWork('mode_listening_after_handoff');
+                    scheduleBeanVoiceBackgroundHandoffClose('mode_listening_after_handoff');
                     return;
                 }
                 markBeanVoiceActivity();

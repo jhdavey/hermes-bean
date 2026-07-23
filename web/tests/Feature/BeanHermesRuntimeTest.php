@@ -702,6 +702,40 @@ PHP);
         $this->assertSame('2026-07-24T10:45:00-04:00', $result['item']['ends_at_local']);
     }
 
+    public function test_calendar_event_create_combines_natural_date_and_time_arguments(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-22T23:47:13Z'));
+        $this->apiToken('bean-calendar-create-natural-date-time@example.com');
+        $user = User::where('email', 'bean-calendar-create-natural-date-time@example.com')->firstOrFail();
+        $session = app(BeanRuntimeService::class)->createSession($user, null, 'America/New_York');
+        $run = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'status' => 'running',
+            'mode' => 'hermes',
+            'input' => 'Create an event called dinner for Sunday at five p.m.',
+            'metadata' => ['time_context' => app(\App\Services\Bean\BeanTimeContext::class)->forSession($session)],
+            'started_at' => now(),
+        ]);
+
+        $result = app(BeanDashboardToolBridgeService::class)->execute($this->signedToolContextForTimezone($user, $session, $run, 'America/New_York'), [
+            'action' => 'calendar_event.create',
+            'arguments' => [
+                'title' => 'dinner',
+                'date' => 'Sunday',
+                'time' => '17:00',
+            ],
+        ]);
+
+        $this->assertTrue((bool) ($result['ok'] ?? false));
+        $event = CalendarEvent::where('user_id', $user->id)->where('title', 'dinner')->firstOrFail();
+        $this->assertSame('2026-07-26T21:00:00+00:00', $event->starts_at->toIso8601String());
+        $this->assertSame('2026-07-26T22:00:00+00:00', $event->ends_at->toIso8601String());
+        $this->assertSame('2026-07-26T17:00:00-04:00', $result['item']['starts_at_local']);
+        $this->assertSame('2026-07-26T18:00:00-04:00', $result['item']['ends_at_local']);
+    }
+
     public function test_task_date_moves_preserve_existing_local_due_time_when_no_new_time_is_explicit(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-07-20T15:00:00Z'));

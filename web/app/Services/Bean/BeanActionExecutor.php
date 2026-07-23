@@ -358,7 +358,8 @@ class BeanActionExecutor
 
     private function dateForTimeLabel(string $timeLabel, array $timeContext): ?string
     {
-        $label = strtolower(trim(preg_replace('/[^a-z0-9\- ]+/', ' ', $timeLabel) ?: $timeLabel));
+        $rawLabel = mb_strtolower(trim((string) $timeLabel));
+        $label = strtolower(trim(preg_replace('/[^a-z0-9\- ]+/', ' ', $rawLabel) ?: $rawLabel));
         $label = trim(preg_replace('/\s+/', ' ', $label) ?: $label);
         if ($this->timeContext->isDateOnly($label)) return $label;
         $label = trim(preg_replace('/^(this|coming|next|on|the)\s+/u', '', $label) ?: $label);
@@ -715,8 +716,9 @@ class BeanActionExecutor
     private function createCalendarEvent(BeanRun $run, array $args): array
     {
         $timeContext = $this->timeContext->forRun($run);
-        $startsAt = $this->dateOrNull($args['starts_at'] ?? null, $timeContext)
+        $startsAt = $this->calendarEventStartAt($args, $timeContext)
             ?: $this->timeContext->localNow($timeContext)->addDay()->setTime(9, 0)->utc();
+        $endsAt = $this->calendarEventEndAt($args, $startsAt, $timeContext);
         $event = $this->domainResources->createCalendarEvent($this->user($run), [
             'workspace_id' => $this->workspaceId($run),
             'title' => trim((string) ($args['title'] ?? 'New event')) ?: 'New event',
@@ -726,7 +728,7 @@ class BeanActionExecutor
             'color' => $args['color'] ?? null,
             'is_critical' => $args['is_critical'] ?? null,
             'starts_at' => $startsAt->toIso8601String(),
-            'ends_at' => ($this->dateOrNull($args['ends_at'] ?? null, $timeContext) ?: (clone $startsAt)->addHour())->toIso8601String(),
+            'ends_at' => $endsAt->toIso8601String(),
             'all_day' => (bool) ($args['all_day'] ?? false),
             'status' => $args['status'] ?? 'scheduled',
             'recurrence' => (string) ($args['recurrence'] ?? 'none'),
@@ -1296,6 +1298,60 @@ class BeanActionExecutor
         if (blank($value)) return null;
         $timeContext ??= $this->timeContext->forClientTimezone(null, 'app_default');
         return $this->timeContext->parseUserDateTime($value, $timeContext);
+    }
+
+    private function calendarEventStartAt(array $args, array $timeContext): ?Carbon
+    {
+        $direct = $this->dateOrNull($args['starts_at'] ?? $args['start_at'] ?? null, $timeContext);
+        if ($direct instanceof Carbon) return $direct;
+
+        $date = $this->dateStringFromNaturalArgument($args['date'] ?? $args['day'] ?? $args['start_date'] ?? null, $timeContext);
+        if ($date === null) return null;
+
+        $time = trim((string) ($args['time'] ?? $args['start_time'] ?? $args['starts_at_time'] ?? ''));
+        if ($time === '') {
+            return Carbon::parse($date, $this->timeContext->timezone($timeContext))->setTime(9, 0)->utc();
+        }
+
+        return $this->dateOrNull("{$date} {$time}", $timeContext);
+    }
+
+    private function calendarEventEndAt(array $args, Carbon $startsAt, array $timeContext): Carbon
+    {
+        $direct = $this->dateOrNull($args['ends_at'] ?? $args['end_at'] ?? null, $timeContext);
+        if ($direct instanceof Carbon) return $direct;
+
+        $endTime = trim((string) ($args['end_time'] ?? $args['ends_at_time'] ?? ''));
+        if ($endTime !== '') {
+            $date = $this->dateStringFromNaturalArgument($args['end_date'] ?? $args['date'] ?? $args['day'] ?? $args['start_date'] ?? null, $timeContext)
+                ?: $startsAt->copy()->timezone($this->timeContext->timezone($timeContext))->toDateString();
+            $combined = $this->dateOrNull("{$date} {$endTime}", $timeContext);
+            if ($combined instanceof Carbon) {
+                if ($combined->lessThanOrEqualTo($startsAt)) return $combined->addDay();
+                return $combined;
+            }
+        }
+
+        $durationMinutes = isset($args['duration_minutes']) ? (int) $args['duration_minutes'] : 60;
+        return (clone $startsAt)->addMinutes(max(1, min(24 * 60, $durationMinutes)));
+    }
+
+    private function dateStringFromNaturalArgument(mixed $value, array $timeContext): ?string
+    {
+        if (blank($value)) return null;
+        $label = trim((string) $value);
+        if ($this->timeContext->isDateOnly($label)) return $label;
+
+        $rawLabel = mb_strtolower($label);
+        $normalized = strtolower(trim(preg_replace('/[^a-z0-9\- ]+/', ' ', $rawLabel) ?: $rawLabel));
+        $normalized = trim(preg_replace('/\s+/', ' ', $normalized) ?: $normalized);
+        $normalized = trim(preg_replace('/^(this|coming|next|on|the)\s+/u', '', $normalized) ?: $normalized);
+
+        $local = $this->timeContext->localNow($timeContext)->startOfDay();
+        if ($normalized === 'today') return $local->toDateString();
+        if ($normalized === 'tomorrow') return $local->addDay()->toDateString();
+
+        return $this->dateForTimeLabel($label, $timeContext);
     }
 
     private function normalizeTemporalUpdate(Model $model, string $field, mixed $value, array $timeContext, array $args): ?Carbon
