@@ -23,8 +23,8 @@
 
 .public-bean-cue {
     position: absolute;
-    top: calc(100% + 10px);
-    left: 54px;
+    top: calc(100% + 34px);
+    left: 76px;
     z-index: 5;
     width: 176px;
     border: 0;
@@ -55,8 +55,8 @@
 
 .public-bean-cue svg {
     position: absolute;
-    top: -48px;
-    left: -47px;
+    top: -34px;
+    left: -34px;
     width: 96px;
     height: 68px;
     overflow: visible;
@@ -254,15 +254,15 @@
 
 @media (max-width: 620px) {
     .public-bean-cue {
-        top: calc(100% + 8px);
-        left: 38px;
+        top: calc(100% + 28px);
+        left: 54px;
         width: 132px;
         font-size: 14px;
     }
 
     .public-bean-cue svg {
-        top: -39px;
-        left: -34px;
+        top: -28px;
+        left: -24px;
         width: 76px;
         height: 54px;
     }

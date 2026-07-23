@@ -26,6 +26,21 @@ test('public pages expose a compact Bean control without the authenticated chat 
     assert.match(styles, /\.public-bean-cue:focus-visible/);
 });
 
+test('landing Bean handwritten cue leaves space between the arrow and control', () => {
+    const desktopCue = styles.match(/\.public-bean-cue \{([\s\S]*?)\n\}/)?.[1] || '';
+    const desktopArrow = styles.match(/\.public-bean-cue svg \{([\s\S]*?)\n\}/)?.[1] || '';
+    assert.match(desktopCue, /top:\s*calc\(100% \+ 34px\)/);
+    assert.match(desktopCue, /left:\s*76px/);
+    assert.match(desktopArrow, /top:\s*-34px/);
+    assert.match(desktopArrow, /left:\s*-34px/);
+
+    const mobileBlock = styles.match(/@media \(max-width: 620px\) \{([\s\S]*?)@media \(max-width: 390px\)/)?.[1] || '';
+    assert.match(mobileBlock, /top:\s*calc\(100% \+ 28px\)/);
+    assert.match(mobileBlock, /left:\s*54px/);
+    assert.match(mobileBlock, /top:\s*-28px/);
+    assert.match(mobileBlock, /left:\s*-24px/);
+});
+
 test('landing Bean starts voice directly from an explicit tap with a hearing check', () => {
     assert.match(source, /let enabled = false/);
     assert.doesNotMatch(source, /localStorage\.getItem|localStorage\.setItem/);
