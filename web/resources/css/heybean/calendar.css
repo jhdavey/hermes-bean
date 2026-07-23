@@ -445,11 +445,6 @@
     overflow-wrap: anywhere;
 }
 
-.hb-month-event-title .hb-critical-star {
-    font-size: 12px;
-    line-height: 1;
-}
-
 .hb-agenda {
     display: grid;
     gap: 8px;

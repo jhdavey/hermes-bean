@@ -125,7 +125,8 @@ test('critical items consistently render a gold star immediately before their ti
     assert.match(source, /isCritical: reminderCritical\(reminder\)/);
     assert.match(source, /criticalTitleMarkup\(\{ isCritical: critical \}, item\.title \|\| item\.name \|\| 'Untitled'\)/);
     assert.match(dashboardSource, /\.hb-critical-title\s*\{[^}]*display:\s*inline-flex;[^}]*gap:\s*4px;/s);
-    assert.match(calendarSource, /\.hb-month-event-title \.hb-critical-star\s*\{[^}]*font-size:\s*12px;[^}]*line-height:\s*1;/s);
+    assert.match(dashboardSource, /\.hb-star\s*\{[^}]*font-size:\s*12px;[^}]*line-height:\s*1;/s);
+    assert.doesNotMatch(calendarSource, /\.hb-month-event-title \.hb-critical-star\s*\{/);
     assert.doesNotMatch(source, /hb-item-critical-star/);
     assert.doesNotMatch(dashboardSource, /\.hb-item-critical-star/);
 });
