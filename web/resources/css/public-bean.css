@@ -218,6 +218,12 @@
     visibility: hidden;
 }
 
+.public-bean-presence[data-scrolled="true"] .public-bean-cue {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
 .public-bean-presence[data-mode="connecting"] .public-bean-ring,
 .public-bean-presence[data-mode="thinking"] .public-bean-ring,
 .public-bean-presence[data-mode="navigating"] .public-bean-ring {

@@ -36,6 +36,10 @@ test('landing Bean stays fixed in the top-left viewport while page content scrol
     assert.match(presence, /z-index:\s*70/);
     assert.match(spacer, /flex:\s*0 0 124px/);
     assert.match(spacer, /height:\s*42px/);
+    assert.match(source, /const updateScrolledCueState = \(\) =>/);
+    assert.match(source, /root\.dataset\.scrolled = window\.scrollY > 80 \? 'true' : 'false'/);
+    assert.match(source, /window\.addEventListener\('scroll', updateScrolledCueState, \{ passive: true \}\)/);
+    assert.match(styles, /\.public-bean-presence\[data-scrolled="true"\] \.public-bean-cue \{[\s\S]*?pointer-events:\s*none/);
 
     const mobileBlock = styles.match(/@media \(max-width: 620px\) \{([\s\S]*?)@media \(max-width: 390px\)/)?.[1] || '';
     assert.match(mobileBlock, /\.public-bean-presence \{[\s\S]*?left:\s*17px/);

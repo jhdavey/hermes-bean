@@ -33,6 +33,13 @@ function mountPublicBean(root) {
 
     const isCurrentLifecycle = (revision) => enabled && lifecycleRevision === revision;
 
+    const updateScrolledCueState = () => {
+        root.dataset.scrolled = window.scrollY > 80 ? 'true' : 'false';
+    };
+
+    updateScrolledCueState();
+    window.addEventListener('scroll', updateScrolledCueState, { passive: true });
+
     const setStatus = (mode, text) => {
         root.dataset.mode = mode;
         status.textContent = text;
