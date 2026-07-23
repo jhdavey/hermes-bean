@@ -14,8 +14,11 @@
 <body class="heybean-app-body">
     @if (request()->is('register'))
         @include('partials.public-beta-banner')
+        @php
+            $registerSource = preg_replace('/[^a-z0-9_\-]/i', '', (string) (request()->query('from') ?: request()->query('source') ?: 'direct_register')) ?: 'direct_register';
+        @endphp
         <div
-            class="public-bean-presence"
+            class="public-bean-presence public-bean-presence-signup"
             data-public-bean
             data-public-bean-context="signup_onboarding"
             data-mode="disabled"
@@ -30,13 +33,6 @@
                 <span class="public-bean-icon"><img src="{{ asset('images/bean-logo.png') }}" alt="Bean"></span>
                 <span class="public-bean-status" data-public-bean-status aria-live="polite">Tap to talk</span>
             </button>
-            <button class="public-bean-cue" type="button" data-public-bean-cue aria-label="Talk with Bean">
-                <span>Hey! I'm over here!</span>
-                <svg viewBox="0 0 88 88" focusable="false" aria-hidden="true">
-                    <path class="public-bean-cue-arrow" d="M78 76 C56 66 48 51 40 36"></path>
-                    <path class="public-bean-cue-head" d="M40 36 L34 53 M40 36 L55 44"></path>
-                </svg>
-            </button>
             <span class="public-bean-help" data-public-bean-help>Turn your volume on, then allow microphone access.</span>
             <span class="public-bean-turnstile" data-public-bean-turnstile hidden></span>
         </div>
@@ -47,6 +43,7 @@
         data-logo="{{ asset('images/bean-logo.png') }}"
         data-auth-mode="{{ request()->is('subscribe') ? 'subscribe' : (request()->is('register') ? (request()->query('mode') === 'plain' ? 'plain' : 'register') : (request()->is('forgot-password') ? 'forgot' : 'login')) }}"
         data-from-landing-bean="{{ request()->query('from') === 'bean' ? 'true' : 'false' }}"
+        data-signup-source="{{ $registerSource ?? 'direct_register' }}"
         data-selected-plan="{{ in_array(request()->query('plan'), ['base', 'premium', 'pro'], true) ? request()->query('plan') : '' }}"
         data-selected-billing-interval="{{ request()->query('billing_interval') === 'yearly' ? 'yearly' : 'monthly' }}"
     >

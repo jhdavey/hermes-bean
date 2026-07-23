@@ -35,10 +35,21 @@ export function reconcileAllDayEndDateInput(startValue, endValue) {
     return next.toISOString().slice(0, 10);
 }
 
+function normalizedSignupSource(value) {
+    const source = String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 80);
+    return source || 'direct_register';
+}
+
 export function mountHeyBeanWebApp(mount) {
     const logoUrl = mount.dataset.logo || '/images/bean-logo.png';
     const initialMode = mount.dataset.authMode || 'login';
     const fromLandingBean = mount.dataset.fromLandingBean === 'true';
+    const signupSource = normalizedSignupSource(mount.dataset.signupSource || (fromLandingBean ? 'bean' : 'direct_register'));
     const initialSelectedPlan = ['base', 'premium', 'pro'].includes(mount.dataset.selectedPlan) ? mount.dataset.selectedPlan : '';
     const initialBillingInterval = mount.dataset.selectedBillingInterval === 'yearly' ? 'yearly' : 'monthly';
     const initialBillingStatus = new URLSearchParams(window.location.search).get('billing') || '';
@@ -1525,6 +1536,7 @@ export function mountHeyBeanWebApp(mount) {
                 password,
                 password_confirmation: password,
                 theme_mode: state.guidedSignupThemeMode,
+                source: signupSource,
                 ...(state.selectedPlan ? { plan: state.selectedPlan } : {}),
                 billing_interval: normalizedBillingInterval(state.selectedBillingInterval),
             },
@@ -1573,13 +1585,13 @@ export function mountHeyBeanWebApp(mount) {
     function guidedOnboardingMarkup() {
         const step = state.guidedSignupStep;
         return `
-            <div class="hb-app">
-                <main class="hb-guided-onboarding-shell hb-guided-chat-shell">
-                    <div class="hb-guided-onboarding-topbar">
+            <div class="hb-app hb-guided-immersive-app">
+                <main class="hb-guided-onboarding-shell hb-guided-chat-shell hb-guided-immersive-shell">
+                    <div class="hb-guided-onboarding-topbar hb-guided-immersive-topbar">
                         <button class="hb-button-ghost" type="button" data-auth-mode="login">Login</button>
                         <button class="hb-button-ghost" type="button" data-plain-signup>Use plain signup form</button>
                     </div>
-                    <section class="hb-guided-onboarding-stage">
+                    <section class="hb-guided-onboarding-stage hb-guided-immersive-stage" aria-live="polite">
                         <div class="hb-guided-onboarding-content hb-guided-chat-content" data-guided-content>
                             ${guidedChatTranscriptMarkup()}
                             ${step === 'themeMode' ? guidedThemeModePanelMarkup() : ''}
@@ -1588,7 +1600,6 @@ export function mountHeyBeanWebApp(mount) {
                     </section>
                     ${['name', 'themeMode', 'email', 'password'].includes(step) ? guidedOnboardingComposerMarkup(step) : ''}
                 </main>
-                <div class="hb-guided-onboarding-bean-dock" aria-hidden="true"><img src="${escapeAttr(logoUrl)}" alt=""></div>
             </div>`;
     }
 
@@ -1641,7 +1652,6 @@ export function mountHeyBeanWebApp(mount) {
         }[step];
         return `
             <form class="hb-guided-chat-composer" data-action="guided-onboarding" data-guided-onboarding-step="${escapeAttr(step)}">
-                <img src="${escapeAttr(logoUrl)}" alt="Bean">
                 <input class="hb-input" name="value" type="${field.type}" value="${escapeAttr(field.value)}" autocomplete="${field.autocomplete}" placeholder="${escapeAttr(field.placeholder)}" ${field.attrs} required ${disabled ? 'disabled' : ''}>
                 <button class="hb-button" type="submit" ${disabled ? 'disabled' : ''}>${state.busy ? 'Saving…' : 'Send'}</button>
             </form>`;

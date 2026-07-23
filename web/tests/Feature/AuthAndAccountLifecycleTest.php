@@ -69,6 +69,25 @@ class AuthAndAccountLifecycleTest extends TestCase
         Notification::assertSentTo($user, VerifyEmail::class);
     }
 
+    public function test_register_preserves_signup_source_attribution(): void
+    {
+        Notification::fake();
+
+        $this->postJson('/api/auth/register', [
+            'name' => 'Topbar User',
+            'email' => 'topbar@example.com',
+            'password' => 'correct-horse-battery-staple',
+            'password_confirmation' => 'correct-horse-battery-staple',
+            'source' => 'topbar_button',
+        ])->assertCreated();
+
+        $this->assertDatabaseHas('early_access_signups', [
+            'email' => 'topbar@example.com',
+            'name' => 'Topbar User',
+            'source' => 'topbar_button',
+        ]);
+    }
+
     public function test_registration_verification_link_marks_email_verified(): void
     {
         Notification::fake();

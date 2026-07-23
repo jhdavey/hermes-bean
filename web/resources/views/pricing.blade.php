@@ -25,7 +25,7 @@
         <div class="wrap">
             <h2>Let Bean take the next few things off your mind.</h2>
             <p class="hero-subhead">Start with one request. Bean will help you turn it into an organized plan for what happens next.</p>
-            <div class="hero-actions"><a class="button" href="/register?from=bean">Start with Bean <span aria-hidden="true">→</span></a></div>
+            <div class="hero-actions"><a class="button" href="/register?from=pricing_cta">Start with Bean <span aria-hidden="true">→</span></a></div>
             <p class="hero-microcopy">24 of 100 spots left · 7-day free trial after plan selection</p>
         </div>
     </section>

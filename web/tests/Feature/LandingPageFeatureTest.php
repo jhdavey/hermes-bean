@@ -66,7 +66,7 @@ class LandingPageFeatureTest extends TestCase
             ->assertDontSee('name="email" type="email"', false)
             ->assertSee('7-day free trial after plan selection', false)
             ->assertDontSee('class="public-brand"', false)
-            ->assertSee('href="/register?from=bean"', false)
+            ->assertSee('href="/register?from=topbar_button"', false)
             ->assertSee('href="/#how-it-works"', false)
             ->assertSee('href="/#features"', false)
             ->assertSee('href="/#plans"', false)
@@ -141,7 +141,9 @@ class LandingPageFeatureTest extends TestCase
         $this->get('/register')->assertOk()
             ->assertSee('id="heybean-web-app"', false)
             ->assertSee('data-public-bean-context="signup_onboarding"', false)
+            ->assertSee('data-signup-source="direct_register"', false)
             ->assertSee('Tap to talk')
+            ->assertDontSee('data-public-bean-cue', false)
             ->assertSee('assets/publicBean-', false);
         $this->get('/register?plan=premium&billing_interval=monthly')
             ->assertOk()

@@ -29,6 +29,9 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.match(source, /I’ll help get your HeyBean account set up\. What is your first and last name\?/);
     assert.match(source, /data-action="guided-onboarding"/);
     assert.match(source, /data-guided-onboarding-step="\$\{escapeAttr\(step\)\}"/);
+    assert.match(source, /source: signupSource/);
+    assert.match(source, /normalizedSignupSource/);
+    assert.match(source, /hb-guided-immersive-shell/);
     assert.match(source, /data-action="plain-signup"/);
     assert.match(source, /startOnboardingTourIfNeeded/);
     assert.match(source, /activateOnboardingTourStep\(0\)/);
@@ -66,6 +69,9 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.ok(source.indexOf("state.phase = 'waitlist'") < source.indexOf('startSignupDashboardPreview(result)'));
     assert.match(baseShellSource, /\.hb-guided-chat-composer/);
     assert.match(baseShellSource, /\.hb-guided-chat-bubble-user/);
+    assert.match(baseShellSource, /\.hb-guided-immersive-app/);
+    assert.match(baseShellSource, /hb-guided-bubble-arrive/);
+    assert.match(baseShellSource, /backdrop-filter:\s*blur\(18px\)/);
 });
 
 test('browser app retains direct productivity resources and command center', () => {

@@ -1555,3 +1555,247 @@
     gap: 4px 8px;
     margin-top: 8px;
 }
+
+.hb-guided-immersive-app {
+    min-height: 100vh;
+    background:
+        radial-gradient(circle at 50% 12%, rgba(var(--hb-accent-rgb), .18), transparent 28%),
+        radial-gradient(circle at 18% 82%, rgba(255, 255, 255, .94), transparent 26%),
+        linear-gradient(180deg, #f8fcf7 0%, #f3faf2 45%, #fbfdf9 100%);
+}
+
+.hb-guided-immersive-shell {
+    position: relative;
+    min-height: 100vh;
+    overflow: hidden;
+    grid-template-rows: auto minmax(0, 1fr);
+    padding: 116px 20px 164px;
+}
+
+.hb-guided-immersive-shell::before,
+.hb-guided-immersive-shell::after {
+    content: "";
+    position: fixed;
+    z-index: 0;
+    border-radius: 999px;
+    pointer-events: none;
+    filter: blur(4px);
+}
+
+.hb-guided-immersive-shell::before {
+    width: 360px;
+    height: 360px;
+    top: 70px;
+    left: max(-120px, calc(50% - 680px));
+    background: rgba(var(--hb-accent-rgb), .10);
+}
+
+.hb-guided-immersive-shell::after {
+    width: 280px;
+    height: 280px;
+    right: max(-90px, calc(50% - 720px));
+    bottom: 84px;
+    background: rgba(250, 204, 21, .10);
+}
+
+.hb-guided-immersive-topbar {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 46px);
+    right: max(18px, calc((100vw - 1040px) / 2 + 18px));
+    z-index: 82;
+    width: auto;
+    margin: 0;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.hb-guided-immersive-topbar .hb-button-ghost {
+    min-height: 34px;
+    padding: 7px 10px;
+    border-color: transparent;
+    background: rgba(255, 255, 255, .56);
+    color: var(--hb-accent-strong);
+    box-shadow: none;
+    backdrop-filter: blur(12px);
+}
+
+.hb-guided-immersive-stage {
+    position: relative;
+    z-index: 1;
+    width: min(760px, 100%);
+    align-items: start;
+}
+
+.hb-guided-immersive-shell .hb-guided-onboarding-content {
+    width: min(680px, 100%);
+    max-height: none;
+    overflow: visible;
+    padding: 32px 0 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 22px;
+}
+
+.hb-guided-immersive-shell .hb-guided-chat-log {
+    width: 100%;
+    min-height: min(38vh, 310px);
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 14px;
+    pointer-events: none;
+}
+
+.hb-guided-immersive-shell .hb-guided-chat-bubble {
+    width: min(620px, calc(100vw - 40px));
+    justify-self: center;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    text-align: center;
+    animation: hb-guided-bubble-arrive .38s cubic-bezier(.2, .85, .2, 1) backwards;
+    transition: opacity .34s ease, transform .34s ease, filter .34s ease;
+}
+
+.hb-guided-immersive-shell .hb-guided-chat-bubble strong {
+    display: none;
+}
+
+.hb-guided-immersive-shell .hb-guided-chat-bubble span {
+    display: inline-block;
+    color: var(--hb-text);
+    font-size: clamp(22px, 3vw, 34px);
+    font-weight: 850;
+    line-height: 1.2;
+    letter-spacing: -.035em;
+    text-wrap: balance;
+}
+
+.hb-guided-immersive-shell .hb-guided-chat-bubble-user span {
+    max-width: min(460px, 86vw);
+    padding: 8px 13px;
+    border: 1px solid rgba(var(--hb-accent-rgb), .22);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .72);
+    color: var(--hb-accent-strong);
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0;
+    box-shadow: 0 12px 30px rgba(34, 87, 52, .08);
+}
+
+.hb-guided-immersive-shell .hb-guided-chat-bubble:not(:last-child) {
+    opacity: .34;
+    transform: translateY(-20px) scale(.96);
+    filter: blur(.15px);
+}
+
+.hb-guided-immersive-shell .hb-guided-chat-bubble:nth-last-child(n+4) {
+    opacity: .14;
+    transform: translateY(-34px) scale(.92);
+}
+
+.hb-guided-immersive-shell .hb-guided-chat-bubble:nth-last-child(n+6) {
+    display: none;
+}
+
+.hb-guided-immersive-shell .hb-guided-choice-panel {
+    width: min(480px, calc(100vw - 36px));
+    justify-self: center;
+    margin: -20px 0 0;
+    padding: 8px;
+    border-color: rgba(var(--hb-accent-rgb), .22);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .72);
+    box-shadow: 0 18px 42px rgba(34, 87, 52, .10);
+    backdrop-filter: blur(18px);
+}
+
+.hb-guided-immersive-shell .hb-guided-choice-chip {
+    border-color: transparent;
+    background: rgba(var(--hb-accent-rgb), .08);
+    transition: transform .18s ease, background .18s ease, color .18s ease;
+}
+
+.hb-guided-immersive-shell .hb-guided-choice-chip:hover,
+.hb-guided-immersive-shell .hb-guided-choice-chip-active {
+    transform: translateY(-1px);
+    background: rgba(var(--hb-accent-rgb), .18);
+}
+
+.hb-guided-immersive-shell .hb-guided-onboarding-error {
+    margin: -8px 0 0;
+    color: color-mix(in srgb, #dc2626 78%, var(--hb-text));
+    font-weight: 800;
+}
+
+.hb-guided-immersive-shell .hb-guided-chat-composer {
+    bottom: clamp(24px, 8vh, 72px);
+    width: min(560px, calc(100vw - 32px));
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 8px;
+    border-color: rgba(var(--hb-accent-rgb), .24);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .82);
+    box-shadow: 0 22px 60px rgba(34, 87, 52, .16), inset 0 1px 0 rgba(255, 255, 255, .88);
+    backdrop-filter: blur(18px);
+    animation: hb-guided-composer-float .54s cubic-bezier(.2, .85, .2, 1) both;
+}
+
+.hb-guided-immersive-shell .hb-guided-chat-composer .hb-input {
+    min-height: 48px;
+    padding: 0 18px;
+    font-size: 16px;
+    font-weight: 750;
+}
+
+.hb-guided-immersive-shell .hb-guided-chat-composer .hb-button {
+    min-height: 48px;
+    padding: 0 18px;
+    border-radius: 999px;
+}
+
+@keyframes hb-guided-bubble-arrive {
+    from { opacity: 0; transform: translateY(18px) scale(.98); filter: blur(4px); }
+    to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+
+@keyframes hb-guided-composer-float {
+    from { opacity: 0; transform: translate(-50%, 18px) scale(.98); }
+    to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+@media (max-width: 720px) {
+    .hb-guided-immersive-shell {
+        padding: 108px 16px 148px;
+    }
+
+    .hb-guided-immersive-topbar {
+        top: auto;
+        right: 14px;
+        bottom: 12px;
+        z-index: 39;
+        opacity: .86;
+    }
+
+    .hb-guided-immersive-shell .hb-guided-onboarding-content {
+        padding-top: 28px;
+    }
+
+    .hb-guided-immersive-shell .hb-guided-chat-log {
+        min-height: min(42vh, 330px);
+    }
+
+    .hb-guided-immersive-shell .hb-guided-chat-bubble span {
+        font-size: clamp(20px, 7vw, 30px);
+    }
+
+    .hb-guided-immersive-shell .hb-guided-choice-panel:not(.hb-guided-plan-panel) {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}

@@ -16,6 +16,9 @@ test('public pages expose a compact Bean control without the authenticated chat 
     assert.match(navigation, /Hey! I'm over here!/);
     assert.match(navigation, /data-public-bean-cue/);
     assert.match(navigation, /aria-label="Talk with Bean"/);
+    assert.match(navigation, /href="\/register\?from=topbar_button"/);
+    assert.match(navigation, /href="\/register\?from=mobile_menu"/);
+    assert.doesNotMatch(navigation, /href="\/register\?from=bean"/);
     assert.match(navigation, /Turn your volume on, then allow microphone access\./);
     assert.match(navigation, /public-bean-nav-spacer/);
     assert.doesNotMatch(navigation, /data-bean-panel|hb-bean-chat/);
@@ -104,9 +107,10 @@ test('landing Bean starts voice directly from an explicit tap with a hearing che
 test('register flow keeps the same tap-to-talk Bean control and uses signup voice context', () => {
     assert.match(appView, /request\(\)->is\('register'\)/);
     assert.match(appView, /data-public-bean-context="signup_onboarding"/);
+    assert.match(appView, /public-bean-presence-signup/);
     assert.match(appView, /data-public-bean-toggle/);
     assert.match(appView, /Tap to talk/);
-    assert.match(appView, /Hey! I'm over here!/);
+    assert.doesNotMatch(appView, /Hey! I'm over here!|data-public-bean-cue|public-bean-cue-arrow/);
     assert.match(appView, /resources\/js\/publicBean\.js/);
     assert.match(source, /publicBeanContext\(root\) === 'signup_onboarding'/);
     assert.match(source, /page_context:\s*publicBeanContext\(root\)/);

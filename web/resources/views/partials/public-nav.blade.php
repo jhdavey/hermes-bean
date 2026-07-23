@@ -30,7 +30,7 @@
         <a href="/#features">Features</a>
         <a href="/#plans">Pricing</a>
         <a class="nav-login" href="/login">Log In</a>
-        <a class="nav-cta" href="/register?from=bean">Start with Bean</a>
+        <a class="nav-cta" href="/register?from=topbar_button">Start with Bean</a>
     </nav>
     <details class="mobile-menu">
         <summary aria-label="Open menu"><span class="mobile-menu-icon" aria-hidden="true"><span></span><span></span><span></span></span></summary>
@@ -40,7 +40,7 @@
             <a href="/#features">Features</a>
             <a href="/#plans">Pricing</a>
             <a href="/login">Log In</a>
-            <a class="mobile-menu-cta" href="/register?from=bean">Start with Bean</a>
+            <a class="mobile-menu-cta" href="/register?from=mobile_menu">Start with Bean</a>
         </div>
     </details>
 </header>

@@ -816,3 +816,28 @@
         flex-basis: 28px;
     }
 }
+
+@media (max-width: 640px) {
+    .hb-guided-immersive-shell {
+        padding: 108px 16px 148px;
+    }
+
+    .hb-guided-immersive-shell .hb-guided-onboarding-content {
+        width: min(100%, 680px);
+        max-height: none;
+        overflow: visible;
+        padding: 28px 0 0;
+    }
+
+    .hb-guided-immersive-shell .hb-guided-choice-panel:not(.hb-guided-plan-panel) {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .hb-guided-immersive-topbar {
+        top: auto;
+        right: 14px;
+        bottom: 12px;
+        z-index: 39;
+        opacity: .86;
+    }
+}

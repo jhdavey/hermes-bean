@@ -87,13 +87,14 @@ class AuthController extends Controller
             'billing_interval' => ['sometimes', 'nullable', Rule::in(['monthly', 'yearly'])],
             'theme_mode' => ['sometimes', 'string', Rule::in(self::THEME_MODE_KEYS)],
             'timezone' => ['sometimes', 'nullable', new ClientTimezone],
+            'source' => ['sometimes', 'nullable', 'string', 'max:80', 'regex:/^[a-z0-9_\-]+$/i'],
         ]);
 
         $signup = $earlyAccess->request(
             $data['email'],
             $data['name'],
             $data['plan'] ?? null,
-            'app_register',
+            $data['source'] ?? 'app_register',
         );
 
         $user = DB::transaction(function () use ($data, $signup, $earlyAccess): User {

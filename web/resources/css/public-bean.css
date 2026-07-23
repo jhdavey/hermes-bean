@@ -326,3 +326,59 @@
         box-shadow: 0 0 0 3px rgba(82, 168, 105, .24);
     }
 }
+
+.public-bean-presence-signup {
+    top: calc(env(safe-area-inset-top, 0px) + 46px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 86;
+    border-color: rgba(var(--public-bean-accent), .30);
+    background: rgba(255, 255, 255, .82);
+    box-shadow: 0 16px 44px rgba(34, 87, 52, .12), inset 0 1px 0 rgba(255, 255, 255, .86);
+    backdrop-filter: blur(18px);
+}
+
+.public-bean-presence-signup .public-bean-cue {
+    display: none;
+}
+
+.public-bean-presence-signup .public-bean-control {
+    min-height: 48px;
+    padding-right: 16px;
+    gap: 6px;
+}
+
+.public-bean-presence-signup .public-bean-icon {
+    width: 48px;
+    height: 48px;
+    flex-basis: 48px;
+}
+
+.public-bean-presence-signup .public-bean-icon img {
+    width: 32px;
+    height: 32px;
+}
+
+.public-bean-presence-signup .public-bean-status {
+    max-width: 180px;
+    font-size: 13px;
+}
+
+.public-bean-presence-signup .public-bean-help,
+.public-bean-presence-signup .public-bean-turnstile {
+    left: 50%;
+    transform: translate(-50%, -4px);
+    text-align: center;
+}
+
+.public-bean-presence-signup[data-mode="starting"] .public-bean-help,
+.public-bean-presence-signup[data-mode="connecting"] .public-bean-help {
+    transform: translate(-50%, 0);
+}
+
+@media (max-width: 620px) {
+    .public-bean-presence-signup {
+        top: calc(env(safe-area-inset-top, 0px) + 42px);
+        left: 50%;
+    }
+}

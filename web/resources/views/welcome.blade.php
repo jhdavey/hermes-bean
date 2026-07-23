@@ -49,7 +49,7 @@
         <h1>Stop carrying every detail yourself.</h1>
         <p class="hero-subhead">HeyBean is the AI executive assistant for busy professionals and parents. Tell Bean what needs to happen, and it turns your requests into calendar events, tasks, reminders, and follow-ups across work and home.</p>
         <div class="hero-actions">
-            <a class="button" href="/register?from=bean">Start with Bean <span aria-hidden="true">→</span></a>
+            <a class="button" href="/register?from=hero_cta">Start with Bean <span aria-hidden="true">→</span></a>
             <a class="button outline" href="#bean-demo">See Bean in action</a>
         </div>
         <p class="hero-microcopy">24 of 100 early-access spots left <span aria-hidden="true">·</span> 7-day free trial after plan selection</p>
@@ -228,7 +228,7 @@
             <h2>Let Bean take the next few things off your mind.</h2>
             <p class="hero-subhead">Start with one request. Bean will help you turn it into an organized plan for what happens next.</p>
             <div class="hero-actions">
-                <a class="button" href="/register?from=bean">Start with Bean <span aria-hidden="true">→</span></a>
+                <a class="button" href="/register?from=final_cta">Start with Bean <span aria-hidden="true">→</span></a>
             </div>
             <p class="hero-microcopy">24 of 100 spots left · 7-day free trial after plan selection</p>
         </div>
