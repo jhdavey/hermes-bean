@@ -28,6 +28,7 @@ Public landing / pricing / legal page
   -> after the visitor confirms yes, Bean gives the normal intro and continues
   -> Agent answers directly with GPT-4.1 Nano and public product/pricing facts
   -> optional action-only client tool: showLandingSection({ destination })
+  -> explicit signup intent can hand off to /register?from=bean, where hard-coded app onboarding takes over
   -> no authenticated dashboard plugin, account data, private tools, or Hermes turn on the voice hot path
 ```
 
@@ -48,7 +49,7 @@ CLOUDFLARE_TURNSTILE_SITE_KEY=...
 CLOUDFLARE_TURNSTILE_SECRET_KEY=...
 ```
 
-The landing guide is disabled on every page load and requires an explicit visitor tap before requesting microphone access. The public landing flow does not require a separate wake phrase: tapping Bean starts the short ConvAI/WebRTC session after browser mic permission, then Bean performs a “can you hear me?” check before the normal intro. Landing cost/abuse controls are configured with `BEAN_LANDING_*` environment variables documented in `web/.env.example`.
+The landing guide is disabled on every page load and requires an explicit visitor tap before requesting microphone access. The public landing flow does not require a separate wake phrase: tapping Bean, Quick tour, Ask Bean, or Help me sign up starts the short ConvAI/WebRTC session after browser mic permission, then Bean performs a “can you hear me?” check before using the selected quick-start intent. Landing cost/abuse controls are configured with `BEAN_LANDING_*` environment variables documented in `web/.env.example`.
 
 ## Voice ownership and cost controls
 
@@ -109,7 +110,7 @@ The landing command creates or updates a separate action-only `showLandingSectio
 
 The landing command also applies provider-side controls: authentication-only conversation tokens, GPT-4.1 Nano without a reasoning layer, a concurrency and daily call cap with bursting disabled, focus and prompt-injection guardrails, no voice recording, and zero-day transcript/audio retention. Laravel independently applies session, IP, global, message, and per-conversation turn limits. Configure both Cloudflare Turnstile keys to require a managed bot challenge before Laravel mints an ElevenLabs token.
 
-The public Hermes guide can return only two allowlisted browser actions: `features` and `pricing`. Laravel strips the silent action marker from the spoken answer. The required ElevenLabs client-tool destination (`none`, `features`, or `pricing`) provides a structured voice fallback if the landing model omits its marker. The browser scrolls to `#features` or `#plans` when that section exists; cross-page pricing/features requests navigate to `/pricing#plans` or `/#features` only after Bean finishes speaking. This is the UI-action boundary for public guided-tour behavior and does not allow arbitrary selectors or URLs.
+The public guide can return only allowlisted browser actions: `command_center`, `calendar_tasks`, `customization`, `features`, `pricing`, `signup`, `onboarding`, and `how_it_works`. Laravel strips fallback `[[BEAN_UI:...]]` markers from spoken answers. The ElevenLabs client-tool destination provides structured voice movement when the landing model calls `showLandingSection`. The browser scrolls to matching public sections; `onboarding` is the only conversion handoff and navigates to `/register?from=bean` after a short delay so the hard-coded app onboarding can take over. This is the UI-action boundary for public guided-tour behavior and does not allow arbitrary selectors or URLs.
 
 ## Removed legacy voice paths
 

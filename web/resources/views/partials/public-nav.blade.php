@@ -15,12 +15,21 @@
             <span class="public-bean-status" data-public-bean-status aria-live="polite">Tap to talk</span>
         </button>
         <button class="public-bean-cue" type="button" data-public-bean-cue aria-label="Talk with Bean">
-            <span>Hey! I'm over here!</span>
+            <span>Talk to Bean now</span>
             <svg viewBox="0 0 88 88" focusable="false" aria-hidden="true">
                 <path class="public-bean-cue-arrow" d="M78 76 C56 66 48 51 40 36"></path>
                 <path class="public-bean-cue-head" d="M40 36 L34 53 M40 36 L55 44"></path>
             </svg>
         </button>
+        <div class="public-bean-prompt" data-public-bean-prompt aria-label="Bean quick-start choices">
+            <strong>Bean can help right now.</strong>
+            <span>Talk through the product, ask a question, or let Bean help you start signup.</span>
+            <div class="public-bean-intents">
+                <button type="button" data-public-bean-intent="quick_tour">Quick tour</button>
+                <button type="button" data-public-bean-intent="question">Ask Bean</button>
+                <button type="button" data-public-bean-intent="signup">Help me sign up</button>
+            </div>
+        </div>
         <span class="public-bean-help" data-public-bean-help>Turn your volume on, then allow microphone access.</span>
         <span class="public-bean-turnstile" data-public-bean-turnstile hidden></span>
     </div>

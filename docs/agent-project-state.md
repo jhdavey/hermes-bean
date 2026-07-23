@@ -13,7 +13,7 @@ Purpose: give future Hermes/agent sessions a compact, durable starting point for
 - Production commit last verified in prior work: `71d9234f Fix Bean voice handoff and natural event times`
 - Production known server-only state: untracked `.env`, `storage`, `web/storage`; do not clean production storage/env casually.
 - Production Bean voice timing last verified in prior work: authenticated `60/5/10/15/15` = max duration / provider soft timeout / background handoff / silence end-call / follow-up idle close. Public landing voice uses a separate fast ElevenLabs Landing Guide that answers directly with public facts and only calls an action-only section tool.
-- Public landing Bean onboarding is tap-to-start: a handwritten cue says `Hey! I'm over here!` and points at the Bean button; tapping either cue or Bean reminds the visitor to turn volume on/allow mic, starts the Landing Guide, first says `Hey, I'm Bean, can you hear me?`, and gives the normal intro only after the visitor confirms they can hear it.
+- Public landing Bean onboarding is tap-to-start with an immediately visible quick-start panel near fixed top-left Bean: `Quick tour`, `Ask Bean`, and `Help me sign up`. Tapping any choice requests mic permission, starts the fast ElevenLabs Landing Guide, first says `Hey, I'm Bean, can you hear me?`, then uses the selected intent after the visitor confirms audio. Signup intent can hand off to `/register?from=bean`, where the hard-coded Bean-guided onboarding takes over; public Bean never collects passwords or payment details by voice.
 
 ## Product/runtime direction
 

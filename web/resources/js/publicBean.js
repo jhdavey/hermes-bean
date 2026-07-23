@@ -63,6 +63,7 @@ function mountPublicBean(root) {
     let lastActivityAt = 0;
     let lifecycleRevision = 0;
     let lastVoiceMode = '';
+    let requestedIntent = '';
 
     let landingVoiceClientSessionId = '';
     let landingVoiceStartedAtMs = 0;
@@ -138,14 +139,41 @@ function mountPublicBean(root) {
         await stopVoiceConversation('disabled');
     };
 
-    const enable = async () => {
+    const normalizeLandingIntent = (intent) => {
+        const key = String(intent || '').toLowerCase().trim().replace(/[\s-]+/g, '_');
+        return ['quick_tour', 'question', 'signup'].includes(key) ? key : '';
+    };
+
+    const intentStatusText = (intent) => ({
+        quick_tour: 'Starting quick tour…',
+        question: 'Ask Bean anything…',
+        signup: 'Starting signup help…',
+    }[intent] || 'Turn volume on. Allow mic.');
+
+    const sendIntentToActiveBean = (intent) => {
+        if (!voiceActive || !conversation?.sendUserMessage) return false;
+        const prompt = {
+            quick_tour: 'Please give me the quick three-stop tour.',
+            question: 'I have a question about HeyBean.',
+            signup: 'Please help me sign up for HeyBean.',
+        }[intent];
+        if (!prompt) return false;
+        conversation.sendUserMessage(prompt);
+        conversation.sendUserActivity?.();
+        lastActivityAt = Date.now();
+        setStatus('thinking', 'Thinking…');
+        return true;
+    };
+
+    const enable = async (intent = '') => {
         if (starting) return;
+        requestedIntent = normalizeLandingIntent(intent);
         const revision = ++lifecycleRevision;
         starting = true;
         enabled = true;
         landingWakeDetectedAtMs = Date.now();
         landingWakeToFirstSpeechMs = null;
-        setStatus('starting', 'Turn volume on. Allow mic.');
+        setStatus('starting', intentStatusText(requestedIntent));
         let micAllowed = false;
         try {
             if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone is unavailable.');
@@ -246,6 +274,7 @@ function mountPublicBean(root) {
         const voiceClientSessionId = landingVoiceClientSessionId;
         logLandingVoiceEvent('voice_start_requested', {
             label: 'tap_to_start',
+            requested_intent: requestedIntent || null,
             wake_event_client_ms: landingWakeDetectedAtMs,
         }, { occurredAtMs: landingWakeDetectedAtMs });
 
@@ -263,6 +292,7 @@ function mountPublicBean(root) {
             dynamicVariables: {
                 bean_landing_page: window.location.pathname,
                 bean_client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+                bean_landing_intent: requestedIntent,
             },
             clientTools: {
                 showLandingSection: async (parameters = {}) => {
@@ -384,6 +414,17 @@ function mountPublicBean(root) {
         else enable();
     });
 
+    root.querySelectorAll('[data-public-bean-intent]').forEach((intentButton) => {
+        intentButton.addEventListener('click', () => {
+            const intent = normalizeLandingIntent(intentButton.dataset.publicBeanIntent);
+            if (enabled) {
+                if (!sendIntentToActiveBean(intent)) disable();
+                return;
+            }
+            enable(intent);
+        });
+    });
+
     window.addEventListener('pagehide', () => {
         stopVoiceConversation('pagehide');
     }, { once: true });
@@ -426,6 +467,7 @@ function showLandingUiAction(action) {
         features: { selector: '#features', href: '/#features', label: 'features', offset: 118 },
         pricing: { selector: '#plans', scrollSelector: '#plans .plans', href: '/#plans', label: 'pricing', offset: 24 },
         signup: { selector: '#early-access', href: '/#early-access', label: 'early access', offset: 118 },
+        onboarding: { selector: '#early-access', href: '/register?from=bean', label: 'Bean-guided onboarding', offset: 118, navigateDelay: 2800 },
     };
     const key = String(action || '').toLowerCase().trim().replace(/[\s-]+/g, '_');
     const target = targets[key];
@@ -449,6 +491,12 @@ function showLandingUiAction(action) {
         cue.classList.remove('public-bean-guided-highlight');
         scrollTarget.classList.remove('public-bean-guided-highlight');
     }, 2400);
+
+    if (target.navigateDelay && target.href) {
+        window.setTimeout(() => {
+            window.location.href = target.href;
+        }, target.navigateDelay);
+    }
 
     return null;
 }

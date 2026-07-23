@@ -76,6 +76,93 @@
     transform: rotate(-3deg);
 }
 
+.public-bean-prompt {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    z-index: 7;
+    width: min(330px, 86vw);
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid rgba(var(--public-bean-accent), .22);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, .97);
+    box-shadow: 0 16px 38px rgba(16, 24, 40, .16);
+    color: #304235;
+    opacity: 0;
+    transform: translateY(-5px);
+    pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease, visibility .18s ease;
+    visibility: hidden;
+}
+
+.public-bean-presence[data-mode="disabled"]:not([data-scrolled="true"]) .public-bean-prompt {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+    visibility: visible;
+}
+
+.public-bean-presence[data-mode="disabled"]:not([data-scrolled="true"]) .public-bean-cue {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.public-bean-presence[data-mode="disabled"]:not([data-scrolled="true"]):hover .public-bean-prompt,
+.public-bean-presence[data-mode="disabled"]:not([data-scrolled="true"]):focus-within .public-bean-prompt {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+    visibility: visible;
+}
+
+.public-bean-presence[data-mode]:not([data-mode="disabled"]) .public-bean-prompt {
+    opacity: 0;
+    transform: translateY(-5px);
+    pointer-events: none;
+    visibility: hidden;
+}
+
+.public-bean-prompt strong {
+    color: #263b2d;
+    font-size: 13px;
+    line-height: 1.2;
+}
+
+.public-bean-prompt span {
+    color: #5c6b61;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.public-bean-intents {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.public-bean-intents button {
+    border: 1px solid rgba(var(--public-bean-accent), .28);
+    border-radius: 999px;
+    padding: 7px 10px;
+    background: rgba(var(--public-bean-accent), .1);
+    color: #2e5d3a;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.public-bean-intents button:hover,
+.public-bean-intents button:focus-visible {
+    border-color: rgba(var(--public-bean-accent), .5);
+    background: rgba(var(--public-bean-accent), .18);
+    outline: none;
+}
+
 .public-bean-cue-arrow {
     stroke-width: 3.2;
 }
