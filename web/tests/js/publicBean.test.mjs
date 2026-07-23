@@ -148,9 +148,13 @@ test('landing Bean reveals the three-step quick tour plus signup and pricing des
     assert.match(agentConfig, /required: \['destination'\]/);
     assert.match(agentConfig, /enum: \['command_center', 'calendar_tasks', 'customization', 'features', 'pricing', 'signup', 'how_it_works'\]/);
     assert.match(agentConfig, /keep it to exactly three short stops/);
+    assert.match(agentConfig, /After the customization stop, end with a complete closing sentence and stop/);
+    assert.match(agentConfig, /do not transition into pricing/);
+    assert.match(agentConfig, /The third stop must not ask another follow-up or offer pricing/);
     assert.match(agentConfig, /destination "command_center"/);
     assert.match(agentConfig, /show "calendar_tasks"/);
     assert.match(agentConfig, /show "customization"/);
+    assert.doesNotMatch(agentConfig, /walk through features or pricing/);
     assert.doesNotMatch(agentConfig, /notes \("notes"\)|shared workspaces \("workspaces"\)|then Bean itself \("bean"\)/);
 
     const destinations = {

@@ -242,9 +242,13 @@ class LandingBeanTest extends TestCase
             $this->assertStringContainsString('AI executive assistant for real life', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('busy professionals and parents', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not position HeyBean as a general-purpose chatbot', File::get($home.'/skills/heybean-guide/SKILL.md'));
-            $this->assertStringContainsString('show you how it works, walk through features or pricing, or give you a quick tour', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('show you how it works, walk through the three-stop tour, or answer pricing if you ask', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not ask about their use case unless they explicitly ask for a recommendation.', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('keep it to exactly three short stops', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('After the customization stop, end with a complete closing sentence and stop', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('do not transition into pricing', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('The third stop must not ask another follow-up or offer pricing', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringNotContainsString('walk through features or pricing', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Supported values are: `command_center`, `calendar_tasks`, `customization`, `features`, `pricing`, `signup`, and `how_it_works`', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('7 workspaces', File::get($home.'/skills/heybean-guide/SKILL.md'));
             touch($home.'/.last-used', now()->subHours(3)->timestamp);
