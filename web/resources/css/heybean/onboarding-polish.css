@@ -1,0 +1,188 @@
+.heybean-app-body .hb-zero-choice-backdrop {
+    z-index: 84;
+    place-items: start center;
+    padding: calc(env(safe-area-inset-top, 0px) + clamp(294px, 42vh, 348px)) 18px 28px;
+    background: transparent;
+    backdrop-filter: none;
+    pointer-events: none;
+    overflow: auto;
+}
+
+.heybean-app-body .hb-zero-choice-panel {
+    width: min(390px, 100%);
+    display: grid;
+    justify-items: center;
+    gap: 13px;
+    color: var(--hb-guided-zero-text, var(--hb-text));
+    text-align: center;
+    pointer-events: auto;
+}
+
+.heybean-app-body .hb-zero-choice-panel h2 {
+    margin: 0;
+    color: currentColor;
+    font-size: clamp(21px, 2.5vw, 28px);
+    line-height: 1.15;
+    font-weight: 680;
+    letter-spacing: -.025em;
+    text-wrap: balance;
+}
+
+.heybean-app-body .hb-zero-choice-panel p {
+    width: min(340px, 100%);
+    margin: -4px 0 2px;
+    color: color-mix(in srgb, var(--hb-guided-zero-text, var(--hb-text)) 52%, transparent);
+    font-size: 13px;
+    line-height: 1.45;
+    font-weight: 620;
+    text-wrap: balance;
+}
+
+.heybean-app-body .hb-zero-choice-grid {
+    width: min(330px, 100%);
+    display: grid;
+    gap: 8px;
+}
+
+.heybean-app-body .hb-zero-choice-action {
+    width: 100%;
+    min-height: 46px;
+    padding: 9px 16px;
+    border: 1px solid color-mix(in srgb, var(--hb-guided-zero-line, var(--hb-border)) 88%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--hb-surface) 42%, transparent);
+    color: var(--hb-guided-zero-text, var(--hb-text));
+    box-shadow: none;
+    display: grid;
+    gap: 1px;
+    text-align: center;
+    cursor: pointer;
+    transition: transform .18s ease, border-color .18s ease, background .18s ease, color .18s ease;
+}
+
+.heybean-app-body .hb-zero-choice-action:hover,
+.heybean-app-body .hb-zero-choice-action:focus-visible {
+    transform: translateY(-1px);
+    border-color: rgba(var(--hb-accent-rgb), .36);
+    background: rgba(var(--hb-accent-rgb), .07);
+    outline: 0;
+}
+
+.heybean-app-body .hb-zero-choice-action strong {
+    font-size: 13px;
+    font-weight: 820;
+    letter-spacing: -.01em;
+}
+
+.heybean-app-body .hb-zero-choice-action span {
+    color: color-mix(in srgb, currentColor 56%, transparent);
+    font-size: 11px;
+    line-height: 1.25;
+    font-weight: 620;
+}
+
+.heybean-app-body .hb-zero-choice-skip {
+    min-height: 34px;
+    padding: 2px 10px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: color-mix(in srgb, var(--hb-guided-zero-text, var(--hb-text)) 46%, transparent);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 720;
+    cursor: pointer;
+}
+
+.heybean-app-body .hb-zero-choice-skip:hover,
+.heybean-app-body .hb-zero-choice-skip:focus-visible {
+    color: var(--hb-accent-strong);
+    outline: 0;
+}
+
+.hb-onboarding-tour {
+    position: fixed;
+    inset: 0;
+    z-index: 82;
+    pointer-events: none;
+}
+
+.hb-onboarding-tour-scrim,
+.hb-onboarding-tour-highlight,
+.hb-onboarding-tour-card {
+    position: fixed;
+    pointer-events: none;
+}
+
+.hb-onboarding-tour-scrim {
+    background: rgba(3, 8, 14, .46);
+    backdrop-filter: blur(1.5px);
+}
+
+.hb-onboarding-tour-highlight {
+    border: 1px solid rgba(var(--hb-accent-rgb), .68);
+    box-shadow: 0 0 0 9999px rgba(3, 8, 14, .16), 0 0 0 6px rgba(var(--hb-accent-rgb), .10);
+}
+
+.hb-onboarding-tour-card {
+    z-index: 83;
+    display: grid;
+    gap: 10px;
+    padding: 15px;
+    border: 1px solid color-mix(in srgb, var(--hb-border) 72%, transparent);
+    border-radius: 22px;
+    background: color-mix(in srgb, var(--hb-surface) 90%, transparent);
+    box-shadow: 0 20px 58px rgba(3, 8, 14, .26);
+    backdrop-filter: blur(18px);
+    color: var(--hb-text);
+    pointer-events: auto;
+}
+
+.hb-onboarding-tour-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.hb-onboarding-tour-card-head strong {
+    font-size: 15px;
+    line-height: 1.15;
+    font-weight: 920;
+}
+
+.hb-onboarding-tour-card-head span {
+    color: var(--hb-muted);
+    font-size: 11px;
+    font-weight: 820;
+}
+
+.hb-onboarding-tour-card p {
+    margin: 0;
+    color: var(--hb-muted);
+    font-size: 13px;
+    line-height: 1.42;
+    font-weight: 680;
+}
+
+.hb-onboarding-tour-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.hb-onboarding-tour-no-target .hb-onboarding-tour-scrim,
+.hb-onboarding-tour-no-target .hb-onboarding-tour-highlight {
+    display: none;
+}
+
+@media (max-width: 700px) {
+    .heybean-app-body .hb-zero-choice-backdrop {
+        padding: calc(env(safe-area-inset-top, 0px) + 276px) 16px 24px;
+    }
+
+    .hb-onboarding-tour-card {
+        max-width: calc(100vw - 28px);
+    }
+}

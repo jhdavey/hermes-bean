@@ -50,8 +50,13 @@ function startInlineSignup(href, options = {}) {
     const detail = signupDetailFromUrl(url, options);
     inlineSignupStarted = true;
 
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+
     document.body.classList.add('public-signup-transitioning', 'heybean-app-body');
     signupFlow.hidden = false;
+    signupFlow.scrollTop = 0;
     signupFlow.setAttribute('aria-hidden', 'false');
     landingContent?.setAttribute('aria-hidden', 'true');
 
@@ -64,7 +69,9 @@ function startInlineSignup(href, options = {}) {
         history.pushState({ inlineSignup: true }, '', nextUrl);
     }
 
-    window.scrollTo({ top: 0, behavior: 'auto' });
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
     window.requestAnimationFrame(() => {
         document.body.classList.add('public-signup-active');
         window.setTimeout(() => {

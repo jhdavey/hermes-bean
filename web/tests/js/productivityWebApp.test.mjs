@@ -11,6 +11,7 @@ const calendarSource = await readFile(new URL('../../resources/css/heybean/calen
 const notesSource = await readFile(new URL('../../resources/css/heybean/notes.css', import.meta.url), 'utf8');
 const baseShellSource = await readFile(new URL('../../resources/css/heybean/base-shell.css', import.meta.url), 'utf8');
 const modalsSource = await readFile(new URL('../../resources/css/heybean/modals.css', import.meta.url), 'utf8');
+const onboardingPolishSource = await readFile(new URL('../../resources/css/heybean/onboarding-polish.css', import.meta.url), 'utf8');
 const publicBetaBannerSource = await readFile(new URL('../../resources/views/partials/public-beta-banner.blade.php', import.meta.url), 'utf8');
 const typographyOverridesSource = await readFile(new URL('../../resources/css/heybean/typography-overrides.css', import.meta.url), 'utf8');
 
@@ -66,7 +67,11 @@ test('web signup uses the Zero Chrome Bean onboarding contract', () => {
     assert.match(source, /data-post-signup-tour/);
     assert.match(source, /data-post-signup-first-action/);
     assert.match(source, /data-post-signup-skip/);
-    assert.match(modalsSource, /\.hb-post-signup-bean-choice-backdrop \{[\s\S]*?place-items:\s*start center[\s\S]*?padding-top:\s*clamp\(156px, 20vh, 184px\)/);
+    assert.match(source, /hb-zero-choice-panel/);
+    assert.match(source, /Want a quick tour, a guided first action/);
+    assert.match(onboardingPolishSource, /\.heybean-app-body \.hb-zero-choice-backdrop \{[\s\S]*?background:\s*transparent;[\s\S]*?backdrop-filter:\s*none/);
+    assert.match(onboardingPolishSource, /\.heybean-app-body \.hb-zero-choice-panel \{[\s\S]*?text-align:\s*center/);
+    assert.doesNotMatch(source, /hb-card hb-modal hb-post-tour-first-action-modal hb-post-signup-bean-choice-modal/);
     assert.match(source, /postTourFirstActionModalMarkup/);
     assert.match(source, /What do you want to do first\?/);
     assert.match(source, /Customize dashboard/);
@@ -93,6 +98,8 @@ test('web signup uses the Zero Chrome Bean onboarding contract', () => {
     assert.doesNotMatch(source, /data-guided-tour-next/);
     assert.doesNotMatch(source, /guidedTourPanelMarkup/);
     assert.doesNotMatch(baseShellSource, /\.hb-guided-tour-card/);
+    assert.match(source, /const cardTop = Math\.min\(Math\.max\(Math\.round\(viewportHeight \* 0\.36\), safeTop\), maxTop\)/);
+    assert.match(onboardingPolishSource, /\.hb-onboarding-tour-card \{[\s\S]*?position:\s*fixed|\.hb-onboarding-tour-scrim,[\s\S]*?position:\s*fixed/);
     assert.match(source, /registerGuidedSignupAccount/);
     assert.match(source, /state\.phase = 'waitlist'/);
     assert.match(source, /currently at capacity/);

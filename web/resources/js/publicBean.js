@@ -104,6 +104,7 @@ function mountPublicBean(root) {
     let hearingCheckUiActionSuppressUntilMs = 0;
     let pendingInlineSignupTimer = 0;
     let pricingScrollHandledForTurn = false;
+    let signupTransitionHandledForTurn = false;
 
     let landingVoiceClientSessionId = '';
     let landingVoiceStartedAtMs = 0;
@@ -333,6 +334,11 @@ function mountPublicBean(root) {
                         return 'No page movement needed for the hearing check.';
                     }
                     if (['signup', 'onboarding', 'register'].includes(normalizedDestination)) {
+                        if (signupTransitionHandledForTurn) {
+                            keepVoiceAliveAfterUiAction();
+                            return 'Signup is already opening after Bean finishes speaking.';
+                        }
+                        signupTransitionHandledForTurn = true;
                         scheduleInlineSignupAfterSpeech('/register?from=bean');
                         keepVoiceAliveAfterUiAction();
                         return 'Signup will open after Bean finishes speaking.';
@@ -430,10 +436,16 @@ function mountPublicBean(root) {
                         hearingCheckUiActionSuppressUntilMs = 0;
                     }
                     pricingScrollHandledForTurn = false;
+                    signupTransitionHandledForTurn = false;
                     if (!isSignupOnboardingContext() && !plainHearingConfirmation && isPricingInquiry(content)) {
                         showLandingUiAction('pricing');
                         keepVoiceAliveAfterUiAction();
                         pricingScrollHandledForTurn = true;
+                    }
+                    if (!isSignupOnboardingContext() && !plainHearingConfirmation && isSignupInquiry(content)) {
+                        scheduleInlineSignupAfterSpeech('/register?from=bean');
+                        keepVoiceAliveAfterUiAction();
+                        signupTransitionHandledForTurn = true;
                     }
                     setStatus('thinking', 'Thinking…');
                 }
@@ -611,6 +623,13 @@ function isPricingInquiry(content) {
     const normalized = normalizeSpokenText(content);
     if (!normalized) return false;
     return /\b(price|pricing|cost|costs|paid|payment|subscription|billing|trial|monthly|yearly|plans|premium|pro plan|base plan|per month|per year)\b/.test(normalized);
+}
+
+function isSignupInquiry(content) {
+    const normalized = normalizeSpokenText(content);
+    if (!normalized) return false;
+    return /\b(sign\s*up|signup|register|registration|onboard|onboarding|join|get started|start|try|create account|make account|open account)\b/.test(normalized)
+        && /\b(sign\s*up|signup|register|registration|onboard|onboarding|join|start|try|account|get started)\b/.test(normalized);
 }
 
 function normalizeSpokenText(content) {

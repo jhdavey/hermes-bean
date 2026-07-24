@@ -4184,20 +4184,21 @@ export function mountHeyBeanWebApp(mount) {
 
     function postSignupBeanChoiceModalMarkup() {
         return `
-            <div class="hb-modal-backdrop hb-post-signup-bean-choice-backdrop" role="dialog" aria-modal="true" aria-labelledby="post-signup-bean-choice-title">
-                <section class="hb-card hb-modal hb-post-tour-first-action-modal hb-post-signup-bean-choice-modal">
-                    ${sectionTitle(icons.bean || icons.activity, 'Alright, your account is created.', 'Now I can give you a quick tour of the dashboard, help you get started, or you can skip all of that stuff and just dive in.')}
-                    <div class="hb-post-tour-action-grid">
-                        <button class="hb-post-tour-action-card" type="button" data-post-signup-tour>
+            <div class="hb-modal-backdrop hb-post-signup-bean-choice-backdrop hb-zero-choice-backdrop" role="dialog" aria-modal="true" aria-labelledby="post-signup-bean-choice-title">
+                <section class="hb-post-signup-bean-choice-modal hb-zero-choice-panel">
+                    <h2 id="post-signup-bean-choice-title">Alright, your account is created.</h2>
+                    <p>Want a quick tour, a guided first action, or do you want to dive straight in?</p>
+                    <div class="hb-post-tour-action-grid hb-zero-choice-grid">
+                        <button class="hb-post-tour-action-card hb-zero-choice-action" type="button" data-post-signup-tour>
                             <strong>Quick tour</strong>
-                            <span>Let Bean show the dashboard in a few quick stops.</span>
+                            <span>Show me around.</span>
                         </button>
-                        <button class="hb-post-tour-action-card" type="button" data-post-signup-first-action>
-                            <strong>Help me get started</strong>
-                            <span>Pick a first action and let Bean guide it.</span>
+                        <button class="hb-post-tour-action-card hb-zero-choice-action" type="button" data-post-signup-first-action>
+                            <strong>First action</strong>
+                            <span>Help me do one thing.</span>
                         </button>
                     </div>
-                    <div class="hb-modal-actions"><button class="hb-button-ghost" type="button" data-post-signup-skip>Dive in</button></div>
+                    <button class="hb-zero-choice-skip" type="button" data-post-signup-skip>Dive in</button>
                 </section>
             </div>`;
     }
@@ -4214,22 +4215,23 @@ export function mountHeyBeanWebApp(mount) {
                         <button class="hb-button" type="button" data-post-tour-walkthrough="${escapeAttr(action.key)}">Walk me through it</button>
                         <button class="hb-button-secondary" type="button" data-post-tour-bean-do-it="${escapeAttr(action.key)}">Have Bean do it</button>
                     </div>
-                    <div class="hb-modal-actions"><button class="hb-button-ghost" type="button" data-post-tour-first-action-skip>Skip</button></div>
+                    <button class="hb-zero-choice-skip" type="button" data-post-tour-first-action-skip>Skip</button>
                 </section>
             </div>`;
         }
         return `
-            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="post-tour-first-action-title">
-                <section class="hb-card hb-modal hb-post-tour-first-action-modal">
-                    ${sectionTitle(icons.bean || icons.activity, 'What do you want to do first?', 'Bean can help you get momentum now. Pick a first action, or skip this step if you already know where you’re headed.')}
-                    <div class="hb-post-tour-action-grid">
+            <div class="hb-modal-backdrop hb-zero-choice-backdrop hb-post-tour-zero-backdrop" role="dialog" aria-modal="true" aria-labelledby="post-tour-first-action-title">
+                <section class="hb-post-tour-first-action-modal hb-zero-choice-panel">
+                    <h2 id="post-tour-first-action-title">What do you want to do first?</h2>
+                    <p>Pick one starting point. Bean can guide it without adding more setup chrome.</p>
+                    <div class="hb-post-tour-action-grid hb-zero-choice-grid">
                         ${postTourFirstActions.map((item) => `
-                            <button class="hb-post-tour-action-card" type="button" data-post-tour-first-action="${escapeAttr(item.key)}">
+                            <button class="hb-post-tour-action-card hb-zero-choice-action" type="button" data-post-tour-first-action="${escapeAttr(item.key)}">
                                 <strong>${escapeHtml(item.title)}</strong>
                                 <span>${escapeHtml(item.subtitle)}</span>
                             </button>`).join('')}
                     </div>
-                    <div class="hb-modal-actions"><button class="hb-button-ghost" type="button" data-post-tour-first-action-skip>Skip</button></div>
+                    <button class="hb-zero-choice-skip" type="button" data-post-tour-first-action-skip>Skip</button>
                 </section>
             </div>`;
     }
@@ -10650,28 +10652,16 @@ export function mountHeyBeanWebApp(mount) {
         bottomScrim.style.height = `${Math.max(0, viewportHeight - bottom)}px`;
 
         const sideMargin = 16;
-        const gap = 18;
-        const safeTop = 16;
-        const dockHeight = viewportWidth <= 720 ? 90 : 96;
-        const cardWidth = Math.min(420, viewportWidth - sideMargin * 2);
+        const safeTop = 108;
+        const dockHeight = viewportWidth <= 720 ? 96 : 104;
+        const cardWidth = Math.min(390, viewportWidth - sideMargin * 2);
         card.style.width = `${cardWidth}px`;
-        const cardHeight = card.offsetHeight || 196;
-        const maxTop = Math.max(safeTop, viewportHeight - dockHeight - cardHeight - 16);
-        const availableBelow = viewportHeight - dockHeight - bottom - 16;
-        const availableAbove = top - safeTop;
-        const preferredBelow = bottom + gap;
-        const preferredAbove = top - cardHeight - gap;
-        const cardTop = availableBelow >= cardHeight + gap
-            ? preferredBelow
-            : availableAbove >= cardHeight + gap
-                ? preferredAbove
-                : maxTop;
-        const cardLeft = Math.min(
-            Math.max(((left + right) / 2) - (cardWidth / 2), sideMargin),
-            viewportWidth - sideMargin - cardWidth,
-        );
-        card.style.left = `${cardLeft}px`;
-        card.style.top = `${Math.min(Math.max(cardTop, safeTop), maxTop)}px`;
+        const cardHeight = card.offsetHeight || 178;
+        const maxTop = Math.max(safeTop, viewportHeight - dockHeight - cardHeight - 18);
+        const cardTop = Math.min(Math.max(Math.round(viewportHeight * 0.36), safeTop), maxTop);
+        const cardLeft = Math.round((viewportWidth - cardWidth) / 2);
+        card.style.left = `${Math.max(sideMargin, cardLeft)}px`;
+        card.style.top = `${cardTop}px`;
         card.style.right = 'auto';
         card.style.bottom = 'auto';
         card.style.transform = 'none';

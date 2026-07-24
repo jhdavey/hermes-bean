@@ -102,6 +102,8 @@ test('home landing Bean is centered in the hero above the feature icons', () => 
     assert.match(landingSignup, /bean:inline-signup-started/);
     assert.match(landingSignup, /history\.pushState\(\{ inlineSignup: true \}/);
     assert.match(landingSignup, /public-signup-active/);
+    assert.match(landingSignup, /window\.scrollTo\(\{ top: 0, left: 0, behavior: 'auto' \}\)/);
+    assert.match(landingSignup, /signupFlow\.scrollTop = 0/);
     assert.match(landing, /@include\('partials.public-bean-critical-styles'\)/);
     assert.match(appView, /@include\('partials.public-bean-critical-styles'\)/);
     assert.match(criticalStyles, /js\/public-bean-handoff\.js/);
