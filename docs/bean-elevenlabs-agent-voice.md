@@ -25,10 +25,10 @@ Public landing / pricing / legal page
   -> /bean/landing/conversation-token (session + CSRF + rate limited)
   -> dedicated ElevenLabs Landing Guide agent
   -> first spoken turn: “Hey, I'm Bean, can you hear me?”
-  -> after the visitor confirms yes, Bean gives the normal intro and continues
+  -> after the visitor confirms yes, Bean gives the normal intro and does not move the page
   -> Agent answers directly with GPT-4.1 Nano and public product/pricing facts
-  -> optional action-only client tool: showLandingSection({ destination })
-  -> explicit signup agreement asks the browser to fade the landing page into the embedded Zero Chrome signup flow, updates the URL to /register?from=bean, and keeps the same Bean DOM presence mounted while asking for first/last name without repeating “Hi, I’m Bean”
+  -> optional action-only client tool: showLandingSection({ destination }); the browser suppresses hearing-check movement defensively
+  -> explicit signup agreement asks the browser to wait for Bean’s spoken transition sentence to finish, then fade the landing page into the embedded Zero Chrome signup flow, update the URL to /register?from=bean, and keep the same Bean DOM presence mounted while asking for first/last name without repeating “Hi, I’m Bean”
   -> no authenticated dashboard plugin, account data, private tools, or Hermes turn on the voice hot path
 ```
 

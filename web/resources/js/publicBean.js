@@ -4,6 +4,10 @@ import '../css/public-bean.css';
 const WAKE_GREETING = "Hey, I'm Bean, can you hear me?";
 const SIGNUP_WAKE_GREETING = "You’re in the quick info step. Type these details here — I’ll chime back in after your account is created.";
 const IDLE_CLOSE_MS = 15000;
+const HEARING_CHECK_UI_ACTION_SUPPRESS_MS = 9000;
+const SIGNUP_TRANSITION_MIN_VOICE_MS = 6500;
+const SIGNUP_TRANSITION_MAX_VOICE_MS = 12000;
+const INLINE_SIGNUP_VOICE_STOP_GRACE_MS = 1400;
 const WAKE_TO_GREETING_TARGET_MS = 1200;
 const BEAN_HANDOFF_KEY = 'heybean.publicBean.handoff';
 let turnstileScriptPromise = null;
@@ -95,6 +99,9 @@ function mountPublicBean(root) {
     let lastActivityAt = 0;
     let lifecycleRevision = 0;
     let lastVoiceMode = '';
+    let hearingCheckExpected = false;
+    let hearingCheckUiActionSuppressUntilMs = 0;
+    let pendingInlineSignupTimer = 0;
 
     let landingVoiceClientSessionId = '';
     let landingVoiceStartedAtMs = 0;
@@ -161,6 +168,8 @@ function mountPublicBean(root) {
 
     const stopVoiceConversation = async (reason = 'client_stop') => {
         stopIdleTimer();
+        window.clearTimeout(pendingInlineSignupTimer);
+        pendingInlineSignupTimer = 0;
         const activeConversation = conversation;
         if (voiceActive || activeConversation) logLandingVoiceClosed(reason);
         voiceActive = false;
@@ -311,11 +320,22 @@ function mountPublicBean(root) {
             clientTools: {
                 showLandingSection: async (parameters = {}) => {
                     const destination = parameters.destination || parameters.section || parameters.action;
-                    if (isSignupOnboardingContext() && ['signup', 'onboarding', 'register', 'input'].includes(String(destination || '').toLowerCase())) {
+                    const normalizedDestination = normalizeLandingDestination(destination);
+                    if (isSignupOnboardingContext() && ['signup', 'onboarding', 'register', 'input'].includes(normalizedDestination)) {
                         return focusSignupOnboardingInput(parameters);
                     }
                     lastActivityAt = Date.now();
-                    showLandingUiAction(destination);
+                    if (shouldSuppressHearingCheckUiAction(normalizedDestination)) {
+                        hearingCheckUiActionSuppressUntilMs = 0;
+                        keepVoiceAliveAfterUiAction();
+                        return 'No page movement needed for the hearing check.';
+                    }
+                    if (['signup', 'onboarding', 'register'].includes(normalizedDestination)) {
+                        scheduleInlineSignupAfterSpeech('/register?from=bean');
+                        keepVoiceAliveAfterUiAction();
+                        return 'Signup will open after Bean finishes speaking.';
+                    }
+                    showLandingUiAction(normalizedDestination);
                     keepVoiceAliveAfterUiAction();
                     return 'Section shown.';
                 },
@@ -348,6 +368,8 @@ function mountPublicBean(root) {
                 if (!isCurrentLifecycle(revision)) return;
                 voiceActive = true;
                 lastVoiceMode = '';
+                hearingCheckExpected = !isSignupOnboardingContext();
+                hearingCheckUiActionSuppressUntilMs = 0;
                 landingVoiceStartedAtMs = Date.now();
                 landingVoiceCloseLogged = false;
                 lastActivityAt = Date.now();
@@ -387,6 +409,12 @@ function mountPublicBean(root) {
                 if (role === 'agent' || role === 'ai') {
                     setStatus('speaking', 'Speaking…');
                 } else if (role === 'user') {
+                    if (hearingCheckExpected) {
+                        if (isPlainHearingConfirmation(content)) {
+                            hearingCheckUiActionSuppressUntilMs = Date.now() + HEARING_CHECK_UI_ACTION_SUPPRESS_MS;
+                        }
+                        hearingCheckExpected = false;
+                    }
                     setStatus('thinking', 'Thinking…');
                 }
             },
@@ -458,13 +486,7 @@ function mountPublicBean(root) {
         delete root.dataset.landingScroll;
         document.body?.classList.remove('public-bean-landing-compact');
         setHelp('Type these quick details. Bean will chime back in.');
-        if (enabled || voiceActive || starting) {
-            lifecycleRevision += 1;
-            enabled = false;
-            starting = false;
-            setStatus('disabled', 'Tap to wake up');
-            stopVoiceConversation('inline_signup_start');
-        }
+        gracefullyStopVoiceForInlineSignup();
     });
 
     window.addEventListener('pagehide', () => {
@@ -472,6 +494,52 @@ function mountPublicBean(root) {
     }, { once: true });
 
     setStatus('disabled', 'Tap to wake up');
+
+
+    function shouldSuppressHearingCheckUiAction(destination) {
+        if (isSignupOnboardingContext()) return false;
+        if (!destination) return false;
+        return hearingCheckUiActionSuppressUntilMs > Date.now();
+    }
+
+    function scheduleInlineSignupAfterSpeech(href) {
+        window.clearTimeout(pendingInlineSignupTimer);
+        const scheduledAtMs = Date.now();
+        const tick = () => {
+            const elapsed = Date.now() - scheduledAtMs;
+            const minimumSpokenWindowPassed = elapsed >= SIGNUP_TRANSITION_MIN_VOICE_MS;
+            const canMove = minimumSpokenWindowPassed && lastVoiceMode !== 'speaking';
+            if (!canMove && elapsed < SIGNUP_TRANSITION_MAX_VOICE_MS) {
+                pendingInlineSignupTimer = window.setTimeout(tick, 250);
+                return;
+            }
+            pendingInlineSignupTimer = 0;
+            requestInlineSignupOrNavigate(href);
+        };
+        pendingInlineSignupTimer = window.setTimeout(tick, 250);
+    }
+
+    function gracefullyStopVoiceForInlineSignup() {
+        if (!(enabled || voiceActive || starting)) return;
+        const stopAfterSpeech = () => {
+            lifecycleRevision += 1;
+            enabled = false;
+            starting = false;
+            setStatus('disabled', 'Tap to wake up');
+            stopVoiceConversation('inline_signup_start');
+        };
+        if (lastVoiceMode === 'speaking') {
+            window.setTimeout(() => {
+                if (lastVoiceMode === 'speaking') {
+                    window.setTimeout(stopAfterSpeech, INLINE_SIGNUP_VOICE_STOP_GRACE_MS);
+                    return;
+                }
+                stopAfterSpeech();
+            }, INLINE_SIGNUP_VOICE_STOP_GRACE_MS);
+            return;
+        }
+        window.setTimeout(stopAfterSpeech, INLINE_SIGNUP_VOICE_STOP_GRACE_MS);
+    }
 
     async function postJson(url, body) {
         const response = await fetch(url, {
@@ -499,6 +567,23 @@ function publicBeanContext(root) {
     const explicit = String(root?.dataset?.publicBeanContext || '').trim().toLowerCase();
     if (explicit) return explicit;
     return window.location.pathname === '/register' ? 'signup_onboarding' : 'landing';
+}
+
+
+function normalizeLandingDestination(destination) {
+    return String(destination || '').toLowerCase().trim().replace(/[\s-]+/g, '_');
+}
+
+function isPlainHearingConfirmation(content) {
+    const normalized = String(content || '')
+        .toLowerCase()
+        .replace(/[“”]/g, '"')
+        .replace(/[’]/g, "'")
+        .replace(/[^a-z0-9'\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!normalized) return false;
+    return /^(yes|yeah|yep|yup|i can|i can hear you|can hear you|i hear you|sure|ok|okay|affirmative)$/.test(normalized);
 }
 
 function currentSignupOnboardingStep() {
@@ -565,7 +650,7 @@ function showLandingUiAction(action) {
         signup: { href: '/register?from=bean', label: 'signup', navigateDelay: 2200 },
         onboarding: { href: '/register?from=bean', label: 'onboarding', navigateDelay: 2200 },
     };
-    const key = String(action || '').toLowerCase().trim().replace(/[\s-]+/g, '_');
+    const key = normalizeLandingDestination(action);
     const target = targets[key];
     if (!target) return null;
 
