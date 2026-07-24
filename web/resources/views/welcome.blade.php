@@ -26,7 +26,7 @@
 </head>
 <body>
     @include('partials.public-beta-banner')
-    @include('partials.public-nav', ['hideBeanPresence' => true])
+    @include('partials.public-nav')
 
     <main class="wrap hero">
         @include('partials.public-bean-presence', [

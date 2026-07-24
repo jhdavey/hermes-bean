@@ -5,23 +5,39 @@ import test from 'node:test';
 const source = await readFile(new URL('../../resources/js/publicBean.js', import.meta.url), 'utf8');
 const styles = await readFile(new URL('../../resources/css/public-bean.css', import.meta.url), 'utf8');
 const navigation = await readFile(new URL('../../resources/views/partials/public-nav.blade.php', import.meta.url), 'utf8');
+const publicPostbridgeStyles = await readFile(new URL('../../resources/views/partials/public-postbridge-styles.blade.php', import.meta.url), 'utf8');
 const beanPresence = await readFile(new URL('../../resources/views/partials/public-bean-presence.blade.php', import.meta.url), 'utf8');
 const appView = await readFile(new URL('../../resources/views/app.blade.php', import.meta.url), 'utf8');
 const landing = await readFile(new URL('../../resources/views/welcome.blade.php', import.meta.url), 'utf8');
 const agentConfig = await readFile(new URL('../../scripts/elevenlabs-landing-agent-configure.mjs', import.meta.url), 'utf8');
 
-test('public pages expose an icon-only Bean control without handwritten cue chrome', () => {
+test('public nav uses Bean brand left, centered nav links, and login on the right', () => {
+    assert.match(navigation, /class="brand"/);
+    assert.match(navigation, /<span>Bean<\/span>/);
+    assert.match(navigation, /images\/bean-logo\.png/);
+    assert.match(navigation, /<nav class="navlinks"/);
+    assert.match(navigation, /href="\/#how-it-works"/);
+    assert.match(navigation, /href="\/#features"/);
+    assert.match(navigation, /href="\/#plans"/);
+    assert.match(navigation, /<a class="nav-login" href="\/login">Login<\/a>/);
+    assert.doesNotMatch(navigation, /nav-cta|mobile-menu-cta|from=topbar_button|from=mobile_menu|Try it for free/);
+    assert.match(navigation, /<a href="\/login">Login<\/a>/);
+    assert.match(navigation, /@vite\('resources\/js\/publicBean\.js'\)/);
+
+    assert.match(publicPostbridgeStyles, /\.nav\{height:80px;display:grid;grid-template-columns:minmax\(160px,1fr\) auto minmax\(160px,1fr\)/);
+    assert.match(publicPostbridgeStyles, /\.brand\{justify-self:start/);
+    assert.match(publicPostbridgeStyles, /\.navlinks\{justify-self:center/);
+    assert.match(publicPostbridgeStyles, /\.nav-login\{justify-self:end/);
+    assert.doesNotMatch(publicPostbridgeStyles, /\.nav-cta|\.mobile-menu-cta/);
+});
+
+test('public Bean presence remains icon-only where it is mounted', () => {
     assert.match(beanPresence, /data-public-bean/);
     assert.match(beanPresence, /Tap to wake up/);
     assert.match(beanPresence, /Volume on · allow mic/);
     assert.match(beanPresence, /data-public-bean-status/);
     assert.match(beanPresence, /data-public-bean-help/);
     assert.match(beanPresence, /aria-label="\{\{ \$publicBeanAria \}\}"/);
-    assert.match(navigation, /@include\('partials.public-bean-presence'\)/);
-    assert.match(navigation, /href="\/register\?from=topbar_button"/);
-    assert.match(navigation, /href="\/register\?from=mobile_menu"/);
-    assert.doesNotMatch(navigation, /href="\/register\?from=bean"/);
-    assert.match(navigation, /public-bean-nav-spacer/);
     assert.doesNotMatch(beanPresence, /data-bean-panel|hb-bean-chat/);
     assert.doesNotMatch(beanPresence, /Hey! I'm over here!|data-public-bean-cue|public-bean-cue-arrow|viewBox="0 0 88 88"/);
     assert.doesNotMatch(styles, /\.public-bean-cue|Bradley Hand|Comic Sans MS|Marker Felt|public-bean-cue-arrow/);
@@ -32,7 +48,7 @@ test('public pages expose an icon-only Bean control without handwritten cue chro
 });
 
 test('home landing Bean is centered in the hero above the feature icons', () => {
-    assert.match(landing, /@include\('partials.public-nav', \['hideBeanPresence' => true\]\)/);
+    assert.match(landing, /@include\('partials.public-nav'\)/);
     assert.match(landing, /public-bean-presence-hero/);
     assert.match(landing, /'status' => 'Tap to wake up'/);
     assert.match(landing, /'help' => 'Volume on · allow mic'/);

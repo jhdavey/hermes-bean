@@ -17,11 +17,12 @@
         a { color:#087a35; font-weight:700; }
         .wrap { width:min(920px, calc(100% - 32px)); margin:0 auto; }
         .nav.wrap { width:min(1160px, calc(100% - 32px)); }
-        .nav { display:flex; align-items:center; justify-content:space-between; padding:22px 0; gap:18px; position:relative; }
-        .brand { display:flex; align-items:center; gap:10px; color:var(--ink); text-decoration:none; font-size:16px; font-weight:950; }
-        .brand img { width:38px; height:38px; border-radius:12px; }
-        .navlinks { display:flex; align-items:center; flex-wrap:wrap; gap:18px; color:var(--muted); font-size:14px; }
+        .nav { min-height:80px; display:grid; grid-template-columns:minmax(150px,1fr) auto minmax(150px,1fr); align-items:center; padding:16px 0; gap:18px; position:relative; }
+        .brand { justify-self:start; display:flex; align-items:center; gap:10px; color:var(--ink); text-decoration:none; font-size:21px; font-weight:950; letter-spacing:-.035em; }
+        .brand img { width:34px; height:34px; border-radius:999px; object-fit:contain; }
+        .navlinks { justify-self:center; display:flex; align-items:center; flex-wrap:wrap; justify-content:center; gap:18px; color:var(--muted); font-size:14px; }
         .navlinks a { color:inherit; font-weight:800; text-decoration:none; }
+        .nav-login { justify-self:end; min-width:88px; height:48px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--line); border-radius:999px; padding:0 24px; color:var(--ink); background:#fff; text-decoration:none; font-weight:850; box-shadow:0 12px 30px rgba(24,80,40,.08); }
         .mobile-menu { display:none; }
         .mobile-menu summary { list-style:none; cursor:pointer; width:42px; height:42px; display:grid; place-items:center; border:1px solid var(--line); background:rgba(255,255,255,.86); border-radius:14px; padding:0; color:#102016; box-shadow:0 12px 30px rgba(24,80,40,.1); }
         .mobile-menu summary::-webkit-details-marker { display:none; }
@@ -38,7 +39,7 @@
         .effective { margin:0 0 24px; color:#708078; }
         .card { border:1px solid var(--line); border-radius:18px; background:#fff; padding:18px; margin:18px 0; }
         footer { color:#778278; font-size:14px; padding:0 0 32px; }
-        @media(max-width:620px) { .nav { padding:16px 0; } .navlinks { display:none; } .mobile-menu { display:block; } }
+        @media(max-width:620px) { .nav { grid-template-columns:1fr auto; padding:16px 0; } .navlinks, .nav-login { display:none; } .mobile-menu { display:block; } }
     </style>
 </head>
 <body>

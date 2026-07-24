@@ -15,15 +15,21 @@ class LandingBeanTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_public_pages_render_the_lightweight_bean_control_without_a_chat_panel(): void
+    public function test_public_pages_render_the_bean_brand_nav_without_a_chat_panel(): void
     {
         foreach (['/', '/pricing', '/privacy'] as $path) {
             $response = $this->get($path);
 
             $response->assertOk()
-                ->assertSee('data-public-bean', false)
-                ->assertSee('Tap to wake up')
-                ->assertSee('Volume on · allow mic')
+                ->assertSee('class="brand"', false)
+                ->assertSee('<span>Bean</span>', false)
+                ->assertSee('images/bean-logo.png', false)
+                ->assertSee('class="navlinks"', false)
+                ->assertSee('<a class="nav-login" href="/login">Login</a>', false)
+                ->assertDontSee('nav-cta', false)
+                ->assertDontSee('mobile-menu-cta', false)
+                ->assertDontSee('from=topbar_button', false)
+                ->assertDontSee('from=mobile_menu', false)
                 ->assertDontSee('Hey! I\'m over here!', false)
                 ->assertDontSee('data-public-bean-cue', false)
                 ->assertDontSee('Bean can help right now.', false)
@@ -33,6 +39,12 @@ class LandingBeanTest extends TestCase
                 ->assertDontSee('data-bean-panel', false)
                 ->assertDontSee('hb-bean-chat', false);
         }
+
+        $this->get('/')->assertOk()
+            ->assertSee('data-public-bean', false)
+            ->assertSee('public-bean-presence-hero', false)
+            ->assertSee('Tap to wake up')
+            ->assertSee('Volume on · allow mic');
     }
 
     public function test_landing_conversation_token_uses_the_dedicated_public_elevenlabs_agent(): void
