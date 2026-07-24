@@ -45,8 +45,7 @@
         z-index: 85;
         height: calc(env(safe-area-inset-top, 0px) + 154px);
         pointer-events: none;
-        background: linear-gradient(180deg, #fff 0%, rgba(255, 255, 255, .995) 70%, rgba(255, 255, 255, .94) 86%, rgba(255, 255, 255, 0) 100%);
-        box-shadow: 0 18px 34px rgba(255, 255, 255, .92);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, .98) 36%, rgba(255, 255, 255, .78) 62%, rgba(255, 255, 255, .38) 82%, rgba(255, 255, 255, 0) 100%);
         opacity: 0;
         transition: opacity .24s ease;
     }

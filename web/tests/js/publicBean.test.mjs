@@ -113,7 +113,11 @@ test('home landing Bean is centered in the hero above the feature icons', () => 
     assert.match(criticalStyles, /\.public-bean-presence-hero,[\s\S]*?\.public-bean-presence-signup \{/);
     assert.match(criticalStyles, /position:\s*fixed/);
     assert.match(criticalStyles, /width:\s*68px[\s\S]*?height:\s*68px[\s\S]*?max-width:\s*68px[\s\S]*?max-height:\s*68px/);
-    assert.match(criticalStyles, /body:has\(\.public-bean-presence-hero\)::before \{[\s\S]*?opacity:\s*0;[\s\S]*?transition:\s*opacity \.24s ease/);
+    const criticalBackdropBlock = criticalStyles.match(/body:has\(\.public-bean-presence-hero\)::before \{([\s\S]*?)\n    \}/)?.[1] || '';
+    assert.match(criticalBackdropBlock, /background:\s*linear-gradient\(180deg, rgba\(255, 255, 255, 1\) 0%, rgba\(255, 255, 255, \.98\) 36%, rgba\(255, 255, 255, \.78\) 62%, rgba\(255, 255, 255, \.38\) 82%, rgba\(255, 255, 255, 0\) 100%\)/);
+    assert.match(criticalBackdropBlock, /opacity:\s*0/);
+    assert.match(criticalBackdropBlock, /transition:\s*opacity \.24s ease/);
+    assert.doesNotMatch(criticalBackdropBlock, /box-shadow|radial-gradient/);
     assert.match(criticalStyles, /body\.public-bean-landing-compact::before \{[\s\S]*?opacity:\s*1/);
     const criticalCompactBlock = criticalStyles.match(/\.public-bean-presence-hero\[data-landing-scroll="compact"\] \{([\s\S]*?)\n    \}/)?.[1] || '';
     assert.match(criticalCompactBlock, /left:\s*50%/);
@@ -125,7 +129,12 @@ test('home landing Bean is centered in the hero above the feature icons', () => 
     assert.match(heroPresence, /--public-bean-handoff-left/);
     assert.match(heroPresence, /transform:\s*translateX\(-50%\)/);
     assert.match(styles, /body:has\(\.public-bean-presence-hero\) \.hero \.hero-icons \{[\s\S]*?margin-top:\s*137px/);
-    assert.match(styles, /body:has\(\.public-bean-presence-hero\)::before \{[\s\S]*?height:\s*calc\(env\(safe-area-inset-top, 0px\) \+ 154px\)[\s\S]*?opacity:\s*0;[\s\S]*?transition:\s*opacity \.24s ease/);
+    const bundledBackdropBlock = styles.match(/body:has\(\.public-bean-presence-hero\)::before \{([\s\S]*?)\n\}/)?.[1] || '';
+    assert.match(bundledBackdropBlock, /height:\s*calc\(env\(safe-area-inset-top, 0px\) \+ 154px\)/);
+    assert.match(bundledBackdropBlock, /background:\s*linear-gradient\(180deg, rgba\(255, 255, 255, 1\) 0%, rgba\(255, 255, 255, \.98\) 36%, rgba\(255, 255, 255, \.78\) 62%, rgba\(255, 255, 255, \.38\) 82%, rgba\(255, 255, 255, 0\) 100%\)/);
+    assert.match(bundledBackdropBlock, /opacity:\s*0/);
+    assert.match(bundledBackdropBlock, /transition:\s*opacity \.24s ease/);
+    assert.doesNotMatch(bundledBackdropBlock, /box-shadow|radial-gradient/);
     assert.match(styles, /\.public-landing-signup-flow \{[\s\S]*?position:\s*fixed[\s\S]*?opacity:\s*0/);
     assert.match(styles, /body\.public-signup-active \.public-landing-content \{[\s\S]*?opacity:\s*0[\s\S]*?filter:\s*blur\(6px\)/);
     assert.match(styles, /body\.public-signup-active \.public-landing-signup-flow \{[\s\S]*?opacity:\s*1/);

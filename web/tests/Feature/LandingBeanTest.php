@@ -47,7 +47,8 @@ class LandingBeanTest extends TestCase
             ->assertSee('width="68" height="68" alt="Bean"', false)
             ->assertSee('max-width: 68px', false)
             ->assertSee('body.public-bean-landing-compact::before', false)
-            ->assertSee('linear-gradient(180deg, #fff', false)
+            ->assertSee('linear-gradient(180deg, rgba(255, 255, 255, 1)', false)
+            ->assertDontSee('box-shadow: 0 18px 34px', false)
             ->assertSee('.public-beta-banner{position:static;top:auto;', false)
             ->assertSee('Tap to wake up')
             ->assertSee('Volume on · allow mic');
