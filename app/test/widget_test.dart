@@ -10,6 +10,30 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test('app theme exposes the zero chrome component contract', () {
+    final theme = HeyBeanTheme.themeDataFor('green', Brightness.light);
+    final cardShape = theme.cardTheme.shape! as RoundedRectangleBorder;
+    final dialogShape = theme.dialogTheme.shape! as RoundedRectangleBorder;
+    final filledShape =
+        theme.filledButtonTheme.style!.shape!.resolve({})!
+            as RoundedRectangleBorder;
+
+    expect(theme.scaffoldBackgroundColor, heyBeanColorThemes.first.bg0);
+    expect(theme.cardTheme.elevation, 0);
+    expect(cardShape.borderRadius, BorderRadius.zero);
+    expect(theme.inputDecorationTheme.filled, isFalse);
+    expect(theme.inputDecorationTheme.border, isA<UnderlineInputBorder>());
+    expect(
+      dialogShape.borderRadius,
+      BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
+    );
+    expect(
+      filledShape.borderRadius,
+      BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
+    );
+    expect(theme.popupMenuTheme.elevation, 0);
+  });
+
   testWidgets('login starts Bean-led signup and exposes plain form fallback', (
     tester,
   ) async {

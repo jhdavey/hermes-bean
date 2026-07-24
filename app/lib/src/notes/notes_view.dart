@@ -1174,11 +1174,19 @@ class _NotesViewState extends State<_NotesView> {
                   margin: const EdgeInsets.fromLTRB(18, 4, 18, 8),
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: HeyBeanTheme.accent.withValues(alpha: .12),
-                    border: Border.all(
-                      color: HeyBeanTheme.accent.withValues(alpha: .25),
+                    color: Colors.transparent,
+                    border: Border(
+                      left: BorderSide(
+                        color: HeyBeanTheme.accentStrong,
+                        width: 2,
+                      ),
+                      top: BorderSide(
+                        color: HeyBeanTheme.accent.withValues(alpha: .25),
+                      ),
+                      bottom: BorderSide(
+                        color: HeyBeanTheme.accent.withValues(alpha: .25),
+                      ),
                     ),
-                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Row(
                     children: const [

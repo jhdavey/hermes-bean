@@ -220,9 +220,7 @@ class _GuidedBeanOnboardingScreenState
         return;
       }
       _email = availability.email;
-      await _respondBean(
-        'Choose a password. Type it — don’t say it.',
-      );
+      await _respondBean('Choose a password. Type it — don’t say it.');
       setState(() => _step = _GuidedOnboardingStep.password);
       _focusInput();
     } catch (_) {
@@ -258,9 +256,7 @@ class _GuidedBeanOnboardingScreenState
         );
         return;
       }
-      await _respondBean(
-        'I’ll show you around your dashboard now.',
-      );
+      await _respondBean('I’ll show you around your dashboard now.');
       setState(() => _step = _GuidedOnboardingStep.plan);
     } catch (error) {
       if (!mounted) return;
@@ -326,7 +322,8 @@ class _GuidedBeanOnboardingScreenState
 
   @override
   Widget build(BuildContext context) {
-    final showRelevantControls = _step == _GuidedOnboardingStep.themeMode ||
+    final showRelevantControls =
+        _step == _GuidedOnboardingStep.themeMode ||
         _step == _GuidedOnboardingStep.plan ||
         _step == _GuidedOnboardingStep.waitlist ||
         _error != null;
@@ -349,12 +346,7 @@ class _GuidedBeanOnboardingScreenState
         child: Align(
           alignment: Alignment.topCenter,
           child: SingleChildScrollView(
-            padding: EdgeInsets.fromLTRB(
-              30,
-              isCompactHeight ? 40 : 54,
-              30,
-              40,
-            ),
+            padding: EdgeInsets.fromLTRB(30, isCompactHeight ? 40 : 54, 30, 40),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 390),
               child: Column(
@@ -384,10 +376,9 @@ class _GuidedBeanOnboardingScreenState
                     _currentBeanMessage,
                     key: const Key('guided-zero-chrome-message'),
                     textAlign: TextAlign.center,
-                    textScaler: MediaQuery.textScalerOf(context).clamp(
-                      minScaleFactor: 1,
-                      maxScaleFactor: 1.15,
-                    ),
+                    textScaler: MediaQuery.textScalerOf(
+                      context,
+                    ).clamp(minScaleFactor: 1, maxScaleFactor: 1.15),
                     style: TextStyle(
                       color: HeyBeanTheme.isDark
                           ? const Color(0xFFF8FBF8)
@@ -498,9 +489,7 @@ class _ZeroChromeBeanButtonState extends State<_ZeroChromeBeanButton>
 
   @override
   Widget build(BuildContext context) {
-    final shadowAlpha = widget.voiceEnabled
-        ? (widget.active ? .24 : .16)
-        : .10;
+    final shadowAlpha = widget.voiceEnabled ? (widget.active ? .24 : .16) : .10;
     return Semantics(
       button: true,
       label: 'Talk with Bean',
@@ -525,10 +514,13 @@ class _ZeroChromeBeanButtonState extends State<_ZeroChromeBeanButton>
                         width: 54,
                         height: 7,
                         decoration: BoxDecoration(
-                          color: (HeyBeanTheme.isDark
-                                  ? Colors.black
-                                  : const Color(0xFF111311))
-                              .withValues(alpha: HeyBeanTheme.isDark ? .30 : .075),
+                          color:
+                              (HeyBeanTheme.isDark
+                                      ? Colors.black
+                                      : const Color(0xFF111311))
+                                  .withValues(
+                                    alpha: HeyBeanTheme.isDark ? .30 : .075,
+                                  ),
                           borderRadius: BorderRadius.circular(999),
                         ),
                       ),
@@ -840,10 +832,13 @@ class _GuidedError extends StatelessWidget {
     margin: const EdgeInsets.only(top: 4, bottom: 12),
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
-      color: HeyBeanTheme.destructive.withValues(alpha: .12),
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(
-        color: HeyBeanTheme.destructive.withValues(alpha: .32),
+      color: Colors.transparent,
+      border: Border(
+        left: BorderSide(color: HeyBeanTheme.destructive, width: 2),
+        top: BorderSide(color: HeyBeanTheme.destructive.withValues(alpha: .26)),
+        bottom: BorderSide(
+          color: HeyBeanTheme.destructive.withValues(alpha: .26),
+        ),
       ),
     ),
     child: Text(
@@ -927,29 +922,29 @@ class _GuidedFloatingInputPill extends StatelessWidget {
         TextButton(
           key: const Key('guided-onboarding-send'),
           onPressed: enabled ? onSubmit : null,
-          style: TextButton.styleFrom(
-            minimumSize: const Size(44, 34),
-            padding: EdgeInsets.zero,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            foregroundColor: HeyBeanTheme.accentStrong,
-            backgroundColor: Colors.transparent,
-            disabledBackgroundColor: Colors.transparent,
-            shadowColor: Colors.transparent,
-            surfaceTintColor: Colors.transparent,
-            textStyle: const TextStyle(fontWeight: FontWeight.w800),
-          ).copyWith(
-            overlayColor: WidgetStateProperty.all(Colors.transparent),
-            shape: WidgetStateProperty.all(
-              const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-            ),
-          ),
+          style:
+              TextButton.styleFrom(
+                minimumSize: const Size(44, 34),
+                padding: EdgeInsets.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                foregroundColor: HeyBeanTheme.accentStrong,
+                backgroundColor: Colors.transparent,
+                disabledBackgroundColor: Colors.transparent,
+                shadowColor: Colors.transparent,
+                surfaceTintColor: Colors.transparent,
+                textStyle: const TextStyle(fontWeight: FontWeight.w800),
+              ).copyWith(
+                overlayColor: WidgetStateProperty.all(Colors.transparent),
+                shape: WidgetStateProperty.all(
+                  const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                ),
+              ),
           child: const Text('Send'),
         ),
       ],
     ),
   );
 }
-
 
 class _GuidedThemeModePicker extends StatelessWidget {
   const _GuidedThemeModePicker({

@@ -85,12 +85,9 @@ class _SignupPaywallScreenState extends State<_SignupPaywallScreen> {
                   Row(
                     children: [
                       Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          color: HeyBeanTheme.accent.withValues(alpha: .14),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
+                        width: 30,
+                        height: 30,
+                        alignment: Alignment.center,
                         child: Icon(
                           Icons.workspace_premium_rounded,
                           color: HeyBeanTheme.accentStrong,
@@ -210,9 +207,6 @@ class _SignupPlanCard extends StatelessWidget {
     final prominent = plan.popular;
     final foreground = HeyBeanTheme.text;
     final muted = HeyBeanTheme.muted;
-    final cardColor = prominent
-        ? HeyBeanTheme.accent.withValues(alpha: HeyBeanTheme.isDark ? .16 : .10)
-        : HeyBeanTheme.surface;
     final borderColor = prominent
         ? HeyBeanTheme.accent.withValues(alpha: .42)
         : HeyBeanTheme.border;
@@ -220,18 +214,13 @@ class _SignupPlanCard extends StatelessWidget {
       key: Key('signup-plan-${plan.key}'),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: borderColor),
-        boxShadow: prominent
-            ? [
-                BoxShadow(
-                  color: HeyBeanTheme.accent.withValues(alpha: .12),
-                  blurRadius: 22,
-                  offset: const Offset(0, 10),
-                ),
-              ]
-            : null,
+        color: Colors.transparent,
+        border: Border(
+          top: BorderSide(color: borderColor, width: prominent ? 2 : 1),
+          bottom: BorderSide(
+            color: _quietBorderColor(alpha: prominent ? .48 : .34),
+          ),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -264,7 +253,9 @@ class _SignupPlanCard extends StatelessWidget {
                             ),
                             decoration: BoxDecoration(
                               color: const Color(0xFFFDE68A),
-                              borderRadius: BorderRadius.circular(999),
+                              borderRadius: BorderRadius.circular(
+                                HeyBeanTheme.zeroChromeRadius,
+                              ),
                             ),
                             child: Text(
                               'Most popular',
@@ -410,9 +401,10 @@ class _BillingIntervalToggle extends StatelessWidget {
       key: const Key('billing-interval-toggle'),
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: HeyBeanTheme.surface,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: HeyBeanTheme.border),
+        color: Colors.transparent,
+        border: Border(
+          bottom: BorderSide(color: _quietBorderColor(alpha: .58)),
+        ),
       ),
       child: Row(
         children: [
@@ -451,12 +443,20 @@ class _BillingIntervalButton extends StatelessWidget {
     child: TextButton(
       onPressed: selected ? null : onPressed,
       style: TextButton.styleFrom(
-        foregroundColor: selected ? HeyBeanTheme.accentInk : HeyBeanTheme.muted,
-        backgroundColor: selected ? HeyBeanTheme.accent : Colors.transparent,
-        disabledForegroundColor: selected
-            ? HeyBeanTheme.accentInk
+        foregroundColor: selected
+            ? HeyBeanTheme.accentStrong
             : HeyBeanTheme.muted,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+        backgroundColor: Colors.transparent,
+        disabledForegroundColor: selected
+            ? HeyBeanTheme.accentStrong
+            : HeyBeanTheme.muted,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
+          side: BorderSide(
+            color: selected ? HeyBeanTheme.accentStrong : Colors.transparent,
+            width: selected ? 1.5 : 0,
+          ),
+        ),
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
       ),
       child: Column(

@@ -76,13 +76,9 @@ class _FormEditorHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            color: _quietMutedSurfaceColor(alpha: .38),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: _quietBorderColor(alpha: .30)),
-          ),
+          width: 24,
+          height: 24,
+          alignment: Alignment.center,
           child: Icon(icon, color: HeyBeanTheme.muted, size: 17),
         ),
         const SizedBox(width: 10),
@@ -234,8 +230,7 @@ class _MobileFormSwitch extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     key: widgetKey,
     decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: _quietBorderColor(alpha: .34)),
+      border: Border(bottom: BorderSide(color: _quietBorderColor(alpha: .42))),
     ),
     child: SwitchListTile(
       value: value,
@@ -304,19 +299,10 @@ Future<void> _showInfoSheet(
       key: Key(
         'info-sheet-${title.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '')}',
       ),
-      margin: const EdgeInsets.all(12),
       padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
       decoration: BoxDecoration(
         color: HeyBeanTheme.surface,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _quietBorderColor(alpha: .46)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x16000000),
-            blurRadius: 22,
-            offset: Offset(0, 10),
-          ),
-        ],
+        border: Border(top: BorderSide(color: _quietBorderColor(alpha: .58))),
       ),
       child: SingleChildScrollView(
         child: Column(
@@ -416,9 +402,12 @@ class _PlanLimitErrorBanner extends StatelessWidget {
       key: const Key('plan-limit-error-banner'),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: HeyBeanTheme.accent.withValues(alpha: .10),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .24)),
+        color: Colors.transparent,
+        border: Border(
+          left: BorderSide(color: HeyBeanTheme.accentStrong, width: 2),
+          top: BorderSide(color: _quietBorderColor(alpha: .34)),
+          bottom: BorderSide(color: _quietBorderColor(alpha: .34)),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -427,12 +416,9 @@ class _PlanLimitErrorBanner extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: HeyBeanTheme.accent.withValues(alpha: .14),
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                width: 28,
+                height: 28,
+                alignment: Alignment.center,
                 child: Icon(
                   Icons.workspace_premium_rounded,
                   color: HeyBeanTheme.accentStrong,
@@ -540,9 +526,12 @@ class _InlinePlanLimitErrorState extends State<_InlinePlanLimitError> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: HeyBeanTheme.accent.withValues(alpha: .10),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .24)),
+        color: Colors.transparent,
+        border: Border(
+          left: BorderSide(color: HeyBeanTheme.accentStrong, width: 2),
+          top: BorderSide(color: _quietBorderColor(alpha: .34)),
+          bottom: BorderSide(color: _quietBorderColor(alpha: .34)),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -604,9 +593,12 @@ class _SuccessNotice extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
-      color: HeyBeanTheme.accent.withValues(alpha: .10),
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .22)),
+      color: Colors.transparent,
+      border: Border(
+        left: BorderSide(color: HeyBeanTheme.accentStrong, width: 2),
+        top: BorderSide(color: _quietBorderColor(alpha: .34)),
+        bottom: BorderSide(color: _quietBorderColor(alpha: .34)),
+      ),
     ),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,

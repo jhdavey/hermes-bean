@@ -549,13 +549,9 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: _quietMutedSurfaceColor(alpha: .42),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _quietBorderColor(alpha: .32)),
-                ),
+                width: 28,
+                height: 28,
+                alignment: Alignment.center,
                 child: Icon(
                   Icons.credit_card_rounded,
                   color: HeyBeanTheme.muted,
@@ -652,9 +648,11 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _quietMutedSurfaceColor(alpha: .32),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _quietBorderColor(alpha: .32)),
+              color: Colors.transparent,
+              border: Border(
+                top: BorderSide(color: _quietBorderColor(alpha: .42)),
+                bottom: BorderSide(color: _quietBorderColor(alpha: .42)),
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -683,9 +681,7 @@ class _BillingSettingsCardState extends State<_BillingSettingsCard> {
                         decoration: InputDecoration(
                           labelText: '6-digit code',
                           counterText: '',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
+                          border: const UnderlineInputBorder(),
                         ),
                         onSubmitted: (_) => unawaited(_redeemCouponCode()),
                       ),
@@ -898,19 +894,22 @@ class _PlanManagementTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => InkWell(
     key: Key('settings-plan-${plan.key}'),
-    borderRadius: BorderRadius.circular(18),
+    borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
     onTap: onTap,
     child: Ink(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: selected
-            ? HeyBeanTheme.accent.withValues(alpha: .10)
-            : HeyBeanTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: selected
-              ? HeyBeanTheme.accent.withValues(alpha: .32)
-              : HeyBeanTheme.border,
+            ? HeyBeanTheme.accent.withValues(alpha: .06)
+            : Colors.transparent,
+        border: Border(
+          left: BorderSide(
+            color: selected
+                ? HeyBeanTheme.accentStrong
+                : _quietBorderColor(alpha: .42),
+            width: selected ? 2 : 1,
+          ),
+          bottom: BorderSide(color: _quietBorderColor(alpha: .34)),
         ),
       ),
       child: Row(
@@ -1167,7 +1166,7 @@ class _ThemeSwatchButton extends StatelessWidget {
     selected: selected,
     label: '${theme.label} theme',
     child: InkWell(
-      borderRadius: BorderRadius.circular(999),
+      borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
       onTap: disabled ? null : onTap,
       child: Container(
         width: 112,
@@ -1175,14 +1174,14 @@ class _ThemeSwatchButton extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected
               ? theme.accent.withValues(alpha: .08)
-              : HeyBeanTheme.surface.withValues(
-                  alpha: HeyBeanTheme.isDark ? .86 : .72,
-                ),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected
-                ? theme.accentStrong.withValues(alpha: .34)
-                : _quietBorderColor(alpha: .38),
+              : Colors.transparent,
+          border: Border(
+            bottom: BorderSide(
+              color: selected
+                  ? theme.accentStrong
+                  : _quietBorderColor(alpha: .42),
+              width: selected ? 2 : 1,
+            ),
           ),
         ),
         child: Row(
@@ -2755,11 +2754,9 @@ class _GoogleCalendarSyncCardState extends State<_GoogleCalendarSyncCard>
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        margin: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: HeyBeanTheme.surface,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: HeyBeanTheme.border),
+          border: Border(top: BorderSide(color: _quietBorderColor(alpha: .62))),
         ),
         child: SafeArea(
           top: false,
@@ -3310,15 +3307,9 @@ class _ExternalCalendarImportCardState
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: HeyBeanTheme.accent.withValues(alpha: .10),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: HeyBeanTheme.accent.withValues(alpha: .24),
-                    ),
-                  ),
+                  width: 28,
+                  height: 28,
+                  alignment: Alignment.center,
                   child: Icon(
                     Icons.calendar_month_rounded,
                     color: HeyBeanTheme.accentStrong,
@@ -3487,8 +3478,10 @@ class _ExternalCalendarProviderTile extends StatelessWidget {
     final connected = status?.connected ?? false;
     return DecoratedBox(
       decoration: BoxDecoration(
-        border: Border.all(color: HeyBeanTheme.border),
-        borderRadius: BorderRadius.circular(18),
+        border: Border(
+          top: BorderSide(color: HeyBeanTheme.border),
+          bottom: BorderSide(color: HeyBeanTheme.border),
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(10),

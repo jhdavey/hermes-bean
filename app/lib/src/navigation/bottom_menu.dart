@@ -102,13 +102,6 @@ class _HeyBeanBottomMenu extends StatelessWidget {
                 border: Border(
                   top: BorderSide(color: _quietBorderColor(alpha: .42)),
                 ),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x10020617),
-                    blurRadius: 12,
-                    offset: Offset(0, -2),
-                  ),
-                ],
               ),
               child: Padding(
                 padding: EdgeInsets.fromLTRB(10, 3, 10, dockBottomPadding),
@@ -231,7 +224,7 @@ class _MenuIconButton extends StatelessWidget {
   Widget build(BuildContext context) => Material(
     color: Colors.transparent,
     child: InkWell(
-      borderRadius: BorderRadius.circular(999),
+      borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
       onTap: onPressed,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 1),
@@ -311,32 +304,15 @@ class _CommandCenterFab extends StatelessWidget {
               height: listening ? 61 : 58,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: highlighted
-                    ? LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          HeyBeanTheme.surface,
-                          HeyBeanTheme.accent.withValues(alpha: .10),
-                        ],
-                      )
-                    : null,
-                color: highlighted ? null : HeyBeanTheme.surface,
+                color: Colors.transparent,
                 border: Border.all(
-                  color: highlighted
+                  color: listening
                       ? activeColor
-                      : _quietBorderColor(alpha: .54),
-                  width: listening ? 2.4 : 1.5,
+                      : highlighted
+                      ? _quietBorderColor(alpha: .42)
+                      : Colors.transparent,
+                  width: listening ? 1.5 : (highlighted ? 1 : 0),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: activeColor.withValues(
-                      alpha: highlighted ? .22 : .08,
-                    ),
-                    blurRadius: highlighted ? 20 : 12,
-                    offset: const Offset(0, 7),
-                  ),
-                ],
               ),
               child: Semantics(
                 label: 'Bean assistant',

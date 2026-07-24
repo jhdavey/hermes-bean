@@ -93,7 +93,7 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.zero,
                                 child: Image.asset(
                                   'assets/images/bean/bean-logo.png',
                                   key: const Key('login-header-logo'),
@@ -105,7 +105,7 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                               Flexible(
                                 child: Text(
                                   'Login',
-                                  textAlign: TextAlign.center,
+                                  textAlign: TextAlign.left,
                                   softWrap: true,
                                   style: Theme.of(context).textTheme.titleMedium
                                       ?.copyWith(fontWeight: FontWeight.w800),
@@ -188,7 +188,7 @@ class _SignedOutScreenState extends State<_SignedOutScreen> {
                             width: 1.4,
                           ),
                           backgroundColor: HeyBeanTheme.accent.withValues(
-                            alpha: HeyBeanTheme.isDark ? .12 : .08,
+                            alpha: HeyBeanTheme.isDark ? .08 : .04,
                           ),
                           foregroundColor: HeyBeanTheme.accentStrong,
                         ),

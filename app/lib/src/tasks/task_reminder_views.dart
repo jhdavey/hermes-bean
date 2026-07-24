@@ -27,9 +27,8 @@ class _QuietFilterBar extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(3),
     decoration: BoxDecoration(
-      color: _quietMutedSurfaceColor(alpha: .46),
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: _quietBorderColor(alpha: .38)),
+      color: Colors.transparent,
+      border: Border(bottom: BorderSide(color: _quietBorderColor(alpha: .58))),
     ),
     child: Row(
       mainAxisSize: MainAxisSize.min,
@@ -76,7 +75,9 @@ class _QuietFilterButton extends StatelessWidget {
         fontSize: 12,
         fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
       ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
+      ),
     ),
     child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
   );
@@ -426,10 +427,12 @@ class _FutureTaskBucket extends StatelessWidget {
         children: [
           Material(
             color: HeyBeanTheme.surface2,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
             child: InkWell(
               key: toggleKey,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(
+                HeyBeanTheme.zeroChromeRadius,
+              ),
               onTap: onTap,
               child: Container(
                 padding: const EdgeInsets.symmetric(
@@ -437,8 +440,9 @@ class _FutureTaskBucket extends StatelessWidget {
                   vertical: 10,
                 ),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: HeyBeanTheme.border),
+                  border: Border(
+                    bottom: BorderSide(color: HeyBeanTheme.border),
+                  ),
                 ),
                 child: Row(
                   children: [

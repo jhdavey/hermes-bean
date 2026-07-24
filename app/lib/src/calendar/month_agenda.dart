@@ -63,23 +63,23 @@ class _MonthScrollerState extends State<_MonthScroller> {
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 3),
                           child: InkWell(
-                            borderRadius: BorderRadius.circular(18),
+                            borderRadius: BorderRadius.circular(
+                              HeyBeanTheme.zeroChromeRadius,
+                            ),
                             onTap: () => widget.onMonthSelected(month),
                             child: Container(
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
                                 color: isSelected
-                                    ? HeyBeanTheme.accent
-                                    : HeyBeanTheme.surface2.withValues(
-                                        alpha: HeyBeanTheme.isDark ? .94 : 1,
-                                      ),
-                                borderRadius: BorderRadius.circular(18),
-                                border: Border.all(
-                                  color: isSelected
-                                      ? HeyBeanTheme.accentStrong
-                                      : HeyBeanTheme.isDark
-                                      ? HeyBeanTheme.borderStrong
-                                      : HeyBeanTheme.border,
+                                    ? HeyBeanTheme.accent.withValues(alpha: .08)
+                                    : Colors.transparent,
+                                border: Border(
+                                  bottom: BorderSide(
+                                    color: isSelected
+                                        ? HeyBeanTheme.accentStrong
+                                        : _quietBorderColor(alpha: .42),
+                                    width: isSelected ? 2 : 1,
+                                  ),
                                 ),
                               ),
                               child: Column(
@@ -258,15 +258,19 @@ class _MonthDayCell extends StatelessWidget {
         : HeyBeanTheme.border;
 
     return InkWell(
-      borderRadius: BorderRadius.circular(999),
+      borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
       onTap: onTap,
       child: Container(
         height: 42,
         margin: const EdgeInsets.symmetric(horizontal: 2),
         decoration: BoxDecoration(
           color: backgroundColor,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: borderColor),
+          border: Border(
+            bottom: BorderSide(
+              color: borderColor,
+              width: isToday || isSelected ? 2 : 1,
+            ),
+          ),
         ),
         child: day == null
             ? const SizedBox.shrink()

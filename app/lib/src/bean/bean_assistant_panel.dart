@@ -384,8 +384,7 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
         dynamicVariables: {
           'bean_session_id': realtime.beanSessionId ?? 0,
           'bean_client_timezone': widget.clientTimezone ?? '',
-          'bean_workspace_id':
-              realtime.dashboardContext['workspace_id'] ?? 0,
+          'bean_workspace_id': realtime.dashboardContext['workspace_id'] ?? 0,
           'bean_dashboard_context': jsonEncode(realtime.dashboardContext),
         },
       );
@@ -527,19 +526,11 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
         width: double.infinity,
         decoration: BoxDecoration(
           color: HeyBeanTheme.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-          border: Border.all(color: _quietBorderColor(alpha: .42)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: .18),
-              blurRadius: 28,
-              offset: const Offset(0, 14),
-            ),
-          ],
+          border: Border(top: BorderSide(color: _quietBorderColor(alpha: .62))),
         ),
         child: Material(
           color: Colors.transparent,
-          borderRadius: BorderRadius.circular(28),
+          borderRadius: BorderRadius.zero,
           clipBehavior: Clip.antiAlias,
           child: SafeArea(
             top: false,
@@ -554,9 +545,11 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
                       constraints: const BoxConstraints(minHeight: 150),
                       decoration: BoxDecoration(
                         color: HeyBeanTheme.bg0.withValues(alpha: .72),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: _quietBorderColor(alpha: .32),
+                        border: Border(
+                          top: BorderSide(color: _quietBorderColor(alpha: .32)),
+                          bottom: BorderSide(
+                            color: _quietBorderColor(alpha: .32),
+                          ),
                         ),
                       ),
                       child: messages.isEmpty
@@ -600,11 +593,13 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
                                       color: isUser
                                           ? HeyBeanTheme.accentStrong
                                           : HeyBeanTheme.surface,
-                                      borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(
-                                        color: isUser
-                                            ? HeyBeanTheme.accentStrong
-                                            : _quietBorderColor(alpha: .36),
+                                      border: Border(
+                                        left: BorderSide(
+                                          color: isUser
+                                              ? HeyBeanTheme.accentStrong
+                                              : _quietBorderColor(alpha: .54),
+                                          width: 2,
+                                        ),
                                       ),
                                     ),
                                     child: Text(

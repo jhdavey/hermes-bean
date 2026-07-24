@@ -100,8 +100,12 @@ BoxDecoration _quietSurfaceDecoration({
   Color? color,
 }) => BoxDecoration(
   color: color ?? _quietSurfaceColor(),
-  borderRadius: BorderRadius.circular(radius),
-  border: Border.all(color: _quietBorderColor(alpha: borderAlpha)),
+  borderRadius: BorderRadius.circular(
+    math.min(radius, HeyBeanTheme.zeroChromeRadius),
+  ),
+  border: Border(
+    bottom: BorderSide(color: _quietBorderColor(alpha: borderAlpha)),
+  ),
 );
 
 class _BeanNotesIcon extends StatelessWidget {

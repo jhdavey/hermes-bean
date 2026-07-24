@@ -43,19 +43,12 @@ Future<DateTime?> _showStandardDateTimeDock(
           top: false,
           child: Container(
             key: Key('$keyPrefix-time-dock'),
-            margin: const EdgeInsets.all(12),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             decoration: BoxDecoration(
               color: HeyBeanTheme.surface,
-              borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: HeyBeanTheme.border),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x26000000),
-                  blurRadius: 30,
-                  offset: Offset(0, 16),
-                ),
-              ],
+              border: Border(
+                top: BorderSide(color: _quietBorderColor(alpha: .62)),
+              ),
             ),
             child: SingleChildScrollView(
               child: Column(
@@ -423,20 +416,24 @@ class _DateCalendarDayButton extends StatelessWidget {
             '${_monthName(date.month)} ${date.day}, ${date.year}${today ? ', today' : ''}',
         child: Material(
           color: background,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
           child: InkWell(
             key: Key(
               '$keyPrefix-date-day-${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}',
             ),
             onTap: enabled ? onTap : null,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 160),
               curve: Curves.easeOutCubic,
               height: 30,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: borderColor),
+                border: Border(
+                  bottom: BorderSide(
+                    color: borderColor,
+                    width: selected || today ? 2 : 1,
+                  ),
+                ),
               ),
               alignment: Alignment.center,
               child: Text(
@@ -790,7 +787,6 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
             decoration: BoxDecoration(
               color: HeyBeanTheme.surface,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
               border: Border(
                 top: BorderSide(color: _quietBorderColor(alpha: .42)),
               ),

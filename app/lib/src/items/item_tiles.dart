@@ -74,7 +74,9 @@ class _TaskItemTileState extends State<_TaskItemTile> {
                   Expanded(
                     child: InkWell(
                       key: Key('task-row-action-${task.id}'),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(
+                        HeyBeanTheme.zeroChromeRadius,
+                      ),
                       onTap: widget.onTap,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
@@ -175,9 +177,13 @@ class _TaskItemTileState extends State<_TaskItemTile> {
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
                             color: _quietMutedSurfaceColor(alpha: .42),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: _quietBorderColor(alpha: .32),
+                            borderRadius: BorderRadius.circular(
+                              HeyBeanTheme.zeroChromeRadius,
+                            ),
+                            border: Border(
+                              bottom: BorderSide(
+                                color: _quietBorderColor(alpha: .42),
+                              ),
                             ),
                           ),
                           child: Text(
@@ -262,7 +268,7 @@ class _SubtaskRow extends StatelessWidget {
     return InkWell(
       key: Key('subtask-row-${task.id}'),
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 3),
         child: Row(
@@ -357,7 +363,9 @@ class _ReminderItemTile extends StatelessWidget {
               Expanded(
                 child: InkWell(
                   key: Key('reminder-row-action-${reminder.id}'),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(
+                    HeyBeanTheme.zeroChromeRadius,
+                  ),
                   onTap: onTap,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),

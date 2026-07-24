@@ -4696,8 +4696,8 @@ class _PostTourActionTile extends StatelessWidget {
     color: HeyBeanTheme.surface,
     elevation: 0,
     shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(18),
-      side: BorderSide(color: HeyBeanTheme.border),
+      borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
+      side: BorderSide(color: _quietBorderColor(alpha: .54)),
     ),
     child: ListTile(
       leading: CircleAvatar(

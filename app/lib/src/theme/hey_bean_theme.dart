@@ -203,6 +203,7 @@ HeyBeanThemeModeOption heyBeanThemeModeForKey(String key) =>
 class HeyBeanTheme {
   const HeyBeanTheme._();
 
+  static const double zeroChromeRadius = 2;
   static HeyBeanColorTheme _current = heyBeanColorThemes.first;
   static bool isDark = false;
   static Color bg0 = _current.bg0;
@@ -298,9 +299,6 @@ class HeyBeanTheme {
     final bgColor = isDarkTheme ? darkBg0 : colorTheme.bg0;
     final surfaceColor = isDarkTheme ? darkSurface : lightSurface;
     final surface2Color = isDarkTheme ? darkSurface2 : colorTheme.surface2;
-    final inputSurfaceColor = isDarkTheme
-        ? darkInputSurface
-        : surfaceColor.withValues(alpha: .88);
     final textColor = isDarkTheme ? darkText : lightText;
     final mutedColor = isDarkTheme ? darkMuted : lightMuted;
     final borderColor = isDarkTheme ? darkBorder : lightBorder;
@@ -310,8 +308,8 @@ class HeyBeanTheme {
     final accentColor = colorTheme.accent;
     final accentStrongColor = colorTheme.accentStrong;
     final accentInkColor = colorTheme.accentInk;
-    const controlRadius = 14.0;
-    const modalRadius = 22.0;
+    const controlRadius = zeroChromeRadius;
+    const modalRadius = zeroChromeRadius;
     final colorScheme =
         ColorScheme.fromSeed(
           brightness: brightness,
@@ -348,7 +346,7 @@ class HeyBeanTheme {
       fontFamily: 'Plus Jakarta Sans',
       fontFamilyFallback: const ['Avenir Next', 'Inter', 'Roboto', 'Arial'],
       textTheme: textTheme,
-      scaffoldBackgroundColor: Colors.transparent,
+      scaffoldBackgroundColor: bgColor,
       canvasColor: bgColor,
       dividerColor: borderColor,
       appBarTheme: AppBarTheme(
@@ -367,14 +365,12 @@ class HeyBeanTheme {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         margin: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: borderColor),
-        ),
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: surfaceColor,
         surfaceTintColor: Colors.transparent,
+        elevation: 0,
         titleTextStyle: textTheme.titleLarge?.copyWith(
           color: textColor,
           fontWeight: FontWeight.w700,
@@ -386,17 +382,18 @@ class HeyBeanTheme {
         ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(modalRadius),
-          side: BorderSide(color: borderColor),
+          side: BorderSide(color: borderStrongColor),
         ),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: surfaceColor,
         modalBackgroundColor: surfaceColor,
         surfaceTintColor: Colors.transparent,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(
-            top: Radius.circular(modalRadius),
-          ),
+        elevation: 0,
+        modalElevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.zero,
+          side: BorderSide(color: borderStrongColor),
         ),
       ),
       dividerTheme: DividerThemeData(
@@ -405,20 +402,22 @@ class HeyBeanTheme {
         space: 1,
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: surface2Color,
-        selectedColor: accentColor.withValues(alpha: .14),
-        disabledColor: surface2Color.withValues(alpha: .54),
+        backgroundColor: Colors.transparent,
+        selectedColor: accentColor.withValues(alpha: .08),
+        disabledColor: Colors.transparent,
         labelStyle: TextStyle(color: textColor, fontWeight: FontWeight.w600),
         secondaryLabelStyle: TextStyle(
           color: accentStrongColor,
           fontWeight: FontWeight.w700,
         ),
         side: BorderSide(color: borderColor),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(zeroChromeRadius),
+        ),
       ),
       inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: inputSurfaceColor,
+        filled: false,
+        fillColor: Colors.transparent,
         hintStyle: TextStyle(color: mutedColor, fontWeight: FontWeight.w500),
         helperStyle: TextStyle(
           color: mutedColor,
@@ -430,36 +429,25 @@ class HeyBeanTheme {
           color: accentStrongColor,
           fontWeight: FontWeight.w700,
         ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 12,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(controlRadius),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 12),
+        border: UnderlineInputBorder(
           borderSide: BorderSide(color: borderColor),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(controlRadius),
-          borderSide: BorderSide(color: borderColor),
+        enabledBorder: UnderlineInputBorder(
+          borderSide: BorderSide(color: borderStrongColor),
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(controlRadius),
-          borderSide: BorderSide(
-            color: accentColor.withValues(alpha: .62),
-            width: 1,
-          ),
+        focusedBorder: UnderlineInputBorder(
+          borderSide: BorderSide(color: accentStrongColor, width: 1.5),
         ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(controlRadius),
+        errorBorder: UnderlineInputBorder(
           borderSide: BorderSide(
             color: isDarkTheme ? darkDestructive : lightDestructive,
           ),
         ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(controlRadius),
+        focusedErrorBorder: UnderlineInputBorder(
           borderSide: BorderSide(
             color: isDarkTheme ? darkDestructive : lightDestructive,
-            width: 1,
+            width: 1.5,
           ),
         ),
       ),
@@ -472,7 +460,7 @@ class HeyBeanTheme {
           minimumSize: const Size(56, 40),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(controlRadius),
           ),
         ),
       ),
@@ -487,7 +475,7 @@ class HeyBeanTheme {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           side: BorderSide(color: borderStrongColor),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(controlRadius),
           ),
         ),
       ),
@@ -516,7 +504,9 @@ class HeyBeanTheme {
         ),
         checkColor: WidgetStateProperty.all(Colors.white),
         side: BorderSide(color: borderStrongColor),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(zeroChromeRadius),
+        ),
       ),
       radioTheme: RadioThemeData(
         fillColor: WidgetStateProperty.resolveWith(
@@ -528,11 +518,10 @@ class HeyBeanTheme {
       dropdownMenuTheme: DropdownMenuThemeData(
         textStyle: TextStyle(color: textColor, fontWeight: FontWeight.w600),
         inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: inputSurfaceColor,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(controlRadius),
-            borderSide: BorderSide(color: borderColor),
+          filled: false,
+          fillColor: Colors.transparent,
+          border: UnderlineInputBorder(
+            borderSide: BorderSide(color: borderStrongColor),
           ),
         ),
       ),
@@ -550,14 +539,19 @@ class HeyBeanTheme {
           ),
           backgroundColor: WidgetStateProperty.resolveWith(
             (states) => states.contains(WidgetState.selected)
-                ? accentColor
-                : surfaceColor,
+                ? accentColor.withValues(alpha: .10)
+                : Colors.transparent,
           ),
           side: WidgetStateProperty.resolveWith(
             (states) => BorderSide(
               color: states.contains(WidgetState.selected)
                   ? accentStrongColor.withValues(alpha: .42)
                   : borderColor,
+            ),
+          ),
+          shape: WidgetStateProperty.all(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(zeroChromeRadius),
             ),
           ),
         ),
@@ -572,6 +566,25 @@ class HeyBeanTheme {
               ? accentColor.withValues(alpha: .28)
               : borderColor,
         ),
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: surfaceColor,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(zeroChromeRadius),
+          side: BorderSide(color: borderStrongColor),
+        ),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: textColor,
+        contentTextStyle: TextStyle(
+          color: surfaceColor,
+          fontWeight: FontWeight.w600,
+        ),
+        elevation: 0,
+        behavior: SnackBarBehavior.fixed,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
       ),
     );
   }
@@ -588,37 +601,30 @@ InputDecoration _longFormInputDecoration({
   hintText: hintText,
   prefixIcon: prefixIcon,
   alignLabelWithHint: true,
-  filled: true,
-  fillColor: _quietMutedSurfaceColor(alpha: .34),
-  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-  border: OutlineInputBorder(
-    borderRadius: BorderRadius.circular(16),
-    borderSide: BorderSide(color: _quietBorderColor(alpha: .44)),
+  filled: false,
+  fillColor: Colors.transparent,
+  contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 12),
+  border: UnderlineInputBorder(
+    borderSide: BorderSide(color: _quietBorderColor(alpha: .54)),
   ),
-  enabledBorder: OutlineInputBorder(
-    borderRadius: BorderRadius.circular(16),
-    borderSide: BorderSide(color: _quietBorderColor(alpha: .44)),
+  enabledBorder: UnderlineInputBorder(
+    borderSide: BorderSide(color: _quietBorderColor(alpha: .54)),
   ),
-  focusedBorder: OutlineInputBorder(
-    borderRadius: BorderRadius.circular(16),
-    borderSide: BorderSide(
-      color: HeyBeanTheme.accent.withValues(alpha: .48),
-      width: 1,
-    ),
+  focusedBorder: UnderlineInputBorder(
+    borderSide: BorderSide(color: HeyBeanTheme.accentStrong, width: 1.5),
   ),
 );
 
-ButtonStyle _destructiveFilledButtonStyle({double radius = 14}) =>
-    FilledButton.styleFrom(
-      backgroundColor: HeyBeanTheme.destructive,
-      foregroundColor: Colors.white,
-      disabledBackgroundColor: HeyBeanTheme.destructive.withValues(alpha: .36),
-      disabledForegroundColor: Colors.white70,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(radius),
-      ),
-    );
+ButtonStyle _destructiveFilledButtonStyle() => FilledButton.styleFrom(
+  backgroundColor: HeyBeanTheme.destructive,
+  foregroundColor: Colors.white,
+  disabledBackgroundColor: HeyBeanTheme.destructive.withValues(alpha: .36),
+  disabledForegroundColor: Colors.white70,
+  elevation: 0,
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
+  ),
+);
 
 ButtonStyle _destructiveIconButtonStyle() => IconButton.styleFrom(
   backgroundColor: HeyBeanTheme.destructive,

@@ -1,0 +1,740 @@
+/*
+ * HeyBean Zero Chrome system
+ *
+ * This final cascade keeps the existing information architecture and
+ * interaction contracts while giving every authenticated, auth, settings,
+ * admin, notes, subscription, and transient surface the same visual grammar.
+ * Structure comes from typography, spacing, and hairlines. Accent color is
+ * reserved for state, focus, and primary action.
+ */
+
+.heybean-app-body {
+    --hb-zero-canvas: var(--hb-bg0);
+    --hb-zero-paper: var(--hb-surface);
+    --hb-zero-muted-paper: color-mix(in srgb, var(--hb-surface) 96%, var(--hb-text));
+    --hb-zero-hover: color-mix(in srgb, var(--hb-text) 4%, transparent);
+    --hb-zero-line: color-mix(in srgb, var(--hb-text) 11%, transparent);
+    --hb-zero-line-strong: color-mix(in srgb, var(--hb-text) 19%, transparent);
+    --hb-zero-focus: color-mix(in srgb, var(--hb-accent-strong) 72%, transparent);
+    --hb-zero-row: 48px;
+    --hb-control-radius: 0;
+    background: var(--hb-zero-canvas);
+    font-feature-settings: "tnum" 1;
+}
+
+.heybean-app-body .hb-app::before {
+    display: none;
+}
+
+.heybean-app-body :is(button, input, textarea, select, summary):focus-visible {
+    outline: 2px solid var(--hb-zero-focus);
+    outline-offset: 2px;
+}
+
+.heybean-app-body :is(.hb-topbar, .hb-bottom-bar) {
+    border-color: var(--hb-zero-line);
+    background: var(--hb-zero-paper);
+    box-shadow: none;
+    backdrop-filter: none;
+}
+
+.heybean-app-body .hb-main {
+    background: var(--hb-zero-canvas);
+}
+
+.heybean-app-body :is(
+    .hb-card,
+    .hb-surface-soft,
+    .hb-board-card,
+    .hb-day-board-column,
+    .hb-command-center-card,
+    .hb-settings-grid,
+    .hb-admin-panel,
+    .hb-billing-settings
+) {
+    border-color: var(--hb-zero-line);
+    border-radius: 0;
+    background: var(--hb-zero-paper);
+    box-shadow: none;
+}
+
+.heybean-app-body .hb-card:not(.hb-modal):not(.hb-auth-card) {
+    border-width: 0;
+}
+
+.heybean-app-body .hb-surface-soft {
+    border-width: 1px 0;
+    background: var(--hb-zero-muted-paper);
+}
+
+.heybean-app-body .hb-card-pad {
+    padding: 18px 20px;
+}
+
+.heybean-app-body .hb-section-title {
+    gap: 10px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--hb-zero-line-strong);
+}
+
+.heybean-app-body .hb-section-icon {
+    width: 20px;
+    height: 20px;
+    flex-basis: 20px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--hb-muted);
+}
+
+.heybean-app-body .hb-section-title :is(h1, h2) {
+    font-size: 17px;
+    font-weight: 650;
+    letter-spacing: -.025em;
+}
+
+.heybean-app-body .hb-section-title p {
+    color: var(--hb-muted);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.45;
+}
+
+.heybean-app-body :is(.hb-label, .hb-form-section-head strong, .hb-settings-panel-head strong) {
+    color: var(--hb-muted);
+    font-size: 9px;
+    font-weight: 750;
+    letter-spacing: .105em;
+    text-transform: uppercase;
+}
+
+.heybean-app-body :is(.hb-label > span, .hb-label-optional, .hb-form-section-head span) {
+    color: var(--hb-muted);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0;
+    line-height: 1.4;
+    text-transform: none;
+}
+
+.heybean-app-body :is(.hb-input, .hb-textarea, .hb-select) {
+    min-height: 42px;
+    border: 0;
+    border-bottom: 1px solid var(--hb-zero-line-strong);
+    border-radius: 0;
+    background-color: transparent;
+    color: var(--hb-text);
+    padding: 9px 2px;
+    box-shadow: none;
+}
+
+.heybean-app-body .hb-select {
+    padding-right: 28px;
+    background-position:
+        calc(100% - 10px) 50%,
+        calc(100% - 5px) 50%;
+}
+
+.heybean-app-body .hb-textarea {
+    min-height: 104px;
+    border-top: 1px solid var(--hb-zero-line);
+    padding: 11px 2px;
+}
+
+.heybean-app-body :is(.hb-input, .hb-textarea, .hb-select):focus {
+    border-color: var(--hb-accent-strong);
+    background-color: transparent;
+    box-shadow: inset 0 -1px 0 var(--hb-accent-strong);
+}
+
+.heybean-app-body .hb-input[type="color"] {
+    width: 38px;
+    height: 38px;
+    min-height: 38px;
+    border: 1px solid var(--hb-zero-line-strong);
+    border-radius: 50%;
+}
+
+.heybean-app-body :is(.hb-button, .hb-button-secondary, .hb-button-danger, .hb-button-ghost) {
+    min-height: 38px;
+    border-radius: 2px;
+    padding: 9px 14px;
+    box-shadow: none;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .01em;
+    transform: none;
+}
+
+.heybean-app-body .hb-button {
+    border-color: var(--hb-accent);
+    background: var(--hb-accent);
+    color: var(--hb-accent-ink);
+    box-shadow: none;
+}
+
+.heybean-app-body .hb-button-secondary {
+    border-color: var(--hb-zero-line-strong);
+    background: transparent;
+}
+
+.heybean-app-body .hb-button-ghost {
+    min-height: 32px;
+    padding-inline: 6px;
+}
+
+.heybean-app-body :is(.hb-button, .hb-button-secondary, .hb-button-danger, .hb-button-ghost):hover {
+    transform: none;
+    filter: saturate(1.06);
+}
+
+.heybean-app-body .hb-button-secondary:hover,
+.heybean-app-body .hb-button-ghost:hover {
+    border-color: var(--hb-zero-line-strong);
+    background: var(--hb-zero-hover);
+}
+
+.heybean-app-body :is(.hb-tabs, .hb-theme-mode-group, .hb-billing-interval-toggle) {
+    gap: 0;
+    border: 0;
+    border-bottom: 1px solid var(--hb-zero-line-strong);
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+}
+
+.heybean-app-body :is(.hb-chip, .hb-theme-mode-option, .hb-billing-interval-toggle button) {
+    min-height: 36px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    color: var(--hb-muted);
+    box-shadow: none;
+}
+
+.heybean-app-body :is(
+    .hb-chip[aria-pressed="true"],
+    .hb-chip-active,
+    .hb-theme-mode-option.is-selected,
+    .hb-theme-mode-option-active,
+    .hb-billing-interval-toggle button[aria-pressed="true"]
+) {
+    border-bottom-color: var(--hb-accent);
+    background: transparent;
+    color: var(--hb-text);
+}
+
+.heybean-app-body :is(.hb-item, .hb-compact-item, .hb-switch-row, .hb-member-row, .hb-critical-row) {
+    min-height: var(--hb-zero-row);
+    border: 0;
+    border-bottom: 1px solid var(--hb-zero-line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.heybean-app-body :is(.hb-item, .hb-compact-item, .hb-switch-row, .hb-member-row, .hb-critical-row):hover {
+    background: var(--hb-zero-hover);
+}
+
+.heybean-app-body .hb-option-list {
+    overflow: visible;
+    border: 0;
+    border-top: 1px solid var(--hb-zero-line-strong);
+    border-radius: 0;
+    background: transparent;
+}
+
+.heybean-app-body .hb-workspace-assignment-list .hb-switch-row {
+    padding-inline: 2px;
+}
+
+.heybean-app-body .hb-workspace-current-label {
+    color: var(--hb-muted);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.heybean-app-body :is(
+    .hb-profile-popover,
+    .hb-create-popover,
+    .hb-critical-popover,
+    .hb-note-actions-popover,
+    .hb-notes-list-options-popover,
+    .hb-date-time-popover,
+    .hb-inline-info-popover
+) {
+    border: 1px solid var(--hb-zero-line-strong);
+    border-radius: 0;
+    background: var(--hb-zero-paper);
+    box-shadow: none;
+    backdrop-filter: none;
+}
+
+.heybean-app-body :is(.hb-profile-action, .hb-profile-nav-action, .hb-overflow-action) {
+    border-radius: 0;
+}
+
+.heybean-app-body :is(.hb-profile-action, .hb-profile-nav-action, .hb-overflow-action):hover {
+    background: var(--hb-zero-hover);
+}
+
+.heybean-app-body .hb-form-section {
+    gap: 11px;
+    padding-top: 15px;
+    border-top-color: var(--hb-zero-line-strong);
+}
+
+.heybean-app-body .hb-form-section-primary {
+    padding-top: 0;
+}
+
+.heybean-app-body :is(.hb-inline-category-manager, .hb-location-suggestions, .hb-location-map) {
+    border: 1px solid var(--hb-zero-line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.heybean-app-body .hb-modal-backdrop {
+    padding: 18px;
+    background: color-mix(in srgb, var(--hb-text) 32%, transparent);
+    backdrop-filter: none;
+}
+
+.heybean-app-body .hb-modal {
+    border: 1px solid var(--hb-zero-line-strong);
+    border-radius: 0;
+    background: var(--hb-zero-paper);
+    box-shadow: none;
+}
+
+.heybean-app-body .hb-item-form {
+    gap: 13px;
+    background: var(--hb-zero-paper);
+}
+
+.heybean-app-body .hb-item-form .hb-section-title {
+    padding-bottom: 12px;
+    border-bottom-color: var(--hb-zero-line-strong);
+}
+
+.heybean-app-body .hb-item-form .hb-section-icon {
+    width: 24px;
+    height: 24px;
+    flex-basis: 24px;
+    border-radius: 0;
+}
+
+.heybean-app-body .hb-item-form .hb-section-title h2 {
+    font-size: 18px;
+}
+
+.heybean-app-body .hb-modal-actions {
+    padding-top: 13px;
+    border-top: 1px solid var(--hb-zero-line-strong);
+}
+
+.heybean-app-body :is(.hb-date-time-trigger, .hb-date-time-nav, .hb-date-time-day) {
+    border-color: var(--hb-zero-line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.heybean-app-body :is(.hb-date-time-trigger, .hb-date-time-nav, .hb-date-time-day):hover {
+    background: var(--hb-zero-hover);
+    box-shadow: none;
+}
+
+.heybean-app-body .hb-date-time-day[aria-pressed="true"] {
+    background: color-mix(in srgb, var(--hb-accent) 12%, transparent);
+    color: var(--hb-accent-strong);
+}
+
+.heybean-app-body .hb-auth-wrap {
+    background: var(--hb-zero-canvas);
+}
+
+.heybean-app-body .hb-auth-card {
+    padding: 24px 4px;
+    border-width: 1px 0;
+    border-color: var(--hb-zero-line-strong);
+    border-radius: 0;
+    background: transparent;
+}
+
+.heybean-app-body .hb-auth-title {
+    justify-content: flex-start;
+    text-align: left;
+}
+
+.heybean-app-body .hb-auth-title img {
+    border-radius: 0;
+}
+
+.heybean-app-body .hb-auth-title h1 {
+    font-size: 22px;
+    font-weight: 650;
+}
+
+.heybean-app-body .hb-auth-card .hb-label {
+    gap: 6px;
+    color: var(--hb-muted);
+    font-size: 9px;
+}
+
+.heybean-app-body .hb-auth-card .hb-input {
+    font-size: 15px;
+}
+
+.heybean-app-body .hb-guided-zero-chrome-app {
+    background: var(--hb-zero-canvas);
+}
+
+.heybean-app-body :is(.hb-subscribe-plan, .hb-subscribe-confirmation, .hb-subscribe-summary-grid > div) {
+    border: 0;
+    border-top: 1px solid var(--hb-zero-line-strong);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.heybean-app-body .hb-subscribe-plan-selected {
+    border-top: 2px solid var(--hb-accent);
+}
+
+.heybean-app-body .hb-subscribe-badge {
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.heybean-app-body .hb-settings-grid {
+    gap: 0;
+    margin-top: 0;
+    padding: 22px 24px 96px;
+    background: var(--hb-zero-paper);
+}
+
+.heybean-app-body .hb-settings-grid > :is(
+    .hb-settings-section,
+    .hb-settings-profile-card,
+    .hb-settings-email-row,
+    .hb-billing-settings,
+    .hb-settings-account-card
+) {
+    padding: 20px 0;
+    border: 0;
+    border-bottom: 1px solid var(--hb-zero-line-strong);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.heybean-app-body .hb-settings-grid > .hb-section-title {
+    margin-bottom: 4px;
+    padding: 4px 0 16px;
+}
+
+.heybean-app-body .hb-settings-panel-head {
+    gap: 9px;
+}
+
+.heybean-app-body .hb-compact-icon {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.heybean-app-body .hb-settings-panel-head strong {
+    color: var(--hb-text);
+    font-size: 12px;
+    letter-spacing: -.01em;
+    text-transform: none;
+}
+
+.heybean-app-body :is(.hb-settings-panel-head small, .hb-settings-panel-subtitle) {
+    font-size: 10px;
+    font-weight: 500;
+}
+
+.heybean-app-body .hb-admin-panel {
+    padding: 22px 24px 96px;
+}
+
+.heybean-app-body :is(
+    .hb-admin-kpi,
+    .hb-admin-metric,
+    .hb-admin-health-card,
+    .hb-admin-growth-card,
+    .hb-admin-activity-chart-card,
+    .hb-admin-list-block,
+    .hb-admin-coupon-table,
+    .hb-admin-settings
+) {
+    border: 0;
+    border-top: 1px solid var(--hb-zero-line-strong);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.heybean-app-body :is(.hb-admin-kpi, .hb-admin-metric, .hb-admin-health-card) {
+    padding: 14px 2px;
+}
+
+.heybean-app-body :is(
+    .hb-admin-growth-stats span,
+    .hb-admin-health-metrics span,
+    .hb-admin-mini-list span,
+    .hb-admin-switch
+) {
+    border: 0;
+    border-bottom: 1px solid var(--hb-zero-line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.heybean-app-body :is(.hb-admin-kpi-danger, .hb-admin-kpi-warning, .hb-admin-kpi-healthy) {
+    background: transparent;
+}
+
+.heybean-app-body .hb-admin-kpi-danger {
+    border-top-color: color-mix(in srgb, var(--hb-destructive) 62%, transparent);
+}
+
+.heybean-app-body .hb-admin-kpi-warning {
+    border-top-color: color-mix(in srgb, var(--hb-warning) 62%, transparent);
+}
+
+.heybean-app-body .hb-admin-kpi-healthy {
+    border-top-color: color-mix(in srgb, var(--hb-success) 62%, transparent);
+}
+
+.heybean-app-body :is(.hb-admin-row, .hb-admin-issue-row, .hb-admin-coupon-row) {
+    border-bottom-color: var(--hb-zero-line);
+    border-radius: 0;
+    background: transparent;
+}
+
+.heybean-app-body .hb-notes-app {
+    background: var(--hb-zero-paper);
+}
+
+.heybean-app-body :is(.hb-notes-folders, .hb-notes-list-pane, .hb-notes-editor-pane) {
+    border-color: var(--hb-zero-line-strong);
+    background: var(--hb-zero-paper);
+}
+
+.heybean-app-body .hb-note-list-item {
+    border: 0;
+    border-bottom: 1px solid var(--hb-zero-line);
+    border-radius: 0;
+    background: transparent;
+}
+
+.heybean-app-body .hb-note-list-item:hover {
+    background: var(--hb-zero-hover);
+}
+
+.heybean-app-body .hb-note-list-item-active {
+    background: color-mix(in srgb, var(--hb-accent) 7%, transparent);
+    box-shadow: inset 2px 0 0 var(--hb-accent);
+}
+
+.heybean-app-body :is(.hb-note-title-input, .hb-note-markdown-editor, .hb-note-markdown-source) {
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.heybean-app-body .hb-note-editor-toolbar {
+    border-color: var(--hb-zero-line);
+    background: var(--hb-zero-paper);
+    box-shadow: none;
+    backdrop-filter: none;
+}
+
+.heybean-app-body .hb-note-markdown-editor .toastui-editor-toolbar {
+    border-width: 1px 0;
+    border-color: var(--hb-zero-line-strong);
+    border-radius: 0;
+    background: transparent;
+}
+
+.heybean-app-body .hb-note-markdown-editor .toastui-editor-toolbar-icons {
+    border-radius: 2px;
+}
+
+.heybean-app-body .hb-bean-panel {
+    border: 1px solid var(--hb-zero-line-strong);
+    border-radius: 0;
+    background: var(--hb-zero-paper);
+    box-shadow: none;
+    backdrop-filter: none;
+}
+
+.heybean-app-body :is(.hb-bean-message, .hb-bean-confirmation, .hb-bean-activity-row) {
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.heybean-app-body :is(.hb-error, .hb-success, .hb-empty) {
+    border: 0;
+    border-left: 2px solid currentColor;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.heybean-app-body .hb-empty {
+    border-left-color: var(--hb-zero-line-strong);
+    color: var(--hb-muted);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] {
+    --hb-zero-muted-paper: color-mix(in srgb, var(--hb-surface) 94%, #000);
+    background: var(--hb-zero-canvas);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] :is(.hb-topbar, .hb-bottom-bar) {
+    border-color: var(--hb-zero-line);
+    background: var(--hb-zero-paper);
+    box-shadow: none;
+    backdrop-filter: none;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] :is(
+    .hb-card,
+    .hb-surface-soft,
+    .hb-profile-popover,
+    .hb-create-popover,
+    .hb-critical-popover,
+    .hb-note-actions-popover,
+    .hb-notes-list-options-popover,
+    .hb-date-time-popover,
+    .hb-inline-info-popover,
+    .hb-modal,
+    .hb-bean-panel
+) {
+    background: var(--hb-zero-paper);
+    box-shadow: none;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] :is(
+    .hb-admin-metric,
+    .hb-admin-kpi,
+    .hb-admin-health-card,
+    .hb-admin-health-metrics span,
+    .hb-admin-mini-list span,
+    .hb-admin-switch,
+    .hb-admin-growth-card,
+    .hb-coupon-entry,
+    .hb-billing-summary-grid > div,
+    .hb-day-board-column,
+    .hb-task-future-toggle
+) {
+    background: transparent;
+    box-shadow: none;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] :is(.hb-input, .hb-textarea, .hb-select) {
+    border: 0;
+    border-bottom: 1px solid var(--hb-zero-line-strong);
+    border-radius: 0;
+    background-color: transparent;
+    padding: 9px 2px;
+    box-shadow: none;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+.heybean-app-body[data-hb-theme-resolved="dark"] textarea,
+.heybean-app-body[data-hb-theme-resolved="dark"] select {
+    border-radius: 0;
+    background-color: transparent;
+    box-shadow: none;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] :is(.hb-input, .hb-textarea, .hb-select):focus {
+    border-color: var(--hb-accent-strong);
+    background-color: transparent;
+    box-shadow: inset 0 -1px 0 var(--hb-accent-strong);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-button {
+    border-color: var(--hb-accent);
+    background: var(--hb-accent);
+    color: var(--hb-accent-ink);
+    box-shadow: none;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-theme-mode-option.is-selected {
+    border-color: transparent;
+    border-bottom-color: var(--hb-accent);
+    background: transparent;
+    color: var(--hb-text);
+    box-shadow: none;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] :is(
+    .hb-button-secondary,
+    .hb-button-ghost,
+    .hb-chip,
+    .hb-admin-growth-range-button,
+    .hb-theme-mode-option
+) {
+    background: transparent;
+    box-shadow: none;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-item-form {
+    background: var(--hb-zero-paper);
+}
+
+.heybean-app-body [data-bean-input] {
+    border-width: 0 0 1px;
+    border-color: var(--hb-zero-line-strong);
+    background: transparent;
+    box-shadow: none;
+}
+
+@media (max-width: 700px) {
+    .heybean-app-body {
+        --hb-zero-row: 46px;
+    }
+
+    .heybean-app-body .hb-card-pad {
+        padding-inline: 14px;
+    }
+
+    .heybean-app-body :is(.hb-settings-grid, .hb-admin-panel) {
+        padding: 16px 14px 88px;
+    }
+
+    .heybean-app-body .hb-modal-backdrop {
+        align-items: end;
+        padding: 0;
+    }
+
+    .heybean-app-body .hb-modal {
+        width: 100%;
+        max-height: calc(100vh - env(safe-area-inset-top, 0px) - 18px);
+        border-width: 1px 0 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .heybean-app-body *,
+    .heybean-app-body *::before,
+    .heybean-app-body *::after {
+        scroll-behavior: auto;
+        transition-duration: .01ms;
+        animation-duration: .01ms;
+        animation-iteration-count: 1;
+    }
+}

@@ -1252,8 +1252,10 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
             key: const Key('event-location-suggestions'),
             decoration: BoxDecoration(
               color: HeyBeanTheme.surface,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: HeyBeanTheme.border),
+              border: Border(
+                top: BorderSide(color: HeyBeanTheme.border),
+                bottom: BorderSide(color: HeyBeanTheme.border),
+              ),
             ),
             child: Column(
               children: [
@@ -2056,8 +2058,10 @@ class _EventLocationMapPreview extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: HeyBeanTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: HeyBeanTheme.border),
+        border: Border(
+          top: BorderSide(color: HeyBeanTheme.border),
+          bottom: BorderSide(color: HeyBeanTheme.border),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2395,9 +2399,14 @@ class _EventCategoryCreateDialogState
               key: const Key('event-category-custom-color-preview'),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: previewColor.withValues(alpha: .14),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: previewColor, width: 1.4),
+                color: Colors.transparent,
+                border: Border(
+                  left: BorderSide(color: previewColor, width: 3),
+                  top: BorderSide(color: previewColor.withValues(alpha: .38)),
+                  bottom: BorderSide(
+                    color: previewColor.withValues(alpha: .38),
+                  ),
+                ),
               ),
               child: Row(
                 children: [

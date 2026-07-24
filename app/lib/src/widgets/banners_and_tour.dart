@@ -17,14 +17,10 @@ class _DueReminderBanner extends StatelessWidget {
     child: Container(
       decoration: BoxDecoration(
         color: HeyBeanTheme.accent.withValues(alpha: .95),
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: HeyBeanTheme.accent.withValues(alpha: .22),
-            blurRadius: 24,
-            offset: const Offset(0, 12),
-          ),
-        ],
+        border: Border(
+          top: BorderSide(color: HeyBeanTheme.accentStrong),
+          bottom: BorderSide(color: HeyBeanTheme.accentStrong),
+        ),
       ),
       padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
       child: Column(
@@ -242,15 +238,8 @@ class _BetaFeedbackThanksDialog extends StatelessWidget {
       width: 58,
       height: 58,
       decoration: BoxDecoration(
-        color: HeyBeanTheme.accent.withValues(alpha: .12),
+        color: Colors.transparent,
         shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: HeyBeanTheme.accent.withValues(alpha: .08),
-            blurRadius: 18,
-            spreadRadius: 8,
-          ),
-        ],
       ),
       child: Icon(
         Icons.check_circle_rounded,
@@ -603,23 +592,13 @@ class _TourHighlight extends StatelessWidget {
       child: Container(
         key: const Key('onboarding-tour-highlight'),
         decoration: BoxDecoration(
-          borderRadius: borderRadius,
+          borderRadius: borderRadius == BorderRadius.zero
+              ? borderRadius
+              : BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
           border: Border.all(
             color: Colors.white.withValues(alpha: .92),
             width: 2,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0x24020617),
-              blurRadius: 16,
-              offset: const Offset(0, 10),
-            ),
-            BoxShadow(
-              color: HeyBeanTheme.accent.withValues(alpha: .18),
-              blurRadius: 24,
-              spreadRadius: 4,
-            ),
-          ],
         ),
       ),
     ),
@@ -652,15 +631,10 @@ class _TourCaptionCard extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
     decoration: BoxDecoration(
       color: HeyBeanTheme.surface,
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .18)),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x22020617),
-          blurRadius: 32,
-          offset: Offset(0, 18),
-        ),
-      ],
+      border: Border(
+        top: BorderSide(color: HeyBeanTheme.accent.withValues(alpha: .44)),
+        bottom: BorderSide(color: _quietBorderColor(alpha: .48)),
+      ),
     ),
     child: Column(
       mainAxisSize: MainAxisSize.min,

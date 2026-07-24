@@ -1249,14 +1249,8 @@ class _CalendarHeaderButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final background = HeyBeanTheme.isDark
-        ? HeyBeanTheme.surface2.withValues(alpha: .94)
-        : HeyBeanTheme.surface;
-    final shadowColor = HeyBeanTheme.isDark
-        ? Colors.black.withValues(alpha: .20)
-        : Colors.black.withValues(alpha: .07);
     return InkWell(
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
       onTap: onTap,
       child: ConstrainedBox(
         constraints: const BoxConstraints(minWidth: 0),
@@ -1266,20 +1260,10 @@ class _CalendarHeaderButton extends StatelessWidget {
             vertical: verticalPadding,
           ),
           decoration: BoxDecoration(
-            color: background,
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(
-              color: HeyBeanTheme.isDark
-                  ? HeyBeanTheme.borderStrong
-                  : HeyBeanTheme.border,
+            color: Colors.transparent,
+            border: Border(
+              bottom: BorderSide(color: _quietBorderColor(alpha: .58)),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: shadowColor,
-                blurRadius: HeyBeanTheme.isDark ? 16 : 14,
-                offset: const Offset(0, 6),
-              ),
-            ],
           ),
           child: IconTheme(
             data: IconThemeData(color: HeyBeanTheme.muted, size: 16),
@@ -2039,7 +2023,7 @@ class _MultiDayEventSpan extends StatelessWidget {
     final foregroundColor = HeyBeanTheme.text;
     return InkWell(
       key: Key('calendar-multi-day-event-${event.id}'),
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
       onTap: () => _showCalendarEventDetails(
         context,
         event,
@@ -2114,9 +2098,11 @@ class _MultiDayEventSpan extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: color.withValues(alpha: _calendarEventBlockFillAlpha),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: color.withValues(alpha: _calendarEventBlockBorderAlpha),
+          border: Border(
+            left: BorderSide(
+              color: color.withValues(alpha: _calendarEventBlockBorderAlpha),
+              width: 3,
+            ),
           ),
         ),
         clipBehavior: Clip.hardEdge,
@@ -2333,7 +2319,7 @@ class _AllDayEventRow extends StatelessWidget {
         final foregroundColor = HeyBeanTheme.text;
         return InkWell(
           key: Key('calendar-all-day-event-${event.id}'),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(HeyBeanTheme.zeroChromeRadius),
           onTap: () => _showCalendarEventDetails(
             context,
             event,
@@ -2414,9 +2400,13 @@ class _AllDayEventRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
               color: color.withValues(alpha: _calendarEventBlockFillAlpha),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: color.withValues(alpha: _calendarEventBlockBorderAlpha),
+              border: Border(
+                left: BorderSide(
+                  color: color.withValues(
+                    alpha: _calendarEventBlockBorderAlpha,
+                  ),
+                  width: 3,
+                ),
               ),
             ),
             child: Row(
