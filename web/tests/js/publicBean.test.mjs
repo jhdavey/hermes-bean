@@ -81,6 +81,9 @@ test('home landing Bean is centered in the hero above the feature icons', () => 
     assert.doesNotMatch(landing, /Stop carrying every detail yourself\.|See Bean in action/);
     assert.ok(landing.indexOf('public-bean-presence-hero') >= 0);
     assert.ok(landing.indexOf('public-bean-presence-hero') < landing.indexOf('hero-icons'));
+    assert.doesNotMatch(landing, /class="hero-icon bean"/);
+    assert.doesNotMatch(landing, /aria-label="Bean"[\s\S]*?images\/bean-logo\.png/);
+    assert.doesNotMatch(publicPostbridgeStyles, /hero-icon\.bean/);
 
     assert.match(landing, /@include\('partials.public-bean-critical-styles'\)/);
     assert.match(appView, /@include\('partials.public-bean-critical-styles'\)/);
