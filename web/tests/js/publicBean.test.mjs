@@ -144,6 +144,9 @@ test('home landing Bean is centered in the hero above the feature icons', () => 
     assert.match(styles, /\.public-bean-presence-hero\[data-mode="listening"\] \.public-bean-control::before \{[\s\S]*?animation:\s*public-bean-zero-glow 1\.35s/);
     assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.public-bean-presence-hero \.public-bean-control::before,[\s\S]*?animation:\s*none !important/);
     assert.match(styles, /body:has\(\.public-bean-presence-hero\) \.hero \.hero-icons \{[\s\S]*?margin-top:\s*137px/);
+    assert.match(styles, /body\[data-public-theme-resolved="dark"\] \.public-bean-presence-hero \.public-bean-icon img,[\s\S]*?body\[data-public-theme-resolved="dark"\] \.public-bean-presence-hero\[data-mode\]:not\(\[data-mode="disabled"\]\) \.public-bean-icon img \{[\s\S]*?filter:\s*invert\(1\) brightness\(1\.2\)/);
+    assert.match(styles, /body\[data-public-theme-resolved="dark"\] \.public-bean-presence-hero\[data-mode\]:not\(\[data-mode="disabled"\]\) \.public-bean-icon img \{[\s\S]*?opacity:\s*1/);
+    assert.match(criticalStyles, /body\[data-public-theme-resolved="dark"\] \.public-bean-presence-hero\[data-mode\]:not\(\[data-mode="disabled"\]\) \.public-bean-icon img \{[\s\S]*?opacity:\s*1/);
     const bundledBackdropBlock = styles.match(/body:has\(\.public-bean-presence-hero\)::before \{([\s\S]*?)\n\}/)?.[1] || '';
     assert.match(bundledBackdropBlock, /height:\s*calc\(env\(safe-area-inset-top, 0px\) \+ 154px\)/);
     assert.match(bundledBackdropBlock, /background:\s*linear-gradient\(180deg, rgba\(255, 255, 255, 1\) 0%, rgba\(255, 255, 255, \.98\) 36%, rgba\(255, 255, 255, \.78\) 62%, rgba\(255, 255, 255, \.38\) 82%, rgba\(255, 255, 255, 0\) 100%\)/);

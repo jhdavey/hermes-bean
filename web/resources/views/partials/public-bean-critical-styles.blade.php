@@ -226,9 +226,14 @@
         --public-bean-accent: 123, 201, 140;
     }
 
-    body[data-public-theme-resolved="dark"] .public-bean-presence-hero .public-bean-icon img {
+    body[data-public-theme-resolved="dark"] .public-bean-presence-hero .public-bean-icon img,
+    body[data-public-theme-resolved="dark"] .public-bean-presence-hero[data-mode]:not([data-mode="disabled"]) .public-bean-icon img {
         opacity: .96;
         filter: invert(1) brightness(1.2) drop-shadow(0 20px 34px rgba(123, 201, 140, .2));
+    }
+
+    body[data-public-theme-resolved="dark"] .public-bean-presence-hero[data-mode]:not([data-mode="disabled"]) .public-bean-icon img {
+        opacity: 1;
     }
 
     body[data-public-theme-resolved="dark"] .public-bean-status {
