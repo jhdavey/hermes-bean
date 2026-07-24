@@ -38,11 +38,10 @@ test('public Bean presence remains icon-only where it is mounted', () => {
     assert.match(beanPresence, /data-public-bean-status/);
     assert.match(beanPresence, /data-public-bean-help/);
     assert.match(beanPresence, /aria-label="\{\{ \$publicBeanAria \}\}"/);
-    assert.doesNotMatch(beanPresence, /data-bean-panel|hb-bean-chat/);
+    assert.doesNotMatch(beanPresence, /data-bean-panel|hb-bean-chat|public-bean-ring/);
     assert.doesNotMatch(beanPresence, /Hey! I'm over here!|data-public-bean-cue|public-bean-cue-arrow|viewBox="0 0 88 88"/);
-    assert.doesNotMatch(styles, /\.public-bean-cue|Bradley Hand|Comic Sans MS|Marker Felt|public-bean-cue-arrow/);
+    assert.doesNotMatch(styles, /\.public-bean-cue|Bradley Hand|Comic Sans MS|Marker Felt|public-bean-cue-arrow|public-bean-ring|public-bean-orbit|public-bean-pulse|--public-bean-ring-angle|conic-gradient/);
     assert.match(styles, /\.public-bean-control \{[\s\S]*?width:\s*92px[\s\S]*?height:\s*92px/);
-    assert.match(styles, /\.public-bean-control::before \{[\s\S]*?radial-gradient/);
     assert.match(styles, /\.public-bean-status,[\s\S]*?\.public-bean-help \{/);
     assert.doesNotMatch(styles, /\.public-bean-prompt|\.public-bean-intents/);
 });
@@ -268,9 +267,8 @@ test('landing Bean reveals the three-step quick tour plus signup and pricing des
     assert.match(styles, /@keyframes public-bean-guided-highlight/);
 });
 
-test('landing Bean uses the stationary app-style border tracing indicator', () => {
-    assert.match(styles, /@property --public-bean-ring-angle/);
-    assert.match(styles, /conic-gradient\(from var\(--public-bean-ring-angle\)/);
-    assert.match(styles, /to \{ --public-bean-ring-angle: 360deg; \}/);
-    assert.doesNotMatch(styles, /public-bean-orbit[\s\S]*?transform:\s*rotate/);
+test('landing Bean does not render circular listening indicators around the icon', () => {
+    assert.doesNotMatch(beanPresence, /public-bean-ring/);
+    assert.doesNotMatch(styles, /@property --public-bean-ring-angle|--public-bean-ring-angle|conic-gradient|public-bean-ring|public-bean-orbit|public-bean-pulse/);
+    assert.match(styles, /\.public-bean-icon img \{[\s\S]*?filter:\s*drop-shadow/);
 });

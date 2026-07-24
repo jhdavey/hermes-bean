@@ -27,7 +27,6 @@
             data-voice-event-url="{{ route('bean.landing.voice-events') }}"
             data-turnstile-site-key="{{ config('services.turnstile.site_key') }}"
         >
-            <span class="public-bean-ring" aria-hidden="true"></span>
             <button class="public-bean-control" type="button" data-public-bean-toggle aria-pressed="false" aria-label="Talk with Bean">
                 <span class="public-bean-icon"><img src="{{ asset('images/bean-logo.png') }}" alt="Bean"></span>
                 <span class="public-bean-status" data-public-bean-status aria-live="polite">Tap to wake up</span>
