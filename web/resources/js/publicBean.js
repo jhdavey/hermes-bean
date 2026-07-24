@@ -28,14 +28,11 @@ function mountTourImageZoom() {
 }
 
 function mountLandingBeanScrollState(root) {
-    const hero = root.closest('.hero') || document.querySelector('main.hero');
-    if (!hero) return;
-
+    const compactScrollThresholdPx = 4;
     let ticking = false;
     const setScrollState = () => {
         ticking = false;
-        const heroBottom = hero.getBoundingClientRect().bottom;
-        const compact = heroBottom <= 118;
+        const compact = window.scrollY > compactScrollThresholdPx;
         root.dataset.landingScroll = compact ? 'compact' : 'hero';
         document.body?.classList.toggle('public-bean-landing-compact', compact);
     };

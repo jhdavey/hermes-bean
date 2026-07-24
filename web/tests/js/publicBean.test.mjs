@@ -107,7 +107,8 @@ test('home landing Bean is centered in the hero above the feature icons', () => 
     assert.match(styles, /\.public-bean-presence-hero\[data-landing-scroll="compact"\] \.public-bean-control,[\s\S]*?width:\s*64px[\s\S]*?height:\s*64px/);
     assert.match(styles, /\.public-bean-presence-hero\[data-landing-scroll="compact"\] \.public-bean-icon img \{[\s\S]*?width:\s*46px[\s\S]*?height:\s*46px/);
     assert.match(source, /function mountLandingBeanScrollState\(root\)/);
-    assert.match(source, /const compact = heroBottom <= 118/);
+    assert.match(source, /const compactScrollThresholdPx = 4/);
+    assert.match(source, /const compact = window\.scrollY > compactScrollThresholdPx/);
     assert.match(source, /root\.dataset\.landingScroll = compact \? 'compact' : 'hero'/);
     assert.match(source, /classList\.toggle\('public-bean-landing-compact', compact\)/);
     assert.match(source, /window\.addEventListener\('scroll', requestScrollState, \{ passive: true \}\)/);
