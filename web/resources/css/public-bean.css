@@ -1,6 +1,6 @@
 .public-bean-presence {
     --public-bean-accent: 82, 168, 105;
-    --public-bean-shell-top: calc(env(safe-area-inset-top, 0px) + clamp(172px, 25vh, 194px));
+    --public-bean-shell-top: calc(env(safe-area-inset-top, 0px) + clamp(136px, 20vh, 158px));
     --public-bean-shell-left: 50%;
     position: fixed;
     top: calc(env(safe-area-inset-top, 0px) + 46px);

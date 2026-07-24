@@ -196,7 +196,7 @@ function mountPublicBean(root) {
         enabled = true;
         landingWakeDetectedAtMs = Date.now();
         landingWakeToFirstSpeechMs = null;
-        setStatus('starting', isSignupOnboardingContext() ? 'Volume on. Allow mic.' : 'Turn volume on. Allow mic.');
+        setStatus('starting', isSignupOnboardingContext() ? 'Volume up. Allow mic.' : 'Turn volume up. Allow mic.');
         let micAllowed = false;
         try {
             if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone is unavailable.');
@@ -493,7 +493,7 @@ function mountPublicBean(root) {
         const message = String(event.detail?.message || '').trim() || 'Alright, your account is created. Now I can give you a quick tour of the dashboard, help you get started, or you can skip all of that stuff and just dive in.';
         root.dataset.postSignup = 'true';
         pendingFirstMessage = message;
-        setHelp('Tap Bean for voice · volume on · allow mic');
+        setHelp('Tap Bean for voice · volume up · allow mic');
         if (event.detail?.autoVoice === true && !enabled) enable();
     });
 

@@ -57,7 +57,7 @@ test('public early access banner stays at the top of the page instead of sticky 
 test('public Bean presence remains icon-only where it is mounted', () => {
     assert.match(beanPresence, /data-public-bean/);
     assert.match(beanPresence, /Tap to wake up/);
-    assert.match(beanPresence, /Volume on · allow mic/);
+    assert.match(beanPresence, /Volume up · allow mic/);
     assert.match(beanPresence, /data-public-bean-status/);
     assert.match(beanPresence, /data-public-bean-help/);
     assert.match(beanPresence, /aria-label="\{\{ \$publicBeanAria \}\}"/);
@@ -75,7 +75,7 @@ test('home landing Bean is centered in the hero above the feature icons', () => 
     assert.match(landing, /@include\('partials.public-nav'\)/);
     assert.match(landing, /public-bean-presence-hero/);
     assert.match(landing, /'status' => 'Tap to wake up'/);
-    assert.match(landing, /'help' => 'Volume on · allow mic'/);
+    assert.match(landing, /'help' => 'Volume up · allow mic'/);
     assert.match(landing, /Hi! I'm Bean\. Your new assistant!/);
     assert.match(landing, /Bean is here to help you stay organized and on top of things like your calendar, tasks, reminders and more\./);
     assert.match(landing, /Across personal and shared workspaces, Bean is by your side, 24\/7\./);
@@ -115,6 +115,8 @@ test('home landing Bean is centered in the hero above the feature icons', () => 
     assert.match(criticalStyles, /\.public-bean-presence-hero,[\s\S]*?\.public-bean-presence-signup \{/);
     assert.match(criticalStyles, /position:\s*fixed/);
     assert.match(criticalStyles, /width:\s*68px[\s\S]*?height:\s*68px[\s\S]*?max-width:\s*68px[\s\S]*?max-height:\s*68px/);
+    assert.match(styles, /--public-bean-shell-top:\s*calc\(env\(safe-area-inset-top, 0px\) \+ clamp\(136px, 20vh, 158px\)\)/);
+    assert.match(criticalStyles, /--public-bean-shell-top:\s*calc\(env\(safe-area-inset-top, 0px\) \+ clamp\(136px, 20vh, 158px\)\)/);
     const criticalBackdropBlock = criticalStyles.match(/body:has\(\.public-bean-presence-hero\)::before \{([\s\S]*?)\n    \}/)?.[1] || '';
     assert.match(criticalBackdropBlock, /background:\s*linear-gradient\(180deg, rgba\(255, 255, 255, 1\) 0%, rgba\(255, 255, 255, \.98\) 36%, rgba\(255, 255, 255, \.78\) 62%, rgba\(255, 255, 255, \.38\) 82%, rgba\(255, 255, 255, 0\) 100%\)/);
     assert.match(criticalBackdropBlock, /opacity:\s*0/);
@@ -173,7 +175,7 @@ test('landing Bean starts voice directly from an explicit tap with a hearing che
     assert.match(source, /let enabled = false/);
     assert.doesNotMatch(source, /localStorage\.getItem|localStorage\.setItem/);
     assert.match(source, /navigator\.mediaDevices\.getUserMedia\(\{ audio: true \}\)/);
-    assert.match(source, /Turn volume on\. Allow mic\./);
+    assert.match(source, /Turn volume up\. Allow mic\./);
     assert.match(source, /await startVoiceConversation\(revision\)/);
     assert.doesNotMatch(source, /cue\?\.addEventListener|data-public-bean-cue/);
     assert.match(source, /Conversation\.startSession/);

@@ -31,7 +31,7 @@
     @include('partials.public-bean-presence', [
         'class' => 'public-bean-presence-hero',
         'status' => 'Tap to wake up',
-        'help' => 'Volume on · allow mic',
+        'help' => 'Volume up · allow mic',
         'ariaLabel' => 'Wake up Bean',
     ])
 

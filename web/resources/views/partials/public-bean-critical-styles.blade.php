@@ -1,7 +1,7 @@
 <script src="{{ asset('js/public-bean-handoff.js') }}"></script>
 <style>
     :root {
-        --public-bean-shell-top: calc(env(safe-area-inset-top, 0px) + clamp(172px, 25vh, 194px));
+        --public-bean-shell-top: calc(env(safe-area-inset-top, 0px) + clamp(136px, 20vh, 158px));
         --public-bean-shell-left: 50%;
     }
 

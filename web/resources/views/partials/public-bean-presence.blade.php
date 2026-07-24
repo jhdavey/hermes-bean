@@ -2,7 +2,7 @@
     $publicBeanClass = trim('public-bean-presence '.($class ?? ''));
     $publicBeanContext = $context ?? null;
     $publicBeanStatus = $status ?? 'Tap to wake up';
-    $publicBeanHelp = $help ?? 'Volume on · allow mic';
+    $publicBeanHelp = $help ?? 'Volume up · allow mic';
     $publicBeanAria = $ariaLabel ?? 'Wake up landing page Bean';
 @endphp
 <div

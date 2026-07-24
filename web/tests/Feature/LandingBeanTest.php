@@ -50,8 +50,7 @@ class LandingBeanTest extends TestCase
             ->assertSee('linear-gradient(180deg, rgba(255, 255, 255, 1)', false)
             ->assertDontSee('box-shadow: 0 18px 34px', false)
             ->assertSee('.public-beta-banner{position:static;top:auto;', false)
-            ->assertSee('Tap to wake up')
-            ->assertSee('Volume on · allow mic');
+            ->assertSee('Tap to wake up');
     }
 
     public function test_landing_conversation_token_uses_the_dedicated_public_elevenlabs_agent(): void
