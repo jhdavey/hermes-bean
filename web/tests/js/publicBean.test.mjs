@@ -259,10 +259,14 @@ test('landing voice uses a dedicated fast ElevenLabs guide with an action-only p
     assert.match(source, /hearingCheckExpected = !isSignupOnboardingContext\(\)/);
     assert.match(source, /function isPlainHearingConfirmation\(content\)/);
     assert.match(source, /hearingCheckUiActionSuppressUntilMs = Date\.now\(\) \+ HEARING_CHECK_UI_ACTION_SUPPRESS_MS/);
+    assert.match(source, /\} else \{\s*hearingCheckUiActionSuppressUntilMs = 0;\s*\}\s*setStatus\('thinking', 'Thinking…'\)/);
     assert.match(source, /function shouldSuppressHearingCheckUiAction\(destination\)/);
     assert.doesNotMatch(source, /\['signup', 'onboarding', 'register'\]\.includes\(destination\)\) return false/);
     assert.match(source, /No page movement needed for the hearing check\./);
     assert.match(source, /if \(shouldSuppressHearingCheckUiAction\(normalizedDestination\)\)/);
+    assert.match(agentConfig, /After the hearing-check confirmation is complete, honor the visitor's next explicit request immediately/);
+    assert.match(agentConfig, /call command_center for stop 1/);
+    assert.match(agentConfig, /call onboarding/);
     assert.match(agentConfig, /Do not call showLandingSection, do not choose how_it_works\/features/);
     assert.match(agentConfig, /do not move the page for this hearing-check confirmation/);
     assert.match(agentConfig, /Do not call showLandingSection for greetings, hearing checks, acknowledgements, filler/);

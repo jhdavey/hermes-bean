@@ -414,6 +414,8 @@ function mountPublicBean(root) {
                             hearingCheckUiActionSuppressUntilMs = Date.now() + HEARING_CHECK_UI_ACTION_SUPPRESS_MS;
                         }
                         hearingCheckExpected = false;
+                    } else {
+                        hearingCheckUiActionSuppressUntilMs = 0;
                     }
                     setStatus('thinking', 'Thinking…');
                 }
