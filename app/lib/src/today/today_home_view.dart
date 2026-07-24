@@ -278,12 +278,14 @@ class _TodayHomeView extends StatelessWidget {
       onEventCategorySaved: onEventCategorySaved,
       workspaces: user.workspaces,
       activeWorkspaceId: user.activeWorkspace?.id,
-      showPrimaryWorkspaceSelector: task == null,
+      showPrimaryWorkspaceSelector: true,
+      lockPrimaryWorkspace: task != null,
       initialPrimaryWorkspaceId: task == null
-          ? (user.activeWorkspace == null
-                ? null
-                : _workspaceValue(user.activeWorkspace!))
-          : null,
+          ? _personalWorkspaceValue(user.workspaces)
+          : _workspaceValueForId(
+              user.workspaces,
+              task.workspaceId?.toString() ?? user.activeWorkspace?.id,
+            ),
       googleCalendarStatus: googleCalendarStatus,
       initialSyncWorkspaceIds: task == null
           ? const []

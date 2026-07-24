@@ -10,9 +10,11 @@ use App\Models\CalendarEvent;
 use App\Models\Reminder;
 use App\Models\Task;
 use App\Models\User;
+use App\Models\Workspace;
 use App\Services\Bean\BeanDashboardToolBridgeService;
 use App\Services\Bean\BeanRuntimeService;
 use App\Services\Bean\DashboardContextBuilder;
+use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Carbon;
@@ -264,6 +266,85 @@ PHP);
         $this->assertDatabaseHas('tasks', ['title' => 'from hermes tool bridge', 'user_id' => $user->id]);
         $this->assertDatabaseHas('bean_tool_calls', ['bean_run_id' => $run->id, 'action' => 'task.create', 'status' => 'completed']);
         $this->assertSame(1, Task::where('user_id', $user->id)->count());
+    }
+
+    public function test_bean_sessions_use_the_personal_base_workspace_while_tools_control_shared_workspaces(): void
+    {
+        $this->apiToken('bean-user-wide-workspaces@example.com');
+        $user = User::where('email', 'bean-user-wide-workspaces@example.com')->firstOrFail();
+        $workspaces = app(WorkspaceService::class);
+        $personalWorkspaceId = $workspaces->ensurePersonalWorkspaceForUser($user);
+        $sharedWorkspace = $workspaces->createHousehold($user, 'Family HQ');
+        $workspaces->setDefaultWorkspace($user, $sharedWorkspace);
+
+        $session = app(BeanRuntimeService::class)->createSession($user->refresh(), $sharedWorkspace->id);
+
+        $this->assertSame($personalWorkspaceId, (int) $session->workspace_id);
+        $this->assertSame((int) $sharedWorkspace->id, (int) $user->refresh()->default_workspace_id);
+        $this->assertSame($personalWorkspaceId, (int) Workspace::where('personal_owner_user_id', $user->id)->firstOrFail()->id);
+
+        $run = BeanRun::create([
+            'bean_session_id' => $session->id,
+            'user_id' => $user->id,
+            'workspace_id' => $session->workspace_id,
+            'status' => 'running',
+            'mode' => 'hermes',
+            'input' => 'manage the family workspace',
+            'started_at' => now(),
+        ]);
+        $context = $this->signedToolContext($user, $session, $run);
+        $bridge = app(BeanDashboardToolBridgeService::class);
+
+        $workspaceList = $bridge->execute($context, [
+            'action' => 'workspace.list',
+            'arguments' => [],
+        ]);
+        $this->assertTrue((bool) ($workspaceList['ok'] ?? false));
+        $this->assertSame($personalWorkspaceId, (int) $workspaceList['base_workspace_id']);
+        $this->assertCount(2, $workspaceList['workspaces']);
+
+        $created = $bridge->execute($context, [
+            'action' => 'task.create',
+            'arguments' => [
+                'workspace_name' => 'Family HQ',
+                'title' => 'Shared family task',
+            ],
+        ]);
+        $this->assertTrue((bool) ($created['ok'] ?? false));
+        $this->assertSame((int) $sharedWorkspace->id, (int) $created['item']['workspace_id']);
+        $this->assertDatabaseHas('tasks', [
+            'user_id' => $user->id,
+            'workspace_id' => $sharedWorkspace->id,
+            'title' => 'Shared family task',
+        ]);
+
+        $personalCreated = $bridge->execute($context, [
+            'action' => 'task.create',
+            'arguments' => ['title' => 'Personal base task'],
+        ]);
+        $this->assertSame($personalWorkspaceId, (int) $personalCreated['item']['workspace_id']);
+
+        $sharedOnly = $bridge->execute($context, [
+            'action' => 'task.list',
+            'arguments' => ['workspace_id' => $sharedWorkspace->id],
+        ]);
+        $this->assertSame(1, $sharedOnly['total_count']);
+        $this->assertSame('Shared family task', $sharedOnly['items'][0]['title']);
+
+        $updated = $bridge->execute($context, [
+            'action' => 'task.update',
+            'arguments' => [
+                'id' => $created['item']['id'],
+                'workspace_name' => 'Family HQ',
+                'title' => 'Updated shared family task',
+            ],
+        ]);
+        $this->assertTrue((bool) ($updated['ok'] ?? false));
+        $this->assertDatabaseHas('tasks', [
+            'id' => $created['item']['id'],
+            'workspace_id' => $sharedWorkspace->id,
+            'title' => 'Updated shared family task',
+        ]);
     }
 
     public function test_bean_dashboard_tool_can_show_and_update_safe_user_settings(): void

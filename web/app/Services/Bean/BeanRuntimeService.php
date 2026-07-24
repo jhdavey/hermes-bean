@@ -21,13 +21,17 @@ class BeanRuntimeService
 
     public function createSession(User $user, ?int $workspaceId = null, ?string $clientTimezone = null, ?array $clientLocation = null): BeanSession
     {
-        $workspace = app(WorkspaceService::class)->resolveWorkspace($user, $workspaceId);
+        // Bean is a user-level agent. Keep every conversation anchored to the
+        // user's personal workspace even when the dashboard is currently
+        // showing a shared workspace. The legacy workspace argument remains in
+        // the API signature for older clients, but it is intentionally ignored.
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
         $timezone = $this->timeContext->rememberUserTimezoneIfMissing($user, $clientTimezone)
             ?: $this->timeContext->normalizeTimezone($clientTimezone);
         $timeContext = $this->timeContext->forUser($user->refresh(), $timezone);
         $session = BeanSession::create([
             'user_id' => $user->id,
-            'workspace_id' => $workspace->id,
+            'workspace_id' => $workspaceId,
             'title' => 'Bean chat',
             'status' => 'active',
             'metadata' => array_filter([
@@ -50,6 +54,7 @@ class BeanRuntimeService
         $session = $sessionId
             ? BeanSession::query()->where('user_id', $user->id)->findOrFail($sessionId)
             : $this->createSession($user, $workspaceId, $clientTimezone, $clientLocation);
+        $session = $this->ensureBaseWorkspace($user, $session);
 
         if ($clientTimezone !== null && $sessionId) {
             $timezone = $this->timeContext->rememberUserTimezoneIfMissing($user, $clientTimezone)
@@ -81,6 +86,16 @@ class BeanRuntimeService
         }
 
         return $this->hermesRuntime->handleMessage($user, $content, $session, $clientTimezone, $source);
+    }
+
+    public function ensureBaseWorkspace(User $user, BeanSession $session): BeanSession
+    {
+        $workspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($user);
+        if ((int) $session->workspace_id !== $workspaceId) {
+            $session->forceFill(['workspace_id' => $workspaceId])->save();
+        }
+
+        return $session->refresh();
     }
 
     public function rememberClientLocation(BeanSession $session, ?array $clientLocation): void

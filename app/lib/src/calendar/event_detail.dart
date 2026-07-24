@@ -238,11 +238,12 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     super.initState();
     final event = widget.event;
     final eventMetadata = event.metadata ?? const <String, Object?>{};
-    final initialPrimaryWorkspaceId =
-        event.workspaceId ?? _workspaceValueToInt(widget.activeWorkspaceId);
-    _primaryWorkspaceId =
-        initialPrimaryWorkspaceId ??
-        _workspaceValueForId(widget.workspaces, widget.activeWorkspaceId);
+    _primaryWorkspaceId = event.id == 0
+        ? _personalWorkspaceValue(widget.workspaces)
+        : _workspaceValueForId(
+            widget.workspaces,
+            event.workspaceId?.toString() ?? widget.activeWorkspaceId,
+          );
     _allDay = _eventIsAllDay(event);
     _title = TextEditingController(text: event.title);
     _startsAt = TextEditingController(
@@ -1149,12 +1150,7 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
 
   bool get _creatingEvent => widget.event.id == 0;
 
-  List<BeanWorkspace> get _eventWorkspaceChoices {
-    if (_creatingEvent) return widget.workspaces;
-    return widget.workspaces
-        .where((workspace) => workspace.id != widget.activeWorkspaceId)
-        .toList();
-  }
+  List<BeanWorkspace> get _eventWorkspaceChoices => widget.workspaces;
 
   bool _eventWorkspaceSelected(BeanWorkspace workspace) {
     final value = _workspaceValue(workspace);
@@ -1168,14 +1164,8 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
     final value = _workspaceValue(workspace);
     setState(() {
       _validationError = null;
-      if (!_creatingEvent) {
-        if (selected) {
-          _syncWorkspaceIds.add(value);
-        } else {
-          _syncWorkspaceIds.removeWhere(
-            (workspaceId) => _workspaceValuesMatch(workspaceId, value),
-          );
-        }
+      if (!_creatingEvent &&
+          _workspaceValuesMatch(value, _primaryWorkspaceId)) {
         return;
       }
 
@@ -1823,52 +1813,51 @@ class _CalendarEventDetailPageState extends State<_CalendarEventDetailPage> {
                         const SizedBox(height: 14),
                         _MobileFormSection(
                           key: const Key('event-workspace-sync-field'),
-                          title: 'Local Workspace Sync',
-                          subtitle: _creatingEvent
-                              ? 'Choose every workspace this event should be created in.'
-                              : 'Copy this event only to selected HeyBean workspaces.',
+                          title: 'Workspaces',
                           icon: Icons.home_work_outlined,
-                          infoKey: const Key('event-workspace-sync-info'),
-                          infoTitle: 'Local Workspace Sync',
-                          infoBullets: const [
-                            'Use this when a Personal event should also appear in a household workspace.',
-                            'Sync creates a copy for the selected workspace; future edits remain controlled by Bean.',
-                            'Leave everything unchecked to keep the event only in the current workspace.',
-                          ],
                           children: [
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                for (final workspace in _eventWorkspaceChoices)
-                                  FilterChip(
+                            for (final workspace in _eventWorkspaceChoices)
+                              Builder(
+                                builder: (context) {
+                                  final value = _workspaceValue(workspace);
+                                  final isPrimary = _workspaceValuesMatch(
+                                    value,
+                                    _primaryWorkspaceId,
+                                  );
+                                  final isCurrent = _workspaceValuesMatch(
+                                    value,
+                                    _workspaceValueForId(
+                                      widget.workspaces,
+                                      widget.activeWorkspaceId,
+                                    ),
+                                  );
+                                  final label = workspace.isPersonal
+                                      ? 'Personal'
+                                      : workspace.name;
+                                  return CheckboxListTile(
                                     key: Key(
                                       'event-sync-workspace-${workspace.id}',
                                     ),
-                                    label: Text(
-                                      _workspaceValuesMatch(
-                                            _workspaceValue(workspace),
-                                            _workspaceValueForId(
-                                              widget.workspaces,
-                                              widget.activeWorkspaceId,
-                                            ),
-                                          )
-                                          ? '${workspace.isPersonal ? 'Personal' : workspace.name} (current)'
-                                          : workspace.isPersonal
-                                          ? 'Personal'
-                                          : workspace.name,
+                                    contentPadding: EdgeInsets.zero,
+                                    dense: true,
+                                    controlAffinity:
+                                        ListTileControlAffinity.leading,
+                                    title: Text(
+                                      isCurrent ? '$label (current)' : label,
                                     ),
-                                    selected: _eventWorkspaceSelected(
-                                      workspace,
-                                    ),
-                                    onSelected: (selected) =>
-                                        _setEventWorkspaceSelected(
-                                          workspace,
-                                          selected,
-                                        ),
-                                  ),
-                              ],
-                            ),
+                                    value: _eventWorkspaceSelected(workspace),
+                                    onChanged:
+                                        _saving ||
+                                            (!_creatingEvent && isPrimary)
+                                        ? null
+                                        : (selected) =>
+                                              _setEventWorkspaceSelected(
+                                                workspace,
+                                                selected == true,
+                                              ),
+                                  );
+                                },
+                              ),
                           ],
                         ),
                       ],

@@ -1223,6 +1223,12 @@
     cursor: default;
 }
 
+.hb-workspace-current-label {
+    color: var(--hb-muted);
+    font-size: 12px;
+    font-weight: 650;
+}
+
 .hb-reminder-recipient-list {
     gap: 10px;
 }

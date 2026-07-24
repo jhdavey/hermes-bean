@@ -195,6 +195,12 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
       onEventCategorySaved: widget.onEventCategorySaved,
       workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
+      showPrimaryWorkspaceSelector: true,
+      lockPrimaryWorkspace: true,
+      initialPrimaryWorkspaceId: _workspaceValueForId(
+        widget.workspaces,
+        task.workspaceId?.toString() ?? widget.activeWorkspaceId,
+      ),
       initialSyncWorkspaceIds: _initialSyncWorkspaceIds(
         linkedWorkspaceIds: task.linkedWorkspaceIds,
         workspaceId: task.workspaceId,
@@ -293,6 +299,12 @@ class _CommandCenterHomeState extends State<_CommandCenterHome> {
           : 'Mark complete',
       workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
+      showPrimaryWorkspaceSelector: true,
+      lockPrimaryWorkspace: true,
+      initialPrimaryWorkspaceId: _workspaceValueForId(
+        widget.workspaces,
+        reminder.workspaceId?.toString() ?? widget.activeWorkspaceId,
+      ),
       initialSyncWorkspaceIds: _initialSyncWorkspaceIds(
         linkedWorkspaceIds: reminder.linkedWorkspaceIds,
         workspaceId: reminder.workspaceId,

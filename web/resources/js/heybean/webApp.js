@@ -2354,7 +2354,7 @@ export function mountHeyBeanWebApp(mount) {
         const metadata = normalizeNoteMetadata(note.metadata);
         const noteWorkspaceIds = linkedWorkspaceIdsForNote(note);
         const activeWorkspaceId = String(note.workspace_id || note.workspaceId || currentWorkspaceId() || '');
-        const syncWorkspaces = workspaces().filter((workspace) => String(workspace.id) !== activeWorkspaceId);
+        const selectedWorkspaceIds = workspaceAssignmentIds(activeWorkspaceId, noteWorkspaceIds, true);
         return `
             <form class="hb-note-editor ${locked ? 'hb-note-editor-locked' : ''}" data-note-editor="${escapeAttr(note.id)}">
                 <div class="hb-note-editor-toolbar">
@@ -2374,8 +2374,7 @@ export function mountHeyBeanWebApp(mount) {
                             <details class="hb-note-workspace-menu">
                                 <summary>${icons.spaces}<span>Workspaces</span></summary>
                                 <div>
-                                    <small>Saved in ${escapeHtml(workspaceDisplayName(findWorkspace(activeWorkspaceId)))}.</small>
-                                    ${syncWorkspaces.length ? syncWorkspaces.map((workspace) => `<label><input type="checkbox" data-note-sync-workspace="${escapeAttr(workspace.id)}" ${noteWorkspaceIds.has(String(workspace.id)) ? 'checked' : ''}> <span>${escapeHtml(workspaceDisplayName(workspace))}</span></label>`).join('') : '<small>No other workspaces available.</small>'}
+                                    ${noteWorkspaceAssignmentRowsMarkup(workspaces(), selectedWorkspaceIds, activeWorkspaceId)}
                                 </div>
                             </details>
                             <button type="button" data-move-note-folder="${escapeAttr(note.id)}" role="menuitem">${icons.notes}<span>Move note</span></button>
@@ -4176,6 +4175,7 @@ export function mountHeyBeanWebApp(mount) {
         if (modal.type === 'post-signup-bean-choice') return postSignupBeanChoiceModalMarkup();
         if (modal.type === 'post-tour-first-action') return postTourFirstActionModalMarkup(modal);
         if (modal.type === 'profile') return profileModalMarkup();
+        if (modal.type === 'note-create') return noteCreateModalMarkup();
         if (modal.type === 'workspace') return workspaceModalMarkup(modal.mode, modal.workspace);
         if (modal.type === 'categories') return categoriesModalMarkup();
         if (modal.type === 'recurring-delete') return recurringDeleteModalMarkup(modal.item);
@@ -4622,10 +4622,10 @@ export function mountHeyBeanWebApp(mount) {
         const linked = new Set(normalizeList(item?.linked_workspace_ids || item?.linkedWorkspaceIds).map(String));
         const sourceWorkspaceId = String(workspaceId || currentWorkspaceId() || '');
         const allWorkspaces = workspaces();
-        const selectedWorkspaceIds = workspaceAssignmentIds(sourceWorkspaceId, linked);
-        const sourceWorkspace = allWorkspaces.find((workspace) => String(workspace.id) === String(selectedWorkspaceIds[0] || sourceWorkspaceId));
+        const selectedWorkspaceIds = workspaceAssignmentIds(sourceWorkspaceId, linked, editing);
         return `
             <section class="hb-form-section hb-event-connections hb-workspace-picker" data-workspace-picker>
+                <div class="hb-form-section-head"><strong>Workspaces</strong></div>
                 <div class="hb-form-section-body">
                 <input type="hidden" name="workspaceId" value="${escapeAttr(sourceWorkspaceId)}">
                 <div class="hb-option-list hb-workspace-assignment-list" aria-label="Workspaces">
@@ -4636,9 +4636,9 @@ export function mountHeyBeanWebApp(mount) {
             </section>`;
     }
 
-    function workspaceAssignmentIds(sourceWorkspaceId, linked = new Set()) {
+    function workspaceAssignmentIds(sourceWorkspaceId, linked = new Set(), editing = false) {
         return Array.from(new Set([
-            sourceWorkspaceId || currentWorkspaceId(),
+            editing ? sourceWorkspaceId : personalWorkspaceId(),
             ...Array.from(linked || []),
         ].map(String).filter(Boolean)));
     }
@@ -4649,8 +4649,42 @@ export function mountHeyBeanWebApp(mount) {
             const workspaceId = String(workspace.id || '');
             const checked = selected.has(workspaceId);
             const locked = editing && workspaceId === String(sourceWorkspaceId || '');
-            return `<label class="hb-switch-row"><input type="checkbox" name="workspaceAssignmentIds" value="${escapeAttr(workspace.id)}" ${checked ? 'checked' : ''} ${locked ? 'disabled' : ''}> <span><strong>${escapeHtml(workspace.name || 'Workspace')}</strong></span></label>`;
+            const current = workspaceId === String(currentWorkspaceId() || '');
+            return `<label class="hb-switch-row"><input type="checkbox" name="workspaceAssignmentIds" value="${escapeAttr(workspace.id)}" ${checked ? 'checked' : ''} ${locked ? 'disabled' : ''}> <span><strong>${escapeHtml(workspaceDisplayName(workspace))}</strong>${current ? '<small class="hb-workspace-current-label">Current workspace</small>' : ''}</span></label>`;
         }).join('') || '<p class="hb-item-meta">No workspaces available.</p>';
+    }
+
+    function noteWorkspaceAssignmentRowsMarkup(allWorkspaces, selectedWorkspaceIds, sourceWorkspaceId) {
+        const selected = new Set(selectedWorkspaceIds.map(String));
+        return allWorkspaces.map((workspace) => {
+            const workspaceId = String(workspace.id || '');
+            const source = workspaceId === String(sourceWorkspaceId || '');
+            const current = workspaceId === String(currentWorkspaceId() || '');
+            return `<label><input type="checkbox" ${source ? '' : `data-note-sync-workspace="${escapeAttr(workspace.id)}"`} ${selected.has(workspaceId) ? 'checked' : ''} ${source ? 'disabled' : ''}> <span>${escapeHtml(workspaceDisplayName(workspace))}${current ? ' <small class="hb-workspace-current-label">Current workspace</small>' : ''}</span></label>`;
+        }).join('') || '<small>No workspaces available.</small>';
+    }
+
+    function noteCreateModalMarkup() {
+        const selectedWorkspaceIds = workspaceAssignmentIds('', new Set(), false);
+        return `
+            <div class="hb-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="note-create-title">
+                <form class="hb-card hb-modal hb-form" data-modal-form="note-create">
+                    ${sectionTitle(icons.notes, 'New note', '')}
+                    ${labelInput('Title', 'title', 'text', 'New Note', 'required')}
+                    <section class="hb-form-section hb-workspace-picker" data-workspace-picker>
+                        <div class="hb-form-section-head"><strong>Workspaces</strong></div>
+                        <div class="hb-form-section-body">
+                            <div class="hb-option-list hb-workspace-assignment-list" aria-label="Workspaces">
+                                ${workspaceAssignmentRowsMarkup(workspaces(), selectedWorkspaceIds)}
+                            </div>
+                        </div>
+                    </section>
+                    <div class="hb-modal-actions">
+                        <button class="hb-button-secondary" type="button" data-close-modal>Cancel</button>
+                        <button class="hb-button" type="submit">Create</button>
+                    </div>
+                </form>
+            </div>`;
     }
 
     function reminderRecipientOptionsMarkup(workspaceIds = [], item = null, selectedByWorkspace = null) {
@@ -5218,7 +5252,6 @@ export function mountHeyBeanWebApp(mount) {
             method: 'POST',
             body: {
                 session_id: state.bean.sessionId || null,
-                workspace_id: currentWorkspaceId(),
                 ...clientTimezonePayload(),
                 ...await clientLocationPrehydrationPayload(),
             },
@@ -5258,7 +5291,6 @@ export function mountHeyBeanWebApp(mount) {
             method: 'POST',
             body: {
                 session_id: state.bean.sessionId || null,
-                workspace_id: currentWorkspaceId(),
                 content,
                 source: 'elevenlabs_agent',
                 ...clientTimezonePayload(),
@@ -5649,7 +5681,7 @@ export function mountHeyBeanWebApp(mount) {
                 dynamicVariables: {
                     bean_session_id: Number(state.bean.sessionId || realtime.bean_session_id || 0),
                     bean_client_timezone: clientTimezonePayload().client_timezone || '',
-                    bean_workspace_id: Number(currentWorkspaceId() || 0),
+                    bean_workspace_id: Number(realtime.dashboard_context?.workspace_id || 0),
                     bean_dashboard_context: JSON.stringify(realtime.dashboard_context || {}),
                     bean_background_original_request: String(options?.backgroundOriginalRequest || ''),
                     bean_background_result: backgroundResultMessage,
@@ -5945,7 +5977,7 @@ export function mountHeyBeanWebApp(mount) {
 
     async function ensureBeanSession() {
         if (state.bean.sessionId) return state.bean.sessionId;
-        const session = await api('/bean/sessions', { method: 'POST', body: { workspace_id: currentWorkspaceId(), ...clientTimezonePayload() } });
+        const session = await api('/bean/sessions', { method: 'POST', body: clientTimezonePayload() });
         state.bean.sessionId = session.id;
         return state.bean.sessionId;
     }
@@ -6214,7 +6246,7 @@ export function mountHeyBeanWebApp(mount) {
         mount.querySelector('[data-toggle-archived-issues]')?.addEventListener('click', () => { state.adminArchivedIssuesOpen = !state.adminArchivedIssuesOpen; render(); });
         mount.querySelectorAll('[data-issue-status]').forEach((button) => button.addEventListener('click', () => updateIssueReportStatus(button.dataset.issueStatus, button.dataset.status)));
         mount.querySelectorAll('[data-open-create]').forEach((button) => button.addEventListener('click', () => openModal(button.dataset.openCreate)));
-        mount.querySelectorAll('[data-create-note]').forEach((button) => button.addEventListener('click', createNote));
+        mount.querySelectorAll('[data-create-note]').forEach((button) => button.addEventListener('click', () => openModal('note-create')));
         mount.querySelectorAll('[data-create-note-folder]').forEach((button) => button.addEventListener('click', createNoteFolder));
         mount.querySelector('[data-toggle-note-folder-edit]')?.addEventListener('click', () => {
             state.noteFoldersEditing = !state.noteFoldersEditing;
@@ -6336,19 +6368,28 @@ export function mountHeyBeanWebApp(mount) {
         render();
     }
 
-    async function createNote() {
+    async function createNote(form) {
         state.error = '';
         try {
+            const workspaceId = selectedPrimaryWorkspaceId(form);
+            const syncTo = selectedSyncWorkspaceIds(form, workspaceId);
+            const selectedFolderId = /^\d+$/.test(String(state.selectedNoteFolderId || ''))
+                && String(workspaceId || '') === String(currentWorkspaceId() || '')
+                ? Number(state.selectedNoteFolderId)
+                : null;
             const body = {
-                title: 'New Note',
+                title: String(form?.elements?.title?.value || 'New Note').trim() || 'New Note',
                 body_markdown: '',
-                note_folder_id: /^\d+$/.test(String(state.selectedNoteFolderId || '')) ? Number(state.selectedNoteFolderId) : null,
+                note_folder_id: selectedFolderId,
+                workspace_id: workspaceId ? Number(workspaceId) : null,
+                sync_to_workspace_ids: syncTo,
             };
-            const note = await api(workspaceScopedPath('/notes'), { method: 'POST', body });
+            const note = await api('/notes', { method: 'POST', body });
             state.notes = normalizeNotes(upsertById(state.notes, note));
             state.selectedNoteId = String(note.id);
             state.notesDetailOpen = true;
             state.selected = 'notes';
+            state.modal = null;
             saveDashboardCache();
             render();
         } catch (error) {
@@ -7603,6 +7644,9 @@ export function mountHeyBeanWebApp(mount) {
                 state.modal = { type: 'categories' };
                 render();
                 return;
+            } else if (kind === 'note-create') {
+                await createNote(form);
+                return;
             } else {
                 if (form.dataset.saving === 'true') return;
                 form.dataset.saving = 'true';
@@ -8307,9 +8351,9 @@ export function mountHeyBeanWebApp(mount) {
         const selected = selectedWorkspaceAssignmentIds(form).map(String);
         const savedWorkspaceId = String(item?.workspace_id || item?.workspaceId || '');
         if (savedWorkspaceId && selected.includes(savedWorkspaceId)) return savedWorkspaceId;
-        const defaultWorkspaceId = String(currentWorkspaceId() || '');
-        if (defaultWorkspaceId && selected.includes(defaultWorkspaceId)) return defaultWorkspaceId;
-        return selected[0] || defaultWorkspaceId || savedWorkspaceId || '';
+        const personalId = String(personalWorkspaceId() || '');
+        if (personalId && selected.includes(personalId)) return personalId;
+        return selected[0] || personalId || savedWorkspaceId || '';
     }
 
     function selectedSyncWorkspaceIds(form, primaryWorkspaceId = selectedPrimaryWorkspaceId(form, state.modal?.item)) {
@@ -9801,6 +9845,10 @@ export function mountHeyBeanWebApp(mount) {
 
     function currentWorkspaceId() {
         return state.user?.active_workspace?.id || state.user?.activeWorkspace?.id || state.summary?.workspace?.id || state.summary?.workspaceId || workspaces().find((workspace) => workspace.active || workspace.is_default || workspace.isDefault)?.id || workspaces()[0]?.id || '';
+    }
+
+    function personalWorkspaceId() {
+        return workspaces().find((workspace) => workspace.type === 'personal' || workspace.kind === 'personal' || workspace.is_personal || workspace.isPersonal)?.id || '';
     }
 
     function workspaceDisplayName(workspace = {}) {

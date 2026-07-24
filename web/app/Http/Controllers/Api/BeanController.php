@@ -44,7 +44,12 @@ class BeanController extends Controller
 
     public function sessions(Request $request): JsonResponse
     {
-        $sessions = BeanSession::query()->where('user_id', $request->user()->id)->latest('updated_at')->limit(20)->get();
+        $sessions = BeanSession::query()
+            ->where('user_id', $request->user()->id)
+            ->latest('updated_at')
+            ->limit(20)
+            ->get()
+            ->map(fn (BeanSession $session): BeanSession => $this->runtime->ensureBaseWorkspace($request->user(), $session));
 
         return response()->json(['data' => $sessions]);
     }
@@ -168,6 +173,7 @@ class BeanController extends Controller
                 ->where('user_id', $request->user()->id)
                 ->where('id', $data['session_id'])
                 ->firstOrFail();
+            $beanSession = $this->runtime->ensureBaseWorkspace($request->user(), $beanSession);
         } else {
             $beanSession = $this->runtime->createSession($request->user(), $data['workspace_id'] ?? null, $data['client_timezone'] ?? null, $data['client_location'] ?? null);
         }

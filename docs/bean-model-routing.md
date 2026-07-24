@@ -2,6 +2,8 @@
 
 Bean routes product chat through per-user Hermes agents. There is no Laravel local deterministic router or test-only local runtime.
 
+Bean sessions are always anchored to the user's personal workspace. The selected dashboard workspace does not select or create a different agent or conversation namespace. The dashboard tool can read every accessible workspace and can target a shared workspace explicitly for mutations.
+
 ## Runtime
 
 ```text
@@ -61,6 +63,8 @@ bean_dashboard(action, arguments)
 ```
 
 The plugin is a thin adapter. It sends the action and arguments to Laravel through the signed `bean:dashboard-tool` bridge. Laravel executes via `BeanActionExecutor` and records `bean_tool_calls`.
+
+`workspace.list` exposes the user's accessible workspace ids and names. Reads span those workspaces by default. Creates default to the personal workspace and accept `workspace_id` or exact `workspace_name` when the user explicitly targets a shared workspace.
 
 ## Confirmation path
 

@@ -27,11 +27,24 @@ Hermes calls one generic tool:
 }
 ```
 
+Creates default to the user's personal workspace. A shared workspace can be targeted explicitly:
+
+```json
+{
+  "action": "task.create",
+  "arguments": {
+    "workspace_name": "Family HQ",
+    "title": "Call the plumber"
+  }
+}
+```
+
 The generic wrapper keeps Hermes flexible while Laravel remains strict at execution time.
 
 ## Supported action families
 
 - `dashboard.summary`
+- `workspace.list`
 - `settings.show`, `settings.update`
 - `time.now`
 - `external.lookup`
@@ -42,6 +55,8 @@ The generic wrapper keeps Hermes flexible while Laravel remains strict at execut
 - `reminder.list`, `reminder.search`, `reminder.create`, `reminder.update`, `reminder.complete`, `reminder.delete`
 - `calendar_event.list`, `calendar_event.search`, `calendar_event.create`, `calendar_event.update`, `calendar_event.delete`
 - `note.list`, `note.search`, `note.create`, `note.update`, `note.delete`
+
+Read actions search all accessible workspaces by default and accept `workspace_id` or exact `workspace_name` to narrow the query. Update, complete, and delete actions can resolve items across all accessible workspaces. Create actions default to the personal workspace and accept the same workspace targeting arguments.
 
 ## Required executor behavior
 

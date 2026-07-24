@@ -316,10 +316,14 @@ class _TaskListCardState extends State<_TaskListCard> {
       onEventCategorySaved: widget.onEventCategorySaved,
       workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
-      showPrimaryWorkspaceSelector: task == null,
+      showPrimaryWorkspaceSelector: true,
+      lockPrimaryWorkspace: task != null,
       initialPrimaryWorkspaceId: task == null
-          ? _workspaceValueForId(widget.workspaces, widget.activeWorkspaceId)
-          : null,
+          ? _personalWorkspaceValue(widget.workspaces)
+          : _workspaceValueForId(
+              widget.workspaces,
+              task.workspaceId?.toString() ?? widget.activeWorkspaceId,
+            ),
       initialSyncWorkspaceIds: task == null
           ? const []
           : _initialSyncWorkspaceIds(
@@ -777,10 +781,14 @@ class _ReminderListCardState extends State<_ReminderListCard> {
                 : 'Mark complete'),
       workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
-      showPrimaryWorkspaceSelector: reminder == null,
+      showPrimaryWorkspaceSelector: true,
+      lockPrimaryWorkspace: reminder != null,
       initialPrimaryWorkspaceId: reminder == null
-          ? _workspaceValueForId(widget.workspaces, widget.activeWorkspaceId)
-          : null,
+          ? _personalWorkspaceValue(widget.workspaces)
+          : _workspaceValueForId(
+              widget.workspaces,
+              reminder.workspaceId?.toString() ?? widget.activeWorkspaceId,
+            ),
       initialSyncWorkspaceIds: reminder == null
           ? const []
           : _initialSyncWorkspaceIds(

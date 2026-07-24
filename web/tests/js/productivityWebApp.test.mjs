@@ -124,6 +124,18 @@ test('browser app retains direct productivity resources and command center', () 
     assert.match(source, /\/admin\/dashboard\/summary/);
 });
 
+test('assignable item forms use one Personal-first workspace selection contract', () => {
+    assert.match(source, /function personalWorkspaceId\(\)/);
+    assert.match(source, /editing \? sourceWorkspaceId : personalWorkspaceId\(\)/);
+    assert.match(source, /<strong>Workspaces<\/strong>/);
+    assert.match(source, /Current workspace/);
+    assert.match(source, /workspaceDisplayName\(workspace\)/);
+    assert.match(source, /modal\.type === 'note-create'/);
+    assert.match(source, /sync_to_workspace_ids: syncTo/);
+    assert.doesNotMatch(source, /const defaultWorkspaceId = String\(currentWorkspaceId\(\)/);
+    assert.doesNotMatch(source, /Saved in \$\{escapeHtml\(workspaceDisplayName/);
+});
+
 test('command center includes a date-scoped plain-text sticky note with autosave', () => {
     assert.match(source, /function dailyStickyNoteMarkup/);
     assert.match(source, /data-daily-sticky-note/);
@@ -293,7 +305,9 @@ test('Bean requests include the canonical user timezone for local-day task queri
     assert.match(source, /function isWeatherIntent/);
     assert.match(source, /navigator\.geolocation\.getCurrentPosition/);
     assert.match(source, /\.\.\.await clientLocationPayload\(content\)/);
-    assert.match(source, /\/bean\/sessions', \{ method: 'POST', body: \{ workspace_id: currentWorkspaceId\(\), \.\.\.clientTimezonePayload\(\) \}/);
+    assert.match(source, /\/bean\/sessions', \{ method: 'POST', body: clientTimezonePayload\(\) \}/);
+    assert.doesNotMatch(source, /\/bean\/sessions'[\s\S]{0,100}workspace_id: currentWorkspaceId\(\)/);
+    assert.match(source, /bean_workspace_id: Number\(realtime\.dashboard_context\?\.workspace_id \|\| 0\)/);
     assert.match(source, /\/bean\/messages', \{ method: 'POST', body: \{ session_id: sessionId, content, \.\.\.clientTimezonePayload\(\), \.\.\.await clientLocationPayload\(content\) \}/);
 });
 

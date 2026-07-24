@@ -38,18 +38,31 @@ storage/hermes/users/{user_id}/
 
 Deleting a Bean account removes that user's Hermes home after the database delete succeeds.
 
+## Workspace model
+
+Bean is user-level, not workspace-level:
+
+- every Bean chat session is anchored to the user's personal workspace, regardless of which dashboard workspace is currently selected;
+- all chats for that user share the same Hermes home and durable memory;
+- dashboard reads search every workspace the user can access unless a workspace is explicitly requested;
+- new resources default to the personal workspace;
+- when the user names a shared workspace, Hermes resolves it with `workspace.list` and passes `workspace_id` or the exact `workspace_name` to the mutation;
+- switching or creating a workspace never creates or selects a different Bean agent.
+
+Shared workspace data is shared; Hermes homes and durable memories remain private to each user.
+
 ## Runtime flow
 
 The existing `/api/bean/*` UI contract is preserved. Flutter and Laravel UI continue to send messages to `/api/bean/messages` and render Bean sessions/messages/runs/activity.
 
 There is no local deterministic Bean router. `BeanRuntimeService` always routes user messages to `HermesAgentRuntimeService` after handling direct pending-confirmation approvals.
 
-1. `BeanRuntimeService` resolves or creates the Bean session.
+1. `BeanRuntimeService` resolves or creates the Bean session and anchors it to the user's personal workspace.
 2. `HermesUserHomeService` ensures the user's isolated Hermes home, default Bean plugin, and `bean-dashboard` skill exist.
 3. `HermesAgentRuntimeService` mirrors the user message/run/activity for the UI.
 4. Laravel invokes `hermes chat` with that user's absolute `HERMES_HOME`. First turns start a fresh Hermes session; later turns use `--resume {hermes_session_id}` after Hermes returns the real session id.
 5. Hermes owns conversation history, memory, context compression, tool choice, and final response.
-6. When dashboard data is needed, Hermes calls the `bean_dashboard` plugin tool.
+6. When dashboard data is needed, Hermes calls the `bean_dashboard` plugin tool, which can operate across every workspace accessible to the user.
 7. The plugin calls Laravel's signed `bean:dashboard-tool` bridge with an absolute signed context path and CLI `php` binary.
 8. Laravel validates scope/schema/safety, executes the action, records tool calls, and returns structured results to Hermes.
 9. Hermes confirms the result or asks for the next clarification/confirmation.

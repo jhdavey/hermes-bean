@@ -662,13 +662,12 @@ List<Object> _initialSyncWorkspaceIds({
   required int? workspaceId,
   required String? activeWorkspaceId,
 }) {
-  final activeNumericId = activeWorkspaceId == null
-      ? null
-      : int.tryParse(activeWorkspaceId);
-  final currentWorkspaceId = activeNumericId ?? workspaceId;
+  final sourceWorkspaceId =
+      workspaceId ??
+      (activeWorkspaceId == null ? null : int.tryParse(activeWorkspaceId));
 
   return linkedWorkspaceIds
-      .where((id) => id != currentWorkspaceId)
+      .where((id) => id != sourceWorkspaceId)
       .map<Object>((id) => id)
       .toList();
 }
@@ -699,6 +698,13 @@ Object? _workspaceValueForId(
     }
   }
   return int.tryParse(workspaceId) ?? workspaceId;
+}
+
+Object? _personalWorkspaceValue(List<BeanWorkspace> workspaces) {
+  for (final workspace in workspaces) {
+    if (workspace.isPersonal) return _workspaceValue(workspace);
+  }
+  return null;
 }
 
 Future<List<Object>?> _confirmWorkspaceDeleteSelection(

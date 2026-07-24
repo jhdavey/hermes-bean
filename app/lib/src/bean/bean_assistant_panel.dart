@@ -16,7 +16,6 @@ class _BeanAssistantPanel extends StatefulWidget {
     required this.onVoiceDockChanged,
     this.voiceDockOnly = false,
     this.userId,
-    this.workspaceId,
     this.clientTimezone,
   });
 
@@ -39,7 +38,6 @@ class _BeanAssistantPanel extends StatefulWidget {
   final ValueChanged<_BeanDockStatusSnapshot> onVoiceDockChanged;
   final bool voiceDockOnly;
   final int? userId;
-  final int? workspaceId;
   final String? clientTimezone;
 
   @override
@@ -386,7 +384,8 @@ class _BeanAssistantPanelState extends State<_BeanAssistantPanel> {
         dynamicVariables: {
           'bean_session_id': realtime.beanSessionId ?? 0,
           'bean_client_timezone': widget.clientTimezone ?? '',
-          'bean_workspace_id': widget.workspaceId ?? 0,
+          'bean_workspace_id':
+              realtime.dashboardContext['workspace_id'] ?? 0,
           'bean_dashboard_context': jsonEncode(realtime.dashboardContext),
         },
       );

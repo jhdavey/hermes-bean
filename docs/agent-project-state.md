@@ -1,14 +1,14 @@
 # HeyBean Agent Project State
 
-Last updated: 2026-07-24T20:25:00Z
+Last updated: 2026-07-24T21:17:05Z
 
 Purpose: give future Hermes/agent sessions a compact, durable starting point for HeyBean work without relying on chat context. Read this file before coding when the task touches Bean, HeyBean, voice UX, runtime/tooling, deployment, or project direction.
 
 ## Current repository/deploy state
 
 - Local project path: `/Users/joshuadavey/development/projects/hermes-bean`
-- Main branch behavior at last update: Zero Chrome Bean onboarding revamp for web `/register` plus matching Flutter guided signup surface.
-- Local working tree at last update was clean after the Zero Chrome onboarding deploy.
+- Main branch behavior at last update: user-level Bean runtime continuity plus unified multi-workspace assignment controls for web and Flutter.
+- Local working tree at last update contains the pending Bean runtime/workspace-assignment release described below.
 - Production host/path: `forge@heybean.org:/home/forge/heybean.org/current`
 - Production onboarding behavior to verify/deploy: persistent landing-to-signup Bean continuation with quiet private fields and post-account Bean choices.
 - Production known server-only state: untracked `.env`, `storage`, `web/storage`; do not clean production storage/env casually.
@@ -26,6 +26,8 @@ Purpose: give future Hermes/agent sessions a compact, durable starting point for
 - Bean should preserve conversational context for app-data follow-ups; do not answer unrelated generic time/date facts when prior context implies a resource query.
 - Public landing Bean remains isolated from private dashboard/app tools. Public landing voice should use the fast ElevenLabs Landing Guide directly for bounded product/pricing questions; do not put Hermes on that voice hot path unless the scope becomes private/account-specific.
 - Authenticated Bean can use scoped dashboard/resource actions through the Laravel-owned tool bridge.
+- Authenticated Bean is user-level rather than workspace-level: every chat session is anchored to the user's personal workspace and all chats share the user's one Hermes home and durable memory. Reads span every accessible workspace by default; shared-workspace mutations explicitly target a workspace by id or exact name. Dashboard workspace switching never selects or creates a different Bean agent.
+- Assignable task, reminder, event, and note creation/editing surfaces use one simple workspace checkbox section in web and Flutter. Personal is preselected on creation without being labeled as a default. The active dashboard workspace is labeled `current` but is not auto-selected unless it is Personal. Editing preserves and locks the item's existing primary copy while allowing its other workspace copies to be added or removed.
 
 ## Voice UX direction
 

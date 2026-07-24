@@ -40,15 +40,27 @@ void main() {
     );
 
     expect(find.text('What is your first and last name?'), findsOneWidget);
-    expect(find.text('Tap Bean for voice · volume on · allow mic'), findsOneWidget);
+    expect(
+      find.text('Tap Bean for voice · volume on · allow mic'),
+      findsOneWidget,
+    );
     expect(find.text('Use plain signup form'), findsNothing);
     expect(find.byKey(const Key('guided-initial-bean-button')), findsOneWidget);
-    expect(find.byKey(const Key('guided-zero-chrome-mic-copy')), findsOneWidget);
+    expect(
+      find.byKey(const Key('guided-zero-chrome-mic-copy')),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('guided-zero-chrome-message')), findsOneWidget);
-    expect(find.byKey(const Key('guided-zero-chrome-input-line')), findsOneWidget);
+    expect(
+      find.byKey(const Key('guided-zero-chrome-input-line')),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('guided-onboarding-send')), findsOneWidget);
 
-    await tester.enterText(find.byKey(const Key('guided-onboarding-input')), 'Harley Davey');
+    await tester.enterText(
+      find.byKey(const Key('guided-onboarding-input')),
+      'Harley Davey',
+    );
     await tester.tap(find.byKey(const Key('guided-onboarding-send')));
     await tester.pump(const Duration(milliseconds: 320));
     expect(find.text('Choose Light, Dark, or Auto.'), findsOneWidget);
@@ -374,6 +386,41 @@ void main() {
     expect(sources, isNot(contains('notes-filter-unfiled')));
     expect(sources, isNot(contains("label: 'Unfiled'")));
   });
+
+  test(
+    'assignable item editors share the Personal-first workspace contract',
+    () {
+      final titleEditor = File(
+        'lib/src/calendar/title_time_editor.dart',
+      ).readAsStringSync();
+      final eventEditor = File(
+        'lib/src/calendar/event_detail.dart',
+      ).readAsStringSync();
+      final notesEditor = File(
+        'lib/src/notes/notes_view.dart',
+      ).readAsStringSync();
+      final shell = File(
+        'lib/src/shell/command_center_shell.dart',
+      ).readAsStringSync();
+
+      for (final source in [titleEditor, eventEditor, notesEditor]) {
+        expect(source, contains('Workspaces'));
+        expect(source, contains('(current)'));
+      }
+      expect(titleEditor, contains('CheckboxListTile'));
+      expect(titleEditor, contains('lockPrimaryWorkspace'));
+      expect(
+        eventEditor,
+        contains('_personalWorkspaceValue(widget.workspaces)'),
+      );
+      expect(eventEditor, contains('CheckboxListTile'));
+      expect(notesEditor, contains('_showNoteWorkspaceAssignmentSheet'));
+      expect(shell, contains('_personalWorkspaceValue'));
+      expect(titleEditor, isNot(contains('Also assign to')));
+      expect(eventEditor, isNot(contains('Local Workspace Sync')));
+      expect(notesEditor, isNot(contains('Also sync to')));
+    },
+  );
 }
 
 Future<void> _pumpUntilFound(
@@ -594,7 +641,6 @@ class _DashboardApiClient extends BeanApiClient {
   Future<BeanAssistantTurn> sendBeanMessage({
     required String content,
     int? sessionId,
-    int? workspaceId,
     String? clientTimezone,
     String? source,
   }) async {

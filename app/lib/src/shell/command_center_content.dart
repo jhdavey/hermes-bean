@@ -193,6 +193,7 @@ class _CommandCenterContent extends StatelessWidget {
     bool clearFolder,
     bool? isPinned,
     Map<String, Object?>? metadata,
+    int? workspaceId,
     List<Object>? syncToWorkspaceIds,
   })
   onNoteSaved;

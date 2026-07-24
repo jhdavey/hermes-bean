@@ -1464,7 +1464,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final turn = await widget.apiClient.sendBeanMessage(
         content: content.trim(),
         sessionId: _beanAssistantSessionId,
-        workspaceId: _activeWorkspaceId(),
         clientTimezone: _user?.timezone,
         source: source,
       );
@@ -1491,7 +1490,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
   Future<BeanRealtimeSession> _createElevenLabsBeanSession() =>
       widget.apiClient.createBeanRealtimeSession(
         sessionId: _beanAssistantSessionId,
-        workspaceId: _activeWorkspaceId(),
         clientTimezone: _user?.timezone,
       );
 
@@ -1550,7 +1548,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       final turn = await widget.apiClient.sendBeanMessage(
         content: content,
         sessionId: _beanAssistantSessionId,
-        workspaceId: _activeWorkspaceId(),
         clientTimezone: _user?.timezone,
         source: 'elevenlabs_agent',
       );
@@ -2357,9 +2354,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       workspaces: _user?.workspaces ?? const [],
       activeWorkspaceId: _user?.activeWorkspace?.id,
       showPrimaryWorkspaceSelector: true,
-      initialPrimaryWorkspaceId: _user?.activeWorkspace == null
-          ? null
-          : _workspaceValue(_user!.activeWorkspace!),
+      initialPrimaryWorkspaceId: _personalWorkspaceValue(
+        _user?.workspaces ?? const [],
+      ),
       googleCalendarStatus: _googleCalendarStatus,
       showRecurrence: true,
       recurrenceTitle: 'Task recurrence',
@@ -2405,9 +2402,9 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       workspaces: _user?.workspaces ?? const [],
       activeWorkspaceId: _user?.activeWorkspace?.id,
       showPrimaryWorkspaceSelector: true,
-      initialPrimaryWorkspaceId: _user?.activeWorkspace == null
-          ? null
-          : _workspaceValue(_user!.activeWorkspace!),
+      initialPrimaryWorkspaceId: _personalWorkspaceValue(
+        _user?.workspaces ?? const [],
+      ),
       googleCalendarStatus: _googleCalendarStatus,
       showRecurrence: true,
       recurrenceTitle: 'Reminder repeats',
@@ -2839,6 +2836,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     bool clearFolder = false,
     bool? isPinned,
     Map<String, Object?>? metadata,
+    int? workspaceId,
     List<Object>? syncToWorkspaceIds,
   }) async {
     if (!_notesEnabled) {
@@ -2856,6 +2854,7 @@ class _CommandCenterShellState extends State<CommandCenterShell>
         folderId: folderId,
         isPinned: isPinned ?? false,
         metadata: metadata,
+        workspaceId: workspaceId,
         syncToWorkspaceIds: syncToWorkspaceIds ?? const [],
       );
       if (mounted) {
@@ -3018,6 +3017,14 @@ class _CommandCenterShellState extends State<CommandCenterShell>
     if (mounted) {
       setState(() => _selectedDestination = _HomeDestination.notes);
     }
+    final user = _user;
+    if (user == null || !mounted) return;
+    final assignment = await _showNoteWorkspaceAssignmentSheet(
+      context,
+      workspaces: user.workspaces,
+      activeWorkspaceId: user.activeWorkspace?.id,
+    );
+    if (assignment == null) return;
     final saved = await _saveNote(
       null,
       title: 'New Note',
@@ -3025,6 +3032,8 @@ class _CommandCenterShellState extends State<CommandCenterShell>
       plainText: '',
       clearFolder: true,
       metadata: const {},
+      workspaceId: assignment.primaryWorkspaceId,
+      syncToWorkspaceIds: assignment.syncWorkspaceIds,
     );
     if (!mounted) return;
     setState(() {
@@ -4244,7 +4253,6 @@ class _CommandCenterShellState extends State<CommandCenterShell>
                 onVoiceEvent: _recordBeanVoiceEvent,
                 onVoiceDockChanged: _updateBeanVoiceDock,
                 userId: _user?.id,
-                workspaceId: _activeWorkspaceId(),
                 clientTimezone: _user?.timezone,
               ),
             if (_onboardingTourVisible)

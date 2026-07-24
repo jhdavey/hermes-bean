@@ -73,6 +73,7 @@ class BeanActionExecutor
 
             $result = match ($action) {
                 'dashboard.summary' => $this->dashboardSummary($run),
+                'workspace.list' => $this->workspaceList($run),
                 'settings.show' => $this->settingsShow($run),
                 'settings.update' => $this->settingsUpdate($run, $arguments),
                 'resource.query' => $this->genericResourceQuery($run, $arguments),
@@ -138,14 +139,49 @@ class BeanActionExecutor
         return User::findOrFail($run->user_id);
     }
 
-    private function workspaceId(BeanRun $run): ?int
+    private function workspaceId(BeanRun $run, array $arguments = []): int
     {
-        return $run->workspace_id ?: ($this->workspaceIds($run)[0] ?? null);
+        $workspaces = app(WorkspaceService::class)->accessibleWorkspaces($this->user($run));
+
+        if (($arguments['workspace_id'] ?? null) !== null) {
+            $workspaceId = (int) $arguments['workspace_id'];
+            if ($workspaces->contains(fn (Workspace $workspace): bool => (int) $workspace->id === $workspaceId)) {
+                return $workspaceId;
+            }
+
+            throw new \RuntimeException('I cannot access that workspace.');
+        }
+
+        $workspaceName = trim((string) ($arguments['workspace_name'] ?? ''));
+        if ($workspaceName !== '') {
+            $matches = $workspaces
+                ->filter(fn (Workspace $workspace): bool => mb_strtolower(trim((string) $workspace->name)) === mb_strtolower($workspaceName))
+                ->values();
+            if ($matches->count() === 1) {
+                return (int) $matches->first()->id;
+            }
+
+            throw new \RuntimeException($matches->isEmpty()
+                ? 'I could not find an accessible workspace with that name.'
+                : 'I found multiple accessible workspaces with that name. Please use a workspace id.');
+        }
+
+        return app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($this->user($run));
     }
 
     private function baseQuery(string $class, BeanRun $run): Builder
     {
         return $class::query()->whereIn('workspace_id', $this->workspaceIds($run));
+    }
+
+    private function applyWorkspaceConstraint(Builder $query, BeanRun $run, array $arguments): void
+    {
+        $workspaceName = trim((string) ($arguments['workspace_name'] ?? ''));
+        if (($arguments['workspace_id'] ?? null) === null && $workspaceName === '') {
+            return;
+        }
+
+        $query->where('workspace_id', $this->workspaceId($run, $arguments));
     }
 
     private function normalizeArguments(string $action, array $arguments, BeanSession $session): array
@@ -384,6 +420,7 @@ class BeanActionExecutor
     {
         $timeContext = $this->timeContext->forRun($run);
         $query = $this->baseQuery($class, $run);
+        $this->applyWorkspaceConstraint($query, $run, $arguments);
         $this->applyDefaultReadConstraints($query, $class, $arguments);
         if (($arguments['status'] ?? null) !== null) {
             $query->where('status', (string) $arguments['status']);
@@ -520,6 +557,7 @@ class BeanActionExecutor
         $timeContext = $this->timeContext->forRun($run);
         $queryText = trim((string) ($arguments['query'] ?? $arguments['title'] ?? ''));
         $query = $this->baseQuery($class, $run);
+        $this->applyWorkspaceConstraint($query, $run, $arguments);
         if ($queryText !== '') {
             $query->where(function (Builder $builder) use ($fields, $queryText): void {
                 foreach ($fields as $field) {
@@ -570,6 +608,7 @@ class BeanActionExecutor
         $label = $this->resourceCatalog->resourceForClass($class) ?? 'tasks';
 
         $query = $this->baseQuery($class, $run);
+        $this->applyWorkspaceConstraint($query, $run, $arguments);
         if (isset($arguments['id'])) {
             $query->whereKey((int) $arguments['id']);
         }
@@ -599,10 +638,6 @@ class BeanActionExecutor
             $query->where('status', (string) $arguments['status']);
         }
         $this->applyStructuredFilters($query, $class, $arguments['filters'] ?? [], $timeContext);
-        if (($arguments['workspace_id'] ?? null) !== null) {
-            $query->where('workspace_id', (int) $arguments['workspace_id']);
-        }
-
         $order = $this->primarySort($class, $arguments, $orderField);
         $items = $query->orderBy($order['field'], $order['direction'])->orderBy('id')->limit($this->limit($arguments))->get();
         $accessibleWorkspaceIds = $this->workspaceIds($run);
@@ -679,7 +714,7 @@ class BeanActionExecutor
     {
         $timeContext = $this->timeContext->forRun($run);
         $task = $this->domainResources->createTask($this->user($run), [
-            'workspace_id' => $this->workspaceId($run),
+            'workspace_id' => $this->workspaceId($run, $args),
             'title' => trim((string) ($args['title'] ?? 'New task')) ?: 'New task',
             'type' => $args['type'] ?? 'todo',
             'status' => $args['status'] ?? 'open',
@@ -700,7 +735,7 @@ class BeanActionExecutor
         $remindAt = $this->dateOrNull($args['remind_at'] ?? null, $timeContext)
             ?: $this->timeContext->localNow($timeContext)->addDay()->utc();
         $reminder = $this->domainResources->createReminder($this->user($run), [
-            'workspace_id' => $this->workspaceId($run),
+            'workspace_id' => $this->workspaceId($run, $args),
             'title' => trim((string) ($args['title'] ?? 'New reminder')) ?: 'New reminder',
             'notes' => $args['notes'] ?? null,
             'category' => $args['category'] ?? null,
@@ -720,7 +755,7 @@ class BeanActionExecutor
             ?: $this->timeContext->localNow($timeContext)->addDay()->setTime(9, 0)->utc();
         $endsAt = $this->calendarEventEndAt($args, $startsAt, $timeContext);
         $event = $this->domainResources->createCalendarEvent($this->user($run), [
-            'workspace_id' => $this->workspaceId($run),
+            'workspace_id' => $this->workspaceId($run, $args),
             'title' => trim((string) ($args['title'] ?? 'New event')) ?: 'New event',
             'description' => $args['description'] ?? null,
             'location' => $args['location'] ?? null,
@@ -757,7 +792,7 @@ class BeanActionExecutor
             ];
         }
         $noteAttributes = [
-            'workspace_id' => $this->workspaceId($run),
+            'workspace_id' => $this->workspaceId($run, $args),
             'body_markdown' => $markdown,
             'note_folder_id' => $args['note_folder_id'] ?? null,
             'is_pinned' => $args['is_pinned'] ?? null,
@@ -852,6 +887,7 @@ class BeanActionExecutor
     private function findContextModel(string $class, BeanRun $run, array $args): array
     {
         $query = $this->baseQuery($class, $run);
+        $this->applyWorkspaceConstraint($query, $run, $args);
         if (isset($args['id'])) {
             $model = $query->whereKey($args['id'])->first();
             return $model ? ['ok' => true, 'model' => $model] : ['ok' => false, 'error' => 'I could not find that item.'];
@@ -877,6 +913,7 @@ class BeanActionExecutor
     private function findOne(string $class, BeanRun $run, array $args): array
     {
         $query = $this->baseQuery($class, $run);
+        $this->applyWorkspaceConstraint($query, $run, $args);
         if (isset($args['id'])) {
             $model = $query->whereKey($args['id'])->first();
             return $model ? ['ok' => true, 'model' => $model] : ['ok' => false, 'error' => 'I could not find that item.'];
@@ -899,6 +936,28 @@ class BeanActionExecutor
             'calendar_events' => $this->baseQuery(CalendarEvent::class, $run)->where('status', $this->resourceCatalog->activeStatusForClass(CalendarEvent::class))->where('starts_at', '>=', Carbon::parse($todayStartUtc)->utc())->count(),
             'notes' => $this->baseQuery(Note::class, $run)->count(),
         ], 'time_context' => $timeContext];
+    }
+
+    private function workspaceList(BeanRun $run): array
+    {
+        $baseWorkspaceId = app(WorkspaceService::class)->ensurePersonalWorkspaceForUser($this->user($run));
+        $workspaces = app(WorkspaceService::class)->accessibleWorkspaces($this->user($run))
+            ->map(fn (Workspace $workspace): array => [
+                'id' => (int) $workspace->id,
+                'name' => (string) $workspace->name,
+                'type' => (string) $workspace->type,
+                'is_personal' => (int) $workspace->id === $baseWorkspaceId,
+                'is_default_dashboard_workspace' => (bool) $workspace->getAttribute('is_default'),
+                'role' => (string) $workspace->getAttribute('membership_role'),
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'ok' => true,
+            'base_workspace_id' => $baseWorkspaceId,
+            'workspaces' => $workspaces,
+        ];
     }
 
     private function settingsShow(BeanRun $run): array

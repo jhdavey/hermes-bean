@@ -573,6 +573,7 @@ class BeanApiClient {
     int? folderId,
     bool isPinned = false,
     Map<String, Object?>? metadata,
+    int? workspaceId,
     List<Object> syncToWorkspaceIds = const [],
   }) async {
     final data = await _sendJson(
@@ -587,6 +588,7 @@ class BeanApiClient {
         'note_folder_id': folderId,
         'is_pinned': isPinned,
         if (metadata != null) 'metadata': metadata,
+        if (workspaceId != null) 'workspace_id': workspaceId,
         if (syncToWorkspaceIds.isNotEmpty)
           'sync_to_workspace_ids': syncToWorkspaceIds,
       },
@@ -1116,7 +1118,6 @@ class BeanApiClient {
   Future<BeanAssistantTurn> sendBeanMessage({
     required String content,
     int? sessionId,
-    int? workspaceId,
     String? clientTimezone,
     String? source,
   }) async {
@@ -1126,7 +1127,6 @@ class BeanApiClient {
       body: {
         'content': content,
         if (sessionId != null) 'session_id': sessionId,
-        if (workspaceId != null) 'workspace_id': workspaceId,
         if (clientTimezone != null) 'client_timezone': clientTimezone,
       },
     );
@@ -1134,16 +1134,12 @@ class BeanApiClient {
   }
 
   Future<BeanAssistantSession> createBeanSession({
-    int? workspaceId,
     String? clientTimezone,
   }) async {
     final data = await _sendJson(
       'POST',
       '/bean/sessions',
-      body: {
-        if (workspaceId != null) 'workspace_id': workspaceId,
-        if (clientTimezone != null) 'client_timezone': clientTimezone,
-      },
+      body: {if (clientTimezone != null) 'client_timezone': clientTimezone},
     );
     return BeanAssistantSession.fromJson(_expectMap(data['data']));
   }
@@ -1187,7 +1183,6 @@ class BeanApiClient {
 
   Future<BeanRealtimeSession> createBeanRealtimeSession({
     int? sessionId,
-    int? workspaceId,
     String? clientTimezone,
   }) async {
     final data = await _sendJson(
@@ -1195,7 +1190,6 @@ class BeanApiClient {
       '/bean/elevenlabs/conversation-token',
       body: {
         if (sessionId != null) 'session_id': sessionId,
-        if (workspaceId != null) 'workspace_id': workspaceId,
         if (clientTimezone != null) 'client_timezone': clientTimezone,
       },
     );

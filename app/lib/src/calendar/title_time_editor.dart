@@ -575,6 +575,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
   List<BeanWorkspace> workspaces = const [],
   String? activeWorkspaceId,
   bool showPrimaryWorkspaceSelector = false,
+  bool lockPrimaryWorkspace = false,
   Object? initialPrimaryWorkspaceId,
   GoogleCalendarSyncStatus? googleCalendarStatus,
   List<Object> initialSyncWorkspaceIds = const [],
@@ -762,20 +763,7 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
     backgroundColor: Colors.transparent,
     builder: (context) => StatefulBuilder(
       builder: (context, setModalState) {
-        final syncPrimaryWorkspaceId = showPrimaryWorkspaceSelector
-            ? selectedPrimaryWorkspaceId
-            : _workspaceValueForId(workspaces, activeWorkspaceId);
-        final syncTargets = workspaces
-            .where(
-              (workspace) => !_workspaceValuesMatch(
-                _workspaceValue(workspace),
-                syncPrimaryWorkspaceId,
-              ),
-            )
-            .toList();
-        final workspaceChoices = showPrimaryWorkspaceSelector
-            ? workspaces
-            : syncTargets;
+        final workspaceChoices = workspaces;
         final categoryDropdownValues = <BeanEventCategory>[...modalCategories];
         if (selectedCategory.isNotEmpty &&
             !categoryDropdownValues.any(
@@ -1304,161 +1292,99 @@ Future<Map<String, Object?>?> _showTitleTimeEditor(
                                 'title-time-editor-primary-workspace',
                               ),
                               title: 'Workspaces',
-                              subtitle:
-                                  'Choose every workspace this item should be created in.',
                               icon: Icons.home_work_outlined,
                               children: [
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    for (final workspace in workspaceChoices)
-                                      Builder(
-                                        builder: (context) {
-                                          final value = _workspaceValue(
-                                            workspace,
-                                          );
-                                          final selected =
-                                              _workspaceValuesMatch(
-                                                value,
-                                                selectedPrimaryWorkspaceId,
-                                              ) ||
-                                              syncWorkspaceIds.any(
-                                                (workspaceId) =>
-                                                    _workspaceValuesMatch(
-                                                      workspaceId,
-                                                      value,
-                                                    ),
-                                              );
-                                          final isCurrent =
-                                              _workspaceValuesMatch(
-                                                value,
-                                                _workspaceValueForId(
-                                                  workspaces,
-                                                  activeWorkspaceId,
+                                for (final workspace in workspaceChoices)
+                                  Builder(
+                                    builder: (context) {
+                                      final value = _workspaceValue(workspace);
+                                      final isPrimary = _workspaceValuesMatch(
+                                        value,
+                                        selectedPrimaryWorkspaceId,
+                                      );
+                                      final selected =
+                                          isPrimary ||
+                                          syncWorkspaceIds.any(
+                                            (workspaceId) =>
+                                                _workspaceValuesMatch(
+                                                  workspaceId,
+                                                  value,
                                                 ),
-                                              );
-                                          final label = workspace.isPersonal
-                                              ? 'Personal'
-                                              : workspace.name;
-                                          return FilterChip(
-                                            key: Key(
-                                              'title-time-editor-primary-workspace-${workspace.id}',
-                                            ),
-                                            label: Text(
-                                              isCurrent
-                                                  ? '$label (current)'
-                                                  : label,
-                                            ),
-                                            selected: selected,
-                                            onSelected: saving
-                                                ? null
-                                                : (
-                                                    nextSelected,
-                                                  ) => setModalState(() {
-                                                    validationError = null;
-                                                    if (nextSelected) {
-                                                      if (selectedPrimaryWorkspaceId ==
-                                                          null) {
-                                                        selectedPrimaryWorkspaceId =
-                                                            value;
-                                                      } else {
-                                                        syncWorkspaceIds.add(
-                                                          value,
-                                                        );
-                                                      }
-                                                      return;
-                                                    }
-
-                                                    if (_workspaceValuesMatch(
-                                                      value,
-                                                      selectedPrimaryWorkspaceId,
-                                                    )) {
-                                                      selectedPrimaryWorkspaceId =
-                                                          null;
-                                                      if (syncWorkspaceIds
-                                                          .isNotEmpty) {
-                                                        final replacement =
-                                                            syncWorkspaceIds
-                                                                .first;
-                                                        selectedPrimaryWorkspaceId =
-                                                            replacement;
-                                                        syncWorkspaceIds
-                                                            .removeWhere(
-                                                              (workspaceId) =>
-                                                                  _workspaceValuesMatch(
-                                                                    workspaceId,
-                                                                    replacement,
-                                                                  ),
-                                                            );
-                                                      }
-                                                    } else {
-                                                      syncWorkspaceIds.removeWhere(
-                                                        (workspaceId) =>
-                                                            _workspaceValuesMatch(
-                                                              workspaceId,
-                                                              value,
-                                                            ),
-                                                      );
-                                                    }
-                                                  }),
                                           );
-                                        },
-                                      ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ],
-                          if (!showPrimaryWorkspaceSelector &&
-                              syncTargets.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            _MobileFormSection(
-                              key: const Key(
-                                'title-time-editor-workspace-sync',
-                              ),
-                              title: 'Also assign to',
-                              subtitle:
-                                  'Copy this item only to selected workspaces.',
-                              icon: Icons.account_tree_outlined,
-                              children: [
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    for (final workspace in syncTargets)
-                                      FilterChip(
+                                      final isCurrent = _workspaceValuesMatch(
+                                        value,
+                                        _workspaceValueForId(
+                                          workspaces,
+                                          activeWorkspaceId,
+                                        ),
+                                      );
+                                      final label = workspace.isPersonal
+                                          ? 'Personal'
+                                          : workspace.name;
+                                      return CheckboxListTile(
                                         key: Key(
-                                          'title-time-editor-sync-workspace-${workspace.id}',
+                                          'title-time-editor-primary-workspace-${workspace.id}',
                                         ),
-                                        label: Text(workspace.name),
-                                        selected: syncWorkspaceIds.any(
-                                          (workspaceId) =>
-                                              _workspaceValuesMatch(
-                                                workspaceId,
-                                                _workspaceValue(workspace),
-                                              ),
+                                        contentPadding: EdgeInsets.zero,
+                                        dense: true,
+                                        controlAffinity:
+                                            ListTileControlAffinity.leading,
+                                        title: Text(
+                                          isCurrent
+                                              ? '$label (current)'
+                                              : label,
                                         ),
-                                        onSelected: (selected) =>
-                                            setModalState(() {
-                                              final value = _workspaceValue(
-                                                workspace,
-                                              );
-                                              if (selected) {
-                                                syncWorkspaceIds.add(value);
-                                              } else {
-                                                syncWorkspaceIds.removeWhere(
-                                                  (workspaceId) =>
-                                                      _workspaceValuesMatch(
-                                                        workspaceId,
-                                                        value,
-                                                      ),
-                                                );
-                                              }
-                                            }),
-                                      ),
-                                  ],
-                                ),
+                                        value: selected,
+                                        onChanged:
+                                            saving ||
+                                                (lockPrimaryWorkspace &&
+                                                    isPrimary)
+                                            ? null
+                                            : (
+                                                nextSelected,
+                                              ) => setModalState(() {
+                                                validationError = null;
+                                                if (nextSelected == true) {
+                                                  if (selectedPrimaryWorkspaceId ==
+                                                      null) {
+                                                    selectedPrimaryWorkspaceId =
+                                                        value;
+                                                  } else {
+                                                    syncWorkspaceIds.add(value);
+                                                  }
+                                                  return;
+                                                }
+
+                                                if (isPrimary) {
+                                                  selectedPrimaryWorkspaceId =
+                                                      null;
+                                                  if (syncWorkspaceIds
+                                                      .isNotEmpty) {
+                                                    final replacement =
+                                                        syncWorkspaceIds.first;
+                                                    selectedPrimaryWorkspaceId =
+                                                        replacement;
+                                                    syncWorkspaceIds.removeWhere(
+                                                      (workspaceId) =>
+                                                          _workspaceValuesMatch(
+                                                            workspaceId,
+                                                            replacement,
+                                                          ),
+                                                    );
+                                                  }
+                                                } else {
+                                                  syncWorkspaceIds.removeWhere(
+                                                    (workspaceId) =>
+                                                        _workspaceValuesMatch(
+                                                          workspaceId,
+                                                          value,
+                                                        ),
+                                                  );
+                                                }
+                                              }),
+                                      );
+                                    },
+                                  ),
                               ],
                             ),
                           ],

@@ -276,6 +276,8 @@ void main() {
     final note = await client.createNote(
       title: 'Plan',
       bodyMarkdown: '# Plan\n- [ ] ship flutter',
+      workspaceId: 5,
+      syncToWorkspaceIds: const [7],
     );
 
     expect(requests.single.path, '/notes');
@@ -285,6 +287,8 @@ void main() {
     );
     expect(requests.single.body?.containsKey('body_html'), isFalse);
     expect(requests.single.body?.containsKey('plain_text'), isFalse);
+    expect(requests.single.body?['workspace_id'], 5);
+    expect(requests.single.body?['sync_to_workspace_ids'], [7]);
     expect(note.bodyMarkdown, '# Plan\n- [ ] ship flutter');
   });
 
@@ -363,7 +367,6 @@ void main() {
     );
 
     final session = await client.createBeanSession(
-      workspaceId: 9,
       clientTimezone: 'America/New_York',
     );
     final activity = await client.getBeanSessionActivity(session.id);
@@ -375,10 +378,7 @@ void main() {
     final approved = await client.approveBeanConfirmation(3);
 
     expect(requests[0].path, '/bean/sessions');
-    expect(requests[0].body, {
-      'workspace_id': 9,
-      'client_timezone': 'America/New_York',
-    });
+    expect(requests[0].body, {'client_timezone': 'America/New_York'});
     expect(requests[1].path, '/bean/sessions/44/activity');
     expect(activity.confirmations.single.action, 'task.delete');
     expect(requests[2].path, '/bean/voice-events');
@@ -414,14 +414,12 @@ void main() {
 
     final realtime = await client.createBeanRealtimeSession(
       sessionId: 44,
-      workspaceId: 9,
       clientTimezone: 'America/New_York',
     );
 
     expect(requests.single.path, '/bean/elevenlabs/conversation-token');
     expect(requests.single.body, {
       'session_id': 44,
-      'workspace_id': 9,
       'client_timezone': 'America/New_York',
     });
     expect(realtime.token, 'convai_test_token');

@@ -124,7 +124,7 @@ Do not make up private dashboard facts. Use the `bean_dashboard` tool whenever t
 
 ## Tool boundary
 
-Laravel is the authority for dashboard state. The `bean_dashboard` tool is scoped to the authenticated Bean user and current Bean session. It enforces ownership, workspace access, schemas, TimeContext, confirmations, and DB writes.
+Laravel is the authority for dashboard state. The `bean_dashboard` tool is scoped to the authenticated Bean user and current Bean session. Every Bean session is anchored to the user's personal workspace, while the tool can read and manipulate every workspace the user can access. It enforces ownership, workspace access, schemas, TimeContext, confirmations, and DB writes.
 
 Call `bean_dashboard` with:
 
@@ -140,6 +140,7 @@ The tool returns structured JSON. Read it before responding. Confirm only action
 ## Supported action families
 
 - `dashboard.summary`
+- `workspace.list`
 - `settings.show`, `settings.update` for persisted user settings: `theme_mode`, `theme`, `preferred_map_app`, `timezone`, `name`, `email`, and `notification_preferences`. Safe appearance/map/name changes can run directly. Sensitive settings such as email, timezone, and notification preferences return `requires_confirmation` unless already confirmed.
 - `time.now`
 - `external.lookup`
@@ -157,6 +158,8 @@ The tool returns structured JSON. Read it before responding. Confirm only action
 - If the tool returns `requires_confirmation: true`, ask the user to confirm the returned summary. Do not claim the action happened yet.
 - If the tool returns `ok: false`, explain the failure and ask for the smallest clarification needed.
 - For destructive actions, rely on the tool's confirmation result rather than bypassing it.
+- Reads search all accessible workspaces by default. Use `workspace_id` or `workspace_name` to narrow a read.
+- New tasks, reminders, events, and notes default to the personal workspace. When the user names a shared workspace, call `workspace.list` if needed and pass its `workspace_id` or exact `workspace_name` to the create action.
 - For dates like today/tomorrow/Tuesday, use natural language in arguments when useful; Laravel TimeContext normalizes the user's timezone.
 - For read/list actions on a specific date, prefer `time_label` with `today`, `tomorrow`, a weekday name, or `YYYY-MM-DD`, or pass `date: "YYYY-MM-DD"`; Laravel expands it to the user's local-day UTC range.
 - Tool results include UTC timestamps and `*_local` timestamp fields. Use `*_local` when wording times for the user.
@@ -202,7 +205,7 @@ _SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "description": "Bean dashboard action, for example settings.update, task.list, task.create, note.create, dashboard.summary, external.lookup, external.weather.",
+                "description": "Bean dashboard action, for example workspace.list, settings.update, task.list, task.create, note.create, dashboard.summary, external.lookup, external.weather.",
             },
             "arguments": {
                 "type": "object",

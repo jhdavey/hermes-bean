@@ -29,6 +29,7 @@ class _NotesView extends StatefulWidget {
     bool clearFolder,
     bool? isPinned,
     Map<String, Object?>? metadata,
+    int? workspaceId,
     List<Object>? syncToWorkspaceIds,
   })
   onNoteSaved;
@@ -175,14 +176,28 @@ class _NotesViewState extends State<_NotesView> {
 
   Future<void> _newNote() async {
     await _flushAutosave();
+    if (!mounted) return;
+    final assignment = await _showNoteWorkspaceAssignmentSheet(
+      context,
+      workspaces: widget.workspaces,
+      activeWorkspaceId: widget.activeWorkspaceId,
+    );
+    if (assignment == null) return;
+    final activeWorkspaceValue = _workspaceValueToInt(
+      _workspaceValueForId(widget.workspaces, widget.activeWorkspaceId),
+    );
+    final keepSelectedFolder =
+        assignment.primaryWorkspaceId == activeWorkspaceValue;
     final saved = await widget.onNoteSaved(
       null,
       title: 'New Note',
       bodyHtml: '',
       plainText: '',
-      folderId: int.tryParse(_folderFilter),
-      clearFolder: int.tryParse(_folderFilter) == null,
+      folderId: keepSelectedFolder ? int.tryParse(_folderFilter) : null,
+      clearFolder: !keepSelectedFolder || int.tryParse(_folderFilter) == null,
       metadata: const {},
+      workspaceId: assignment.primaryWorkspaceId,
+      syncToWorkspaceIds: assignment.syncWorkspaceIds,
     );
     if (!mounted) return;
     setState(() => _selectNote(saved));
@@ -192,6 +207,7 @@ class _NotesViewState extends State<_NotesView> {
   Future<void> _save({
     bool? isPinned,
     Map<String, Object?>? metadata,
+    int? workspaceId,
     List<Object>? syncToWorkspaceIds,
   }) async {
     final note = _selectedNote;
@@ -212,6 +228,7 @@ class _NotesViewState extends State<_NotesView> {
         metadata ?? note.metadata,
         _bodyController.formats,
       ),
+      workspaceId: workspaceId,
       syncToWorkspaceIds: syncToWorkspaceIds,
     );
     if (mounted && _selectedId == note.id) {
@@ -252,24 +269,17 @@ class _NotesViewState extends State<_NotesView> {
     if (note == null) return;
     await _flushAutosave();
     if (!mounted) return;
-    final selectedIds = _initialSyncWorkspaceIds(
-      linkedWorkspaceIds: note.linkedWorkspaceIds,
-      workspaceId: note.workspaceId,
+    final assignment = await _showNoteWorkspaceAssignmentSheet(
+      context,
+      note: note,
+      workspaces: widget.workspaces,
       activeWorkspaceId: widget.activeWorkspaceId,
-    ).toSet();
-    final selected = await showModalBottomSheet<List<Object>>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (context) => _NoteWorkspaceSyncSheet(
-        note: note,
-        workspaces: widget.workspaces,
-        activeWorkspaceId: widget.activeWorkspaceId,
-        initialSyncWorkspaceIds: selectedIds,
-      ),
     );
-    if (selected == null) return;
-    await _save(metadata: note.metadata, syncToWorkspaceIds: selected);
+    if (assignment == null) return;
+    await _save(
+      metadata: note.metadata,
+      syncToWorkspaceIds: assignment.syncWorkspaceIds,
+    );
   }
 
   Future<void> _deleteNote() async {
@@ -1617,7 +1627,7 @@ class _NotesOptionRow extends StatelessWidget {
   final String label;
   final int? count;
   final bool selected;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final Widget? trailing;
 
   @override
@@ -1685,53 +1695,86 @@ class _NotesOptionRow extends StatelessWidget {
   );
 }
 
-class _NoteWorkspaceSyncSheet extends StatefulWidget {
-  const _NoteWorkspaceSyncSheet({
-    required this.note,
-    required this.workspaces,
-    required this.activeWorkspaceId,
-    required this.initialSyncWorkspaceIds,
+class _NoteWorkspaceAssignment {
+  const _NoteWorkspaceAssignment({
+    required this.primaryWorkspaceId,
+    required this.syncWorkspaceIds,
   });
 
-  final BeanNote note;
-  final List<BeanWorkspace> workspaces;
-  final String? activeWorkspaceId;
-  final Set<Object> initialSyncWorkspaceIds;
-
-  @override
-  State<_NoteWorkspaceSyncSheet> createState() =>
-      _NoteWorkspaceSyncSheetState();
+  final int primaryWorkspaceId;
+  final List<Object> syncWorkspaceIds;
 }
 
-class _NoteWorkspaceSyncSheetState extends State<_NoteWorkspaceSyncSheet> {
+Future<_NoteWorkspaceAssignment?> _showNoteWorkspaceAssignmentSheet(
+  BuildContext context, {
+  BeanNote? note,
+  required List<BeanWorkspace> workspaces,
+  required String? activeWorkspaceId,
+}) {
+  return showModalBottomSheet<_NoteWorkspaceAssignment>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (context) => _NoteWorkspaceAssignmentSheet(
+      note: note,
+      workspaces: workspaces,
+      activeWorkspaceId: activeWorkspaceId,
+    ),
+  );
+}
+
+class _NoteWorkspaceAssignmentSheet extends StatefulWidget {
+  const _NoteWorkspaceAssignmentSheet({
+    this.note,
+    required this.workspaces,
+    required this.activeWorkspaceId,
+  });
+
+  final BeanNote? note;
+  final List<BeanWorkspace> workspaces;
+  final String? activeWorkspaceId;
+
+  @override
+  State<_NoteWorkspaceAssignmentSheet> createState() =>
+      _NoteWorkspaceAssignmentSheetState();
+}
+
+class _NoteWorkspaceAssignmentSheetState
+    extends State<_NoteWorkspaceAssignmentSheet> {
+  late int? _primaryWorkspaceId;
   late final Set<int> _selectedWorkspaceIds;
 
   @override
   void initState() {
     super.initState();
-    _selectedWorkspaceIds = widget.initialSyncWorkspaceIds
-        .map(_workspaceValueToInt)
-        .whereType<int>()
-        .toSet();
+    _primaryWorkspaceId = widget.note == null
+        ? _workspaceValueToInt(_personalWorkspaceValue(widget.workspaces))
+        : widget.note?.workspaceId ??
+              _workspaceValueToInt(
+                _workspaceValueForId(
+                  widget.workspaces,
+                  widget.activeWorkspaceId,
+                ),
+              );
+    _selectedWorkspaceIds = {
+      if (_primaryWorkspaceId != null) _primaryWorkspaceId!,
+      if (widget.note != null) ...widget.note!.linkedWorkspaceIds,
+    };
   }
 
   @override
   Widget build(BuildContext context) {
-    final primaryWorkspaceId =
-        widget.note.workspaceId ??
-        _workspaceValueToInt(widget.activeWorkspaceId);
-    final primaryWorkspace = widget.workspaces
-        .where((workspace) => workspace.numericId == primaryWorkspaceId)
-        .cast<BeanWorkspace?>()
-        .firstOrNull;
-    final syncTargets =
+    final workspaceChoices =
         widget.workspaces
             .where((workspace) => workspace.numericId != null)
-            .where((workspace) => workspace.numericId != primaryWorkspaceId)
             .toList()
-          ..sort(
-            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-          );
+          ..sort((a, b) {
+            if (a.isPersonal != b.isPersonal) return a.isPersonal ? -1 : 1;
+            return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+          });
+    final currentWorkspaceId = _workspaceValueToInt(
+      _workspaceValueForId(widget.workspaces, widget.activeWorkspaceId),
+    );
 
     return SafeArea(
       child: Padding(
@@ -1741,74 +1784,49 @@ class _NoteWorkspaceSyncSheetState extends State<_NoteWorkspaceSyncSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Note workspaces',
+              widget.note == null ? 'New note' : 'Note workspaces',
               style: TextStyle(
                 color: HeyBeanTheme.text,
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Choose which additional workspaces this note is synced to.',
-              style: TextStyle(
-                color: HeyBeanTheme.muted,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
             const SizedBox(height: 14),
             _NotesOptionsSection(
-              title: 'Current copy',
-              children: [
-                _NotesOptionRow(
-                  icon: Icons.home_work_outlined,
-                  label: primaryWorkspace == null
-                      ? 'Current workspace'
-                      : primaryWorkspace.isPersonal
-                      ? 'Personal'
-                      : primaryWorkspace.name,
-                  selected: true,
-                  onTap: () {},
-                  trailing: Padding(
-                    padding: EdgeInsets.only(left: 8, right: 8),
-                    child: Text(
-                      'Fixed',
-                      style: TextStyle(
-                        color: HeyBeanTheme.muted,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            _NotesOptionsSection(
-              title: 'Also sync to',
-              emptyText: syncTargets.isEmpty
-                  ? 'No other workspaces available'
+              title: 'Workspaces',
+              emptyText: workspaceChoices.isEmpty
+                  ? 'No workspaces available'
                   : null,
               children: [
-                for (final workspace in syncTargets)
+                for (final workspace in workspaceChoices)
                   _NotesOptionRow(
                     key: Key('note-sync-workspace-${workspace.id}'),
-                    icon: Icons.account_tree_outlined,
-                    label: workspace.isPersonal ? 'Personal' : workspace.name,
+                    icon: Icons.home_work_outlined,
+                    label:
+                        '${workspace.isPersonal ? 'Personal' : workspace.name}${workspace.numericId == currentWorkspaceId ? ' (current)' : ''}',
                     selected: _selectedWorkspaceIds.contains(
                       workspace.numericId,
                     ),
-                    onTap: () {
-                      final workspaceId = workspace.numericId;
-                      if (workspaceId == null) return;
-                      setState(() {
-                        if (_selectedWorkspaceIds.contains(workspaceId)) {
-                          _selectedWorkspaceIds.remove(workspaceId);
-                        } else {
-                          _selectedWorkspaceIds.add(workspaceId);
-                        }
-                      });
-                    },
+                    onTap:
+                        widget.note != null &&
+                            workspace.numericId == _primaryWorkspaceId
+                        ? null
+                        : () {
+                            final workspaceId = workspace.numericId;
+                            if (workspaceId == null) return;
+                            setState(() {
+                              if (_selectedWorkspaceIds.contains(workspaceId)) {
+                                _selectedWorkspaceIds.remove(workspaceId);
+                                if (workspaceId == _primaryWorkspaceId) {
+                                  _primaryWorkspaceId =
+                                      _selectedWorkspaceIds.firstOrNull;
+                                }
+                              } else {
+                                _selectedWorkspaceIds.add(workspaceId);
+                                _primaryWorkspaceId ??= workspaceId;
+                              }
+                            });
+                          },
                   ),
               ],
             ),
@@ -1825,11 +1843,33 @@ class _NoteWorkspaceSyncSheetState extends State<_NoteWorkspaceSyncSheet> {
                 Expanded(
                   child: FilledButton(
                     key: const Key('note-sync-workspaces-save'),
-                    onPressed: () => Navigator.pop(
-                      context,
-                      _selectedWorkspaceIds.toList()..sort(),
-                    ),
-                    child: Text('Save'),
+                    onPressed:
+                        _primaryWorkspaceId == null ||
+                            _selectedWorkspaceIds.isEmpty
+                        ? null
+                        : () {
+                            final syncWorkspaceIds =
+                                _selectedWorkspaceIds
+                                    .where(
+                                      (workspaceId) =>
+                                          workspaceId != _primaryWorkspaceId,
+                                    )
+                                    .map<Object>((workspaceId) => workspaceId)
+                                    .toList()
+                                  ..sort(
+                                    (a, b) => _workspaceValueToInt(
+                                      a,
+                                    )!.compareTo(_workspaceValueToInt(b)!),
+                                  );
+                            Navigator.pop(
+                              context,
+                              _NoteWorkspaceAssignment(
+                                primaryWorkspaceId: _primaryWorkspaceId!,
+                                syncWorkspaceIds: syncWorkspaceIds,
+                              ),
+                            );
+                          },
+                    child: Text(widget.note == null ? 'Create' : 'Save'),
                   ),
                 ),
               ],
