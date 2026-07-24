@@ -14,6 +14,8 @@ const appResponsiveStyles = await readFile(new URL('../../resources/css/heybean/
 const appView = await readFile(new URL('../../resources/views/app.blade.php', import.meta.url), 'utf8');
 const landing = await readFile(new URL('../../resources/views/welcome.blade.php', import.meta.url), 'utf8');
 const agentConfig = await readFile(new URL('../../scripts/elevenlabs-landing-agent-configure.mjs', import.meta.url), 'utf8');
+const pricingScriptPartial = await readFile(new URL('../../resources/views/partials/public-pricing-script.blade.php', import.meta.url), 'utf8');
+const publicPricingScript = await readFile(new URL('../../public/js/public-pricing.js', import.meta.url), 'utf8');
 
 test('public nav uses Bean brand left, centered nav links, and login on the right', () => {
     assert.match(navigation, /class="brand"/);
@@ -33,6 +35,15 @@ test('public nav uses Bean brand left, centered nav links, and login on the righ
     assert.match(publicPostbridgeStyles, /\.navlinks\{justify-self:center/);
     assert.match(publicPostbridgeStyles, /\.nav-login\{justify-self:end/);
     assert.doesNotMatch(publicPostbridgeStyles, /\.nav-cta|\.mobile-menu-cta/);
+});
+
+
+test('public pricing toggle script is external so production CSP does not block it', () => {
+    assert.match(pricingScriptPartial, /src="\{\{ asset\('js\/public-pricing\.js'\) \}\}"/);
+    assert.doesNotMatch(pricingScriptPartial, /document\.querySelectorAll|URLSearchParams|addEventListener/);
+    assert.match(publicPricingScript, /data-billing-option/);
+    assert.match(publicPricingScript, /data-billing-label/);
+    assert.match(publicPricingScript, /billing_interval/);
 });
 
 test('public Bean presence remains icon-only where it is mounted', () => {
