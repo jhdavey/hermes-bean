@@ -1,0 +1,506 @@
+/*
+ * Zero Chrome treatment for the default Laravel calendar.
+ *
+ * Keep this stylesheet scoped to the Today surface. The calendar structure,
+ * responsive behavior, theme tokens, and accent-color choices remain owned by
+ * their existing stylesheets.
+ */
+
+.heybean-app-body:has(.hb-main-today) {
+    background: var(--hb-bg0);
+}
+
+.heybean-app-body:has(.hb-main-today) .hb-app::before {
+    display: none;
+}
+
+.heybean-app-body:has(.hb-main-today) .hb-topbar {
+    --hb-topbar-date-font-size: 13px;
+    border-bottom-color: color-mix(in srgb, var(--hb-text) 11%, transparent);
+    background: var(--hb-surface);
+    box-shadow: none;
+    backdrop-filter: none;
+}
+
+.heybean-app-body:has(.hb-main-today) .hb-topbar-date-line {
+    gap: 8px;
+}
+
+.heybean-app-body:has(.hb-main-today) .hb-topbar-current-time {
+    color: var(--hb-muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    letter-spacing: .015em;
+}
+
+.heybean-app-body:has(.hb-main-today) .hb-topbar-date-line .hb-header-pill,
+.heybean-app-body:has(.hb-main-today) .hb-month-current {
+    color: var(--hb-text);
+    font-weight: 650;
+    text-decoration: none;
+}
+
+.heybean-app-body:has(.hb-main-today) .hb-header-pill:hover,
+.heybean-app-body:has(.hb-main-today) .hb-header-pill:focus-visible,
+.heybean-app-body:has(.hb-main-today) .hb-month-current:hover,
+.heybean-app-body:has(.hb-main-today) .hb-month-current:focus-visible {
+    color: var(--hb-accent-strong);
+}
+
+.heybean-app-body:has(.hb-main-today) .hb-top-nav .hb-nav-item {
+    color: var(--hb-muted);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.heybean-app-body:has(.hb-main-today) .hb-top-nav .hb-nav-item:hover,
+.heybean-app-body:has(.hb-main-today) .hb-top-nav .hb-nav-item-active {
+    background: transparent;
+    color: var(--hb-text);
+}
+
+.heybean-app-body:has(.hb-main-today) .hb-profile-trigger:hover,
+.heybean-app-body:has(.hb-main-today) .hb-profile-menu[open] .hb-profile-trigger {
+    box-shadow: none;
+}
+
+.hb-main-today {
+    --hb-calendar-line: color-mix(in srgb, var(--hb-text) 11%, transparent);
+    --hb-calendar-line-strong: color-mix(in srgb, var(--hb-text) 19%, transparent);
+    --hb-calendar-hover: color-mix(in srgb, var(--hb-text) 4%, transparent);
+    background: var(--hb-surface);
+    font-feature-settings: "tnum" 1;
+}
+
+.hb-main-today .hb-dashboard-grid,
+.hb-main-today .hb-primary-column,
+.hb-main-today .hb-side-column,
+.hb-main-today .hb-calendar-card,
+.hb-main-today .hb-command-center-card {
+    background: var(--hb-surface);
+}
+
+.hb-main-today .hb-calendar-card,
+.hb-main-today .hb-command-center-card {
+    border: 0;
+    box-shadow: none;
+}
+
+.hb-main-today .hb-month-grid {
+    background: var(--hb-calendar-line);
+}
+
+.hb-main-today .hb-month-weekday {
+    border-bottom: 1px solid var(--hb-calendar-line-strong);
+    background: var(--hb-surface);
+    color: color-mix(in srgb, var(--hb-muted) 82%, transparent);
+    padding: 5px 8px 6px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+}
+
+.hb-main-today .hb-month-cell {
+    gap: 5px;
+    border: 0;
+    background: var(--hb-surface);
+    padding: 9px 8px;
+}
+
+.hb-main-today .hb-month-cell-adjacent,
+.hb-main-today .hb-month-cell-empty {
+    background: color-mix(in srgb, var(--hb-surface) 96%, var(--hb-text));
+}
+
+.hb-main-today .hb-month-cell-active {
+    border: 0;
+    background: color-mix(in srgb, var(--hb-accent) 4%, var(--hb-surface));
+    box-shadow: inset 0 2px 0 var(--hb-accent);
+}
+
+.hb-main-today .hb-month-date strong {
+    min-width: 20px;
+    height: 20px;
+    border-radius: 0;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 650;
+}
+
+.hb-main-today .hb-month-cell-active .hb-month-date strong {
+    color: var(--hb-accent-strong);
+}
+
+.hb-main-today .hb-month-cell-adjacent .hb-month-date strong {
+    height: 20px;
+    border-radius: 0;
+    background: transparent;
+    color: color-mix(in srgb, var(--hb-muted) 72%, transparent);
+    padding: 0;
+    font-size: 9.5px;
+    font-weight: 550;
+}
+
+.hb-main-today .hb-month-event-list,
+.hb-main-today .hb-month-all-day-list {
+    gap: 2px;
+}
+
+.hb-main-today .hb-month-event,
+.hb-main-today .hb-month-all-day-event {
+    border-width: 0 0 0 2px;
+    border-radius: 0;
+    padding: 3px 5px;
+    box-shadow: none;
+}
+
+.hb-main-today .hb-month-event:hover,
+.hb-main-today .hb-month-all-day-event:hover {
+    border-radius: 0;
+    filter: saturate(1.08);
+}
+
+.hb-main-today .hb-month-event-title {
+    font-size: 9.5px;
+    font-weight: 550;
+    letter-spacing: -.005em;
+    line-height: 1.2;
+}
+
+.hb-main-today .hb-timeline {
+    border: 0;
+    background: var(--hb-surface);
+    box-shadow: none;
+}
+
+.hb-main-today .hb-timeline-head {
+    border-bottom-color: var(--hb-calendar-line-strong);
+    background: var(--hb-surface);
+}
+
+.hb-main-today .hb-timeline-day-head {
+    gap: 3px;
+    border-left-color: var(--hb-calendar-line);
+    padding: 11px 12px;
+}
+
+.hb-main-today .hb-timeline-day-head:hover {
+    background: var(--hb-calendar-hover);
+}
+
+.hb-main-today .hb-timeline-day-head-active {
+    background: transparent;
+    box-shadow: inset 0 -2px 0 var(--hb-accent);
+}
+
+.hb-main-today .hb-timeline-day-head strong {
+    color: var(--hb-text);
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: -.01em;
+}
+
+.hb-main-today .hb-timeline-day-head span {
+    color: var(--hb-muted);
+    font-size: 9.5px;
+    font-weight: 550;
+    letter-spacing: .04em;
+}
+
+.hb-main-today .hb-timeline-day-head-active strong,
+.hb-main-today .hb-timeline-day-head-active span {
+    color: var(--hb-accent-strong);
+}
+
+.hb-main-today .hb-multi-day-row,
+.hb-main-today .hb-all-day-row {
+    border-bottom-color: var(--hb-calendar-line);
+    background: var(--hb-surface);
+    box-shadow: none;
+    backdrop-filter: none;
+}
+
+.hb-main-today .hb-multi-day-cell,
+.hb-main-today .hb-all-day-cell {
+    border-left-color: var(--hb-calendar-line);
+    padding: 6px 7px;
+}
+
+.hb-main-today .hb-multi-day-event,
+.hb-main-today .hb-all-day-event {
+    border-width: 0 0 0 3px;
+    border-radius: 0;
+    padding-inline: 8px;
+    font-weight: 650;
+}
+
+.hb-main-today .hb-timeline-row {
+    border-bottom-color: var(--hb-calendar-line);
+}
+
+.hb-main-today .hb-timeline-hour,
+.hb-main-today .hb-timeline-head .hb-timeline-hour {
+    background: var(--hb-surface);
+}
+
+.hb-main-today .hb-timeline-hour {
+    color: color-mix(in srgb, var(--hb-muted) 78%, transparent);
+    font-size: 9.5px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    letter-spacing: .02em;
+    box-shadow: 1px 0 0 var(--hb-calendar-line);
+}
+
+.hb-main-today .hb-timeline-slot {
+    border-left-color: var(--hb-calendar-line);
+}
+
+.hb-main-today .hb-timed-event {
+    border-width: 0 0 0 3px;
+    border-radius: 0;
+    padding: 6px 8px;
+    box-shadow: none;
+}
+
+.heybean-app-body .hb-main-today .hb-timed-event,
+.heybean-app-body .hb-main-today .hb-timed-event-short,
+.heybean-app-body .hb-main-today .hb-multi-day-event,
+.heybean-app-body .hb-main-today .hb-all-day-event {
+    border-radius: 0;
+}
+
+.hb-main-today .hb-timed-event:hover {
+    filter: saturate(1.08);
+}
+
+.hb-main-today .hb-timed-event .hb-event-time {
+    color: var(--hb-muted);
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 550;
+    letter-spacing: .01em;
+}
+
+.hb-main-today .hb-timed-event .hb-event-title {
+    color: var(--hb-text);
+    font-size: 10.5px;
+    font-weight: 650;
+    letter-spacing: -.01em;
+}
+
+.hb-main-today .hb-timed-event-short {
+    padding-block: 2px;
+}
+
+.hb-main-today .hb-now-label {
+    margin-right: 7px;
+    border-radius: 0;
+    background: var(--hb-surface);
+    color: var(--hb-accent-strong);
+    padding: 2px 4px;
+    font-size: 8.5px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    box-shadow: none;
+}
+
+.hb-main-today .hb-now-line {
+    height: 1px;
+}
+
+.hb-main-today .hb-now-line::before {
+    left: -3px;
+    width: 7px;
+    height: 7px;
+    box-shadow: none;
+}
+
+.hb-main-today .hb-command-center-card {
+    border-left: 1px solid var(--hb-calendar-line);
+}
+
+.hb-main-today .hb-command-center-agenda-list {
+    padding: 0 14px;
+}
+
+.hb-main-today .hb-command-center-agenda-list > .hb-command-center-day-label {
+    padding: 16px 2px 10px;
+    border-bottom: 1px solid var(--hb-calendar-line-strong);
+    color: color-mix(in srgb, var(--hb-muted) 82%, transparent);
+    font-size: 9px;
+    font-weight: 750;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+}
+
+.hb-main-today .hb-command-center-row {
+    height: 46px;
+    grid-template-columns: 50px minmax(0, 1fr) auto;
+    gap: 9px;
+    border-bottom: 1px solid var(--hb-calendar-line);
+    padding: 0 3px;
+    box-shadow: none;
+}
+
+.hb-main-today .hb-command-center-row::before {
+    content: "";
+    width: 2px;
+    height: 24px;
+    position: absolute;
+    background: color-mix(in srgb, var(--hb-command-center-item-color, var(--hb-accent)) 78%, transparent);
+    transform: translateX(-3px);
+}
+
+.hb-main-today .hb-command-center-row {
+    position: relative;
+}
+
+.hb-main-today .hb-command-center-row:hover {
+    background: var(--hb-calendar-hover);
+}
+
+.hb-main-today .hb-command-center-time {
+    padding-left: 5px;
+    color: var(--hb-muted);
+    font-size: 9.5px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+}
+
+.hb-main-today .hb-command-center-copy {
+    gap: 2px;
+}
+
+.hb-main-today .hb-command-center-copy strong {
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: -.01em;
+}
+
+.hb-main-today .hb-command-center-copy small {
+    color: var(--hb-muted);
+    font-size: 9px;
+    font-weight: 500;
+}
+
+.hb-main-today .hb-command-center-notes {
+    width: 16px;
+    height: 16px;
+    color: color-mix(in srgb, var(--hb-muted) 78%, transparent);
+}
+
+.hb-main-today .hb-command-center-agenda-list .hb-glance-day {
+    gap: 4px;
+    padding: 14px 2px 4px;
+    border-top-color: var(--hb-calendar-line-strong);
+}
+
+.hb-main-today .hb-command-center-agenda-list .hb-glance-day-label {
+    color: color-mix(in srgb, var(--hb-muted) 82%, transparent);
+    font-size: 9px;
+    font-weight: 750;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+}
+
+.hb-main-today .hb-command-center-glance-list {
+    gap: 0;
+    padding-top: 12px;
+}
+
+.hb-main-today .hb-command-center-empty {
+    color: var(--hb-muted);
+    font-size: 10.5px;
+    font-weight: 500;
+}
+
+.hb-main-today .hb-daily-sticky-note {
+    border-top-color: var(--hb-calendar-line-strong);
+    background: var(--hb-surface);
+}
+
+.hb-main-today .hb-daily-sticky-note textarea {
+    padding: 15px 16px 28px;
+    font-size: 11px;
+    line-height: 1.55;
+}
+
+.hb-main-today .hb-daily-sticky-note textarea::placeholder {
+    color: color-mix(in srgb, var(--hb-muted) 78%, transparent);
+    font-size: 9px;
+    font-weight: 750;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+    opacity: 1;
+}
+
+.hb-main-today .hb-daily-sticky-note textarea:focus {
+    box-shadow: inset 0 0 0 1px var(--hb-calendar-line-strong);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"]:has(.hb-main-today),
+.heybean-app-body[data-hb-theme-resolved="dark"]:has(.hb-main-today) .hb-topbar,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-main-today,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-main-today .hb-dashboard-grid,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-main-today .hb-calendar-card,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-main-today .hb-command-center-card,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-main-today .hb-timeline,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-main-today .hb-month-cell {
+    background: var(--hb-surface);
+    box-shadow: none;
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-main-today .hb-month-cell-adjacent,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-main-today .hb-month-cell-empty {
+    background: color-mix(in srgb, var(--hb-surface) 94%, #000);
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-main-today .hb-month-cell-active {
+    background: color-mix(in srgb, var(--hb-accent) 5%, var(--hb-surface));
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-main-today .hb-timeline-head,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-main-today .hb-all-day-row,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-main-today .hb-multi-day-row,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-main-today .hb-timeline-hour {
+    background: var(--hb-surface);
+}
+
+@media (min-width: 900px) {
+    .hb-main-today .hb-command-center-card {
+        border-left-color: var(--hb-calendar-line);
+    }
+}
+
+@media (max-width: 899px) {
+    .hb-main-today .hb-command-center-card {
+        border-top: 1px solid var(--hb-calendar-line-strong);
+        border-left: 0;
+    }
+}
+
+@media (max-width: 700px) {
+    .heybean-app-body:has(.hb-main-today) .hb-topbar {
+        --hb-topbar-date-font-size: 11px;
+    }
+
+    .heybean-app-body:has(.hb-main-today) .hb-topbar-current-time {
+        font-size: 9px;
+    }
+
+    .heybean-app-body:has(.hb-main-today) .hb-header-pill,
+    .heybean-app-body:has(.hb-main-today) .hb-month-current {
+        text-decoration: none;
+    }
+
+    .hb-main-today .hb-timeline-day-head {
+        padding: 9px 8px;
+    }
+
+    .hb-main-today .hb-timed-event {
+        padding: 5px 7px;
+    }
+}
