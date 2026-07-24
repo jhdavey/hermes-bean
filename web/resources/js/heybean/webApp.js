@@ -1617,7 +1617,6 @@ export function mountHeyBeanWebApp(mount) {
             next_step: 'dashboardPreview',
             instruction: 'The account is ready. Briefly say you are opening the dashboard preview and will show the first few steps before the plan screen.',
         });
-        removePublicSignupBeanPresence({ delayMs: 3600 });
         state.signupPaywallDeferred = true;
         state.subscriptionCheckoutStatus = '';
         state.subscriptionSummary = null;
@@ -1637,6 +1636,7 @@ export function mountHeyBeanWebApp(mount) {
 
     function openDeferredSignupPaywall(message = 'Choose a plan to continue with HeyBean.') {
         if (!state.signupPaywallDeferred && !userNeedsSignupPaywall()) return false;
+        removePublicSignupBeanPresence();
         state.signupPaywallDeferred = false;
         state.onboardingTourActive = false;
         state.onboardingTourStep = 0;
@@ -1659,56 +1659,41 @@ export function mountHeyBeanWebApp(mount) {
     function guidedOnboardingMarkup() {
         const step = state.guidedSignupStep;
         return `
-            <div class="hb-app hb-guided-immersive-app">
-                <main class="hb-guided-onboarding-shell hb-guided-chat-shell hb-guided-immersive-shell">
-                    <div class="hb-guided-onboarding-topbar hb-guided-immersive-topbar" aria-label="Signup alternatives">
-                        <button class="hb-button-ghost" type="button" data-auth-mode="login">Log in</button>
-                        <span aria-hidden="true">·</span>
-                        <button class="hb-button-ghost" type="button" data-plain-signup>Use form instead</button>
-                    </div>
-                    <section class="hb-guided-onboarding-stage hb-guided-immersive-stage" aria-live="polite">
-                        <div class="hb-guided-onboarding-content hb-guided-chat-content" data-guided-content>
+            <div class="hb-app hb-guided-immersive-app hb-guided-zero-chrome-app">
+                <main class="hb-guided-onboarding-shell hb-guided-chat-shell hb-guided-immersive-shell hb-guided-zero-chrome-shell">
+                    <section class="hb-guided-onboarding-stage hb-guided-immersive-stage hb-guided-zero-chrome-stage" aria-live="polite">
+                        <div class="hb-guided-onboarding-content hb-guided-chat-content hb-guided-zero-chrome-content" data-guided-content>
                             ${guidedChatTranscriptMarkup()}
                             ${step === 'themeMode' ? guidedThemeModePanelMarkup() : ''}
                             ${guidedOnboardingStatusMarkup()}
+                            ${['name', 'themeMode', 'email', 'password'].includes(step) ? guidedOnboardingComposerMarkup(step) : ''}
                         </div>
                     </section>
-                    ${['name', 'themeMode', 'email', 'password'].includes(step) ? guidedOnboardingComposerMarkup(step) : ''}
                 </main>
             </div>`;
     }
 
     function guidedChatTranscriptMarkup() {
-        return `<section class="hb-guided-chat-log" aria-label="Bean signup conversation">
-            ${guidedChatMessages().map(guidedChatMessageMarkup).join('')}
-            ${state.busy ? '<div class="hb-guided-chat-bubble hb-guided-chat-bubble-bean"><strong>Bean</strong><span>Bean is thinking…</span></div>' : ''}
+        return `<section class="hb-guided-chat-log hb-guided-zero-chrome-message" aria-label="Bean signup message">
+            ${guidedChatMessageMarkup(['bean', state.busy ? 'Bean is thinking…' : guidedCurrentBeanMessage()])}
         </section>`;
     }
 
-    function guidedChatMessages() {
-        const messages = [
-            ['bean', `${fromLandingBean ? '' : 'Hi, I’m Bean. '}I’ll help get your HeyBean account set up. What is your first and last name?`],
-        ];
-        if (state.guidedSignupName) {
-            messages.push(['user', 'Name added']);
-            messages.push(['bean', 'Nice to meet you. Do you prefer Light, Dark, or Auto mode? You can change this later in Appearance settings.']);
+    function guidedCurrentBeanMessage() {
+        if (state.guidedSignupStep === 'themeMode') {
+            return 'Choose Light, Dark, or Auto.';
         }
-        if (state.guidedSignupStep !== 'name' && ['email', 'password', 'plan'].includes(state.guidedSignupStep)) {
+        if (state.guidedSignupStep === 'email') {
             const mode = themeModesByKey.get(state.guidedSignupThemeMode) || themeModesByKey.get('auto');
-            messages.push(['user', mode.label]);
-            messages.push(['bean', `${mode.label} it is. What email address would you like to use for your account?`]);
+            return `${mode.label} it is. What email should I use for your account?`;
         }
-        if (state.guidedSignupEmail) {
-            messages.push(['user', 'Email added']);
-            if (['password', 'plan'].includes(state.guidedSignupStep)) {
-                messages.push(['bean', 'Great. Now choose a password. Type it here and press Send — don’t say it out loud.']);
-            }
+        if (state.guidedSignupStep === 'password') {
+            return 'Choose a password. Type it — don’t say it.';
         }
         if (state.guidedSignupStep === 'plan') {
-            messages.push(['user', '************']);
-            messages.push(['bean', 'Your account is ready. Choose a plan and complete checkout to start your 7-day free trial. Then I’ll show you around your dashboard.']);
+            return 'I’ll show you around your dashboard now.';
         }
-        return messages;
+        return 'What is your first and last name?';
     }
 
     function guidedChatMessageMarkup([role, text]) {
@@ -1720,10 +1705,10 @@ export function mountHeyBeanWebApp(mount) {
         if (!['name', 'themeMode', 'email', 'password'].includes(step)) return '';
         const disabled = guidedSignupInputLocked();
         const field = {
-            name: { type: 'text', value: '', autocomplete: 'name', placeholder: 'Name', attrs: 'minlength="2" maxlength="255"' },
-            themeMode: { type: 'text', value: '', autocomplete: 'off', placeholder: 'Choose Light, Dark, or Auto...', attrs: '' },
-            email: { type: 'email', value: state.guidedSignupEmail, autocomplete: 'email', placeholder: 'Type your email address...', attrs: 'maxlength="254"' },
-            password: { type: 'password', value: '', autocomplete: 'new-password', placeholder: 'Type your password...', attrs: 'minlength="12"' },
+            name: { type: 'text', value: '', autocomplete: 'name', placeholder: 'Type your name…', attrs: 'minlength="2" maxlength="255"' },
+            themeMode: { type: 'text', value: '', autocomplete: 'off', placeholder: 'Light, Dark, or Auto…', attrs: '' },
+            email: { type: 'email', value: state.guidedSignupEmail, autocomplete: 'email', placeholder: 'Type your email…', attrs: 'maxlength="254"' },
+            password: { type: 'password', value: '', autocomplete: 'new-password', placeholder: 'Type your password…', attrs: 'minlength="12"' },
         }[step];
         return `
             <form class="hb-guided-chat-composer" data-action="guided-onboarding" data-guided-onboarding-step="${escapeAttr(step)}">
@@ -2053,6 +2038,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function beanPresenceMarkup() {
+        if (shouldUseConnectedSignupBeanPresence()) return '';
         const mode = state.bean.mode || 'privacy';
         const label = state.bean.statusText || (mode === 'privacy' ? 'Privacy mode' : 'Listening for “Hey Bean”');
         const pressed = mode !== 'privacy';
@@ -2073,6 +2059,10 @@ export function mountHeyBeanWebApp(mount) {
                 </div>
                 ${panelOpen ? beanPanelMarkup() : ''}
             </div>`;
+    }
+
+    function shouldUseConnectedSignupBeanPresence() {
+        return Boolean(state.signupPaywallDeferred || state.onboardingTourActive || state.modal?.type === 'post-tour-first-action');
     }
 
     function beanPanelMarkup() {

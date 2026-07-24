@@ -62,8 +62,7 @@ class _GuidedBeanOnboardingScreenState
   final List<_GuidedOnboardingMessage> _messages = [
     const _GuidedOnboardingMessage(
       bean: true,
-      text:
-          'Hi, I’m Bean. HeyBean is opening early access gradually, with 24 of the first 100 spots left. I’ll help reserve yours and set up your account. What is your first and last name?',
+      text: 'What is your first and last name?',
     ),
   ];
 
@@ -73,6 +72,7 @@ class _GuidedBeanOnboardingScreenState
   String _themeModeKey = 'auto';
   bool _busy = false;
   bool _beanThinking = false;
+  bool _voiceEnabled = false;
   String? _error;
   String _billingInterval = 'monthly';
 
@@ -166,10 +166,8 @@ class _GuidedBeanOnboardingScreenState
       return;
     }
     _name = name;
-    _addUser(name);
-    await _respondBean(
-      'Nice to meet you, $_name. Do you prefer Light, Dark, or Auto mode? You can change this later in Appearance settings.',
-    );
+    _addUser('Name added');
+    await _respondBean('Choose Light, Dark, or Auto.');
     setState(() => _step = _GuidedOnboardingStep.themeMode);
     _focusInput();
   }
@@ -192,7 +190,7 @@ class _GuidedBeanOnboardingScreenState
     widget.onPreviewThemeMode(mode.key);
     _addUser(mode.label);
     await _respondBean(
-      '${mode.label} it is. What email address would you like to use for your account?',
+      '${mode.label} it is. What email should I use for your account?',
     );
     setState(() => _step = _GuidedOnboardingStep.email);
     _focusInput();
@@ -202,11 +200,11 @@ class _GuidedBeanOnboardingScreenState
     final email = value.trim().toLowerCase();
     if (!_looksLikeEmailAddress(email)) {
       _setError(
-        'That email does not look valid. Please text the address you want to use.',
+        'That email does not look valid. Type the address you want to use.',
       );
       return;
     }
-    _addUser(email);
+    _addUser('Email added');
     setState(() => _busy = true);
     try {
       final availability = await widget.apiClient.checkEmailAvailability(
@@ -216,14 +214,14 @@ class _GuidedBeanOnboardingScreenState
       setState(() => _busy = false);
       if (!availability.available) {
         await _respondBean(
-          'That email is already connected to an account. Please send me a different one and I’ll check it.',
+          'That email is already connected to an account. Type a different one and I’ll check it.',
         );
         _focusInput();
         return;
       }
       _email = availability.email;
       await _respondBean(
-        'Great. Now choose a password. Please text it here and I’ll keep it hidden.',
+        'Choose a password. Type it — don’t say it.',
       );
       setState(() => _step = _GuidedOnboardingStep.password);
       _focusInput();
@@ -231,7 +229,7 @@ class _GuidedBeanOnboardingScreenState
       if (!mounted) return;
       setState(() => _busy = false);
       await _respondBean(
-        'I could not check that email right now. Please try the email again in a moment.',
+        'I could not check that email right now. Try again in a moment.',
       );
       _focusInput();
     }
@@ -261,7 +259,7 @@ class _GuidedBeanOnboardingScreenState
         return;
       }
       await _respondBean(
-        'Your account is ready. Choose a plan and complete checkout to start your 7-day free trial. Then I’ll show you around your dashboard.',
+        'I’ll show you around your dashboard now.',
       );
       setState(() => _step = _GuidedOnboardingStep.plan);
     } catch (error) {
@@ -304,98 +302,273 @@ class _GuidedBeanOnboardingScreenState
   );
 
   String get _inputHint => switch (_step) {
-    _GuidedOnboardingStep.name => 'Name',
-    _GuidedOnboardingStep.themeMode => 'Choose Light, Dark, or Auto...',
-    _GuidedOnboardingStep.email => 'Text your email address...',
-    _GuidedOnboardingStep.password => 'Text your password...',
+    _GuidedOnboardingStep.name => 'Type your name…',
+    _GuidedOnboardingStep.themeMode => 'Light, Dark, or Auto…',
+    _GuidedOnboardingStep.email => 'Type your email…',
+    _GuidedOnboardingStep.password => 'Type your password…',
     _GuidedOnboardingStep.plan => 'Select a plan above...',
     _GuidedOnboardingStep.waitlist => 'We’ll email you when access opens.',
   };
 
+  String get _currentBeanMessage {
+    if (_beanThinking || _busy) return 'Bean is thinking…';
+    for (final message in _messages.reversed) {
+      if (message.bean) return message.text;
+    }
+    return 'What is your first and last name?';
+  }
+
+  String get _voiceStatus => _voiceEnabled
+      ? (_beanThinking || _busy ? 'Speaking' : 'Listening')
+      : 'Tap Bean for voice · volume on · allow mic';
+
+  void _toggleVoiceChrome() => setState(() => _voiceEnabled = !_voiceEnabled);
+
   @override
-  Widget build(BuildContext context) => SafeArea(
-    child: Stack(
-      children: [
-        Positioned.fill(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
-                child: Row(
-                  children: [
-                    TextButton.icon(
-                      onPressed: _busy ? null : widget.onBackToLogin,
-                      icon: const Icon(Icons.arrow_back_rounded),
-                      label: const Text('Login'),
-                    ),
-                    const Spacer(),
-                    TextButton(
-                      key: const Key('guided-plain-signup-action'),
-                      onPressed: _busy ? null : widget.onSkipToPlainSignup,
-                      child: const Text('Use plain signup form'),
-                    ),
-                  ],
+  Widget build(BuildContext context) {
+    final showRelevantControls = _step == _GuidedOnboardingStep.themeMode ||
+        _step == _GuidedOnboardingStep.plan ||
+        _step == _GuidedOnboardingStep.waitlist ||
+        _error != null;
+    final isCompactHeight = MediaQuery.of(context).size.height < 720;
+    return SafeArea(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: HeyBeanTheme.isDark
+              ? const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xFF050706), Color(0xFF090C0A)],
+                )
+              : const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xFFFFFFFF), Color(0xFFFCFDFB)],
                 ),
-              ),
-              Expanded(
-                child: ListView(
-                  controller: _scrollController,
-                  padding: EdgeInsets.fromLTRB(
-                    20,
-                    18,
-                    20,
-                    _showComposer ? 182 : 38,
-                  ),
-                  children: [
-                    for (final message in _messages)
-                      _GuidedOnboardingBubble(message: message),
-                    if (_beanThinking) const _GuidedThinkingBubble(),
-                    if (_step == _GuidedOnboardingStep.themeMode)
-                      _GuidedInlinePanel(
-                        child: _GuidedThemeModePicker(
-                          selected: _themeModeKey,
-                          enabled: !_inputLocked,
-                          onSelected: (key) => unawaited(_selectThemeMode(key)),
-                        ),
-                      ),
-                    if (_step == _GuidedOnboardingStep.plan)
-                      _GuidedPlanPicker(
-                        billingInterval: _billingInterval,
-                        busyPlan: widget.busyPlan,
-                        error: widget.checkoutError,
-                        onBillingChanged: (value) => setState(
-                          () => _billingInterval = _normalizedBillingInterval(
-                            value,
-                          ),
-                        ),
-                        onSelect: (plan) =>
-                            widget.onSelectPlan(plan, _billingInterval),
-                        onContactEnterprise: widget.onContactEnterprise,
-                      ),
-                    if (_error != null) _GuidedError(message: _error!),
-                  ],
-                ),
-              ),
-            ],
-          ),
         ),
-        if (_showComposer)
-          Positioned(
-            left: 20,
-            right: 20,
-            bottom: 18,
-            child: _GuidedFloatingInputPill(
-              controller: _input,
-              focusNode: _inputFocus,
-              hint: _inputHint,
-              enabled: !_inputLocked,
-              obscureText: _step == _GuidedOnboardingStep.password,
-              onSubmit: () => unawaited(_submitDraft()),
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(
+              30,
+              isCompactHeight ? 40 : 54,
+              30,
+              40,
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 390),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _ZeroChromeBeanButton(
+                    voiceEnabled: _voiceEnabled,
+                    active: _voiceEnabled && (_beanThinking || _busy),
+                    onTap: _toggleVoiceChrome,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _voiceStatus,
+                    key: const Key('guided-zero-chrome-mic-copy'),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: HeyBeanTheme.isDark
+                          ? Colors.white.withValues(alpha: .44)
+                          : const Color(0xFF111311).withValues(alpha: .34),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      height: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _currentBeanMessage,
+                    key: const Key('guided-zero-chrome-message'),
+                    textAlign: TextAlign.center,
+                    textScaler: MediaQuery.textScalerOf(context).clamp(
+                      minScaleFactor: 1,
+                      maxScaleFactor: 1.15,
+                    ),
+                    style: TextStyle(
+                      color: HeyBeanTheme.isDark
+                          ? const Color(0xFFF8FBF8)
+                          : const Color(0xFF111311),
+                      fontSize: 21,
+                      height: 1.23,
+                      letterSpacing: -.42,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (showRelevantControls) ...[
+                    const SizedBox(height: 14),
+                    _zeroChromeRelevantControls(),
+                  ],
+                  if (_showComposer) ...[
+                    const SizedBox(height: 16),
+                    _GuidedFloatingInputPill(
+                      controller: _input,
+                      focusNode: _inputFocus,
+                      hint: _inputHint,
+                      enabled: !_inputLocked,
+                      obscureText: _step == _GuidedOnboardingStep.password,
+                      onSubmit: () => unawaited(_submitDraft()),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
-      ],
-    ),
-  );
+        ),
+      ),
+    );
+  }
+
+  Widget _zeroChromeRelevantControls() {
+    if (_step == _GuidedOnboardingStep.themeMode) {
+      return _GuidedThemeModePicker(
+        selected: _themeModeKey,
+        enabled: !_inputLocked,
+        onSelected: (key) => unawaited(_selectThemeMode(key)),
+      );
+    }
+    if (_step == _GuidedOnboardingStep.plan) {
+      return _GuidedPlanPicker(
+        billingInterval: _billingInterval,
+        busyPlan: widget.busyPlan,
+        error: widget.checkoutError,
+        onBillingChanged: (value) => setState(
+          () => _billingInterval = _normalizedBillingInterval(value),
+        ),
+        onSelect: (plan) => widget.onSelectPlan(plan, _billingInterval),
+        onContactEnterprise: widget.onContactEnterprise,
+      );
+    }
+    if (_error != null) return _GuidedError(message: _error!);
+    if (_step == _GuidedOnboardingStep.waitlist) {
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 340),
+        child: Text(
+          'Unfortunately, we’re currently at capacity. I’ll add you to the waitlist and let you know when we can continue onboarding.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: HeyBeanTheme.muted,
+            fontSize: 13,
+            height: 1.4,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+}
+
+class _ZeroChromeBeanButton extends StatefulWidget {
+  const _ZeroChromeBeanButton({
+    required this.voiceEnabled,
+    required this.active,
+    required this.onTap,
+  });
+
+  final bool voiceEnabled;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  State<_ZeroChromeBeanButton> createState() => _ZeroChromeBeanButtonState();
+}
+
+class _ZeroChromeBeanButtonState extends State<_ZeroChromeBeanButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 5),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shadowAlpha = widget.voiceEnabled
+        ? (widget.active ? .24 : .16)
+        : .10;
+    return Semantics(
+      button: true,
+      label: 'Talk with Bean',
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedBuilder(
+          animation: _controller,
+          builder: (context, child) {
+            final float = math.sin(_controller.value * math.pi) * -7;
+            return Transform.translate(
+              offset: Offset(0, float),
+              child: SizedBox(
+                width: 92,
+                height: 82,
+                child: Stack(
+                  alignment: Alignment.center,
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned(
+                      bottom: 2,
+                      child: Container(
+                        width: 54,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          color: (HeyBeanTheme.isDark
+                                  ? Colors.black
+                                  : const Color(0xFF111311))
+                              .withValues(alpha: HeyBeanTheme.isDark ? .30 : .075),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    ),
+                    if (widget.voiceEnabled)
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: HeyBeanTheme.accent.withValues(
+                                  alpha: shadowAlpha,
+                                ),
+                                blurRadius: widget.active ? 18 : 12,
+                                spreadRadius: 0,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    Image.asset(
+                      HeyBeanTheme.isDark
+                          ? 'assets/images/bean/bean-logo-white-overlay.png'
+                          : 'assets/images/bean/bean-logo.png',
+                      key: const Key('guided-initial-bean-button'),
+                      width: 62,
+                      height: 62,
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.high,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
 }
 
 class _PlainSignupScreen extends StatefulWidget {
@@ -656,88 +829,6 @@ class _EarlyAccessWaitlistScreen extends StatelessWidget {
   );
 }
 
-class _GuidedOnboardingBubble extends StatelessWidget {
-  const _GuidedOnboardingBubble({required this.message});
-
-  final _GuidedOnboardingMessage message;
-
-  @override
-  Widget build(BuildContext context) {
-    final align = message.bean ? Alignment.centerLeft : Alignment.centerRight;
-    final bg = message.bean
-        ? HeyBeanTheme.surface2
-        : HeyBeanTheme.accent.withValues(
-            alpha: HeyBeanTheme.isDark ? .22 : .14,
-          );
-    final border = message.bean
-        ? HeyBeanTheme.border
-        : HeyBeanTheme.accent.withValues(alpha: .32);
-    return Align(
-      alignment: align,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 340),
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              message.bean ? 'Bean' : 'You',
-              style: TextStyle(
-                color: message.bean
-                    ? HeyBeanTheme.accentStrong
-                    : HeyBeanTheme.accent,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              message.masked ? '************' : message.text,
-              style: TextStyle(
-                color: HeyBeanTheme.text,
-                fontSize: 16,
-                height: 1.35,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _GuidedThinkingBubble extends StatelessWidget {
-  const _GuidedThinkingBubble();
-
-  @override
-  Widget build(BuildContext context) => Align(
-    alignment: Alignment.centerLeft,
-    child: Container(
-      key: const Key('guided-bean-thinking'),
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-      decoration: BoxDecoration(
-        color: HeyBeanTheme.surface2,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: HeyBeanTheme.border),
-      ),
-      child: Text(
-        'Bean is thinking…',
-        style: TextStyle(
-          color: HeyBeanTheme.muted,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    ),
-  );
-}
-
 class _GuidedError extends StatelessWidget {
   const _GuidedError({required this.message});
 
@@ -783,76 +874,82 @@ class _GuidedFloatingInputPill extends StatelessWidget {
   final VoidCallback onSubmit;
 
   @override
-  Widget build(BuildContext context) => Material(
-    elevation: 10,
-    color: Colors.transparent,
-    borderRadius: BorderRadius.circular(24),
-    child: Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-      decoration: BoxDecoration(
-        color: HeyBeanTheme.surface,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: HeyBeanTheme.accent.withValues(alpha: .26)),
-      ),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: Image.asset(
-              HeyBeanTheme.isDark
-                  ? 'assets/images/bean/bean-logo-white-overlay.png'
-                  : 'assets/images/bean/bean-logo.png',
-              key: const Key('guided-initial-bean-button'),
-              width: 42,
-              height: 42,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: TextField(
-              key: const Key('guided-onboarding-input'),
-              controller: controller,
-              focusNode: focusNode,
-              enabled: enabled,
-              obscureText: obscureText,
-              textInputAction: TextInputAction.send,
-              onSubmitted: (_) => onSubmit(),
-              decoration: InputDecoration(
-                hintText: hint,
-                border: InputBorder.none,
-                isDense: true,
-              ),
-            ),
-          ),
-          IconButton.filled(
-            key: const Key('guided-onboarding-send'),
-            onPressed: enabled ? onSubmit : null,
-            icon: const Icon(Icons.arrow_upward_rounded),
-            tooltip: 'Send to Bean',
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-class _GuidedInlinePanel extends StatelessWidget {
-  const _GuidedInlinePanel({required this.child});
-
-  final Widget child;
-
-  @override
   Widget build(BuildContext context) => Container(
-    margin: const EdgeInsets.only(bottom: 12),
-    padding: const EdgeInsets.all(14),
+    key: const Key('guided-zero-chrome-input-line'),
+    padding: const EdgeInsets.only(bottom: 8),
     decoration: BoxDecoration(
-      color: HeyBeanTheme.surface,
-      borderRadius: BorderRadius.circular(22),
-      border: Border.all(color: HeyBeanTheme.border),
+      border: Border(
+        bottom: BorderSide(
+          color: HeyBeanTheme.isDark
+              ? Colors.white.withValues(alpha: .16)
+              : const Color(0xFF111311).withValues(alpha: .16),
+        ),
+      ),
     ),
-    child: child,
+    child: Row(
+      children: [
+        Expanded(
+          child: TextField(
+            key: const Key('guided-onboarding-input'),
+            controller: controller,
+            focusNode: focusNode,
+            enabled: enabled,
+            obscureText: obscureText,
+            textInputAction: TextInputAction.send,
+            onSubmitted: (_) => onSubmit(),
+            style: TextStyle(
+              color: HeyBeanTheme.isDark
+                  ? const Color(0xFFF8FBF8)
+                  : const Color(0xFF111311),
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+            ),
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: TextStyle(
+                color: HeyBeanTheme.isDark
+                    ? Colors.white.withValues(alpha: .44)
+                    : const Color(0xFF6B7280).withValues(alpha: .72),
+                fontWeight: FontWeight.w500,
+              ),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              disabledBorder: InputBorder.none,
+              errorBorder: InputBorder.none,
+              focusedErrorBorder: InputBorder.none,
+              filled: false,
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        ),
+        TextButton(
+          key: const Key('guided-onboarding-send'),
+          onPressed: enabled ? onSubmit : null,
+          style: TextButton.styleFrom(
+            minimumSize: const Size(44, 34),
+            padding: EdgeInsets.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            foregroundColor: HeyBeanTheme.accentStrong,
+            backgroundColor: Colors.transparent,
+            disabledBackgroundColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+            textStyle: const TextStyle(fontWeight: FontWeight.w800),
+          ).copyWith(
+            overlayColor: WidgetStateProperty.all(Colors.transparent),
+            shape: WidgetStateProperty.all(
+              const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            ),
+          ),
+          child: const Text('Send'),
+        ),
+      ],
+    ),
   );
 }
+
 
 class _GuidedThemeModePicker extends StatelessWidget {
   const _GuidedThemeModePicker({
@@ -880,7 +977,6 @@ class _GuidedThemeModePicker extends StatelessWidget {
               key: Key('guided-theme-mode-${mode.key}'),
               selected: selected == mode.key,
               label: Text(mode.label),
-              avatar: Icon(_themeModeIcon(mode.key), size: 18),
               onSelected: enabled ? (_) => onSelected(mode.key) : null,
             );
           },

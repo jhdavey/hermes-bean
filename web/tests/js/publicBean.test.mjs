@@ -114,7 +114,7 @@ test('register flow keeps the same tap-to-talk Bean control and uses signup voic
     assert.match(appView, /Tap to talk/);
     assert.doesNotMatch(appView, /Hey! I'm over here!|data-public-bean-cue|public-bean-cue-arrow/);
     assert.match(appView, /resources\/js\/publicBean\.js/);
-    assert.match(appView, /Turn your volume on and allow microphone access\. Bean will talk you through signup/);
+    assert.match(appView, /Tap Bean for voice · volume on · allow mic/);
     assert.match(source, /publicBeanContext\(root\) === 'signup_onboarding'/);
     assert.match(source, /page_context:\s*publicBeanContext\(root\)/);
     assert.match(source, /bean_public_context:\s*publicBeanContext\(root\)/);
@@ -129,7 +129,9 @@ test('register flow keeps the same tap-to-talk Bean control and uses signup voic
     assert.match(source, /conversation\.sendUserActivity\(\)/);
     assert.match(source, /Tell the visitor to type their password in the input and press Send, not to say it out loud/);
     assert.match(source, /await stopVoiceConversation\('disabled'\)/);
-    assert.match(styles, /\.public-bean-presence-signup\[data-mode="listening"\] \.public-bean-help/);
+    assert.match(styles, /public-bean-zero-float/);
+    assert.match(styles, /public-bean-zero-glow/);
+    assert.match(styles, /\.public-bean-presence-signup \.public-bean-status \{[\s\S]*?display:\s*none/);
     assert.match(agentConfig, /showSignupInput/);
     assert.match(agentConfig, /type answers into the input and press Send/);
     assert.match(agentConfig, /Tap Bean anytime to mute me and continue by text/);

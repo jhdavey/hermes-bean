@@ -818,39 +818,32 @@
 }
 
 @media (max-width: 640px) {
-    .hb-guided-immersive-shell {
+    .hb-guided-immersive-shell,
+    .hb-guided-zero-chrome-shell {
         min-height: 100svh;
-        padding: 114px 16px 96px;
+        padding: 174px 16px 88px;
     }
 
-    .hb-guided-immersive-shell .hb-guided-onboarding-content {
-        width: min(100%, 680px);
+    .hb-guided-immersive-shell .hb-guided-onboarding-content,
+    .hb-guided-zero-chrome-content {
+        width: min(390px, 100%);
         max-height: none;
         overflow: visible;
-        padding: 18px 0 0;
-        gap: 10px;
+        padding: 0;
+        gap: 12px;
     }
 
     .hb-guided-immersive-shell .hb-guided-chat-log {
         min-height: 0;
-        gap: 8px;
+        gap: 0;
     }
 
     .hb-guided-immersive-shell .hb-guided-choice-panel:not(.hb-guided-plan-panel) {
-        width: min(336px, calc(100vw - 36px));
+        width: min(316px, calc(100vw - 58px));
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
     .hb-guided-immersive-topbar {
-        top: auto;
-        right: auto;
-        left: 50%;
-        bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
-        z-index: 39;
-        width: auto;
-        transform: translateX(-50%);
-        opacity: .78;
-        gap: 5px;
-        white-space: nowrap;
+        display: none;
     }
 }

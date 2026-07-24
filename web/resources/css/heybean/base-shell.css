@@ -1600,99 +1600,77 @@
     margin-top: 8px;
 }
 
-.hb-guided-immersive-app {
-    --hb-guided-atmosphere: linear-gradient(180deg, #ffffff 0%, #f8fbf6 55%, #f1f7ee 100%);
-    --hb-guided-glass: rgba(255, 255, 255, .86);
-    --hb-guided-glass-strong: rgba(255, 255, 255, .94);
-    --hb-guided-glass-border: rgba(var(--hb-accent-rgb), .22);
-    --hb-guided-shadow: 0 12px 34px rgba(16, 24, 40, .08), inset 0 1px 0 rgba(255, 255, 255, .88);
+.hb-guided-immersive-app,
+.hb-guided-zero-chrome-app {
+    --hb-guided-zero-bg: #ffffff;
+    --hb-guided-zero-text: #111311;
+    --hb-guided-zero-muted: rgba(17, 19, 17, .34);
+    --hb-guided-zero-line: rgba(17, 19, 17, .16);
+    --hb-guided-zero-glow: rgba(var(--hb-accent-rgb), .28);
     min-height: 100vh;
-    background: var(--hb-guided-atmosphere);
+    background: linear-gradient(180deg, #fff 0%, #fcfdfb 100%);
+    color: var(--hb-guided-zero-text);
     transition: background .24s ease, color .24s ease;
 }
 
-.hb-guided-immersive-shell {
+.hb-guided-immersive-shell,
+.hb-guided-zero-chrome-shell {
     position: relative;
     min-height: 100vh;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-start;
-    padding: 126px 20px 88px;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    justify-items: center;
+    align-items: start;
+    padding: clamp(174px, 25vh, 210px) 20px 96px;
 }
 
 .hb-guided-immersive-shell::before,
-.hb-guided-immersive-shell::after {
+.hb-guided-immersive-shell::after,
+.hb-guided-zero-chrome-shell::before,
+.hb-guided-zero-chrome-shell::after {
     display: none;
     content: none;
 }
 
 .hb-guided-immersive-topbar {
-    position: fixed;
-    top: calc(env(safe-area-inset-top, 0px) + 54px);
-    right: max(18px, calc((100vw - 1040px) / 2 + 18px));
-    z-index: 82;
-    width: auto;
-    margin: 0;
-    gap: 7px;
-    justify-content: flex-end;
-    align-items: center;
-    color: color-mix(in srgb, var(--hb-muted) 76%, var(--hb-text));
-    font-size: 12px;
+    display: none;
 }
 
-.hb-guided-immersive-topbar .hb-button-ghost {
-    min-height: 30px;
-    padding: 5px 7px;
-    border-color: transparent;
-    background: transparent;
-    color: color-mix(in srgb, var(--hb-muted) 72%, var(--hb-accent-strong));
-    box-shadow: none;
-    backdrop-filter: none;
-    font-size: 12px;
-    font-weight: 760;
-    letter-spacing: .005em;
-}
-
-.hb-guided-immersive-topbar .hb-button-ghost:hover,
-.hb-guided-immersive-topbar .hb-button-ghost:focus-visible {
-    background: rgba(var(--hb-accent-rgb), .07);
-    color: var(--hb-accent-strong);
-}
-
-.hb-guided-immersive-stage {
-    position: relative;
-    z-index: 1;
-    width: min(760px, 100%);
-    flex: 0 0 auto;
+.hb-guided-immersive-stage,
+.hb-guided-zero-chrome-stage {
+    width: min(520px, 100%);
+    min-height: 0;
+    display: grid;
+    justify-items: center;
     align-items: start;
 }
 
-.hb-guided-immersive-shell .hb-guided-onboarding-content {
-    width: min(680px, 100%);
+.hb-guided-immersive-shell .hb-guided-onboarding-content,
+.hb-guided-zero-chrome-content {
+    width: min(520px, 100%);
     max-height: none;
     overflow: visible;
-    padding: 10px 0 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
+    padding: 0;
+    display: grid;
+    justify-items: center;
+    align-content: start;
+    gap: 14px;
 }
 
-.hb-guided-immersive-shell .hb-guided-chat-log {
+.hb-guided-immersive-shell .hb-guided-chat-log,
+.hb-guided-zero-chrome-message {
     width: 100%;
     min-height: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-start;
-    align-items: center;
-    gap: 10px;
+    display: grid;
+    justify-items: center;
+    align-items: start;
+    gap: 0;
     pointer-events: none;
 }
 
 .hb-guided-immersive-shell .hb-guided-chat-bubble {
-    width: min(620px, calc(100vw - 40px));
+    width: min(390px, calc(100vw - 64px));
     justify-self: center;
     padding: 0;
     border: 0;
@@ -1700,8 +1678,7 @@
     background: transparent;
     box-shadow: none;
     text-align: center;
-    animation: hb-guided-bubble-arrive .38s cubic-bezier(.2, .85, .2, 1) backwards;
-    transition: opacity .34s ease, transform .34s ease, filter .34s ease;
+    animation: hb-guided-zero-message-arrive .28s ease-out backwards;
 }
 
 .hb-guided-immersive-shell .hb-guided-chat-bubble strong {
@@ -1710,83 +1687,78 @@
 
 .hb-guided-immersive-shell .hb-guided-chat-bubble span {
     display: inline-block;
-    color: var(--hb-text);
-    font-size: clamp(24px, 2.55vw, 32px);
-    font-weight: 760;
-    line-height: 1.19;
-    letter-spacing: -.011em;
+    max-width: 390px;
+    color: var(--hb-guided-zero-text);
+    font-size: clamp(20px, 2.7vw, 27px);
+    font-weight: 610;
+    line-height: 1.23;
+    letter-spacing: -.025em;
     text-wrap: balance;
 }
 
-.hb-guided-immersive-shell .hb-guided-chat-bubble:not(:last-child) span {
-    max-width: min(480px, 84vw);
-    color: color-mix(in srgb, var(--hb-text) 70%, var(--hb-muted));
-    font-size: clamp(12px, 1.12vw, 15px);
-    font-weight: 760;
-    line-height: 1.25;
-    letter-spacing: 0;
+.hb-guided-immersive-shell .hb-guided-chat-bubble:not(:last-child),
+.hb-guided-immersive-shell .hb-guided-chat-bubble:nth-last-child(n+4),
+.hb-guided-immersive-shell .hb-guided-chat-bubble:nth-last-child(n+5) {
+    display: block;
+    opacity: 1;
+    transform: none;
+    filter: none;
 }
 
+.hb-guided-immersive-shell .hb-guided-chat-bubble-user,
 .hb-guided-immersive-shell .hb-guided-chat-bubble-user span,
 .hb-guided-immersive-shell .hb-guided-chat-bubble-user:not(:last-child) span {
-    max-width: min(360px, 78vw);
-    padding: 6px 11px;
-    border: 1px solid rgba(var(--hb-accent-rgb), .18);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--hb-guided-glass) 80%, transparent);
-    color: color-mix(in srgb, var(--hb-accent-strong) 76%, var(--hb-text));
-    font-size: 12px;
-    font-weight: 760;
-    letter-spacing: .01em;
-    box-shadow: 0 8px 18px rgba(34, 87, 52, .045);
-}
-
-.hb-guided-immersive-shell .hb-guided-chat-bubble:not(:last-child) {
-    opacity: .36;
-    transform: translateY(-7px) scale(.982);
-    filter: saturate(.86);
-}
-
-.hb-guided-immersive-shell .hb-guided-chat-bubble:nth-last-child(n+4) {
-    opacity: .16;
-    transform: translateY(-12px) scale(.96);
-}
-
-.hb-guided-immersive-shell .hb-guided-chat-bubble:nth-last-child(n+5) {
     display: none;
 }
 
 .hb-guided-immersive-shell .hb-guided-choice-panel {
-    width: min(420px, calc(100vw - 36px));
+    width: min(330px, calc(100vw - 58px));
     justify-self: center;
     margin: 0;
-    padding: 6px;
-    border-color: var(--hb-guided-glass-border);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--hb-guided-glass) 86%, transparent);
-    box-shadow: var(--hb-guided-shadow);
-    backdrop-filter: blur(18px);
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
 }
 
 .hb-guided-immersive-shell .hb-guided-choice-chip {
-    min-height: 38px;
-    border-color: transparent;
-    background: rgba(var(--hb-accent-rgb), .065);
-    font-weight: 790;
-    transition: transform .18s ease, background .18s ease, color .18s ease, box-shadow .18s ease;
+    min-height: 36px;
+    padding: 0 10px;
+    border: 1px solid color-mix(in srgb, var(--hb-guided-zero-line) 86%, transparent);
+    border-radius: 999px;
+    background: transparent;
+    color: color-mix(in srgb, var(--hb-guided-zero-text) 72%, var(--hb-accent-strong));
+    box-shadow: none;
+    font-size: 12px;
+    font-weight: 760;
+    transition: transform .18s ease, border-color .18s ease, color .18s ease, background .18s ease;
 }
 
 .hb-guided-immersive-shell .hb-guided-choice-chip:hover,
 .hb-guided-immersive-shell .hb-guided-choice-chip-active {
     transform: translateY(-1px);
-    background: rgba(var(--hb-accent-rgb), .18);
-    box-shadow: inset 0 0 0 1px rgba(var(--hb-accent-rgb), .12);
+    border-color: rgba(var(--hb-accent-rgb), .34);
+    background: rgba(var(--hb-accent-rgb), .065);
+    color: var(--hb-accent-strong);
 }
 
 .hb-guided-immersive-shell .hb-guided-onboarding-error {
-    margin: 4px 0 0;
-    color: color-mix(in srgb, #dc2626 78%, var(--hb-text));
-    font-weight: 800;
+    width: min(390px, calc(100vw - 64px));
+    margin: -2px 0 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    color: color-mix(in srgb, #dc2626 78%, var(--hb-guided-zero-text));
+    font-size: 12px;
+    font-weight: 760;
+    line-height: 1.35;
+    text-align: center;
 }
 
 .hb-guided-immersive-shell .hb-guided-chat-composer {
@@ -1794,221 +1766,139 @@
     left: auto;
     bottom: auto;
     z-index: 2;
-    width: min(520px, calc(100vw - 32px));
-    margin: 18px auto 0;
+    width: min(390px, calc(100vw - 64px));
+    margin: 4px auto 0;
     transform: none;
+    display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 7px;
-    padding: 7px;
-    border-color: var(--hb-guided-glass-border);
-    border-radius: 999px;
-    background: var(--hb-guided-glass-strong);
-    box-shadow: var(--hb-guided-shadow);
-    backdrop-filter: blur(18px);
-    animation: hb-guided-composer-float .48s cubic-bezier(.2, .85, .2, 1) both;
+    gap: 10px;
+    align-items: end;
+    padding: 0 2px 9px;
+    border: 0;
+    border-bottom: 1px solid var(--hb-guided-zero-line);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    animation: hb-guided-zero-composer-arrive .28s ease-out both;
 }
 
 .hb-guided-immersive-shell .hb-guided-chat-composer:focus-within {
-    border-color: rgba(var(--hb-accent-rgb), .34);
-    box-shadow: 0 16px 40px rgba(34, 87, 52, .12), inset 0 1px 0 rgba(255, 255, 255, .88);
-}
-
-.hb-guided-immersive-shell .hb-guided-chat-composer .hb-input {
-    min-height: 48px;
-    padding: 0 18px;
-    border: 0;
-    background: transparent;
-    font-size: 16px;
-    font-weight: 750;
-}
-
-.hb-guided-immersive-shell .hb-guided-chat-composer .hb-button {
-    min-height: 48px;
-    padding: 0 18px;
-    border-radius: 999px;
-}
-
-@keyframes hb-guided-bubble-arrive {
-    from { opacity: 0; transform: translateY(18px) scale(.98); filter: blur(4px); }
-    to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
-}
-
-@keyframes hb-guided-composer-float {
-    from { opacity: 0; transform: translateY(14px) scale(.985); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-app {
-    --hb-guided-atmosphere: linear-gradient(180deg, #0b0f14 0%, #111820 56%, #151c24 100%);
-    --hb-guided-glass: rgba(19, 27, 35, .74);
-    --hb-guided-glass-strong: rgba(13, 19, 26, .86);
-    --hb-guided-glass-border: rgba(var(--hb-accent-rgb), .24);
-    --hb-guided-shadow: 0 18px 42px rgba(0, 0, 0, .28), inset 0 1px 0 rgba(255, 255, 255, .055);
-}
-
-.heybean-app-body[data-hb-theme-resolved="dark"] .public-beta-banner-register .public-beta-banner-inner > span {
-    border-color: rgba(var(--hb-accent-rgb), .24);
-    background: rgba(13, 19, 26, .70);
-    color: color-mix(in srgb, var(--hb-text) 82%, var(--hb-accent));
-    box-shadow: 0 12px 28px rgba(0, 0, 0, .22), inset 0 1px 0 rgba(255, 255, 255, .05);
-}
-
-.heybean-app-body[data-hb-theme-resolved="dark"] .public-beta-banner-eyebrow {
-    color: rgba(167, 176, 189, .78);
-}
-
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-topbar {
-    color: rgba(167, 176, 189, .72);
-}
-
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-topbar .hb-button-ghost {
-    background: transparent;
-    color: rgba(217, 225, 234, .72);
+    border-bottom-color: rgba(var(--hb-accent-rgb), .48);
     box-shadow: none;
 }
 
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-topbar .hb-button-ghost:hover,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-topbar .hb-button-ghost:focus-visible {
-    background: rgba(255, 255, 255, .045);
-    color: var(--hb-text);
-}
-
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-shell .hb-guided-chat-bubble:not(:last-child) span {
-    color: rgba(244, 247, 251, .70);
-}
-
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-shell .hb-guided-chat-bubble-user span,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-shell .hb-guided-chat-bubble-user:not(:last-child) span {
-    border-color: rgba(var(--hb-accent-rgb), .26);
-    background: rgba(var(--hb-accent-rgb), .12);
-    color: color-mix(in srgb, var(--hb-accent) 82%, var(--hb-text));
-    box-shadow: 0 12px 32px rgba(0, 0, 0, .20);
-}
-
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-shell .hb-guided-choice-panel,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-shell .hb-guided-chat-composer {
-    border-color: var(--hb-guided-glass-border);
-    background: var(--hb-guided-glass-strong);
-    box-shadow: var(--hb-guided-shadow);
-}
-
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-shell .hb-guided-chat-composer:focus-within {
-    border-color: rgba(var(--hb-accent-rgb), .34);
-    box-shadow: 0 18px 44px rgba(0, 0, 0, .34), inset 0 1px 0 rgba(255, 255, 255, .06);
-}
-
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-shell .hb-guided-choice-chip {
-    background: rgba(255, 255, 255, .045);
-    color: color-mix(in srgb, var(--hb-text) 82%, var(--hb-muted));
-}
-
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-shell .hb-guided-choice-chip:hover,
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-shell .hb-guided-choice-chip-active {
-    background: rgba(var(--hb-accent-rgb), .18);
-    color: var(--hb-text);
-}
-
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-shell .hb-guided-chat-composer .hb-input {
+.hb-guided-immersive-shell .hb-guided-chat-composer .hb-input {
+    min-height: 42px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
     background: transparent;
-    color: var(--hb-text);
+    box-shadow: none;
+    color: var(--hb-guided-zero-text);
+    font-size: 15px;
+    font-weight: 520;
 }
 
-.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-shell .hb-guided-chat-composer .hb-input::placeholder {
-    color: rgba(167, 176, 189, .74);
+.hb-guided-immersive-shell .hb-guided-chat-composer .hb-button {
+    min-height: 34px;
+    padding: 0 2px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--hb-accent-strong);
+    box-shadow: none;
+    font-size: 14px;
+    font-weight: 820;
+}
+
+.hb-guided-immersive-shell .hb-guided-chat-composer .hb-button:hover,
+.hb-guided-immersive-shell .hb-guided-chat-composer .hb-button:focus-visible {
+    background: transparent;
+    color: color-mix(in srgb, var(--hb-accent-strong) 78%, var(--hb-guided-zero-text));
+    transform: none;
+}
+
+@keyframes hb-guided-zero-message-arrive {
+    from { opacity: 0; transform: translateY(8px); filter: blur(3px); }
+    to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+@keyframes hb-guided-zero-composer-arrive {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-immersive-app,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-zero-chrome-app {
+    --hb-guided-zero-bg: #050706;
+    --hb-guided-zero-text: #f8fbf8;
+    --hb-guided-zero-muted: rgba(248, 251, 248, .44);
+    --hb-guided-zero-line: rgba(248, 251, 248, .16);
+    background: linear-gradient(180deg, #050706 0%, #090c0a 100%);
 }
 
 @media (max-width: 720px) {
-    .public-beta-banner-register {
-        top: calc(env(safe-area-inset-top, 0px) + 7px);
-    }
-
-    .public-beta-banner-register .public-beta-banner-inner > span {
-        min-height: 26px;
-        padding: 4px 9px;
-        font-size: 10.5px;
-    }
-
-    .hb-guided-immersive-shell {
+    .hb-guided-immersive-shell,
+    .hb-guided-zero-chrome-shell {
         min-height: 100svh;
-        padding: 114px 16px 96px;
+        padding: 174px 16px 88px;
     }
 
-    .hb-guided-immersive-topbar {
-        top: auto;
-        right: auto;
-        left: 50%;
-        bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
-        z-index: 39;
-        width: auto;
-        transform: translateX(-50%);
-        opacity: .78;
-        gap: 5px;
-        white-space: nowrap;
+    .hb-guided-immersive-shell .hb-guided-onboarding-content,
+    .hb-guided-zero-chrome-content {
+        width: min(390px, 100%);
+        gap: 12px;
     }
 
-    .hb-guided-immersive-topbar .hb-button-ghost {
-        min-height: 28px;
-        padding: 4px 6px;
-        font-size: 11.5px;
-    }
-
-    .hb-guided-immersive-shell .hb-guided-onboarding-content {
-        padding-top: 18px;
-        gap: 10px;
-    }
-
-    .hb-guided-immersive-shell .hb-guided-chat-log {
-        min-height: 0;
-        gap: 8px;
+    .hb-guided-immersive-shell .hb-guided-chat-bubble {
+        width: min(330px, calc(100vw - 58px));
     }
 
     .hb-guided-immersive-shell .hb-guided-chat-bubble span {
-        width: min(344px, calc(100vw - 34px));
-        font-size: clamp(19.5px, 5.45vw, 22px);
-        font-weight: 720;
-        line-height: 1.2;
-        letter-spacing: -.006em;
-    }
-
-    .hb-guided-immersive-shell .hb-guided-chat-bubble:not(:last-child) span {
-        max-width: min(316px, calc(100vw - 42px));
-        font-size: 12px;
-        line-height: 1.23;
-    }
-
-    .hb-guided-immersive-shell .hb-guided-chat-bubble-user span,
-    .hb-guided-immersive-shell .hb-guided-chat-bubble-user:not(:last-child) span {
-        width: auto;
-        max-width: min(260px, 72vw);
-        font-size: 11.5px;
-    }
-
-    .hb-guided-immersive-shell .hb-guided-chat-bubble:nth-last-child(n+4) {
-        display: none;
-    }
-
-    .hb-guided-immersive-shell .hb-guided-chat-composer {
-        width: min(360px, calc(100vw - 28px));
-        margin-top: 16px;
-        padding: 6px;
-    }
-
-    .hb-guided-immersive-shell .hb-guided-chat-composer .hb-input,
-    .hb-guided-immersive-shell .hb-guided-chat-composer .hb-button {
-        min-height: 44px;
-        font-size: 15px;
-        font-weight: 730;
+        max-width: 330px;
+        font-size: clamp(18px, 5.1vw, 21px);
+        font-weight: 600;
+        line-height: 1.24;
+        letter-spacing: -.022em;
     }
 
     .hb-guided-immersive-shell .hb-guided-choice-panel:not(.hb-guided-plan-panel) {
-        width: min(336px, calc(100vw - 36px));
+        width: min(316px, calc(100vw - 58px));
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        padding: 5px;
+        gap: 7px;
     }
 
     .hb-guided-immersive-shell .hb-guided-choice-chip {
-        min-height: 36px;
+        min-height: 34px;
         padding-inline: 8px;
-        font-size: 12px;
+        font-size: 11.5px;
     }
+
+    .hb-guided-immersive-shell .hb-guided-chat-composer {
+        width: min(330px, calc(100vw - 58px));
+        margin-top: 2px;
+    }
+
+    .hb-guided-immersive-shell .hb-guided-chat-composer .hb-input {
+        min-height: 40px;
+        font-size: 15px;
+    }
+
+    .hb-guided-immersive-shell .hb-guided-chat-composer .hb-button {
+        min-height: 32px;
+        font-size: 13px;
+    }
+}
+
+
+.hb-guided-zero-chrome-shell .hb-guided-chat-composer .hb-input,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-zero-chrome-shell .hb-guided-chat-composer .hb-input,
+.hb-guided-zero-chrome-shell .hb-guided-chat-composer .hb-input:focus,
+.heybean-app-body[data-hb-theme-resolved="dark"] .hb-guided-zero-chrome-shell .hb-guided-chat-composer .hb-input:focus {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    outline: 0;
 }

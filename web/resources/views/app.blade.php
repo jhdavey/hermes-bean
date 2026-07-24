@@ -13,7 +13,6 @@
 </head>
 <body class="heybean-app-body">
     @if (request()->is('register'))
-        @include('partials.public-beta-banner')
         @php
             $registerSource = preg_replace('/[^a-z0-9_\-]/i', '', (string) (request()->query('from') ?: request()->query('source') ?: 'direct_register')) ?: 'direct_register';
         @endphp
@@ -33,7 +32,7 @@
                 <span class="public-bean-icon"><img src="{{ asset('images/bean-logo.png') }}" alt="Bean"></span>
                 <span class="public-bean-status" data-public-bean-status aria-live="polite">Tap to talk</span>
             </button>
-            <span class="public-bean-help" data-public-bean-help>Turn your volume on and allow microphone access. Bean will talk you through signup, but type answers into the box.</span>
+            <span class="public-bean-help" data-public-bean-help>Tap Bean for voice · volume on · allow mic</span>
             <span class="public-bean-turnstile" data-public-bean-turnstile hidden></span>
         </div>
         @vite('resources/js/publicBean.js')

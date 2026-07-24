@@ -21,23 +21,26 @@ function cssRuleContaining(sourceText, selector) {
     return sourceText.slice(ruleStart, ruleEnd);
 }
 
-test('web signup starts with Bean chat and keeps a plain signup fallback', () => {
+test('web signup uses the Zero Chrome Bean onboarding contract', () => {
     assert.match(source, /Start with Bean/);
     assert.match(source, /Use plain signup form/);
-    assert.match(source, /Use form instead/);
-    assert.match(source, /Name added/);
-    assert.match(source, /Email added/);
+    assert.doesNotMatch(source, /Use form instead/);
     assert.doesNotMatch(source, /messages\.push\(\['user', state\.guidedSignupEmail\]\)/);
     assert.doesNotMatch(source, /Nice to meet you, \$\{state\.guidedSignupName\}/);
     assert.match(source, /plainSignupMarkup/);
-    assert.match(source, /hb-guided-chat-log/);
-    assert.match(source, /fromLandingBean/);
-    assert.match(source, /I’ll help get your HeyBean account set up\. What is your first and last name\?/);
+    assert.match(source, /hb-guided-zero-chrome-app/);
+    assert.match(source, /hb-guided-zero-chrome-shell/);
+    assert.match(source, /hb-guided-zero-chrome-message/);
+    assert.match(source, /function guidedCurrentBeanMessage/);
+    assert.match(source, /What is your first and last name\?/);
+    assert.match(source, /Choose Light, Dark, or Auto\./);
+    assert.match(source, /What email should I use for your account\?/);
+    assert.match(source, /Choose a password\. Type it — don’t say it\./);
+    assert.doesNotMatch(source, /I’ll help get your HeyBean account set up\. What is your first and last name\?/);
     assert.match(source, /data-action="guided-onboarding"/);
     assert.match(source, /data-guided-onboarding-step="\$\{escapeAttr\(step\)\}"/);
     assert.match(source, /source: signupSource/);
     assert.match(source, /normalizedSignupSource/);
-    assert.match(source, /hb-guided-immersive-shell/);
     assert.match(source, /data-action="plain-signup"/);
     assert.match(source, /function looksLikeInternalError/);
     assert.match(source, /SQLSTATE\|PDOException\|QueryException/);
@@ -46,7 +49,11 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.match(source, /function removePublicSignupBeanPresence/);
     assert.match(source, /\.public-bean-presence-signup\[data-public-bean\]/);
     assert.match(source, /root\.querySelector\('\[data-public-bean-toggle\]'\)\?\.click\(\)/);
-    assert.match(source, /removePublicSignupBeanPresence\(\{ delayMs: 3600 \}\);\n\s*state\.signupPaywallDeferred = true/);
+    assert.match(source, /function shouldUseConnectedSignupBeanPresence/);
+    assert.match(source, /state\.signupPaywallDeferred \|\| state\.onboardingTourActive \|\| state\.modal\?\.type === 'post-tour-first-action'/);
+    assert.match(source, /if \(shouldUseConnectedSignupBeanPresence\(\)\) return ''/);
+    assert.match(source, /removePublicSignupBeanPresence\(\);\n\s*state\.signupPaywallDeferred = false/);
+    assert.doesNotMatch(source, /removePublicSignupBeanPresence\(\{ delayMs: 3600 \}\);\n\s*state\.signupPaywallDeferred = true/);
     assert.match(source, /removePublicSignupBeanPresence\(\{ delayMs: 3600 \}\);\n\s*state\.phase = 'waitlist'/);
     assert.match(source, /function dispatchSignupVoiceProgress/);
     assert.match(source, /new CustomEvent\('bean:signup-progress'/);
@@ -58,7 +65,6 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.match(source, /next_step: 'password'/);
     assert.match(source, /completed_step: 'password'/);
     assert.match(source, /next_step: 'creatingAccount'/);
-    assert.match(source, /removePublicSignupBeanPresence\(\{ delayMs: 3600 \}\)/);
     assert.match(source, /startOnboardingTourIfNeeded/);
     assert.match(source, /activateOnboardingTourStep\(0\)/);
     assert.match(source, /postTourFirstActionModalMarkup/);
@@ -94,22 +100,16 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.doesNotMatch(source, /You won’t choose a plan or pay while you wait/);
     assert.ok(source.indexOf("state.phase = 'waitlist'") < source.indexOf('startSignupDashboardPreview(result)'));
     assert.match(baseShellSource, /\.hb-guided-chat-composer/);
-    assert.match(baseShellSource, /\.public-beta-banner-register/);
-    assert.match(publicBetaBannerSource, /request\(\)->is\('register'\)/);
-    assert.match(publicBetaBannerSource, /Early access/);
-    assert.doesNotMatch(publicBetaBannerSource.match(/@if \(\$isRegisterBanner\)[\s\S]*?@else/)?.[0] || '', /Start with Bean/);
-    assert.match(baseShellSource, /\.hb-guided-chat-bubble-user/);
-    assert.match(baseShellSource, /\.hb-guided-immersive-app/);
-    assert.match(baseShellSource, /--hb-guided-atmosphere/);
-    assert.match(baseShellSource, /\.hb-guided-immersive-shell \.hb-guided-chat-composer \{[\s\S]*?position:\s*relative/);
-    assert.match(baseShellSource, /data-hb-theme-resolved="dark"\] \.hb-guided-immersive-app/);
-    assert.match(baseShellSource, /--hb-guided-atmosphere:\s*linear-gradient\(180deg, #ffffff 0%, #f8fbf6 55%, #f1f7ee 100%\)/);
-    assert.match(baseShellSource, /--hb-guided-atmosphere:\s*linear-gradient\(180deg, #0b0f14 0%, #111820 56%, #151c24 100%\)/);
-    assert.match(baseShellSource, /\.hb-guided-immersive-shell::before,[\s\S]*?content:\s*none/);
+    assert.match(baseShellSource, /--hb-guided-zero-text/);
+    assert.match(baseShellSource, /--hb-guided-zero-line/);
+    assert.match(baseShellSource, /\.hb-guided-immersive-topbar \{\n\s*display:\s*none/);
+    assert.match(baseShellSource, /\.hb-guided-immersive-shell \.hb-guided-chat-composer \{[\s\S]*?border-bottom:\s*1px solid var\(--hb-guided-zero-line\)/);
+    assert.match(baseShellSource, /\.hb-guided-immersive-shell \.hb-guided-chat-bubble-user,[\s\S]*?display:\s*none/);
+    assert.doesNotMatch(baseShellSource, /--hb-guided-atmosphere/);
     assert.doesNotMatch(cssRuleContaining(baseShellSource, '.hb-guided-immersive-app'), /radial-gradient|circle at/);
-    assert.match(baseShellSource, /\.hb-guided-chat-bubble:not\(:last-child\) span/);
-    assert.match(baseShellSource, /hb-guided-bubble-arrive/);
-    assert.match(baseShellSource, /backdrop-filter:\s*blur\(18px\)/);
+    assert.doesNotMatch(baseShellSource, /hb-guided-bubble-arrive/);
+    assert.doesNotMatch(cssRuleContaining(baseShellSource, '.hb-guided-immersive-shell .hb-guided-chat-composer'), /backdrop-filter:\s*blur/);
+    assert.doesNotMatch(source, /public-beta-banner-register/);
 });
 
 test('browser app retains direct productivity resources and command center', () => {

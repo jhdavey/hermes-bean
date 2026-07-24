@@ -39,19 +39,19 @@ void main() {
       find.byKey(const Key('guided-onboarding-input')),
     );
 
-    expect(find.textContaining('Hi, I’m Bean'), findsOneWidget);
-    expect(find.text('Use plain signup form'), findsOneWidget);
+    expect(find.text('What is your first and last name?'), findsOneWidget);
+    expect(find.text('Tap Bean for voice · volume on · allow mic'), findsOneWidget);
+    expect(find.text('Use plain signup form'), findsNothing);
     expect(find.byKey(const Key('guided-initial-bean-button')), findsOneWidget);
+    expect(find.byKey(const Key('guided-zero-chrome-mic-copy')), findsOneWidget);
+    expect(find.byKey(const Key('guided-zero-chrome-message')), findsOneWidget);
+    expect(find.byKey(const Key('guided-zero-chrome-input-line')), findsOneWidget);
     expect(find.byKey(const Key('guided-onboarding-send')), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('guided-plain-signup-action')));
-    await _pumpUntilFound(tester, find.byKey(const Key('plain-signup-title')));
-
-    expect(find.text('Plain signup'), findsOneWidget);
-    expect(find.byKey(const Key('plain-signup-name')), findsOneWidget);
-    expect(find.byKey(const Key('plain-signup-email')), findsOneWidget);
-    expect(find.byKey(const Key('plain-signup-password')), findsOneWidget);
-    expect(find.text('Start with Bean instead'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('guided-onboarding-input')), 'Harley Davey');
+    await tester.tap(find.byKey(const Key('guided-onboarding-send')));
+    await tester.pump(const Duration(milliseconds: 320));
+    expect(find.text('Choose Light, Dark, or Auto.'), findsOneWidget);
   });
 
   testWidgets(
