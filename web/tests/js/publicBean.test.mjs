@@ -261,7 +261,7 @@ test('landing voice uses a dedicated fast ElevenLabs guide with an action-only p
     assert.match(source, /function isPlainHearingConfirmation\(content\)/);
     assert.match(source, /hearingCheckUiActionSuppressUntilMs = Date\.now\(\) \+ HEARING_CHECK_UI_ACTION_SUPPRESS_MS/);
     assert.match(source, /if \(!hearingCheckExpected\) hearingCheckUiActionSuppressUntilMs = 0/);
-    assert.match(source, /\} else \{\s*hearingCheckUiActionSuppressUntilMs = 0;\s*\}\s*setStatus\('thinking', 'Thinking…'\)/);
+    assert.match(source, /hearingCheckExpected = false;\s*\} else \{\s*hearingCheckUiActionSuppressUntilMs = 0;\s*\}/);
     assert.match(source, /function shouldSuppressHearingCheckUiAction\(destination\)/);
     assert.doesNotMatch(source, /\['signup', 'onboarding', 'register'\]\.includes\(destination\)\) return false/);
     assert.match(source, /No page movement needed for the hearing check\./);
@@ -316,6 +316,17 @@ test('landing Bean reveals the three-step quick tour plus signup and pricing des
     assert.match(agentConfig, /destination "onboarding"/);
     assert.match(agentConfig, /make it sound conversational instead of scripted/);
     assert.match(agentConfig, /Do not repeat the same question twice/);
+    assert.match(agentConfig, /If they ask about pricing, cost, billing, trials, subscriptions, or plan details/);
+    assert.match(agentConfig, /call showLandingSection with destination "pricing" before you begin talking through prices/);
+    assert.match(agentConfig, /Do not wait to ask whether they want all details before showing pricing/);
+    assert.match(agentConfig, /difference between two named plans, call showLandingSection with destination "pricing" before you begin the comparison/);
+    assert.match(agentConfig, /use pricing immediately for any pricing, cost, billing, trial, subscription, plan limit, or plan comparison question/);
+    assert.match(source, /function isPricingInquiry\(content\)/);
+    assert.match(source, /isPricingInquiry\(content\)/);
+    assert.match(source, /showLandingUiAction\('pricing'\)/);
+    assert.match(source, /if \(normalizedDestination === 'pricing' && pricingScrollHandledForTurn\)/);
+    assert.match(source, /Pricing section already shown\./);
+    assert.match(source, /if \(normalizedDestination === 'pricing'\) pricingScrollHandledForTurn = true/);
     assert.match(agentConfig, /Do not pivot to signup unless they explicitly ask how to try or start/);
     assert.match(agentConfig, /do not say “Want the next stop\?” more than once/);
     assert.match(agentConfig, /Ok, i'll just get some quick info from you and show you around/);
