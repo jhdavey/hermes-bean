@@ -28,7 +28,7 @@ Public landing / pricing / legal page
   -> after the visitor confirms yes, Bean gives the normal intro and does not move the page
   -> Agent answers directly with GPT-4.1 Nano and public product/pricing facts
   -> optional action-only client tool: showLandingSection({ destination }); the browser suppresses same-turn hearing-check movement defensively but clears suppression on the next visitor transcript
-  -> explicit signup agreement asks the browser to wait for Bean’s spoken transition sentence to finish, then fade the landing page into the embedded Zero Chrome signup flow, update the URL to /register?from=bean, and keep the same Bean DOM presence mounted while asking for first/last name without repeating “Hi, I’m Bean”
+  -> explicit signup agreement asks the browser to wait for Bean’s spoken transition sentence to finish, then fade the landing page into the embedded Zero Chrome signup flow, update the URL to /register?from=bean, and keep the same Bean DOM presence mounted while asking for first/last name without repeating “Hi, I’m Bean”; the browser also backs this up by recognizing the exact transition sentence if the hosted Agent speaks it but fails to invoke the section tool
   -> no authenticated dashboard plugin, account data, private tools, or Hermes turn on the voice hot path
 ```
 

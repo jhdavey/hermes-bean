@@ -162,6 +162,7 @@ test('landing Bean starts voice directly from an explicit tap with a hearing che
     assert.match(source, /conversationToken:\s*session\.token/);
     assert.match(source, /Hey, I'm Bean, can you hear me\?/);
     assert.match(source, /SIGNUP_WAKE_GREETING/);
+    assert.match(source, /SIGNUP_TRANSITION_LINE/);
     assert.match(source, /You’re in the quick info step/);
     assert.match(agentConfig, /I can give you a quick tour or answer questions/);
     assert.doesNotMatch(agentConfig, /help you start signup whenever you’re ready/);
@@ -259,6 +260,7 @@ test('landing voice uses a dedicated fast ElevenLabs guide with an action-only p
     assert.match(source, /hearingCheckExpected = !isSignupOnboardingContext\(\)/);
     assert.match(source, /function isPlainHearingConfirmation\(content\)/);
     assert.match(source, /hearingCheckUiActionSuppressUntilMs = Date\.now\(\) \+ HEARING_CHECK_UI_ACTION_SUPPRESS_MS/);
+    assert.match(source, /if \(!hearingCheckExpected\) hearingCheckUiActionSuppressUntilMs = 0/);
     assert.match(source, /\} else \{\s*hearingCheckUiActionSuppressUntilMs = 0;\s*\}\s*setStatus\('thinking', 'Thinking…'\)/);
     assert.match(source, /function shouldSuppressHearingCheckUiAction\(destination\)/);
     assert.doesNotMatch(source, /\['signup', 'onboarding', 'register'\]\.includes\(destination\)\) return false/);
@@ -365,6 +367,9 @@ test('landing Bean reveals the three-step quick tour plus signup and pricing des
     assert.match(source, /const SIGNUP_TRANSITION_MIN_VOICE_MS = 6500/);
     assert.match(source, /const SIGNUP_TRANSITION_MAX_VOICE_MS = 12000/);
     assert.match(source, /function scheduleInlineSignupAfterSpeech\(href\)/);
+    assert.match(source, /function isSignupTransitionLine\(content\)/);
+    assert.match(source, /normalizeSpokenText\(SIGNUP_TRANSITION_LINE\)/);
+    assert.match(source, /if \(!isSignupOnboardingContext\(\) && isSignupTransitionLine\(content\)\) \{\s*scheduleInlineSignupAfterSpeech\('\/register\?from=bean'\)/);
     assert.match(source, /const canMove = minimumSpokenWindowPassed && lastVoiceMode !== 'speaking'/);
     assert.match(source, /scheduleInlineSignupAfterSpeech\('\/register\?from=bean'\)/);
     assert.match(source, /Signup will open after Bean finishes speaking\./);

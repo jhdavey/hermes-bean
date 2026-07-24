@@ -2,6 +2,7 @@ import { Conversation } from '@elevenlabs/client';
 import '../css/public-bean.css';
 
 const WAKE_GREETING = "Hey, I'm Bean, can you hear me?";
+const SIGNUP_TRANSITION_LINE = "Ok, i'll just get some quick info from you and show you around";
 const SIGNUP_WAKE_GREETING = "You’re in the quick info step. Type these details here — I’ll chime back in after your account is created.";
 const IDLE_CLOSE_MS = 15000;
 const HEARING_CHECK_UI_ACTION_SUPPRESS_MS = 9000;
@@ -407,6 +408,10 @@ function mountPublicBean(root) {
                 if (!content) return;
                 lastActivityAt = Date.now();
                 if (role === 'agent' || role === 'ai') {
+                    if (!isSignupOnboardingContext() && isSignupTransitionLine(content)) {
+                        scheduleInlineSignupAfterSpeech('/register?from=bean');
+                        keepVoiceAliveAfterUiAction();
+                    }
                     setStatus('speaking', 'Speaking…');
                 } else if (role === 'user') {
                     if (hearingCheckExpected) {
@@ -438,6 +443,7 @@ function mountPublicBean(root) {
                         });
                     }
                 } else if (nextMode === 'listening') {
+                    if (!hearingCheckExpected) hearingCheckUiActionSuppressUntilMs = 0;
                     setStatus('listening', 'Listening…');
                     scheduleIdleClose();
                 }
@@ -577,15 +583,25 @@ function normalizeLandingDestination(destination) {
 }
 
 function isPlainHearingConfirmation(content) {
-    const normalized = String(content || '')
+    const normalized = normalizeSpokenText(content);
+    if (!normalized) return false;
+    return /^(yes|yeah|yep|yup|i can|i can hear you|can hear you|i hear you|sure|ok|okay|affirmative)$/.test(normalized);
+}
+
+
+function isSignupTransitionLine(content) {
+    const normalized = normalizeSpokenText(content);
+    return normalized.includes(normalizeSpokenText(SIGNUP_TRANSITION_LINE));
+}
+
+function normalizeSpokenText(content) {
+    return String(content || '')
         .toLowerCase()
         .replace(/[“”]/g, '"')
         .replace(/[’]/g, "'")
         .replace(/[^a-z0-9'\s]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
-    if (!normalized) return false;
-    return /^(yes|yeah|yep|yup|i can|i can hear you|can hear you|i hear you|sure|ok|okay|affirmative)$/.test(normalized);
 }
 
 function currentSignupOnboardingStep() {
