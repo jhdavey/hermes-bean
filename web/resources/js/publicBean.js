@@ -5,6 +5,7 @@ const WAKE_GREETING = "Hey, I'm Bean, can you hear me?";
 const SIGNUP_WAKE_GREETING = "You’re in the quick info step. Type these details here — I’ll chime back in after your account is created.";
 const IDLE_CLOSE_MS = 15000;
 const WAKE_TO_GREETING_TARGET_MS = 1200;
+const BEAN_HANDOFF_KEY = 'heybean.publicBean.handoff';
 let turnstileScriptPromise = null;
 
 document.querySelectorAll('[data-public-bean]').forEach((root) => mountPublicBean(root));
@@ -526,7 +527,7 @@ function showLandingUiAction(action) {
     const section = target.selector ? document.querySelector(target.selector) : null;
     if (!section) {
         if (target.href && target.navigateDelay !== undefined) {
-            window.setTimeout(() => { window.location.href = target.href; }, target.navigateDelay);
+            window.setTimeout(() => navigateWithBeanHandoff(target.href), target.navigateDelay);
         }
         return null;
     }
@@ -549,11 +550,30 @@ function showLandingUiAction(action) {
 
     if (target.navigateDelay !== undefined && target.href) {
         window.setTimeout(() => {
-            window.location.href = target.href;
+            navigateWithBeanHandoff(target.href);
         }, target.navigateDelay);
     }
 
     return null;
+}
+
+function captureBeanHandoffState() {
+    const root = document.querySelector('[data-public-bean]');
+    if (!root || !window.sessionStorage) return;
+    const rect = root.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    window.sessionStorage.setItem(BEAN_HANDOFF_KEY, JSON.stringify({
+        top: rect.top,
+        centerX: rect.left + rect.width / 2,
+        width: rect.width,
+        height: rect.height,
+        expiresAt: Date.now() + 8000,
+    }));
+}
+
+function navigateWithBeanHandoff(href) {
+    captureBeanHandoffState();
+    window.location.href = href;
 }
 
 async function getTurnstileToken(root) {

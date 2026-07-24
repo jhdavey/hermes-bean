@@ -43,6 +43,9 @@ class LandingBeanTest extends TestCase
         $this->get('/')->assertOk()
             ->assertSee('data-public-bean', false)
             ->assertSee('public-bean-presence-hero', false)
+            ->assertSee('js/public-bean-handoff.js', false)
+            ->assertSee('width="68" height="68" alt="Bean"', false)
+            ->assertSee('max-width: 68px', false)
             ->assertSee('Tap to wake up')
             ->assertSee('Volume on · allow mic');
     }

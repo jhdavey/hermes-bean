@@ -1,5 +1,7 @@
 .public-bean-presence {
     --public-bean-accent: 82, 168, 105;
+    --public-bean-shell-top: calc(env(safe-area-inset-top, 0px) + clamp(172px, 25vh, 194px));
+    --public-bean-shell-left: 50%;
     position: fixed;
     top: calc(env(safe-area-inset-top, 0px) + 46px);
     left: max(24px, calc((100vw - var(--pb-max, 1152px)) / 2 + 24px));
@@ -19,14 +21,17 @@
 }
 
 .public-bean-presence-hero {
-    position: relative;
-    top: auto;
-    left: auto;
-    z-index: 2;
+    position: fixed;
+    top: var(--public-bean-handoff-top, var(--public-bean-shell-top));
+    left: var(--public-bean-handoff-left, var(--public-bean-shell-left));
+    z-index: 86;
     width: max-content;
     max-width: min(260px, calc(100vw - 48px));
-    margin: 0 auto 20px;
-    transform: none;
+    transform: translateX(-50%);
+}
+
+.public-bean-presence-hero + .hero-icons {
+    margin-top: 137px;
 }
 
 .public-bean-nav-spacer {
@@ -104,6 +109,8 @@
     z-index: 1;
     width: 68px;
     height: 68px;
+    max-width: 68px;
+    max-height: 68px;
     border-radius: 0;
     object-fit: contain;
     opacity: .9;
@@ -187,11 +194,14 @@
     }
 
     .public-bean-presence-hero {
-        top: auto;
-        left: auto;
+        top: var(--public-bean-handoff-top, var(--public-bean-shell-top));
+        left: var(--public-bean-handoff-left, var(--public-bean-shell-left));
         width: max-content;
         max-width: min(260px, calc(100vw - 48px));
-        margin-bottom: 16px;
+    }
+
+    .public-bean-presence-hero + .hero-icons {
+        margin-top: 133px;
     }
 
     .public-bean-nav-spacer {
@@ -210,6 +220,8 @@
     .public-bean-icon img {
         width: 60px;
         height: 60px;
+        max-width: 60px;
+        max-height: 60px;
     }
 
 
@@ -241,8 +253,8 @@
 }
 
 .public-bean-presence-signup {
-    top: calc(env(safe-area-inset-top, 0px) + clamp(58px, 9vh, 96px));
-    left: 50%;
+    top: var(--public-bean-handoff-top, var(--public-bean-shell-top));
+    left: var(--public-bean-handoff-left, var(--public-bean-shell-left));
     transform: translateX(-50%);
     z-index: 86;
     width: 112px;
@@ -264,8 +276,8 @@
 
 .public-bean-presence-signup .public-bean-control {
     position: relative;
-    width: 96px;
-    height: 96px;
+    width: 92px;
+    height: 92px;
     min-height: 0;
     padding: 0;
     display: grid;
@@ -299,9 +311,9 @@
 }
 
 .public-bean-presence-signup .public-bean-icon {
-    width: 96px;
-    height: 96px;
-    flex-basis: 96px;
+    width: 92px;
+    height: 92px;
+    flex-basis: 92px;
     border: 0;
     border-radius: 0;
     background: transparent;
@@ -310,8 +322,10 @@
 }
 
 .public-bean-presence-signup .public-bean-icon img {
-    width: 70px;
-    height: 70px;
+    width: 68px;
+    height: 68px;
+    max-width: 68px;
+    max-height: 68px;
     filter: drop-shadow(0 22px 34px rgba(20, 42, 24, .18));
 }
 
@@ -390,7 +404,7 @@
 
 @media (max-width: 620px) {
     .public-bean-presence-signup {
-        top: calc(env(safe-area-inset-top, 0px) + 54px);
+        top: var(--public-bean-handoff-top, var(--public-bean-shell-top));
         width: 92px;
     }
 
@@ -404,6 +418,8 @@
     .public-bean-presence-signup .public-bean-icon img {
         width: 60px;
         height: 60px;
+        max-width: 60px;
+        max-height: 60px;
     }
 
     .public-bean-presence-signup .public-bean-help,

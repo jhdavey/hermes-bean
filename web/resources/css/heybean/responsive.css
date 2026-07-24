@@ -824,6 +824,11 @@
         padding: 174px 16px 88px;
     }
 
+    .heybean-app-body:has(.public-bean-presence-signup) .hb-guided-immersive-shell,
+    .heybean-app-body:has(.public-bean-presence-signup) .hb-guided-zero-chrome-shell {
+        padding: clamp(292px, 39vh, 326px) 16px 88px;
+    }
+
     .hb-guided-immersive-shell .hb-guided-onboarding-content,
     .hb-guided-zero-chrome-content {
         width: min(390px, 100%);

@@ -1625,6 +1625,11 @@
     padding: clamp(174px, 25vh, 210px) 20px 96px;
 }
 
+.heybean-app-body:has(.public-bean-presence-signup) .hb-guided-immersive-shell,
+.heybean-app-body:has(.public-bean-presence-signup) .hb-guided-zero-chrome-shell {
+    padding-top: clamp(292px, 39vh, 326px);
+}
+
 .hb-guided-immersive-shell::before,
 .hb-guided-immersive-shell::after,
 .hb-guided-zero-chrome-shell::before,
