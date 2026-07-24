@@ -22,11 +22,12 @@ class LandingBeanTest extends TestCase
 
             $response->assertOk()
                 ->assertSee('data-public-bean', false)
-                ->assertSee('Tap to talk')
-                ->assertSee('Hey! I\'m over here!', false)
+                ->assertSee('Tap to wake up')
+                ->assertSee('Volume on · allow mic')
+                ->assertDontSee('Hey! I\'m over here!', false)
+                ->assertDontSee('data-public-bean-cue', false)
                 ->assertDontSee('Bean can help right now.', false)
                 ->assertDontSee('data-public-bean-intent', false)
-                ->assertSee('Turn your volume on, then allow microphone access.', false)
                 ->assertDontSee('audio processed by ElevenLabs')
                 ->assertSee('assets/publicBean-', false)
                 ->assertDontSee('data-bean-panel', false)
@@ -244,10 +245,12 @@ class LandingBeanTest extends TestCase
             $this->assertStringContainsString('AI executive assistant for real life', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('busy professionals and parents', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not position HeyBean as a general-purpose chatbot', File::get($home.'/skills/heybean-guide/SKILL.md'));
-            $this->assertStringContainsString('give you a quick tour, answer questions, or help you start signup', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('I can give you a quick tour or answer questions', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not ask about their use case unless they explicitly ask for a recommendation.', File::get($home.'/skills/heybean-guide/SKILL.md'));
-            $this->assertStringContainsString('Help the visitor experience Bean as quickly as possible', File::get($home.'/skills/heybean-guide/SKILL.md'));
-            $this->assertStringContainsString('not like a nagging salesperson', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('Do not pivot to signup unless they explicitly ask how to try or start.', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('Help the visitor understand Bean quickly', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('not a salesperson', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('Do not repeatedly suggest signup or pressure them', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('keep it to exactly three short stops', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('make it sound conversational instead of scripted', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not repeat the same question twice', File::get($home.'/skills/heybean-guide/SKILL.md'));

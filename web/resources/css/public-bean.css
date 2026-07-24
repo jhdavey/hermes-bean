@@ -8,153 +8,176 @@
     --public-bean-accent: 82, 168, 105;
     --public-bean-ring-angle: 0deg;
     position: fixed;
-    top: calc(env(safe-area-inset-top, 0px) + 54px);
+    top: calc(env(safe-area-inset-top, 0px) + 46px);
     left: max(24px, calc((100vw - var(--pb-max, 1152px)) / 2 + 24px));
     z-index: 70;
+    width: 128px;
     min-width: 0;
-    display: inline-flex;
+    display: grid;
+    justify-items: center;
     align-items: center;
-    flex: 0 1 auto;
-    border: 1px solid rgba(var(--public-bean-accent), .26);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, .92);
-    box-shadow: 0 8px 22px rgba(16, 24, 40, .08);
+    gap: 2px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
     isolation: isolate;
-    transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
+    overflow: visible;
+}
+
+.public-bean-presence-hero {
+    position: relative;
+    top: auto;
+    left: auto;
+    z-index: 2;
+    width: max-content;
+    max-width: min(260px, calc(100vw - 48px));
+    margin: 0 auto 20px;
+    transform: none;
 }
 
 .public-bean-nav-spacer {
-    flex: 0 0 124px;
-    width: 124px;
-    height: 42px;
+    flex: 0 0 136px;
+    width: 136px;
+    height: 86px;
     pointer-events: none;
-}
-
-.public-bean-cue {
-    position: absolute;
-    top: calc(100% + 34px);
-    left: 112px;
-    z-index: 5;
-    width: 176px;
-    border: 0;
-    padding: 0;
-    background: transparent;
-    color: #304235;
-    font-family: "Bradley Hand", "Comic Sans MS", "Marker Felt", cursive;
-    font-size: 18px;
-    font-weight: 700;
-    line-height: 1.05;
-    letter-spacing: .01em;
-    text-align: left;
-    text-shadow: 0 1px 0 rgba(255, 255, 255, .86);
-    cursor: pointer;
-    transform: rotate(-5deg);
-}
-
-.public-bean-cue span {
-    display: inline-block;
-    padding: 3px 4px;
-}
-
-.public-bean-cue:focus-visible {
-    outline: 2px solid rgba(var(--public-bean-accent), .62);
-    outline-offset: 4px;
-    border-radius: 10px;
-}
-
-.public-bean-cue svg {
-    position: absolute;
-    top: -60px;
-    left: -78px;
-    width: 88px;
-    height: 88px;
-    overflow: visible;
-    fill: none;
-    stroke: currentColor;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    transform: rotate(-3deg);
-}
-
-.public-bean-cue-arrow {
-    stroke-width: 3.2;
-}
-
-.public-bean-cue-head {
-    stroke-width: 3.4;
-}
-
-.public-bean-help {
-    position: absolute;
-    top: calc(100% + 8px);
-    left: 0;
-    z-index: 6;
-    width: min(280px, 78vw);
-    padding: 9px 11px;
-    border: 1px solid rgba(var(--public-bean-accent), .24);
-    border-radius: 14px;
-    background: rgba(255, 255, 255, .97);
-    box-shadow: 0 12px 28px rgba(16, 24, 40, .14);
-    color: #304235;
-    font-size: 12px;
-    font-weight: 800;
-    line-height: 1.25;
-    opacity: 0;
-    transform: translateY(-4px);
-    pointer-events: none;
-    transition: opacity .18s ease, transform .18s ease;
 }
 
 .public-bean-control {
+    position: relative;
+    width: 92px;
+    height: 92px;
     min-width: 0;
-    min-height: 42px;
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
+    min-height: 0;
+    display: grid;
+    place-items: center;
     border: 0;
-    border-radius: inherit;
-    padding: 0 14px 0 0;
+    border-radius: 0;
+    padding: 0;
     background: transparent;
-    color: #667085;
-    font: inherit;
+    color: inherit;
     cursor: pointer;
+    animation: public-bean-zero-float 5.2s ease-in-out infinite;
 }
 
-.public-bean-control:hover {
-    color: #2d3748;
+.public-bean-control::before {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    z-index: -1;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(var(--public-bean-accent), .24), transparent 66%);
+    filter: blur(11px);
+}
+
+.public-bean-control::after {
+    content: "";
+    position: absolute;
+    bottom: 1px;
+    z-index: -1;
+    width: 64px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgba(17, 19, 17, .08);
+    filter: blur(10px);
+}
+
+.public-bean-control:hover::before {
+    background: radial-gradient(circle, rgba(var(--public-bean-accent), .32), transparent 68%);
 }
 
 .public-bean-control:focus-visible {
     outline: 2px solid rgba(var(--public-bean-accent), .62);
-    outline-offset: 3px;
+    outline-offset: 4px;
+    border-radius: 999px;
 }
 
 .public-bean-icon {
     position: relative;
-    width: 42px;
-    height: 42px;
-    flex: 0 0 42px;
-    display: inline-grid;
+    width: 92px;
+    height: 92px;
+    flex: 0 0 92px;
+    display: grid;
     place-items: center;
-    border-radius: 999px;
-    overflow: hidden;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
 }
 
 .public-bean-icon img {
     position: relative;
     z-index: 1;
-    width: 28px;
-    height: 28px;
-    border-radius: 999px;
-    object-fit: cover;
-    opacity: .82;
-    filter: grayscale(.12);
+    width: 68px;
+    height: 68px;
+    border-radius: 0;
+    object-fit: contain;
+    opacity: .9;
+    filter: drop-shadow(0 20px 32px rgba(20, 42, 24, .16));
+}
+
+.public-bean-copy {
+    display: grid;
+    justify-items: center;
+    gap: 3px;
+    width: max-content;
+    max-width: min(260px, calc(100vw - 48px));
+    text-align: center;
+    pointer-events: none;
+}
+
+.public-bean-status,
+.public-bean-help {
+    display: block;
+    min-width: 0;
+    max-width: inherit;
+    overflow: hidden;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: rgba(17, 19, 17, .42);
+    font-size: 13px;
+    font-weight: 560;
+    line-height: 1.22;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 1;
+    transform: none;
+    transition: color .18s ease, opacity .18s ease;
+}
+
+.public-bean-status {
+    color: rgba(17, 19, 17, .58);
+    font-size: 14px;
+    font-weight: 620;
+}
+
+.public-bean-turnstile {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 50%;
+    z-index: 4;
+    padding: 8px;
+    border: 1px solid rgba(var(--public-bean-accent), .22);
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 12px 28px rgba(16, 24, 40, .14);
+    transform: translateX(-50%);
+}
+
+.public-bean-turnstile[hidden] {
+    display: none;
 }
 
 .public-bean-ring {
     position: absolute;
-    inset: -3px;
+    inset: 15px 18px auto;
     z-index: 2;
+    width: 92px;
+    height: 92px;
     border-radius: 999px;
     padding: 2px;
     background: transparent;
@@ -165,39 +188,18 @@
     pointer-events: none;
 }
 
-.public-bean-status {
-    min-width: 0;
-    max-width: min(260px, 36vw);
-    overflow: hidden;
-    color: currentColor;
-    font-size: 12px;
-    font-weight: 800;
-    line-height: 1;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+.public-bean-presence[data-mode="starting"] .public-bean-control::before,
+.public-bean-presence[data-mode="connecting"] .public-bean-control::before,
+.public-bean-presence[data-mode="thinking"] .public-bean-control::before,
+.public-bean-presence[data-mode="speaking"] .public-bean-control::before {
+    background: radial-gradient(circle, rgba(var(--public-bean-accent), .48), transparent 68%);
+    animation: public-bean-zero-glow .95s ease-in-out infinite;
 }
 
-.public-bean-turnstile {
-    position: absolute;
-    top: calc(100% + 8px);
-    left: 0;
-    z-index: 4;
-    padding: 8px;
-    border: 1px solid rgba(var(--public-bean-accent), .22);
-    border-radius: 12px;
-    background: #fff;
-    box-shadow: 0 12px 28px rgba(16, 24, 40, .14);
-}
-
-.public-bean-turnstile[hidden] {
-    display: none;
-}
-
-.public-bean-presence[data-mode="starting"],
-.public-bean-presence[data-mode="wake_listening"],
-.public-bean-presence[data-mode="listening"] {
-    border-color: rgba(var(--public-bean-accent), .46);
-    background: rgba(var(--public-bean-accent), .13);
+.public-bean-presence[data-mode="wake_listening"] .public-bean-control::before,
+.public-bean-presence[data-mode="listening"] .public-bean-control::before {
+    background: radial-gradient(circle, rgba(56, 132, 255, .34), transparent 68%);
+    animation: public-bean-zero-glow 1.35s ease-in-out infinite;
 }
 
 .public-bean-presence[data-mode="starting"] .public-bean-ring,
@@ -207,23 +209,6 @@
     animation: public-bean-pulse 1.8s ease-in-out infinite;
 }
 
-.public-bean-presence[data-mode="starting"] .public-bean-help,
-.public-bean-presence[data-mode="connecting"] .public-bean-help {
-    opacity: 1;
-    transform: translateY(0);
-}
-
-.public-bean-presence[data-mode]:not([data-mode="disabled"]) .public-bean-cue {
-    opacity: 0;
-    visibility: hidden;
-}
-
-.public-bean-presence[data-scrolled="true"] .public-bean-cue {
-    opacity: 0;
-    visibility: hidden;
-    pointer-events: none;
-}
-
 .public-bean-presence[data-mode="connecting"] .public-bean-ring,
 .public-bean-presence[data-mode="thinking"] .public-bean-ring,
 .public-bean-presence[data-mode="navigating"] .public-bean-ring {
@@ -231,25 +216,71 @@
     animation: public-bean-orbit .85s linear infinite;
 }
 
-.public-bean-guided-highlight {
-    border-radius: 18px;
-    animation: public-bean-guided-highlight 2.4s ease-out both;
-}
-
 .public-bean-presence[data-mode="speaking"] .public-bean-ring {
     background: conic-gradient(from var(--public-bean-ring-angle), rgba(var(--public-bean-accent), .18), rgba(var(--public-bean-accent), .68), rgba(var(--public-bean-accent), .18));
     animation: public-bean-pulse 1.05s ease-in-out infinite;
 }
 
-.public-bean-presence[data-mode="error"] {
-    border-color: rgba(220, 38, 38, .34);
-    background: rgba(254, 242, 242, .94);
+.public-bean-presence[data-mode="error"] .public-bean-status {
     color: #a43b3b;
 }
 
 .public-bean-presence[data-mode]:not([data-mode="disabled"]) .public-bean-icon img {
     opacity: 1;
-    filter: none;
+    filter: drop-shadow(0 20px 32px rgba(20, 42, 24, .2));
+}
+
+.public-bean-guided-highlight {
+    border-radius: 18px;
+    animation: public-bean-guided-highlight 2.4s ease-out both;
+}
+
+@media (max-width: 620px) {
+    .public-bean-presence {
+        top: calc(env(safe-area-inset-top, 0px) + 38px);
+        left: 14px;
+        width: 116px;
+    }
+
+    .public-bean-presence-hero {
+        top: auto;
+        left: auto;
+        width: max-content;
+        max-width: min(260px, calc(100vw - 48px));
+        margin-bottom: 16px;
+    }
+
+    .public-bean-nav-spacer {
+        flex-basis: 118px;
+        width: 118px;
+        height: 82px;
+    }
+
+    .public-bean-control,
+    .public-bean-icon {
+        width: 82px;
+        height: 82px;
+        flex-basis: 82px;
+    }
+
+    .public-bean-icon img {
+        width: 60px;
+        height: 60px;
+    }
+
+    .public-bean-ring {
+        inset: 12px 17px auto;
+        width: 82px;
+        height: 82px;
+    }
+
+    .public-bean-status {
+        font-size: 13px;
+    }
+
+    .public-bean-help {
+        font-size: 12px;
+    }
 }
 
 @keyframes public-bean-pulse {
@@ -265,53 +296,6 @@
     0% { box-shadow: 0 0 0 0 rgba(82, 168, 105, 0); }
     18% { box-shadow: 0 0 0 6px rgba(82, 168, 105, .24); }
     100% { box-shadow: 0 0 0 12px rgba(82, 168, 105, 0); }
-}
-
-@media (max-width: 620px) {
-    .public-bean-presence {
-        top: calc(env(safe-area-inset-top, 0px) + 54px);
-        left: 17px;
-    }
-
-    .public-bean-nav-spacer {
-        flex-basis: 124px;
-        width: 124px;
-    }
-
-    .public-bean-cue {
-        top: calc(100% + 28px);
-        left: 72px;
-        width: 132px;
-        font-size: 14px;
-    }
-
-    .public-bean-cue svg {
-        top: -48px;
-        left: -62px;
-        width: 70px;
-        height: 70px;
-    }
-
-    .public-bean-status {
-        max-width: 132px;
-    }
-
-}
-
-@media (max-width: 390px) {
-    .public-bean-cue {
-        display: none;
-    }
-
-    .public-bean-control {
-        padding-right: 10px;
-    }
-
-    .public-bean-status {
-        max-width: 104px;
-        font-size: 11px;
-    }
-
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -345,7 +329,6 @@
     overflow: visible;
 }
 
-.public-bean-presence-signup .public-bean-cue,
 .public-bean-presence-signup .public-bean-status {
     display: none;
 }

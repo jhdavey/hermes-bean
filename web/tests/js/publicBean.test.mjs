@@ -5,68 +5,51 @@ import test from 'node:test';
 const source = await readFile(new URL('../../resources/js/publicBean.js', import.meta.url), 'utf8');
 const styles = await readFile(new URL('../../resources/css/public-bean.css', import.meta.url), 'utf8');
 const navigation = await readFile(new URL('../../resources/views/partials/public-nav.blade.php', import.meta.url), 'utf8');
+const beanPresence = await readFile(new URL('../../resources/views/partials/public-bean-presence.blade.php', import.meta.url), 'utf8');
 const appView = await readFile(new URL('../../resources/views/app.blade.php', import.meta.url), 'utf8');
 const landing = await readFile(new URL('../../resources/views/welcome.blade.php', import.meta.url), 'utf8');
 const agentConfig = await readFile(new URL('../../scripts/elevenlabs-landing-agent-configure.mjs', import.meta.url), 'utf8');
 
-test('public pages expose a compact Bean control without the authenticated chat panel', () => {
-    assert.match(navigation, /data-public-bean/);
-    assert.match(navigation, /Tap to talk/);
-    assert.match(navigation, /data-public-bean-status/);
-    assert.match(navigation, /Hey! I'm over here!/);
-    assert.match(navigation, /data-public-bean-cue/);
-    assert.match(navigation, /aria-label="Talk with Bean"/);
+test('public pages expose an icon-only Bean control without handwritten cue chrome', () => {
+    assert.match(beanPresence, /data-public-bean/);
+    assert.match(beanPresence, /Tap to wake up/);
+    assert.match(beanPresence, /Volume on · allow mic/);
+    assert.match(beanPresence, /data-public-bean-status/);
+    assert.match(beanPresence, /data-public-bean-help/);
+    assert.match(beanPresence, /aria-label="\{\{ \$publicBeanAria \}\}"/);
+    assert.match(navigation, /@include\('partials.public-bean-presence'\)/);
     assert.match(navigation, /href="\/register\?from=topbar_button"/);
     assert.match(navigation, /href="\/register\?from=mobile_menu"/);
     assert.doesNotMatch(navigation, /href="\/register\?from=bean"/);
-    assert.match(navigation, /Turn your volume on, then allow microphone access\./);
     assert.match(navigation, /public-bean-nav-spacer/);
-    assert.doesNotMatch(navigation, /data-bean-panel|hb-bean-chat/);
-    assert.match(styles, /\.public-bean-presence/);
-    assert.match(styles, /background:\s*rgba\(255, 255, 255/);
-    assert.match(styles, /\.public-bean-status/);
-    assert.match(styles, /\.public-bean-cue/);
-    assert.match(styles, /font-family: "Bradley Hand", "Comic Sans MS", "Marker Felt", cursive/);
-    assert.match(styles, /\.public-bean-cue-arrow/);
-    assert.match(styles, /\.public-bean-help/);
+    assert.doesNotMatch(beanPresence, /data-bean-panel|hb-bean-chat/);
+    assert.doesNotMatch(beanPresence, /Hey! I'm over here!|data-public-bean-cue|public-bean-cue-arrow|viewBox="0 0 88 88"/);
+    assert.doesNotMatch(styles, /\.public-bean-cue|Bradley Hand|Comic Sans MS|Marker Felt|public-bean-cue-arrow/);
+    assert.match(styles, /\.public-bean-control \{[\s\S]*?width:\s*92px[\s\S]*?height:\s*92px/);
+    assert.match(styles, /\.public-bean-control::before \{[\s\S]*?radial-gradient/);
+    assert.match(styles, /\.public-bean-status,[\s\S]*?\.public-bean-help \{/);
     assert.doesNotMatch(styles, /\.public-bean-prompt|\.public-bean-intents/);
-    assert.match(styles, /\.public-bean-cue:focus-visible/);
 });
 
-test('landing Bean stays fixed in the top-left viewport while page content scrolls', () => {
-    const presence = styles.match(/\.public-bean-presence \{([\s\S]*?)\n\}/)?.[1] || '';
-    const spacer = styles.match(/\.public-bean-nav-spacer \{([\s\S]*?)\n\}/)?.[1] || '';
-    assert.match(presence, /position:\s*fixed/);
-    assert.match(presence, /top:\s*calc\(env\(safe-area-inset-top, 0px\) \+ 54px\)/);
-    assert.match(presence, /left:\s*max\(24px, calc\(\(100vw - var\(--pb-max, 1152px\)\) \/ 2 \+ 24px\)\)/);
-    assert.match(presence, /z-index:\s*70/);
-    assert.match(spacer, /flex:\s*0 0 124px/);
-    assert.match(spacer, /height:\s*42px/);
-    assert.match(source, /const updateScrolledCueState = \(\) =>/);
-    assert.match(source, /root\.dataset\.scrolled = window\.scrollY > 80 \? 'true' : 'false'/);
-    assert.match(source, /window\.addEventListener\('scroll', updateScrolledCueState, \{ passive: true \}\)/);
-    assert.match(styles, /\.public-bean-presence\[data-scrolled="true"\] \.public-bean-cue \{[\s\S]*?pointer-events:\s*none/);
+test('home landing Bean is centered in the hero above the feature icons', () => {
+    assert.match(landing, /@include\('partials.public-nav', \['hideBeanPresence' => true\]\)/);
+    assert.match(landing, /public-bean-presence-hero/);
+    assert.match(landing, /'status' => 'Tap to wake up'/);
+    assert.match(landing, /'help' => 'Volume on · allow mic'/);
+    assert.match(landing, /Hi! I'm Bean\. Your new assistant!/);
+    assert.match(landing, /Bean is here to help you stay organized and on top of things like your calendar, tasks, reminders and more\./);
+    assert.match(landing, /Across personal and shared workspaces, Bean is by your side, 24\/7\./);
+    assert.match(landing, /Try it for free/);
+    assert.doesNotMatch(landing, /Stop carrying every detail yourself\.|See Bean in action/);
+    assert.ok(landing.indexOf('public-bean-presence-hero') >= 0);
+    assert.ok(landing.indexOf('public-bean-presence-hero') < landing.indexOf('hero-icons'));
 
-    const mobileBlock = styles.match(/@media \(max-width: 620px\) \{([\s\S]*?)@media \(max-width: 390px\)/)?.[1] || '';
-    assert.match(mobileBlock, /\.public-bean-presence \{[\s\S]*?left:\s*17px/);
-});
-
-test('landing Bean handwritten cue keeps the arrow separate and more upward than leftward', () => {
-    const desktopCue = styles.match(/\.public-bean-cue \{([\s\S]*?)\n\}/)?.[1] || '';
-    const desktopArrow = styles.match(/\.public-bean-cue svg \{([\s\S]*?)\n\}/)?.[1] || '';
-    assert.match(desktopCue, /top:\s*calc\(100% \+ 34px\)/);
-    assert.match(desktopCue, /left:\s*112px/);
-    assert.match(desktopArrow, /top:\s*-60px/);
-    assert.match(desktopArrow, /left:\s*-78px/);
-    assert.match(desktopArrow, /width:\s*88px/);
-    assert.match(navigation, /viewBox="0 0 88 88"/);
-    assert.match(navigation, /M78 76 C56 66 48 51 40 36/);
-
-    const mobileBlock = styles.match(/@media \(max-width: 620px\) \{([\s\S]*?)@media \(max-width: 390px\)/)?.[1] || '';
-    assert.match(mobileBlock, /top:\s*calc\(100% \+ 28px\)/);
-    assert.match(mobileBlock, /left:\s*72px/);
-    assert.match(mobileBlock, /top:\s*-48px/);
-    assert.match(mobileBlock, /left:\s*-62px/);
+    const heroPresence = styles.match(/\.public-bean-presence-hero \{([\s\S]*?)\n\}/)?.[1] || '';
+    assert.match(heroPresence, /position:\s*relative/);
+    assert.match(heroPresence, /top:\s*auto/);
+    assert.match(heroPresence, /left:\s*auto/);
+    assert.match(heroPresence, /margin:\s*0 auto 20px/);
+    assert.doesNotMatch(source, /updateScrolledCueState|data-public-bean-cue/);
 });
 
 test('landing Bean starts voice directly from an explicit tap with a hearing check', () => {
@@ -75,13 +58,14 @@ test('landing Bean starts voice directly from an explicit tap with a hearing che
     assert.match(source, /navigator\.mediaDevices\.getUserMedia\(\{ audio: true \}\)/);
     assert.match(source, /Turn volume on\. Allow mic\./);
     assert.match(source, /await startVoiceConversation\(revision\)/);
-    assert.match(source, /cue\?\.addEventListener\('click'/);
+    assert.doesNotMatch(source, /cue\?\.addEventListener|data-public-bean-cue/);
     assert.match(source, /Conversation\.startSession/);
     assert.match(source, /conversationToken:\s*session\.token/);
     assert.match(source, /Hey, I'm Bean, can you hear me\?/);
     assert.match(source, /SIGNUP_WAKE_GREETING/);
     assert.match(source, /You’re in the quick info step/);
-    assert.match(agentConfig, /help you start signup whenever you’re ready/);
+    assert.match(agentConfig, /I can give you a quick tour or answer questions/);
+    assert.doesNotMatch(agentConfig, /help you start signup whenever you’re ready/);
     assert.match(source, /firstMessage:\s*pendingFirstMessage \|\| \(signupOnboardingContext \? SIGNUP_WAKE_GREETING : WAKE_GREETING\)/);
     assert.doesNotMatch(source, /SpeechRecognition|Just say “Hey Bean|createWakeDetector|extractWakeTail|prefetchVoiceSession|restartWakeListening/);
     assert.match(source, /Demo cooldown — try again shortly/);
@@ -98,7 +82,7 @@ test('landing Bean starts voice directly from an explicit tap with a hearing che
     assert.match(source, /root\.dataset\.conversationTokenUrl/);
     assert.match(source, /root\.dataset\.messageUrl/);
     assert.match(source, /root\.dataset\.voiceEventUrl/);
-    assert.match(navigation, /data-voice-event-url/);
+    assert.match(beanPresence, /data-voice-event-url/);
 
     const permissionRequest = source.indexOf('navigator.mediaDevices.getUserMedia({ audio: true })');
     const voiceStart = source.indexOf('await startVoiceConversation(revision)');
@@ -111,7 +95,7 @@ test('register flow keeps one visual Bean while private signup fields stay text-
     assert.match(appView, /data-public-bean-context="signup_onboarding"/);
     assert.match(appView, /public-bean-presence-signup/);
     assert.match(appView, /data-public-bean-toggle/);
-    assert.match(appView, /Tap to talk/);
+    assert.match(appView, /Tap to wake up/);
     assert.doesNotMatch(appView, /Hey! I'm over here!|data-public-bean-cue|public-bean-cue-arrow/);
     assert.match(appView, /resources\/js\/publicBean\.js/);
     assert.match(appView, /Type these quick details\. Bean will chime back in\./);
@@ -145,8 +129,8 @@ test('landing Bean can be disabled while voice startup is still pending', () => 
     assert.match(source, /if \(!isCurrentLifecycle\(revision\)\) \{\s*await nextConversation\?\.endSession\?\.\(\)\.catch/);
 
     const disableBody = source.match(/const disable = async \(\) => \{([\s\S]*?)\n    \};/)?.[1] || '';
-    assert.ok(disableBody.indexOf("setStatus('disabled', 'Tap to talk')") >= 0);
-    assert.ok(disableBody.indexOf("setStatus('disabled', 'Tap to talk')") < disableBody.indexOf("await stopVoiceConversation('disabled')"));
+    assert.ok(disableBody.indexOf("setStatus('disabled', 'Tap to wake up')") >= 0);
+    assert.ok(disableBody.indexOf("setStatus('disabled', 'Tap to wake up')") < disableBody.indexOf("await stopVoiceConversation('disabled')"));
 });
 
 test('landing voice uses a dedicated fast ElevenLabs guide with an action-only public section tool', () => {
@@ -155,6 +139,8 @@ test('landing voice uses a dedicated fast ElevenLabs guide with an action-only p
     assert.match(agentConfig, /showSignupInput/);
     assert.match(source, /showLandingSection:\s*async/);
     assert.match(source, /showSignupInput:\s*async/);
+    assert.match(source, /keepVoiceAliveAfterUiAction/);
+    assert.match(source, /conversation\?\.sendUserActivity\?\.\(\)/);
     assert.match(agentConfig, /answer directly with the facts below using the configured fast model/);
     assert.match(agentConfig, /Do not call a response\/reasoning tool for normal questions/);
     assert.match(agentConfig, /bean:landing-guide-facts/);
@@ -162,8 +148,10 @@ test('landing voice uses a dedicated fast ElevenLabs guide with an action-only p
     assert.match(agentConfig, /Hey, I'm Bean, can you hear me\?/);
     assert.match(agentConfig, /If the visitor responds yes, yeah, yep, I can/);
     assert.match(agentConfig, /Primary goal:/);
-    assert.match(agentConfig, /Help the visitor experience Bean as quickly as possible/);
-    assert.match(agentConfig, /not like a nagging salesperson/);
+    assert.match(agentConfig, /Help the visitor understand Bean quickly/);
+    assert.match(agentConfig, /not a salesperson/);
+    assert.match(agentConfig, /Do not repeatedly suggest signup or pressure them/);
+    assert.doesNotMatch(agentConfig, /naturally steer interested visitors|nagging salesperson|If they sound interested/);
     assert.doesNotMatch(agentConfig, /bean_landing_intent|quick-start intent/);
     assert.match(agentConfig, /expectsResponse:\s*false/);
     assert.match(agentConfig, /expectsResponse:\s*true/);
@@ -187,7 +175,7 @@ test('landing voice uses a dedicated fast ElevenLabs guide with an action-only p
 });
 
 test('landing Bean supports optional bot verification without exposing a secret', () => {
-    assert.match(navigation, /data-turnstile-site-key/);
+    assert.match(beanPresence, /data-turnstile-site-key/);
     assert.match(source, /getTurnstileToken/);
     assert.match(source, /challenges\.cloudflare\.com\/turnstile/);
     assert.doesNotMatch(navigation, /TURNSTILE_SECRET|secret_key/);
@@ -203,6 +191,7 @@ test('landing Bean reveals the three-step quick tour plus signup and pricing des
     assert.match(agentConfig, /destination "onboarding"/);
     assert.match(agentConfig, /make it sound conversational instead of scripted/);
     assert.match(agentConfig, /Do not repeat the same question twice/);
+    assert.match(agentConfig, /Do not pivot to signup unless they explicitly ask how to try or start/);
     assert.match(agentConfig, /do not say “Want the next stop\?” more than once/);
     assert.match(agentConfig, /Ok, i'll just get some quick info from you and show you around/);
     assert.match(agentConfig, /Do not say handoff, transfer, another Bean, or explain implementation/);

@@ -53,7 +53,6 @@ function mountPublicBean(root) {
     const button = root.querySelector('[data-public-bean-toggle]');
     const status = root.querySelector('[data-public-bean-status]');
     const help = root.querySelector('[data-public-bean-help]');
-    const cue = root.querySelector('[data-public-bean-cue]');
     if (!button || !status) return;
     const signupOnboardingContext = publicBeanContext(root) === 'signup_onboarding';
     const beanLabel = signupOnboardingContext ? 'Bean signup guide' : 'landing page Bean';
@@ -77,12 +76,6 @@ function mountPublicBean(root) {
 
     const isCurrentLifecycle = (revision) => enabled && lifecycleRevision === revision;
 
-    const updateScrolledCueState = () => {
-        root.dataset.scrolled = window.scrollY > 80 ? 'true' : 'false';
-    };
-
-    updateScrolledCueState();
-    window.addEventListener('scroll', updateScrolledCueState, { passive: true });
 
     const setStatus = (mode, text) => {
         root.dataset.mode = mode;
@@ -101,6 +94,14 @@ function mountPublicBean(root) {
         idleTimer = 0;
     };
 
+    const keepVoiceAliveAfterUiAction = () => {
+        lastActivityAt = Date.now();
+        try {
+            conversation?.sendUserActivity?.();
+        } catch (_) {}
+        if (voiceActive) scheduleIdleClose();
+    };
+
     const scheduleIdleClose = () => {
         stopIdleTimer();
         if (!voiceActive) return;
@@ -113,7 +114,7 @@ function mountPublicBean(root) {
             }
             stopVoiceConversation('client_idle_timeout').finally(() => {
                 enabled = false;
-                setStatus('disabled', 'Tap to talk');
+                setStatus('disabled', 'Tap to wake up');
             });
         }, IDLE_CLOSE_MS);
     };
@@ -143,7 +144,7 @@ function mountPublicBean(root) {
         lifecycleRevision += 1;
         enabled = false;
         starting = false;
-        setStatus('disabled', 'Tap to talk');
+        setStatus('disabled', 'Tap to wake up');
         await stopVoiceConversation('disabled');
     };
 
@@ -284,7 +285,9 @@ function mountPublicBean(root) {
                     if (signupOnboardingContext && ['signup', 'onboarding', 'register', 'input'].includes(String(destination || '').toLowerCase())) {
                         return focusSignupOnboardingInput(parameters);
                     }
+                    lastActivityAt = Date.now();
                     showLandingUiAction(destination);
+                    keepVoiceAliveAfterUiAction();
                     return 'Section shown.';
                 },
                 showSignupInput: async (parameters = {}) => focusSignupOnboardingInput(parameters),
@@ -305,6 +308,7 @@ function mountPublicBean(root) {
                             landingHermesRuntimeSamplesMs.push(Math.round(runtimeMs));
                         }
                         showLandingUiAction(response?.ui_action || parameters.destination);
+                        keepVoiceAliveAfterUiAction();
                         return String(response?.answer || 'I am having trouble answering right now.');
                     } catch (error) {
                         return String(error?.publicMessage || 'I am having trouble answering right now.');
@@ -339,7 +343,7 @@ function mountPublicBean(root) {
                 landingWakeToFirstSpeechMs = null;
                 landingHermesRuntimeSamplesMs = [];
                 enabled = false;
-                setStatus('disabled', 'Tap to talk');
+                setStatus('disabled', 'Tap to wake up');
             },
             onError: () => {
                 if (!isCurrentLifecycle(revision)) return;
@@ -416,17 +420,12 @@ function mountPublicBean(root) {
         enable();
     });
 
-    cue?.addEventListener('click', () => {
-        if (enabled) disable();
-        else enable();
-    });
-
 
     window.addEventListener('pagehide', () => {
         stopVoiceConversation('pagehide');
     }, { once: true });
 
-    setStatus('disabled', 'Tap to talk');
+    setStatus('disabled', 'Tap to wake up');
 
     async function postJson(url, body) {
         const response = await fetch(url, {

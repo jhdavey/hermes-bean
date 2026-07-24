@@ -26,9 +26,15 @@
 </head>
 <body>
     @include('partials.public-beta-banner')
-    @include('partials.public-nav')
+    @include('partials.public-nav', ['hideBeanPresence' => true])
 
     <main class="wrap hero">
+        @include('partials.public-bean-presence', [
+            'class' => 'public-bean-presence-hero',
+            'status' => 'Tap to wake up',
+            'help' => 'Volume on · allow mic',
+            'ariaLabel' => 'Wake up Bean',
+        ])
         <div class="hero-icons" aria-label="HeyBean tools">
             <span class="hero-icon bean" aria-label="Bean">
                 <img src="{{ asset('images/bean-logo.png') }}" alt="">
@@ -46,11 +52,10 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
             </span>
         </div>
-        <h1>Stop carrying every detail yourself.</h1>
-        <p class="hero-subhead">HeyBean is the AI executive assistant for busy professionals and parents. Tell Bean what needs to happen, and it turns your requests into calendar events, tasks, reminders, and follow-ups across work and home.</p>
+        <h1>Hi! I'm Bean. Your new assistant!</h1>
+        <p class="hero-subhead">Bean is here to help you stay organized and on top of things like your calendar, tasks, reminders and more. Across personal and shared workspaces, Bean is by your side, 24/7.</p>
         <div class="hero-actions">
-            <a class="button" href="/register?from=hero_cta">Start with Bean <span aria-hidden="true">→</span></a>
-            <a class="button outline" href="#bean-demo">See Bean in action</a>
+            <a class="button" href="/register?from=hero_cta">Try it for free <span aria-hidden="true">→</span></a>
         </div>
         <p class="hero-microcopy">24 of 100 early-access spots left <span aria-hidden="true">·</span> 7-day free trial after plan selection</p>
         <div class="agent-pills" aria-label="HeyBean highlights">
@@ -228,7 +233,7 @@
             <h2>Let Bean take the next few things off your mind.</h2>
             <p class="hero-subhead">Start with one request. Bean will help you turn it into an organized plan for what happens next.</p>
             <div class="hero-actions">
-                <a class="button" href="/register?from=final_cta">Start with Bean <span aria-hidden="true">→</span></a>
+                <a class="button" href="/register?from=final_cta">Try it for free <span aria-hidden="true">→</span></a>
             </div>
             <p class="hero-microcopy">24 of 100 spots left · 7-day free trial after plan selection</p>
         </div>

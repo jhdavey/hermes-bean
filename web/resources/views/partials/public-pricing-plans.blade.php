@@ -49,8 +49,8 @@
                         @endforeach
                     </ul>
                     <div class="plan-actions">
-                        <a class="button monthly-link" data-plan-link="{{ $plan['key'] }}" href="/register?plan={{ $plan['key'] }}&billing_interval=monthly">Start with Bean <span aria-hidden="true">→</span></a>
-                        <a class="button yearly-link" href="/register?plan={{ $plan['key'] }}&billing_interval=yearly">Start with Bean <span aria-hidden="true">→</span></a>
+                        <a class="button monthly-link" data-plan-link="{{ $plan['key'] }}" href="/register?plan={{ $plan['key'] }}&billing_interval=monthly">Try it for free <span aria-hidden="true">→</span></a>
+                        <a class="button yearly-link" href="/register?plan={{ $plan['key'] }}&billing_interval=yearly">Try it for free <span aria-hidden="true">→</span></a>
                     </div>
                     <p class="fine">$0.00 due today, cancel anytime</p>
                 </article>

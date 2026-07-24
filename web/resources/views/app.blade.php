@@ -30,7 +30,7 @@
             <span class="public-bean-ring" aria-hidden="true"></span>
             <button class="public-bean-control" type="button" data-public-bean-toggle aria-pressed="false" aria-label="Talk with Bean">
                 <span class="public-bean-icon"><img src="{{ asset('images/bean-logo.png') }}" alt="Bean"></span>
-                <span class="public-bean-status" data-public-bean-status aria-live="polite">Tap to talk</span>
+                <span class="public-bean-status" data-public-bean-status aria-live="polite">Tap to wake up</span>
             </button>
             <span class="public-bean-help" data-public-bean-help>Type these quick details. Bean will chime back in.</span>
             <span class="public-bean-turnstile" data-public-bean-turnstile hidden></span>
