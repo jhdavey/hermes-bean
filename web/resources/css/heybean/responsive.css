@@ -819,25 +819,38 @@
 
 @media (max-width: 640px) {
     .hb-guided-immersive-shell {
-        padding: 108px 16px 148px;
+        min-height: 100svh;
+        padding: 114px 16px 96px;
     }
 
     .hb-guided-immersive-shell .hb-guided-onboarding-content {
         width: min(100%, 680px);
         max-height: none;
         overflow: visible;
-        padding: 28px 0 0;
+        padding: 18px 0 0;
+        gap: 10px;
+    }
+
+    .hb-guided-immersive-shell .hb-guided-chat-log {
+        min-height: 0;
+        gap: 8px;
     }
 
     .hb-guided-immersive-shell .hb-guided-choice-panel:not(.hb-guided-plan-panel) {
+        width: min(336px, calc(100vw - 36px));
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
     .hb-guided-immersive-topbar {
         top: auto;
-        right: 14px;
-        bottom: 12px;
+        right: auto;
+        left: 50%;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
         z-index: 39;
-        opacity: .86;
+        width: auto;
+        transform: translateX(-50%);
+        opacity: .78;
+        gap: 5px;
+        white-space: nowrap;
     }
 }

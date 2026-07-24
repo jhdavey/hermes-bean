@@ -1661,9 +1661,10 @@ export function mountHeyBeanWebApp(mount) {
         return `
             <div class="hb-app hb-guided-immersive-app">
                 <main class="hb-guided-onboarding-shell hb-guided-chat-shell hb-guided-immersive-shell">
-                    <div class="hb-guided-onboarding-topbar hb-guided-immersive-topbar">
-                        <button class="hb-button-ghost" type="button" data-auth-mode="login">Login</button>
-                        <button class="hb-button-ghost" type="button" data-plain-signup>Use plain signup form</button>
+                    <div class="hb-guided-onboarding-topbar hb-guided-immersive-topbar" aria-label="Signup alternatives">
+                        <button class="hb-button-ghost" type="button" data-auth-mode="login">Log in</button>
+                        <span aria-hidden="true">·</span>
+                        <button class="hb-button-ghost" type="button" data-plain-signup>Use form instead</button>
                     </div>
                     <section class="hb-guided-onboarding-stage hb-guided-immersive-stage" aria-live="polite">
                         <div class="hb-guided-onboarding-content hb-guided-chat-content" data-guided-content>
@@ -1689,8 +1690,8 @@ export function mountHeyBeanWebApp(mount) {
             ['bean', `${fromLandingBean ? '' : 'Hi, I’m Bean. '}I’ll help get your HeyBean account set up. What is your first and last name?`],
         ];
         if (state.guidedSignupName) {
-            messages.push(['user', state.guidedSignupName]);
-            messages.push(['bean', `Nice to meet you, ${state.guidedSignupName}. Do you prefer Light, Dark, or Auto mode? You can change this later in Appearance settings.`]);
+            messages.push(['user', 'Name added']);
+            messages.push(['bean', 'Nice to meet you. Do you prefer Light, Dark, or Auto mode? You can change this later in Appearance settings.']);
         }
         if (state.guidedSignupStep !== 'name' && ['email', 'password', 'plan'].includes(state.guidedSignupStep)) {
             const mode = themeModesByKey.get(state.guidedSignupThemeMode) || themeModesByKey.get('auto');
@@ -1698,7 +1699,7 @@ export function mountHeyBeanWebApp(mount) {
             messages.push(['bean', `${mode.label} it is. What email address would you like to use for your account?`]);
         }
         if (state.guidedSignupEmail) {
-            messages.push(['user', state.guidedSignupEmail]);
+            messages.push(['user', 'Email added']);
             if (['password', 'plan'].includes(state.guidedSignupStep)) {
                 messages.push(['bean', 'Great. Now choose a password. Type it here and press Send — don’t say it out loud.']);
             }

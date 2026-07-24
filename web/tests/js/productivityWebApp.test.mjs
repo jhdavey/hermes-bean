@@ -10,6 +10,7 @@ const dashboardSource = await readFile(new URL('../../resources/css/heybean/dash
 const calendarSource = await readFile(new URL('../../resources/css/heybean/calendar.css', import.meta.url), 'utf8');
 const notesSource = await readFile(new URL('../../resources/css/heybean/notes.css', import.meta.url), 'utf8');
 const baseShellSource = await readFile(new URL('../../resources/css/heybean/base-shell.css', import.meta.url), 'utf8');
+const publicBetaBannerSource = await readFile(new URL('../../resources/views/partials/public-beta-banner.blade.php', import.meta.url), 'utf8');
 const typographyOverridesSource = await readFile(new URL('../../resources/css/heybean/typography-overrides.css', import.meta.url), 'utf8');
 
 function cssRuleContaining(sourceText, selector) {
@@ -23,6 +24,11 @@ function cssRuleContaining(sourceText, selector) {
 test('web signup starts with Bean chat and keeps a plain signup fallback', () => {
     assert.match(source, /Start with Bean/);
     assert.match(source, /Use plain signup form/);
+    assert.match(source, /Use form instead/);
+    assert.match(source, /Name added/);
+    assert.match(source, /Email added/);
+    assert.doesNotMatch(source, /messages\.push\(\['user', state\.guidedSignupEmail\]\)/);
+    assert.doesNotMatch(source, /Nice to meet you, \$\{state\.guidedSignupName\}/);
     assert.match(source, /plainSignupMarkup/);
     assert.match(source, /hb-guided-chat-log/);
     assert.match(source, /fromLandingBean/);
@@ -88,6 +94,10 @@ test('web signup starts with Bean chat and keeps a plain signup fallback', () =>
     assert.doesNotMatch(source, /You won’t choose a plan or pay while you wait/);
     assert.ok(source.indexOf("state.phase = 'waitlist'") < source.indexOf('startSignupDashboardPreview(result)'));
     assert.match(baseShellSource, /\.hb-guided-chat-composer/);
+    assert.match(baseShellSource, /\.public-beta-banner-register/);
+    assert.match(publicBetaBannerSource, /request\(\)->is\('register'\)/);
+    assert.match(publicBetaBannerSource, /Early access/);
+    assert.doesNotMatch(publicBetaBannerSource.match(/@if \(\$isRegisterBanner\)[\s\S]*?@else/)?.[0] || '', /Start with Bean/);
     assert.match(baseShellSource, /\.hb-guided-chat-bubble-user/);
     assert.match(baseShellSource, /\.hb-guided-immersive-app/);
     assert.match(baseShellSource, /--hb-guided-atmosphere/);
