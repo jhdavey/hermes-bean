@@ -91,7 +91,7 @@ body:has(.public-bean-presence-hero) .hero .hero-icons {
     inset: 8px;
     z-index: -1;
     border-radius: 50%;
-    background: radial-gradient(circle, rgba(var(--public-bean-accent), .24), transparent 66%);
+    background: radial-gradient(circle, rgba(var(--public-bean-accent), .29), transparent 66%);
     filter: blur(11px);
 }
 
@@ -108,7 +108,7 @@ body:has(.public-bean-presence-hero) .hero .hero-icons {
 }
 
 .public-bean-control:hover::before {
-    background: radial-gradient(circle, rgba(var(--public-bean-accent), .32), transparent 68%);
+    background: radial-gradient(circle, rgba(var(--public-bean-accent), .37), transparent 68%);
 }
 
 .public-bean-control:focus-visible {
@@ -156,7 +156,15 @@ body:has(.public-bean-presence-hero) .hero .hero-icons {
 .public-bean-presence-hero[data-landing-scroll="compact"] .public-bean-control::before {
     inset: 7px;
     filter: blur(8px);
-    background: radial-gradient(circle, rgba(var(--public-bean-accent), .20), transparent 66%);
+    background: radial-gradient(circle, rgba(var(--public-bean-accent), .25), transparent 66%);
+}
+
+.public-bean-presence-hero[data-mode="speaking"] .public-bean-control::before {
+    animation: public-bean-zero-glow .95s ease-in-out infinite;
+}
+
+.public-bean-presence-hero[data-mode="listening"] .public-bean-control::before {
+    animation: public-bean-zero-glow 1.35s ease-in-out infinite;
 }
 
 .public-bean-presence-hero[data-landing-scroll="compact"] .public-bean-control::after {
@@ -601,6 +609,7 @@ body.public-signup-active .hb-guided-zero-chrome-shell {
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .public-bean-presence-hero .public-bean-control::before,
     .public-bean-presence-signup .public-bean-control,
     .public-bean-presence-signup .public-bean-control::before {
         animation: none !important;

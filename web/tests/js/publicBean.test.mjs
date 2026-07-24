@@ -127,7 +127,14 @@ test('home landing Bean is centered in the hero above the feature icons', () => 
     assert.match(heroPresence, /position:\s*fixed/);
     assert.match(heroPresence, /--public-bean-handoff-top/);
     assert.match(heroPresence, /--public-bean-handoff-left/);
+    assert.match(heroPresence, /--public-bean-accent:\s*107, 114, 128/);
     assert.match(heroPresence, /transform:\s*translateX\(-50%\)/);
+    assert.match(styles, /\.public-bean-control::before \{[\s\S]*?rgba\(var\(--public-bean-accent\), \.29\)/);
+    assert.match(styles, /\.public-bean-control:hover::before \{[\s\S]*?rgba\(var\(--public-bean-accent\), \.37\)/);
+    assert.match(styles, /\.public-bean-presence-hero\[data-landing-scroll="compact"\] \.public-bean-control::before \{[\s\S]*?rgba\(var\(--public-bean-accent\), \.25\)/);
+    assert.match(styles, /\.public-bean-presence-hero\[data-mode="speaking"\] \.public-bean-control::before \{[\s\S]*?animation:\s*public-bean-zero-glow \.95s/);
+    assert.match(styles, /\.public-bean-presence-hero\[data-mode="listening"\] \.public-bean-control::before \{[\s\S]*?animation:\s*public-bean-zero-glow 1\.35s/);
+    assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.public-bean-presence-hero \.public-bean-control::before,[\s\S]*?animation:\s*none !important/);
     assert.match(styles, /body:has\(\.public-bean-presence-hero\) \.hero \.hero-icons \{[\s\S]*?margin-top:\s*137px/);
     const bundledBackdropBlock = styles.match(/body:has\(\.public-bean-presence-hero\)::before \{([\s\S]*?)\n\}/)?.[1] || '';
     assert.match(bundledBackdropBlock, /height:\s*calc\(env\(safe-area-inset-top, 0px\) \+ 154px\)/);
