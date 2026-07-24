@@ -132,8 +132,8 @@
 }
 
 .public-beta-banner {
-    position: sticky;
-    top: 0;
+    position: static;
+    top: auto;
     z-index: 25;
     width: 100%;
     min-height: 34px;

@@ -46,6 +46,12 @@ test('public pricing toggle script is external so production CSP does not block 
     assert.match(publicPricingScript, /billing_interval/);
 });
 
+test('public early access banner stays at the top of the page instead of sticky viewport chrome', () => {
+    assert.match(appShellStyles, /\.public-beta-banner \{[\s\S]*?position:\s*static;[\s\S]*?top:\s*auto;/);
+    assert.match(publicPostbridgeStyles, /\.public-beta-banner\{position:static;top:auto;/);
+    assert.doesNotMatch(publicPostbridgeStyles, /\.public-beta-banner\{position:sticky;top:0/);
+});
+
 test('public Bean presence remains icon-only where it is mounted', () => {
     assert.match(beanPresence, /data-public-bean/);
     assert.match(beanPresence, /Tap to wake up/);
@@ -87,12 +93,25 @@ test('home landing Bean is centered in the hero above the feature icons', () => 
     assert.match(criticalStyles, /\.public-bean-presence-hero,[\s\S]*?\.public-bean-presence-signup \{/);
     assert.match(criticalStyles, /position:\s*fixed/);
     assert.match(criticalStyles, /width:\s*68px[\s\S]*?height:\s*68px[\s\S]*?max-width:\s*68px[\s\S]*?max-height:\s*68px/);
+    assert.match(criticalStyles, /body\.public-bean-landing-compact::before \{[\s\S]*?background:\s*linear-gradient\(180deg, #fff/);
+    assert.match(criticalStyles, /\.public-bean-presence-hero\[data-landing-scroll="compact"\] \{[\s\S]*?top:\s*calc\(env\(safe-area-inset-top, 0px\) \+ 14px\)/);
+    assert.match(criticalStyles, /\.public-bean-presence-hero\[data-landing-scroll="compact"\] \.public-bean-icon img \{[\s\S]*?width:\s*46px[\s\S]*?height:\s*46px/);
     const heroPresence = styles.match(/\.public-bean-presence-hero \{([\s\S]*?)\n\}/)?.[1] || '';
     assert.match(heroPresence, /position:\s*fixed/);
     assert.match(heroPresence, /--public-bean-handoff-top/);
     assert.match(heroPresence, /--public-bean-handoff-left/);
     assert.match(heroPresence, /transform:\s*translateX\(-50%\)/);
     assert.match(styles, /\.public-bean-presence-hero \+ \.hero-icons \{[\s\S]*?margin-top:\s*137px/);
+    assert.match(styles, /body\.public-bean-landing-compact::before \{[\s\S]*?height:\s*calc\(env\(safe-area-inset-top, 0px\) \+ 154px\)[\s\S]*?background:\s*linear-gradient\(180deg, #fff/);
+    assert.match(styles, /\.public-bean-presence-hero\[data-landing-scroll="compact"\] \{[\s\S]*?top:\s*calc\(env\(safe-area-inset-top, 0px\) \+ 14px\)/);
+    assert.match(styles, /\.public-bean-presence-hero\[data-landing-scroll="compact"\] \.public-bean-control,[\s\S]*?width:\s*64px[\s\S]*?height:\s*64px/);
+    assert.match(styles, /\.public-bean-presence-hero\[data-landing-scroll="compact"\] \.public-bean-icon img \{[\s\S]*?width:\s*46px[\s\S]*?height:\s*46px/);
+    assert.match(source, /function mountLandingBeanScrollState\(root\)/);
+    assert.match(source, /const compact = heroBottom <= 118/);
+    assert.match(source, /root\.dataset\.landingScroll = compact \? 'compact' : 'hero'/);
+    assert.match(source, /classList\.toggle\('public-bean-landing-compact', compact\)/);
+    assert.match(source, /window\.addEventListener\('scroll', requestScrollState, \{ passive: true \}\)/);
+    assert.match(source, /root\.classList\.contains\('public-bean-presence-hero'\)/);
     assert.doesNotMatch(source, /updateScrolledCueState|data-public-bean-cue/);
 });
 

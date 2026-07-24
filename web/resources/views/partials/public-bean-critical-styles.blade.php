@@ -33,6 +33,26 @@
         width: max-content;
         max-width: min(260px, calc(100vw - 48px));
         transform: translateX(-50%);
+        transition: top .24s ease, left .24s ease, transform .24s ease, max-width .24s ease;
+    }
+
+    body.public-bean-landing-compact::before {
+        content: "";
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 85;
+        height: calc(env(safe-area-inset-top, 0px) + 154px);
+        pointer-events: none;
+        background: linear-gradient(180deg, #fff 0%, rgba(255, 255, 255, .995) 70%, rgba(255, 255, 255, .94) 86%, rgba(255, 255, 255, 0) 100%);
+        box-shadow: 0 18px 34px rgba(255, 255, 255, .92);
+    }
+
+    .public-bean-presence-hero[data-landing-scroll="compact"] {
+        top: calc(env(safe-area-inset-top, 0px) + 14px);
+        left: 50%;
+        max-width: min(180px, calc(100vw - 40px));
     }
 
     .public-bean-presence-hero + .hero-icons {
@@ -74,6 +94,19 @@
         opacity: .9;
     }
 
+    .public-bean-presence-hero[data-landing-scroll="compact"] .public-bean-control,
+    .public-bean-presence-hero[data-landing-scroll="compact"] .public-bean-icon {
+        width: 64px;
+        height: 64px;
+    }
+
+    .public-bean-presence-hero[data-landing-scroll="compact"] .public-bean-icon img {
+        width: 46px;
+        height: 46px;
+        max-width: 46px;
+        max-height: 46px;
+    }
+
     .public-bean-copy {
         display: grid;
         justify-items: center;
@@ -101,6 +134,21 @@
         font-weight: 620;
     }
 
+    .public-bean-presence-hero[data-landing-scroll="compact"] .public-bean-copy {
+        gap: 0;
+        max-width: min(180px, calc(100vw - 40px));
+    }
+
+    .public-bean-presence-hero[data-landing-scroll="compact"] .public-bean-status {
+        color: rgba(17, 19, 17, .54);
+        font-size: 11px;
+        font-weight: 650;
+    }
+
+    .public-bean-presence-hero[data-landing-scroll="compact"] .public-bean-help {
+        display: none;
+    }
+
     .public-bean-presence-signup .public-bean-status {
         display: none;
     }
@@ -117,6 +165,28 @@
             height: 60px;
             max-width: 60px;
             max-height: 60px;
+        }
+
+        body.public-bean-landing-compact::before {
+            height: calc(env(safe-area-inset-top, 0px) + 190px);
+        }
+
+        .public-bean-presence-hero[data-landing-scroll="compact"] {
+            top: calc(env(safe-area-inset-top, 0px) + 10px);
+            max-width: min(160px, calc(100vw - 32px));
+        }
+
+        .public-bean-presence-hero[data-landing-scroll="compact"] .public-bean-control,
+        .public-bean-presence-hero[data-landing-scroll="compact"] .public-bean-icon {
+            width: 56px;
+            height: 56px;
+        }
+
+        .public-bean-presence-hero[data-landing-scroll="compact"] .public-bean-icon img {
+            width: 42px;
+            height: 42px;
+            max-width: 42px;
+            max-height: 42px;
         }
 
         .public-bean-presence-hero + .hero-icons {

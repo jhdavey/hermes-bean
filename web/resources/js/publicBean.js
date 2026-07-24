@@ -27,6 +27,29 @@ function mountTourImageZoom() {
     });
 }
 
+function mountLandingBeanScrollState(root) {
+    const hero = root.closest('.hero') || document.querySelector('main.hero');
+    if (!hero) return;
+
+    let ticking = false;
+    const setScrollState = () => {
+        ticking = false;
+        const heroBottom = hero.getBoundingClientRect().bottom;
+        const compact = heroBottom <= 118;
+        root.dataset.landingScroll = compact ? 'compact' : 'hero';
+        document.body?.classList.toggle('public-bean-landing-compact', compact);
+    };
+    const requestScrollState = () => {
+        if (ticking) return;
+        ticking = true;
+        window.requestAnimationFrame(setScrollState);
+    };
+
+    setScrollState();
+    window.addEventListener('scroll', requestScrollState, { passive: true });
+    window.addEventListener('resize', requestScrollState);
+}
+
 function openTourImageZoom(image) {
     document.querySelector('.tour-image-zoom')?.remove();
     const overlay = document.createElement('div');
@@ -57,6 +80,9 @@ function mountPublicBean(root) {
     if (!button || !status) return;
     const signupOnboardingContext = publicBeanContext(root) === 'signup_onboarding';
     const beanLabel = signupOnboardingContext ? 'Bean signup guide' : 'landing page Bean';
+    if (!signupOnboardingContext && root.classList.contains('public-bean-presence-hero')) {
+        mountLandingBeanScrollState(root);
+    }
 
     // Public Bean is intentionally opt-in on every page load.
     let enabled = false;
