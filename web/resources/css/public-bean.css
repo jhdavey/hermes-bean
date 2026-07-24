@@ -22,6 +22,7 @@
 }
 
 .public-bean-presence-hero {
+    --public-bean-accent: 107, 114, 128;
     position: fixed;
     top: var(--public-bean-scroll-top, var(--public-bean-handoff-top, var(--public-bean-shell-top)));
     left: var(--public-bean-handoff-left, var(--public-bean-shell-left));
