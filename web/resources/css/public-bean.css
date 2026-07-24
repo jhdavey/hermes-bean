@@ -33,7 +33,7 @@
 .public-bean-cue {
     position: absolute;
     top: calc(100% + 34px);
-    left: 76px;
+    left: 112px;
     z-index: 5;
     width: 176px;
     border: 0;
@@ -65,7 +65,7 @@
 .public-bean-cue svg {
     position: absolute;
     top: -60px;
-    left: -96px;
+    left: -78px;
     width: 88px;
     height: 88px;
     overflow: visible;
@@ -280,14 +280,14 @@
 
     .public-bean-cue {
         top: calc(100% + 28px);
-        left: 54px;
+        left: 72px;
         width: 132px;
         font-size: 14px;
     }
 
     .public-bean-cue svg {
         top: -48px;
-        left: -80px;
+        left: -62px;
         width: 70px;
         height: 70px;
     }
