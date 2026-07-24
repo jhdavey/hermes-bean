@@ -27,6 +27,8 @@ test('public nav uses Bean brand left, centered nav links, and login on the righ
     assert.match(navigation, /href="\/#how-it-works"/);
     assert.match(navigation, /href="\/#features"/);
     assert.match(navigation, /href="\/#plans"/);
+    assert.match(navigation, /class="nav-actions"/);
+    assert.match(navigation, /data-public-theme-toggle/);
     assert.match(navigation, /<a class="nav-login" href="\/login">Login<\/a>/);
     assert.doesNotMatch(navigation, /nav-cta|mobile-menu-cta|from=topbar_button|from=mobile_menu|Try it for free/);
     assert.match(navigation, /<a href="\/login">Login<\/a>/);
@@ -36,6 +38,8 @@ test('public nav uses Bean brand left, centered nav links, and login on the righ
     assert.match(publicPostbridgeStyles, /\.brand\{justify-self:start/);
     assert.match(publicPostbridgeStyles, /\.navlinks\{justify-self:center/);
     assert.match(publicPostbridgeStyles, /\.nav-login\{justify-self:end/);
+    assert.match(publicPostbridgeStyles, /\.nav-actions\{justify-self:end;display:inline-flex/);
+    assert.match(publicPostbridgeStyles, /\.public-theme-toggle/);
     assert.doesNotMatch(publicPostbridgeStyles, /\.nav-cta|\.mobile-menu-cta/);
 });
 
@@ -173,18 +177,22 @@ test('home landing Bean is centered in the hero above the feature icons', () => 
 
 test('landing Bean starts voice directly from an explicit tap with a hearing check', () => {
     assert.match(source, /let enabled = false/);
-    assert.doesNotMatch(source, /localStorage\.getItem|localStorage\.setItem/);
+    assert.match(source, /heybean\.public\.themeMode/);
+    assert.match(source, /localStorage\?\.getItem\(PUBLIC_THEME_STORAGE_KEY\)/);
+    assert.match(source, /localStorage\?\.setItem\(PUBLIC_THEME_STORAGE_KEY/);
     assert.match(source, /navigator\.mediaDevices\.getUserMedia\(\{ audio: true \}\)/);
     assert.match(source, /Turn volume up\. Allow mic\./);
     assert.match(source, /await startVoiceConversation\(revision\)/);
     assert.doesNotMatch(source, /cue\?\.addEventListener|data-public-bean-cue/);
     assert.match(source, /Conversation\.startSession/);
     assert.match(source, /conversationToken:\s*session\.token/);
-    assert.match(source, /Hey, I'm Bean, can you hear me\?/);
+    assert.match(source, /Hey, can you hear me\?/);
+    assert.doesNotMatch(source, /Hey, I'm Bean, can you hear me\?/);
     assert.match(source, /SIGNUP_WAKE_GREETING/);
     assert.match(source, /SIGNUP_TRANSITION_LINE/);
     assert.match(source, /You’re in the quick info step/);
-    assert.match(agentConfig, /I can give you a quick tour or answer questions/);
+    assert.match(agentConfig, /First thing's first, do you prefer light or dark mode/);
+    assert.match(agentConfig, /setLandingTheme/);
     assert.doesNotMatch(agentConfig, /help you start signup whenever you’re ready/);
     assert.match(source, /firstMessage:\s*pendingFirstMessage \|\| \(isSignupOnboardingContext\(\) \? SIGNUP_WAKE_GREETING : WAKE_GREETING\)/);
     assert.doesNotMatch(source, /SpeechRecognition|Just say “Hey Bean|createWakeDetector|extractWakeTail|prefetchVoiceSession|restartWakeListening/);
@@ -197,6 +205,7 @@ test('landing Bean starts voice directly from an explicit tap with a hearing che
     assert.doesNotMatch(source, /normalizeLandingIntent|bean_landing_intent|requested_intent|data-public-bean-intent/);
     assert.doesNotMatch(source, /Please give me the quick three-stop tour|Please help me sign up for HeyBean/);
     assert.match(source, /showLandingSection/);
+    assert.match(source, /setLandingTheme/);
     assert.match(source, /showSignupInput/);
     assert.match(source, /askLandingBean/);
     assert.match(source, /root\.dataset\.conversationTokenUrl/);
@@ -267,26 +276,33 @@ test('landing voice uses a dedicated fast ElevenLabs guide with an action-only p
     assert.match(agentConfig, /showSignupInput/);
     assert.match(source, /showLandingSection:\s*async/);
     assert.match(source, /showSignupInput:\s*async/);
+    assert.match(source, /setLandingTheme:\s*async/);
     assert.match(source, /keepVoiceAliveAfterUiAction/);
     assert.match(source, /conversation\?\.sendUserActivity\?\.\(\)/);
     assert.match(agentConfig, /answer directly with the facts below using the configured fast model/);
     assert.match(agentConfig, /Do not call a response\/reasoning tool for normal questions/);
     assert.match(agentConfig, /bean:landing-guide-facts/);
     assert.match(agentConfig, /firstMessage:\s*WAKE_GREETING/);
-    assert.match(agentConfig, /Hey, I'm Bean, can you hear me\?/);
+    assert.match(agentConfig, /Hey, can you hear me\?/);
+    assert.doesNotMatch(agentConfig, /Hey, I'm Bean, can you hear me\?/);
     assert.match(agentConfig, /If the visitor responds yes, yeah, yep, I can/);
+    assert.match(agentConfig, /When the visitor answers light or dark mode, immediately call setLandingTheme/);
     assert.match(source, /const HEARING_CHECK_UI_ACTION_SUPPRESS_MS = 9000/);
     assert.match(source, /let hearingCheckExpected = false/);
+    assert.match(source, /let landingThemeChoiceExpected = false/);
     assert.match(source, /hearingCheckExpected = !isSignupOnboardingContext\(\)/);
+    assert.match(source, /bean_public_theme_mode/);
     assert.match(source, /function isPlainHearingConfirmation\(content\)/);
     assert.match(source, /hearingCheckUiActionSuppressUntilMs = Date\.now\(\) \+ HEARING_CHECK_UI_ACTION_SUPPRESS_MS/);
     assert.match(source, /if \(!hearingCheckExpected\) hearingCheckUiActionSuppressUntilMs = 0/);
+    assert.match(source, /publicThemeModeFromSpeech\(content\)/);
+    assert.match(source, /applyPublicLandingThemeMode\(requestedThemeMode/);
     assert.match(source, /hearingCheckExpected = false;\s*\} else \{\s*hearingCheckUiActionSuppressUntilMs = 0;\s*\}/);
     assert.match(source, /function shouldSuppressHearingCheckUiAction\(destination\)/);
     assert.doesNotMatch(source, /\['signup', 'onboarding', 'register'\]\.includes\(destination\)\) return false/);
     assert.match(source, /No page movement needed for the hearing check\./);
     assert.match(source, /if \(shouldSuppressHearingCheckUiAction\(normalizedDestination\)\)/);
-    assert.match(agentConfig, /After the hearing-check confirmation is complete, honor the visitor's next explicit request immediately/);
+    assert.match(agentConfig, /After the hearing-check confirmation is complete and theme preference is set or skipped, honor the visitor's next explicit request immediately/);
     assert.match(agentConfig, /call command_center for stop 1/);
     assert.match(agentConfig, /call onboarding/);
     assert.match(agentConfig, /Do not call showLandingSection, do not choose how_it_works\/features/);
@@ -313,6 +329,8 @@ test('landing voice uses a dedicated fast ElevenLabs guide with an action-only p
     assert.doesNotMatch(agentConfig, /SIGNUP_PROGRESS_UPDATE|private UI state from the browser/);
     assert.match(agentConfig, /silenceEndCallTimeout:\s*silenceEndCallSeconds/);
     assert.match(agentConfig, /dailyLimit:\s*dailyConversationLimit/);
+    assert.match(agentConfig, /themeToolConfig/);
+    assert.match(agentConfig, /enum: \['light', 'dark'\]/);
     assert.match(agentConfig, /enableAuth:\s*true/);
     assert.match(agentConfig, /promptInjection:\s*\{ isEnabled: true \}/);
     assert.match(agentConfig, /recordVoice:\s*false/);

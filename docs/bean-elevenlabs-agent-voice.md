@@ -24,8 +24,9 @@ Public landing / pricing / legal page
   -> browser reminds the visitor to turn volume on and allow mic access
   -> /bean/landing/conversation-token (session + CSRF + rate limited)
   -> dedicated ElevenLabs Landing Guide agent
-  -> first spoken turn: “Hey, I'm Bean, can you hear me?”
-  -> after the visitor confirms yes, Bean gives the normal intro and does not move the page
+  -> first spoken turn: “Hey, can you hear me?”
+  -> after the visitor confirms yes, Bean introduces itself once, asks whether they prefer light or dark mode, and does not move the page
+  -> visitor theme choice is applied to the public landing page, stored locally, carried into signup, and saved as the new account theme preference
   -> Agent answers directly with GPT-4.1 Nano and public product/pricing facts
   -> optional action-only client tool: showLandingSection({ destination }); the browser suppresses same-turn hearing-check movement defensively but clears suppression on the next visitor transcript; pricing/cost/plan transcripts scroll to the pricing section immediately and de-dupe the later pricing tool call
   -> explicit signup agreement asks the browser to wait for Bean’s spoken transition sentence to finish, then fade the landing page into the embedded Zero Chrome signup flow, update the URL to /register?from=bean, and keep the same Bean DOM presence mounted while asking for first/last name without repeating “Hi, I’m Bean”; the browser also backs this up by recognizing the exact transition sentence if the hosted Agent speaks it but fails to invoke the section tool
@@ -73,7 +74,7 @@ Authenticated app voice is intentionally short-lived but should not cut off natu
 Public landing voice remains tighter by default because it is unauthenticated:
 
 - Landing max duration defaults to `60` seconds.
-- Landing first message is the hearing check, not the full intro.
+- Landing first message is the hearing check only; the confirmation response introduces Bean once and asks for light/dark preference.
 - Landing initial wait defaults to `5` seconds.
 - Landing silence-end-call timeout defaults to `8` seconds unless production env overrides it higher.
 - Landing max meaningful visitor turns defaults to `20`.
@@ -110,7 +111,7 @@ The landing command creates or updates a separate action-only `showLandingSectio
 
 The landing command also applies provider-side controls: authentication-only conversation tokens, GPT-4.1 Nano without a reasoning layer, a concurrency and daily call cap with bursting disabled, focus and prompt-injection guardrails, no voice recording, and zero-day transcript/audio retention. Laravel independently applies session, IP, global, message, and per-conversation turn limits. Configure both Cloudflare Turnstile keys to require a managed bot challenge before Laravel mints an ElevenLabs token.
 
-The public guide can return only allowlisted browser actions: `command_center`, `calendar_tasks`, `customization`, `features`, `pricing`, `signup`, `onboarding`, and `how_it_works`. Laravel strips fallback `[[BEAN_UI:...]]` markers from spoken answers. The ElevenLabs client-tool destination provides structured voice movement when the landing model calls `showLandingSection`. The browser scrolls to matching public sections; `signup`/`onboarding` are the only conversion actions and start the embedded landing-page signup transition to `/register?from=bean` without a hard page reload. This is the UI-action boundary for public guided-tour behavior and does not allow arbitrary selectors or URLs.
+The public guide can return only allowlisted browser actions: `command_center`, `calendar_tasks`, `customization`, `features`, `pricing`, `signup`, `onboarding`, `how_it_works`, and the local `setLandingTheme` light/dark preference action. Laravel strips fallback `[[BEAN_UI:...]]` markers from spoken answers. The ElevenLabs client-tool destination provides structured voice movement when the landing model calls `showLandingSection`. The browser scrolls to matching public sections; `signup`/`onboarding` are the only conversion actions and start the embedded landing-page signup transition to `/register?from=bean` without a hard page reload. This is the UI-action boundary for public guided-tour behavior and does not allow arbitrary selectors or URLs.
 
 ## Removed legacy voice paths
 

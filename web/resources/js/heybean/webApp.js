@@ -55,6 +55,7 @@ export function mountHeyBeanWebApp(mount) {
     const initialBillingInterval = mount.dataset.selectedBillingInterval === 'yearly' ? 'yearly' : 'monthly';
     const initialBillingStatus = new URLSearchParams(window.location.search).get('billing') || '';
     const initialSignupEmail = new URLSearchParams(window.location.search).get('email') || '';
+    const publicThemeStorageKey = 'heybean.public.themeMode';
     const tokenKey = 'heybean.web.token';
     const rememberKey = 'heybean.web.remember';
     const activeWorkspaceKey = 'heybean.web.activeWorkspace';
@@ -70,7 +71,7 @@ export function mountHeyBeanWebApp(mount) {
         guidedSignupName: '',
         guidedSignupEmail: initialSignupEmail,
         guidedSignupPassword: '',
-        guidedSignupThemeMode: 'light',
+        guidedSignupThemeMode: initialGuidedSignupThemeMode(),
         guidedSignupError: '',
         subscriptionSummary: null,
         subscriptionCheckoutStatus: new URLSearchParams(window.location.search).get('checkout') || '',
@@ -291,6 +292,7 @@ export function mountHeyBeanWebApp(mount) {
 
     boot();
     bindInlineLandingSignupStart();
+    bindPublicThemePreference();
     bindResponsiveCalendar();
     bindCurrentTimeTicker();
     bindDashboardLiveUpdateFallbacks();
@@ -330,10 +332,35 @@ export function mountHeyBeanWebApp(mount) {
             state.notice = '';
             resetGuidedSignupState({
                 email: detail.email || '',
-                themeMode: state.guidedSignupThemeMode || 'light',
+                themeMode: detail.themeMode || state.guidedSignupThemeMode || initialGuidedSignupThemeMode(),
             });
             render();
         });
+    }
+
+    function bindPublicThemePreference() {
+        window.addEventListener('bean:landing-theme-mode-changed', (event) => {
+            const mode = normalizeThemeModeKey(event.detail?.themeMode || event.detail?.mode);
+            if (!['light', 'dark', 'auto'].includes(mode)) return;
+            state.guidedSignupThemeMode = mode;
+            if (state.phase === 'guidedOnboarding' && state.guidedSignupStep === 'themeMode') {
+                state.guidedSignupError = '';
+                render();
+            }
+        });
+    }
+
+    function initialGuidedSignupThemeMode() {
+        const fromDataset = normalizeThemeModeKey(mount.dataset.initialThemeMode);
+        if (mount.dataset.initialThemeMode && ['light', 'dark', 'auto'].includes(fromDataset)) return fromDataset;
+        const fromGlobal = normalizeThemeModeKey(window.__heybeanPublicThemeMode || document.documentElement.dataset.publicThemeMode || document.body?.dataset.publicThemeMode);
+        if (window.__heybeanPublicThemeMode || document.documentElement.dataset.publicThemeMode || document.body?.dataset.publicThemeMode) return fromGlobal;
+        try {
+            const stored = window.localStorage?.getItem(publicThemeStorageKey);
+            const normalized = normalizeThemeModeKey(stored);
+            if (stored && ['light', 'dark', 'auto'].includes(normalized)) return normalized;
+        } catch (_) {}
+        return 'light';
     }
 
     function bindNoteAutosaveTeardown() {
@@ -1505,6 +1532,12 @@ export function mountHeyBeanWebApp(mount) {
         }
         state.guidedSignupThemeMode = normalized;
         state.guidedSignupError = '';
+        try {
+            window.localStorage?.setItem(publicThemeStorageKey, normalized);
+        } catch (_) {}
+        window.dispatchEvent(new CustomEvent('bean:landing-theme-mode-requested', {
+            detail: { themeMode: normalized, source: 'guided_signup' },
+        }));
         state.guidedSignupStep = 'email';
         render();
     }

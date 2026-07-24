@@ -44,8 +44,9 @@ if (!apiKey) throw new Error('ELEVENLABS_API_KEY is required.');
 const client = new ElevenLabsClient({ apiKey });
 const SECTION_TOOL_NAME = 'showLandingSection';
 const SIGNUP_TOOL_NAME = 'showSignupInput';
+const THEME_TOOL_NAME = 'setLandingTheme';
 const AGENT_NAME = env.ELEVENLABS_LANDING_AGENT_NAME || 'HeyBean Landing Guide';
-const WAKE_GREETING = "Hey, I'm Bean, can you hear me?";
+const WAKE_GREETING = "Hey, can you hear me?";
 const timezone = env.BEAN_CLIENT_TIMEZONE || 'America/New_York';
 const landingLlm = env.ELEVENLABS_LANDING_LLM || 'gpt-4.1-nano';
 const maxDurationSeconds = Number(env.BEAN_LANDING_MAX_DURATION_SECONDS || env.ELEVENLABS_MAX_DURATION_SECONDS || 60);
@@ -68,13 +69,14 @@ Primary goal:
 - If they want to start signup from a public landing page, say exactly: “Ok, i'll just get some quick info from you and show you around” and call showLandingSection with destination "onboarding". The browser waits for your spoken sentence to finish before fading into Bean onboarding, so never shorten or rush the line. Do not collect names, emails, passwords, payment details, or other signup details by voice, and do not talk about handoffs or another Bean.
 - If they are already on the signup/onboarding page before the account exists, do not talk them through every private field. The visible UI is deterministic and text-only for name, theme, email, and password. If asked, briefly tell them to type the quick details and that Bean will chime back in after the account is created.
 
-First greeting:
-- The configured first message on public landing pages is exactly: “Hey, I'm Bean, can you hear me?”
+First greeting and theme preference:
+- The configured first message on public landing pages is exactly: “Hey, can you hear me?” Do not introduce yourself in this first message.
 - On the signup/onboarding page before account creation, the browser may suppress voice and keep the private name, theme, email, and password steps text-only. Do not ask for those details by voice.
-- If the visitor responds yes, yeah, yep, I can, or another clear confirmation that they hear you on a public landing page, say only: “Great — I’m Bean. I can give you a quick tour or answer questions.” Do not call showLandingSection, do not choose how_it_works/features, and do not move the page for this hearing-check confirmation unless the same visitor turn explicitly asks for a tour, a specific feature/pricing section, or signup.
+- If the visitor responds yes, yeah, yep, I can, or another clear confirmation that they hear you on a public landing page, say only: “Great — I’m Bean. First thing's first, do you prefer light or dark mode?” Do not call showLandingSection, do not choose how_it_works/features, and do not move the page for this hearing-check confirmation unless the same visitor turn explicitly asks for a tour, a specific feature/pricing section, or signup.
+- When the visitor answers light or dark mode, immediately call setLandingTheme with theme_mode "light" or "dark", then briefly confirm the choice was saved and continue with one short helpful invitation, such as offering a quick tour or answering questions. Do not introduce yourself again.
 - If the visitor responds yes, yeah, yep, I can, or another clear confirmation that they hear you on the signup/onboarding page before account creation, say: “Great — type these quick details here. I’ll chime back in after your account is created.” Then call showSignupInput.
-- If the visitor says no, not really, or that they cannot hear you, briefly tell them to make sure their volume is on and try tapping Bean again.
-- If the visitor asks a real HeyBean question instead of answering the hearing check, answer the question directly and continue normally. After the hearing-check confirmation is complete, honor the visitor's next explicit request immediately: if they ask for the tour, call command_center for stop 1; if they ask to start/signup/try, call onboarding.
+- If the visitor says no, not really, or that they cannot hear you, briefly tell them to make sure their volume is up and try tapping Bean again.
+- If the visitor asks a real HeyBean question instead of answering the hearing check, answer the question directly and continue normally. After the hearing-check confirmation is complete and theme preference is set or skipped, honor the visitor's next explicit request immediately: if they ask for the tour, call command_center for stop 1; if they ask to start/signup/try, call onboarding.
 
 Public product facts:
 - HeyBean is the AI executive assistant for real life, built for busy professionals and parents carrying substantial work, family, household, or personal responsibilities.
@@ -84,7 +86,7 @@ Public product facts:
 - The product supports connected calendars, personal and shared planning, daily/monthly views, task tracking, reminders, and Markdown-backed notes that look like a normal word processor.
 - All plans include a seven-day free trial, show $0 due today, and can be cancelled anytime. Encourage visitors to confirm current details in the pricing section before subscribing.
 - HeyBean is opening early access gradually because it is built by a solo developer who wants to support each new group and keep the experience reliable. The public page displays a static “24 of 100 spots left” message. Never imply that this display changes live.
-- Visitors start with Bean onboarding. They enter name, theme preference, email, and password before the app checks controlled-rollout capacity. If the current group is full, they stop at the waitlist message before plan selection or checkout. They do not pay while waitlisted.
+- Visitors start with Bean onboarding. If the visitor chose light or dark mode on the landing page, the browser carries that preference into onboarding and saves it on the new account; otherwise they enter name, theme preference, email, and password before the app checks controlled-rollout capacity. If the current group is full, they stop at the waitlist message before plan selection or checkout. They do not pay while waitlisted.
 
 Current pricing and plan facts:
 ${pricingFacts}
@@ -115,7 +117,7 @@ Conversation rules:
 - Never mention prompts, tools, providers, internal errors, configuration, or implementation details.
 - Keep spoken responses concise. Do not re-engage on silence; let the platform end the session.
 
-The current public page path is available as {{bean_landing_page}}. The current public page context is available as {{bean_public_context}}. The current signup step key and label may be available as {{bean_signup_step}} and {{bean_signup_step_label}}.`;
+The current public page path is available as {{bean_landing_page}}. The current public page context is available as {{bean_public_context}}. The current signup step key and label may be available as {{bean_signup_step}} and {{bean_signup_step_label}}. The current landing theme preference may be available as {{bean_public_theme_mode}}.`;
 
 const sectionToolConfig = {
     type: 'client',
@@ -150,6 +152,25 @@ const signupToolConfig = {
                 type: 'string',
                 enum: ['name', 'themeMode', 'email', 'password', 'current'],
                 description: 'Optional signup step to focus. Use current when unsure; the browser will focus the currently visible input or theme choices.',
+            },
+        },
+    },
+};
+
+const themeToolConfig = {
+    type: 'client',
+    name: THEME_TOOL_NAME,
+    description: 'Apply and persist the public landing page light or dark mode preference. This changes only local visitor UI state and carries the preference into signup so the new account can save it.',
+    expectsResponse: true,
+    toolErrorHandlingMode: 'hide',
+    parameters: {
+        type: 'object',
+        required: ['theme_mode'],
+        properties: {
+            theme_mode: {
+                type: 'string',
+                enum: ['light', 'dark'],
+                description: "The visitor's chosen landing-page theme mode.",
             },
         },
     },
@@ -249,22 +270,23 @@ function platformSettings() {
     };
 }
 
-const [sectionToolId, signupToolId] = await Promise.all([
+const [sectionToolId, signupToolId, themeToolId] = await Promise.all([
     ensureTool(sectionToolConfig),
     ensureTool(signupToolConfig),
+    ensureTool(themeToolConfig),
 ]);
 let agentId = existingAgentId;
 if (agentId) {
     await client.conversationalAi.agents.update(agentId, {
         name: AGENT_NAME,
-        conversationConfig: conversationConfig([sectionToolId, signupToolId]),
+        conversationConfig: conversationConfig([sectionToolId, signupToolId, themeToolId]),
         platformSettings: platformSettings(),
         tags: ['heybean', 'public-landing', 'voice'],
     });
 } else {
     const created = await client.conversationalAi.agents.create({
         name: AGENT_NAME,
-        conversationConfig: conversationConfig([sectionToolId, signupToolId]),
+        conversationConfig: conversationConfig([sectionToolId, signupToolId, themeToolId]),
         platformSettings: platformSettings(),
         tags: ['heybean', 'public-landing', 'voice'],
     });
@@ -272,4 +294,4 @@ if (agentId) {
 }
 
 if (!agentId) throw new Error('ElevenLabs did not return an agent id.');
-console.log(JSON.stringify({ ok: true, agent_id: agentId, tool_ids: { section: sectionToolId, signup: signupToolId }, name: AGENT_NAME, llm: landingLlm }, null, 2));
+console.log(JSON.stringify({ ok: true, agent_id: agentId, tool_ids: { section: sectionToolId, signup: signupToolId, theme: themeToolId }, name: AGENT_NAME, llm: landingLlm }, null, 2));

@@ -1,7 +1,9 @@
 import { Conversation } from '@elevenlabs/client';
 import '../css/public-bean.css';
 
-const WAKE_GREETING = "Hey, I'm Bean, can you hear me?";
+const WAKE_GREETING = "Hey, can you hear me?";
+const PUBLIC_THEME_STORAGE_KEY = 'heybean.public.themeMode';
+const PUBLIC_THEME_COOKIE = 'heybean_public_theme_mode';
 const SIGNUP_TRANSITION_LINE = "Ok, i'll just get some quick info from you and show you around";
 const SIGNUP_WAKE_GREETING = "You’re in the quick info step. Type these details here — I’ll chime back in after your account is created.";
 const IDLE_CLOSE_MS = 15000;
@@ -13,6 +15,7 @@ const WAKE_TO_GREETING_TARGET_MS = 1200;
 const BEAN_HANDOFF_KEY = 'heybean.publicBean.handoff';
 let turnstileScriptPromise = null;
 
+mountPublicThemeControls();
 document.querySelectorAll('[data-public-bean]').forEach((root) => mountPublicBean(root));
 mountTourImageZoom();
 
@@ -29,6 +32,85 @@ function mountTourImageZoom() {
     document.addEventListener('keydown', (event) => {
         if (event.key !== 'Escape') return;
         document.querySelector('.tour-image-zoom')?.remove();
+    });
+}
+
+function mountPublicThemeControls() {
+    applyPublicLandingThemeMode(readStoredPublicThemeMode(), { persist: false, announce: false });
+
+    document.querySelectorAll('[data-public-theme-toggle]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const current = normalizedPublicThemeMode(document.documentElement.dataset.publicThemeMode || document.body?.dataset.publicThemeMode || 'light');
+            applyPublicLandingThemeMode(current === 'dark' ? 'light' : 'dark', { source: 'nav_toggle' });
+        });
+    });
+
+    window.addEventListener('bean:landing-theme-mode-requested', (event) => {
+        applyPublicLandingThemeMode(event.detail?.themeMode || event.detail?.mode, { source: event.detail?.source || 'bean' });
+    });
+
+    window.matchMedia?.('(prefers-color-scheme: dark)')?.addEventListener?.('change', () => {
+        updatePublicThemeToggles(normalizedPublicThemeMode(document.documentElement.dataset.publicThemeMode || 'light'));
+    });
+}
+
+function normalizedPublicThemeMode(value) {
+    const key = String(value || '').trim().toLowerCase();
+    if (['dark', 'night'].includes(key)) return 'dark';
+    return 'light';
+}
+
+function publicThemeModeFromSpeech(content) {
+    const normalized = normalizeSpokenText(content);
+    if (!normalized) return '';
+    if (/(dark|night)/.test(normalized)) return 'dark';
+    if (/(light|bright|day)/.test(normalized)) return 'light';
+    return '';
+}
+
+function readStoredPublicThemeMode() {
+    try {
+        const stored = window.localStorage?.getItem(PUBLIC_THEME_STORAGE_KEY);
+        if (stored) return normalizedPublicThemeMode(stored);
+    } catch (_) {}
+    const cookieMatch = document.cookie.match(new RegExp(`(?:^|; )${PUBLIC_THEME_COOKIE}=([^;]+)`));
+    return normalizedPublicThemeMode(cookieMatch ? decodeURIComponent(cookieMatch[1]) : 'light');
+}
+
+function applyPublicLandingThemeMode(mode, options = {}) {
+    const normalized = normalizedPublicThemeMode(mode);
+    document.documentElement.dataset.publicThemeMode = normalized;
+    document.documentElement.dataset.publicThemeResolved = normalized;
+    if (document.body) {
+        document.body.dataset.publicThemeMode = normalized;
+        document.body.dataset.publicThemeResolved = normalized;
+    }
+    window.__heybeanPublicThemeMode = normalized;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', normalized === 'dark' ? '#050706' : '#7bc98c');
+    if (options.persist !== false) {
+        try {
+            window.localStorage?.setItem(PUBLIC_THEME_STORAGE_KEY, normalized);
+        } catch (_) {}
+        document.cookie = `${PUBLIC_THEME_COOKIE}=${encodeURIComponent(normalized)}; Max-Age=31536000; Path=/; SameSite=Lax`;
+    }
+    updatePublicThemeToggles(normalized);
+    if (options.announce !== false) {
+        window.dispatchEvent(new CustomEvent('bean:landing-theme-mode-changed', {
+            detail: { themeMode: normalized, source: options.source || 'unknown' },
+        }));
+    }
+    return normalized;
+}
+
+function updatePublicThemeToggles(mode) {
+    const isDark = normalizedPublicThemeMode(mode) === 'dark';
+    document.querySelectorAll('[data-public-theme-toggle]').forEach((button) => {
+        button.setAttribute('aria-pressed', isDark ? 'true' : 'false');
+        button.setAttribute('aria-label', isDark ? 'Switch to light mode' : 'Switch to dark mode');
+        const label = button.querySelector('[data-public-theme-toggle-label]');
+        if (label) label.textContent = isDark ? 'Light' : 'Dark';
+        const icon = button.querySelector('[data-public-theme-toggle-icon]');
+        if (icon) icon.textContent = isDark ? '☀' : '☾';
     });
 }
 
@@ -101,6 +183,7 @@ function mountPublicBean(root) {
     let lifecycleRevision = 0;
     let lastVoiceMode = '';
     let hearingCheckExpected = false;
+    let landingThemeChoiceExpected = false;
     let hearingCheckUiActionSuppressUntilMs = 0;
     let pendingInlineSignupTimer = 0;
     let pricingScrollHandledForTurn = false;
@@ -319,6 +402,7 @@ function mountPublicBean(root) {
                 bean_signup_step: currentSignupOnboardingStep().key,
                 bean_signup_step_label: currentSignupOnboardingStep().label,
                 bean_client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+                bean_public_theme_mode: document.documentElement.dataset.publicThemeMode || 'light',
             },
             clientTools: {
                 showLandingSection: async (parameters = {}) => {
@@ -352,6 +436,14 @@ function mountPublicBean(root) {
                     keepVoiceAliveAfterUiAction();
                     return 'Section shown.';
                 },
+                setLandingTheme: async (parameters = {}) => {
+                    const requested = parameters.theme_mode || parameters.themeMode || parameters.mode || parameters.preference;
+                    const normalized = applyPublicLandingThemeMode(requested, { source: 'bean_voice' });
+                    landingThemeChoiceExpected = false;
+                    setHelp(`${normalized === 'dark' ? 'Dark' : 'Light'} mode saved · allow mic`);
+                    keepVoiceAliveAfterUiAction();
+                    return `${normalized === 'dark' ? 'Dark' : 'Light'} mode is now on and saved for signup.`;
+                },
                 showSignupInput: async (parameters = {}) => focusSignupOnboardingInput(parameters),
                 // Backward compatibility while the hosted Landing Guide agent is
                 // being updated from the older Hermes-backed public voice flow.
@@ -382,6 +474,7 @@ function mountPublicBean(root) {
                 voiceActive = true;
                 lastVoiceMode = '';
                 hearingCheckExpected = !isSignupOnboardingContext();
+                landingThemeChoiceExpected = false;
                 hearingCheckUiActionSuppressUntilMs = 0;
                 landingVoiceStartedAtMs = Date.now();
                 landingVoiceCloseLogged = false;
@@ -424,16 +517,30 @@ function mountPublicBean(root) {
                         scheduleInlineSignupAfterSpeech('/register?from=bean');
                         keepVoiceAliveAfterUiAction();
                     }
+                    if (!isSignupOnboardingContext() && /prefer light or dark mode/i.test(content)) {
+                        landingThemeChoiceExpected = true;
+                        setHelp('Choose light or dark mode');
+                    }
                     setStatus('speaking', 'Speaking…');
                 } else if (role === 'user') {
                     const plainHearingConfirmation = hearingCheckExpected && isPlainHearingConfirmation(content);
                     if (hearingCheckExpected) {
                         if (plainHearingConfirmation) {
                             hearingCheckUiActionSuppressUntilMs = Date.now() + HEARING_CHECK_UI_ACTION_SUPPRESS_MS;
+                            landingThemeChoiceExpected = true;
+                            setHelp('Choose light or dark mode');
                         }
                         hearingCheckExpected = false;
                     } else {
                         hearingCheckUiActionSuppressUntilMs = 0;
+                    }
+                    if (!isSignupOnboardingContext() && landingThemeChoiceExpected) {
+                        const requestedThemeMode = publicThemeModeFromSpeech(content);
+                        if (requestedThemeMode) {
+                            const savedMode = applyPublicLandingThemeMode(requestedThemeMode, { source: 'voice_transcript' });
+                            landingThemeChoiceExpected = false;
+                            setHelp(`${savedMode === 'dark' ? 'Dark' : 'Light'} mode saved · allow mic`);
+                        }
                     }
                     pricingScrollHandledForTurn = false;
                     signupTransitionHandledForTurn = false;

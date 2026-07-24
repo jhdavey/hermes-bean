@@ -217,4 +217,26 @@
         .public-bean-status { font-size: 13px; }
         .public-bean-help { font-size: 12px; }
     }
+
+    body[data-public-theme-resolved="dark"]:has(.public-bean-presence-hero)::before {
+        background: linear-gradient(180deg, rgba(5, 7, 6, 1) 0%, rgba(5, 7, 6, .98) 36%, rgba(5, 7, 6, .78) 62%, rgba(5, 7, 6, .38) 82%, rgba(5, 7, 6, 0) 100%);
+    }
+
+    body[data-public-theme-resolved="dark"] .public-bean-presence-hero {
+        --public-bean-accent: 123, 201, 140;
+    }
+
+    body[data-public-theme-resolved="dark"] .public-bean-presence-hero .public-bean-icon img {
+        opacity: .96;
+        filter: invert(1) brightness(1.2) drop-shadow(0 20px 34px rgba(123, 201, 140, .2));
+    }
+
+    body[data-public-theme-resolved="dark"] .public-bean-status {
+        color: rgba(237, 244, 238, .72);
+    }
+
+    body[data-public-theme-resolved="dark"] .public-bean-help {
+        color: rgba(237, 244, 238, .50);
+    }
+
 </style>

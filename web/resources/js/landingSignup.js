@@ -92,7 +92,18 @@ function signupDetailFromUrl(url, options = {}) {
         plan,
         billingInterval,
         email: params.get('email') || '',
+        themeMode: currentPublicThemeMode(),
     };
+}
+
+function currentPublicThemeMode() {
+    const mode = String(window.__heybeanPublicThemeMode || document.documentElement.dataset.publicThemeMode || document.body?.dataset.publicThemeMode || '').trim().toLowerCase();
+    if (['light', 'dark', 'auto'].includes(mode)) return mode;
+    try {
+        const stored = window.localStorage?.getItem('heybean.public.themeMode');
+        if (['light', 'dark', 'auto'].includes(String(stored || '').trim().toLowerCase())) return String(stored).trim().toLowerCase();
+    } catch (_) {}
+    return 'light';
 }
 
 function focusInlineSignupInput() {
