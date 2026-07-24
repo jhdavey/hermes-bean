@@ -80,9 +80,9 @@ test('landing Bean starts voice directly from an explicit tap with a hearing che
     assert.match(source, /conversationToken:\s*session\.token/);
     assert.match(source, /Hey, I'm Bean, can you hear me\?/);
     assert.match(source, /SIGNUP_WAKE_GREETING/);
-    assert.match(source, /Make sure your volume is up and your microphone is on/);
+    assert.match(source, /You’re in the quick info step/);
     assert.match(agentConfig, /help you start signup whenever you’re ready/);
-    assert.match(source, /firstMessage:\s*signupOnboardingContext \? SIGNUP_WAKE_GREETING : WAKE_GREETING/);
+    assert.match(source, /firstMessage:\s*pendingFirstMessage \|\| \(signupOnboardingContext \? SIGNUP_WAKE_GREETING : WAKE_GREETING\)/);
     assert.doesNotMatch(source, /SpeechRecognition|Just say “Hey Bean|createWakeDetector|extractWakeTail|prefetchVoiceSession|restartWakeListening/);
     assert.match(source, /Demo cooldown — try again shortly/);
     assert.doesNotMatch(source, /Demo limit reached/);
@@ -106,7 +106,7 @@ test('landing Bean starts voice directly from an explicit tap with a hearing che
     assert.ok(voiceStart > permissionRequest);
 });
 
-test('register flow keeps the same tap-to-talk Bean control and uses signup voice context', () => {
+test('register flow keeps one visual Bean while private signup fields stay text-only', () => {
     assert.match(appView, /request\(\)->is\('register'\)/);
     assert.match(appView, /data-public-bean-context="signup_onboarding"/);
     assert.match(appView, /public-bean-presence-signup/);
@@ -114,28 +114,29 @@ test('register flow keeps the same tap-to-talk Bean control and uses signup voic
     assert.match(appView, /Tap to talk/);
     assert.doesNotMatch(appView, /Hey! I'm over here!|data-public-bean-cue|public-bean-cue-arrow/);
     assert.match(appView, /resources\/js\/publicBean\.js/);
-    assert.match(appView, /Tap Bean for voice · volume on · allow mic/);
+    assert.match(appView, /Type these quick details\. Bean will chime back in\./);
     assert.match(source, /publicBeanContext\(root\) === 'signup_onboarding'/);
     assert.match(source, /page_context:\s*publicBeanContext\(root\)/);
     assert.match(source, /bean_public_context:\s*publicBeanContext\(root\)/);
     assert.match(source, /bean_signup_step:\s*currentSignupOnboardingStep\(\)\.key/);
     assert.match(source, /bean_signup_step_label:\s*currentSignupOnboardingStep\(\)\.label/);
     assert.match(source, /function focusSignupOnboardingInput/);
-    assert.match(source, /bean:signup-progress/);
-    assert.match(source, /conversation\.sendUserMessage\(prompt\)/);
-    assert.match(source, /SIGNUP_PROGRESS_UPDATE:/);
-    assert.match(source, /Do not repeat typed names, email addresses, or passwords/);
-    assert.match(source, /bean:signup-activity/);
-    assert.match(source, /conversation\.sendUserActivity\(\)/);
-    assert.match(source, /Tell the visitor to type their password in the input and press Send, not to say it out loud/);
+    assert.match(source, /const setHelp = \(text\) =>/);
+    assert.match(source, /function privateSignupStepIsActive/);
+    assert.match(source, /signupOnboardingContext && privateSignupStepIsActive\(\)/);
+    assert.match(source, /Type these quick details\. Bean will chime back in\./);
+    assert.doesNotMatch(source, /SIGNUP_PROGRESS_UPDATE:|bean:signup-progress|conversation\.sendUserMessage\(prompt\)|signupProgressPrompt/);
+    assert.match(source, /bean:post-signup-chime/);
+    assert.match(source, /event\.detail\?\.autoVoice === true && !enabled/);
+    assert.match(source, /root\.dataset\.postSignup = 'true'/);
     assert.match(source, /await stopVoiceConversation\('disabled'\)/);
     assert.match(styles, /public-bean-zero-float/);
     assert.match(styles, /public-bean-zero-glow/);
     assert.match(styles, /\.public-bean-presence-signup \.public-bean-status \{[\s\S]*?display:\s*none/);
     assert.match(agentConfig, /showSignupInput/);
-    assert.match(agentConfig, /type answers into the input and press Send/);
-    assert.match(agentConfig, /Tap Bean anytime to mute me and continue by text/);
-    assert.match(agentConfig, /Do not collect names, emails, passwords, payment details/);
+    assert.match(agentConfig, /pre-account signup fields quiet and text-only/);
+    assert.match(agentConfig, /Ok, i'll just get some quick info from you and show you around/);
+    assert.match(agentConfig, /Bean re-enters after account creation/);
 });
 
 test('landing Bean can be disabled while voice startup is still pending', () => {
@@ -176,8 +177,7 @@ test('landing voice uses a dedicated fast ElevenLabs guide with an action-only p
     assert.match(agentConfig, /maxDurationSeconds/);
     assert.match(agentConfig, /env\.ELEVENLABS_MAX_DURATION_SECONDS \|\| 60/);
     assert.match(agentConfig, /env\.ELEVENLABS_SILENCE_TIMEOUT_SECONDS \|\| 30/);
-    assert.match(agentConfig, /SIGNUP_PROGRESS_UPDATE/);
-    assert.match(agentConfig, /private UI state from the browser/);
+    assert.doesNotMatch(agentConfig, /SIGNUP_PROGRESS_UPDATE|private UI state from the browser/);
     assert.match(agentConfig, /silenceEndCallTimeout:\s*silenceEndCallSeconds/);
     assert.match(agentConfig, /dailyLimit:\s*dailyConversationLimit/);
     assert.match(agentConfig, /enableAuth:\s*true/);
@@ -204,7 +204,7 @@ test('landing Bean reveals the three-step quick tour plus signup and pricing des
     assert.match(agentConfig, /make it sound conversational instead of scripted/);
     assert.match(agentConfig, /Do not repeat the same question twice/);
     assert.match(agentConfig, /do not say “Want the next stop\?” more than once/);
-    assert.match(agentConfig, /Great — let’s get you started/);
+    assert.match(agentConfig, /Ok, i'll just get some quick info from you and show you around/);
     assert.match(agentConfig, /Do not say handoff, transfer, another Bean, or explain implementation/);
     assert.match(agentConfig, /destination "command_center"/);
     assert.match(agentConfig, /destination "calendar_tasks"/);
@@ -248,7 +248,7 @@ test('landing Bean reveals the three-step quick tour plus signup and pricing des
     assert.match(source, /scrollTarget\.classList\.add\('public-bean-guided-highlight'\)/);
     assert.match(source, /signup:\s*\{ href: '\/register\?from=bean'/);
     assert.match(source, /onboarding:\s*\{ href: '\/register\?from=bean'/);
-    assert.match(source, /navigateDelay:\s*0/);
+    assert.match(source, /navigateDelay:\s*2200/);
     assert.match(source, /window\.location\.href = target\.href/);
     assert.match(source, /mountTourImageZoom\(\)/);
     assert.match(source, /closest\?\.\('\.tour-screenshot-card'\)/);

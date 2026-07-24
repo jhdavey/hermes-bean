@@ -1461,11 +1461,6 @@ export function mountHeyBeanWebApp(mount) {
         state.guidedSignupName = name;
         state.guidedSignupStep = 'themeMode';
         render();
-        dispatchSignupVoiceProgress({
-            completed_step: 'name',
-            next_step: 'themeMode',
-            instruction: 'The visitor typed their name. Briefly acknowledge it without repeating the name, then guide them to choose Light, Dark, or Auto.',
-        });
     }
 
     function guidedThemeModeFromText(value) {
@@ -1486,13 +1481,6 @@ export function mountHeyBeanWebApp(mount) {
         state.guidedSignupError = '';
         state.guidedSignupStep = 'email';
         render();
-        const selectedMode = themeModesByKey.get(normalized)?.label || normalized;
-        dispatchSignupVoiceProgress({
-            completed_step: 'themeMode',
-            next_step: 'email',
-            selected_option: selectedMode,
-            instruction: 'The visitor selected a theme mode. Briefly confirm the choice, then guide them to type their email address into the input and press Send.',
-        });
     }
 
     async function handleGuidedSignupEmail(value) {
@@ -1516,11 +1504,6 @@ export function mountHeyBeanWebApp(mount) {
             state.guidedSignupEmail = availability.email;
             state.guidedSignupStep = 'password';
             render();
-            dispatchSignupVoiceProgress({
-                completed_step: 'email',
-                next_step: 'password',
-                instruction: 'The visitor typed an available email address. Do not say the address out loud. Guide them to type a password in the input, press Send, and never speak the password aloud.',
-            });
         } catch (_) {
             state.busy = false;
             state.guidedSignupError = 'I could not check that email right now. Please try again in a moment.';
@@ -1542,11 +1525,6 @@ export function mountHeyBeanWebApp(mount) {
         state.guidedSignupPassword = value;
         state.busy = true;
         render();
-        dispatchSignupVoiceProgress({
-            completed_step: 'password',
-            next_step: 'creatingAccount',
-            instruction: 'The visitor typed a password. Do not mention the password. Briefly say you are creating the account and that you will continue after the account is ready.',
-        });
         try {
             const result = await registerGuidedSignupAccount({ password: value });
             persistToken(result.token, true);
@@ -1554,11 +1532,6 @@ export function mountHeyBeanWebApp(mount) {
             state.subscriptionSummary = null;
             state.busy = false;
             if (state.user?.access_state === 'waitlisted' || state.user?.accessState === 'waitlisted') {
-                dispatchSignupVoiceProgress({
-                    completed_step: 'account',
-                    next_step: 'waitlist',
-                    instruction: 'The account was created but the rollout is currently at capacity. Briefly explain that the visitor is on the waitlist and will hear back in usually 1–2 days. Do not mention plan selection or payment.',
-                });
                 removePublicSignupBeanPresence({ delayMs: 3600 });
                 state.phase = 'waitlist';
                 state.guidedSignupError = '';
@@ -1612,11 +1585,6 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function startSignupDashboardPreview(result = {}) {
-        dispatchSignupVoiceProgress({
-            completed_step: 'account',
-            next_step: 'dashboardPreview',
-            instruction: 'The account is ready. Briefly say you are opening the dashboard preview and will show the first few steps before the plan screen.',
-        });
         state.signupPaywallDeferred = true;
         state.subscriptionCheckoutStatus = '';
         state.subscriptionSummary = null;
@@ -1628,10 +1596,12 @@ export function mountHeyBeanWebApp(mount) {
         state.dashboardDataLoading = false;
         state.error = '';
         state.notice = '';
-        state.modal = null;
+        state.onboardingTourActive = false;
+        state.onboardingTourStep = 0;
+        state.modal = { type: 'post-signup-bean-choice' };
         history.pushState({}, '', '/app?welcome=1');
-        activateOnboardingTourStep(0);
         render();
+        dispatchPostSignupBeanChime();
     }
 
     function openDeferredSignupPaywall(message = 'Choose a plan to continue with HeyBean.') {
@@ -1654,6 +1624,28 @@ export function mountHeyBeanWebApp(mount) {
         state.error = '';
         history.pushState({}, '', `/subscribe?plan=${encodeURIComponent(state.selectedPlan || 'premium')}&billing_interval=${encodeURIComponent(normalizedBillingInterval(state.selectedBillingInterval))}`);
         render();
+    }
+
+
+    function postSignupBeanChoiceMessage() {
+        return 'Alright, your account is created. Now I can give you a quick tour of the dashboard, help you get started, or you can skip all of that stuff and just dive in.';
+    }
+
+    function dispatchPostSignupBeanChime() {
+        window.dispatchEvent(new CustomEvent('bean:post-signup-chime', {
+            detail: { message: postSignupBeanChoiceMessage(), autoVoice: fromLandingBean },
+        }));
+    }
+
+    function startPostSignupDashboardTour() {
+        state.modal = null;
+        activateOnboardingTourStep(0);
+    }
+
+    function startPostSignupFirstActionChoice() {
+        state.onboardingTourActive = false;
+        state.onboardingTourStep = 0;
+        state.modal = { type: 'post-tour-first-action', step: 'choose' };
     }
 
     function guidedOnboardingMarkup() {
@@ -2062,7 +2054,7 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function shouldUseConnectedSignupBeanPresence() {
-        return Boolean(state.signupPaywallDeferred || state.onboardingTourActive || state.modal?.type === 'post-tour-first-action');
+        return Boolean(state.signupPaywallDeferred || state.onboardingTourActive || ['post-signup-bean-choice', 'post-tour-first-action'].includes(state.modal?.type));
     }
 
     function beanPanelMarkup() {
@@ -4156,12 +4148,33 @@ export function mountHeyBeanWebApp(mount) {
         if (modal.type === 'issue-report-success') return issueReportSuccessModalMarkup();
         if (modal.type === 'external-calendar-connect') return externalCalendarConnectModalMarkup();
         if (modal.type === 'external-calendar-import') return externalCalendarImportModalMarkup(modal);
+        if (modal.type === 'post-signup-bean-choice') return postSignupBeanChoiceModalMarkup();
         if (modal.type === 'post-tour-first-action') return postTourFirstActionModalMarkup(modal);
         if (modal.type === 'profile') return profileModalMarkup();
         if (modal.type === 'workspace') return workspaceModalMarkup(modal.mode, modal.workspace);
         if (modal.type === 'categories') return categoriesModalMarkup();
         if (modal.type === 'recurring-delete') return recurringDeleteModalMarkup(modal.item);
         return itemModalMarkup(modal.type, modal.item, modal.parentTask);
+    }
+
+    function postSignupBeanChoiceModalMarkup() {
+        return `
+            <div class="hb-modal-backdrop hb-post-signup-bean-choice-backdrop" role="dialog" aria-modal="true" aria-labelledby="post-signup-bean-choice-title">
+                <section class="hb-card hb-modal hb-post-tour-first-action-modal hb-post-signup-bean-choice-modal">
+                    ${sectionTitle(icons.bean || icons.activity, 'Alright, your account is created.', 'Now I can give you a quick tour of the dashboard, help you get started, or you can skip all of that stuff and just dive in.')}
+                    <div class="hb-post-tour-action-grid">
+                        <button class="hb-post-tour-action-card" type="button" data-post-signup-tour>
+                            <strong>Quick tour</strong>
+                            <span>Let Bean show the dashboard in a few quick stops.</span>
+                        </button>
+                        <button class="hb-post-tour-action-card" type="button" data-post-signup-first-action>
+                            <strong>Help me get started</strong>
+                            <span>Pick a first action and let Bean guide it.</span>
+                        </button>
+                    </div>
+                    <div class="hb-modal-actions"><button class="hb-button-ghost" type="button" data-post-signup-skip>Dive in</button></div>
+                </section>
+            </div>`;
     }
 
     function postTourFirstActionModalMarkup(modal = {}) {
@@ -6916,6 +6929,18 @@ export function mountHeyBeanWebApp(mount) {
             state.modal = null;
             render();
         }));
+        mount.querySelector('[data-post-signup-tour]')?.addEventListener('click', () => {
+            startPostSignupDashboardTour();
+            render();
+        });
+        mount.querySelector('[data-post-signup-first-action]')?.addEventListener('click', () => {
+            startPostSignupFirstActionChoice();
+            render();
+        });
+        mount.querySelector('[data-post-signup-skip]')?.addEventListener('click', () => {
+            finishPostTourFirstAction();
+            render();
+        });
         mount.querySelectorAll('[data-post-tour-first-action]').forEach((button) => button.addEventListener('click', () => {
             state.modal = { type: 'post-tour-first-action', step: 'assist', action: button.dataset.postTourFirstAction };
             render();

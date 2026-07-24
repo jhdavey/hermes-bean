@@ -2,7 +2,7 @@ import { Conversation } from '@elevenlabs/client';
 import '../css/public-bean.css';
 
 const WAKE_GREETING = "Hey, I'm Bean, can you hear me?";
-const SIGNUP_WAKE_GREETING = "Hey, I'm Bean. Make sure your volume is up and your microphone is on. I’ll guide you through each signup step. When I ask for details, type them into the input and press Send. What is your first and last name?";
+const SIGNUP_WAKE_GREETING = "You’re in the quick info step. Type these details here — I’ll chime back in after your account is created.";
 const IDLE_CLOSE_MS = 15000;
 const WAKE_TO_GREETING_TARGET_MS = 1200;
 let turnstileScriptPromise = null;
@@ -52,6 +52,7 @@ function openTourImageZoom(image) {
 function mountPublicBean(root) {
     const button = root.querySelector('[data-public-bean-toggle]');
     const status = root.querySelector('[data-public-bean-status]');
+    const help = root.querySelector('[data-public-bean-help]');
     const cue = root.querySelector('[data-public-bean-cue]');
     if (!button || !status) return;
     const signupOnboardingContext = publicBeanContext(root) === 'signup_onboarding';
@@ -89,6 +90,10 @@ function mountPublicBean(root) {
         status.title = text;
         button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
         button.setAttribute('aria-label', enabled ? `Mute ${beanLabel}` : `Talk with ${beanLabel}`);
+    };
+
+    const setHelp = (text) => {
+        if (help && text) help.textContent = text;
     };
 
     const stopIdleTimer = () => {
@@ -238,6 +243,8 @@ function mountPublicBean(root) {
         }, { keepalive: true });
     }
 
+    let pendingFirstMessage = '';
+
     async function startVoiceConversation(revision) {
         const session = await requestVoiceSession();
         if (!isCurrentLifecycle(revision)) return;
@@ -261,7 +268,7 @@ function mountPublicBean(root) {
             userId: session.landing_session_id ? `bean-visitor-${session.landing_session_id}` : undefined,
             overrides: {
                 agent: {
-                    firstMessage: signupOnboardingContext ? SIGNUP_WAKE_GREETING : WAKE_GREETING,
+                    firstMessage: pendingFirstMessage || (signupOnboardingContext ? SIGNUP_WAKE_GREETING : WAKE_GREETING),
                 },
             },
             dynamicVariables: {
@@ -377,6 +384,7 @@ function mountPublicBean(root) {
             await nextConversation?.endSession?.().catch(() => {});
             return;
         }
+        pendingFirstMessage = '';
         conversation = nextConversation;
         voiceActive = true;
         lastActivityAt = Date.now();
@@ -386,67 +394,26 @@ function mountPublicBean(root) {
         conversation.sendUserActivity?.();
     }
 
-    function signupProgressPrompt(detail = {}) {
-        const completed = signupStepLabel(detail.completed_step || 'current');
-        const next = signupStepLabel(detail.next_step || currentSignupOnboardingStep().key);
-        const selected = detail.selected_option ? ` Selected option: ${String(detail.selected_option).slice(0, 40)}.` : '';
-        const instruction = String(detail.instruction || '').slice(0, 420);
-        return [
-            'SIGNUP_PROGRESS_UPDATE:',
-            `Completed step: ${completed}.`,
-            `Next visible step: ${next}.`,
-            selected,
-            instruction,
-            'Respond as Bean in one or two short spoken sentences. Do not ask the visitor to speak signup details aloud. Do not repeat typed names, email addresses, or passwords. Call showSignupInput if the visitor should type or choose something visible.',
-        ].filter(Boolean).join(' ');
-    }
-
-    function signupStepLabel(key) {
-        const labels = {
-            name: 'full name',
-            themeMode: 'theme choice',
-            email: 'email address',
-            password: 'password',
-            creatingAccount: 'creating account',
-            account: 'account created',
-            waitlist: 'waitlist',
-            dashboardPreview: 'dashboard preview',
-            plan: 'plan screen',
-            current: currentSignupOnboardingStep().label,
-        };
-        return labels[key] || currentSignupOnboardingStep().label || 'current signup step';
-    }
-
-    function sendSignupProgressToVoice(detail = {}) {
-        if (!signupOnboardingContext || !voiceActive || !conversation?.sendUserMessage) return;
-        const prompt = signupProgressPrompt(detail);
-        lastActivityAt = Date.now();
-        stopIdleTimer();
-        setStatus('thinking', 'Guiding…');
-        logLandingVoiceEvent('signup_progress_sent', {
-            completed_step: detail.completed_step || null,
-            next_step: detail.next_step || null,
-        });
-        conversation.sendUserActivity?.();
-        conversation.sendUserMessage(prompt);
-    }
-
-    let lastSignupActivityPingAt = 0;
-    function sendSignupActivityToVoice() {
-        if (!signupOnboardingContext || !voiceActive || !conversation?.sendUserActivity) return;
-        const now = Date.now();
-        if (now - lastSignupActivityPingAt < 2500) return;
-        lastSignupActivityPingAt = now;
-        lastActivityAt = now;
-        conversation.sendUserActivity();
-    }
-
-    window.addEventListener('bean:signup-progress', (event) => sendSignupProgressToVoice(event.detail || {}));
-    window.addEventListener('bean:signup-activity', () => sendSignupActivityToVoice());
+    window.addEventListener('bean:post-signup-chime', (event) => {
+        if (!signupOnboardingContext) return;
+        const message = String(event.detail?.message || '').trim() || 'Alright, your account is created. Now I can give you a quick tour of the dashboard, help you get started, or you can skip all of that stuff and just dive in.';
+        root.dataset.postSignup = 'true';
+        pendingFirstMessage = message;
+        setHelp('Tap Bean for voice · volume on · allow mic');
+        if (event.detail?.autoVoice === true && !enabled) enable();
+    });
 
     button.addEventListener('click', () => {
-        if (enabled) disable();
-        else enable();
+        if (enabled) {
+            disable();
+            return;
+        }
+        if (signupOnboardingContext && privateSignupStepIsActive()) {
+            setHelp('Type these quick details. Bean will chime back in.');
+            focusSignupOnboardingInput();
+            return;
+        }
+        enable();
     });
 
     cue?.addEventListener('click', () => {
@@ -505,6 +472,10 @@ function currentSignupOnboardingStep() {
     return { key: stepKey, label: labels[stepKey] || labels.unknown };
 }
 
+function privateSignupStepIsActive() {
+    return ['name', 'themeMode', 'email', 'password'].includes(currentSignupOnboardingStep().key);
+}
+
 function focusSignupOnboardingInput(parameters = {}) {
     const step = currentSignupOnboardingStep();
     const requestedStep = String(parameters.step || parameters.destination || '').trim();
@@ -546,8 +517,8 @@ function showLandingUiAction(action) {
         themes: { selector: '#tour-customization', href: '/#tour-customization', label: 'dashboard customization', offset: 118 },
         features: { selector: '#features', href: '/#features', label: 'features', offset: 118 },
         pricing: { selector: '#plans', scrollSelector: '#plans .plans', href: '/#plans', label: 'pricing', offset: 24 },
-        signup: { href: '/register?from=bean', label: 'signup', navigateDelay: 0 },
-        onboarding: { href: '/register?from=bean', label: 'onboarding', navigateDelay: 0 },
+        signup: { href: '/register?from=bean', label: 'signup', navigateDelay: 2200 },
+        onboarding: { href: '/register?from=bean', label: 'onboarding', navigateDelay: 2200 },
     };
     const key = String(action || '').toLowerCase().trim().replace(/[\s-]+/g, '_');
     const target = targets[key];
@@ -555,7 +526,9 @@ function showLandingUiAction(action) {
 
     const section = target.selector ? document.querySelector(target.selector) : null;
     if (!section) {
-        if (target.href && target.navigateDelay !== undefined) window.location.href = target.href;
+        if (target.href && target.navigateDelay !== undefined) {
+            window.setTimeout(() => { window.location.href = target.href; }, target.navigateDelay);
+        }
         return null;
     }
     const scrollTarget = target.scrollSelector ? (document.querySelector(target.scrollSelector) || section) : section;

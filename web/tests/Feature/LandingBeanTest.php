@@ -251,7 +251,7 @@ class LandingBeanTest extends TestCase
             $this->assertStringContainsString('keep it to exactly three short stops', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('make it sound conversational instead of scripted', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not repeat the same question twice', File::get($home.'/skills/heybean-guide/SKILL.md'));
-            $this->assertStringContainsString('Great — let’s get you started', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString("Ok, i'll just get some quick info from you and show you around", File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not say handoff, transfer, another Bean, or explain implementation', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringNotContainsString('walk through features or pricing', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringNotContainsString('hard-coded Bean-guided onboarding can take over', File::get($home.'/skills/heybean-guide/SKILL.md'));

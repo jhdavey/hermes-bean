@@ -32,7 +32,7 @@
                 <span class="public-bean-icon"><img src="{{ asset('images/bean-logo.png') }}" alt="Bean"></span>
                 <span class="public-bean-status" data-public-bean-status aria-live="polite">Tap to talk</span>
             </button>
-            <span class="public-bean-help" data-public-bean-help>Tap Bean for voice · volume on · allow mic</span>
+            <span class="public-bean-help" data-public-bean-help>Type these quick details. Bean will chime back in.</span>
             <span class="public-bean-turnstile" data-public-bean-turnstile hidden></span>
         </div>
         @vite('resources/js/publicBean.js')
