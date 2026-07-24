@@ -28,13 +28,18 @@ function mountTourImageZoom() {
 }
 
 function mountLandingBeanScrollState(root) {
-    const compactScrollThresholdPx = 4;
+    const heroTopPx = parseFloat(window.getComputedStyle(root).top || '0') || 0;
+    const dockedTopPx = () => (window.matchMedia?.('(max-width: 620px)')?.matches ? 10 : 14);
     let ticking = false;
     const setScrollState = () => {
         ticking = false;
-        const compact = window.scrollY > compactScrollThresholdPx;
-        root.dataset.landingScroll = compact ? 'compact' : 'hero';
-        document.body?.classList.toggle('public-bean-landing-compact', compact);
+        const dockedTop = dockedTopPx();
+        const travelTop = Math.max(dockedTop, heroTopPx - window.scrollY);
+        const docked = window.scrollY > 0 && travelTop <= dockedTop + 0.5;
+        const travelling = window.scrollY > 0 && !docked;
+        root.style.setProperty('--public-bean-scroll-top', `${travelTop.toFixed(2)}px`);
+        root.dataset.landingScroll = docked ? 'compact' : (travelling ? 'travel' : 'hero');
+        document.body?.classList.toggle('public-bean-landing-compact', docked);
     };
     const requestScrollState = () => {
         if (ticking) return;

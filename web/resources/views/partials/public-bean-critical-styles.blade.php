@@ -27,16 +27,16 @@
     .public-bean-presence-hero,
     .public-bean-presence-signup {
         position: fixed;
-        top: var(--public-bean-handoff-top, var(--public-bean-shell-top));
+        top: var(--public-bean-scroll-top, var(--public-bean-handoff-top, var(--public-bean-shell-top)));
         left: var(--public-bean-handoff-left, var(--public-bean-shell-left));
         z-index: 86;
         width: max-content;
         max-width: min(260px, calc(100vw - 48px));
         transform: translateX(-50%);
-        transition: top .24s ease, left .24s ease, transform .24s ease, max-width .24s ease;
+        transition: left .24s ease, transform .24s ease, max-width .24s ease;
     }
 
-    body.public-bean-landing-compact::before {
+    body:has(.public-bean-presence-hero)::before {
         content: "";
         position: fixed;
         top: 0;
@@ -47,10 +47,15 @@
         pointer-events: none;
         background: linear-gradient(180deg, #fff 0%, rgba(255, 255, 255, .995) 70%, rgba(255, 255, 255, .94) 86%, rgba(255, 255, 255, 0) 100%);
         box-shadow: 0 18px 34px rgba(255, 255, 255, .92);
+        opacity: 0;
+        transition: opacity .24s ease;
+    }
+
+    body.public-bean-landing-compact::before {
+        opacity: 1;
     }
 
     .public-bean-presence-hero[data-landing-scroll="compact"] {
-        top: calc(env(safe-area-inset-top, 0px) + 14px);
         left: 50%;
         max-width: min(180px, calc(100vw - 40px));
     }
@@ -167,12 +172,11 @@
             max-height: 60px;
         }
 
-        body.public-bean-landing-compact::before {
+        body:has(.public-bean-presence-hero)::before {
             height: calc(env(safe-area-inset-top, 0px) + 190px);
         }
 
         .public-bean-presence-hero[data-landing-scroll="compact"] {
-            top: calc(env(safe-area-inset-top, 0px) + 10px);
             max-width: min(160px, calc(100vw - 32px));
         }
 

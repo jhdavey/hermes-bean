@@ -264,6 +264,8 @@ class LandingBeanTest extends TestCase
             $this->assertStringContainsString('busy professionals and parents', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not position HeyBean as a general-purpose chatbot', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('I can give you a quick tour or answer questions', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('Do not add a `BEAN_UI` marker for this hearing-check confirmation', File::get($home.'/skills/heybean-guide/SKILL.md'));
+            $this->assertStringContainsString('Do not add a `BEAN_UI` marker for greetings, hearing checks, acknowledgements, filler', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not ask about their use case unless they explicitly ask for a recommendation.', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Do not pivot to signup unless they explicitly ask how to try or start.', File::get($home.'/skills/heybean-guide/SKILL.md'));
             $this->assertStringContainsString('Help the visitor understand Bean quickly', File::get($home.'/skills/heybean-guide/SKILL.md'));
