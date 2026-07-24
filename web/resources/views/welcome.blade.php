@@ -25,17 +25,18 @@
         .tour-feature-stack{display:grid;gap:78px}.tour-section-head{max-width:760px;margin:0 auto 4px;text-align:center}.tour-section-head h2{margin:8px 0 0;font-size:clamp(32px,4vw,48px);line-height:1.08;letter-spacing:-.025em}.tour-section-head p{margin:14px auto 0;max-width:680px;color:var(--pb-muted);font-size:17px;line-height:1.65}.tour-feature-row{scroll-margin-top:130px}.tour-step-kicker{display:inline-flex;margin:0 0 12px;padding:7px 11px;border-radius:999px;background:rgba(123,201,140,.18);color:var(--pb-green-dark);font-size:12px;font-weight:850;letter-spacing:.08em;text-transform:uppercase}.tour-screenshot-card{position:relative;overflow:hidden;transition:transform .22s ease,box-shadow .22s ease,border-color .22s ease;cursor:zoom-in}.tour-screenshot-card:after{content:"Tap tour step to zoom";position:absolute;right:14px;bottom:14px;padding:7px 10px;border-radius:999px;background:rgba(23,58,40,.86);color:#fff;font-size:12px;font-weight:800;opacity:.86}.tour-screenshot{transition:transform .24s ease;transform-origin:center top}.tour-screenshot.portrait{max-height:620px;object-fit:cover;object-position:top center}.tour-screenshot-card.wide .tour-screenshot{object-fit:cover}.tour-feature-row.public-bean-guided-highlight .tour-screenshot-card,.tour-feature-row:focus-within .tour-screenshot-card,.tour-feature-row:hover .tour-screenshot-card{transform:translateY(-4px) scale(1.018);box-shadow:0 24px 55px rgba(23,58,40,.16);border-color:rgba(82,168,105,.45)}.tour-feature-row.public-bean-guided-highlight .tour-screenshot,.tour-feature-row:focus-within .tour-screenshot,.tour-feature-row:hover .tour-screenshot{transform:scale(1.045)}.tour-image-zoom{position:fixed;inset:0;z-index:140;display:flex;align-items:center;justify-content:center;padding:40px;background:rgba(13,23,18,.78);backdrop-filter:blur(10px)}.tour-image-zoom img{display:block;max-width:min(1120px,92vw);max-height:86vh;border-radius:28px;border:1px solid rgba(255,255,255,.32);box-shadow:0 28px 80px rgba(0,0,0,.42);object-fit:contain;background:#fff}.tour-image-zoom-close{position:absolute;top:22px;right:24px;width:46px;height:46px;border:1px solid rgba(255,255,255,.38);border-radius:999px;background:rgba(255,255,255,.16);color:#fff;font-size:32px;line-height:1;cursor:pointer}.tour-image-zoom-close:focus-visible{outline:3px solid var(--pb-green);outline-offset:3px}@media(max-width:920px){.tour-feature-stack{gap:56px}.tour-screenshot.portrait{max-height:540px}.tour-screenshot-card:after{content:"";display:none}}@media(max-width:620px){.tour-image-zoom{padding:18px}.tour-image-zoom img{max-width:96vw;max-height:82vh;border-radius:20px}.tour-image-zoom-close{top:12px;right:12px}}
     </style>
 </head>
-<body>
+<body class="public-landing-body" data-public-landing-page>
     @include('partials.public-beta-banner')
     @include('partials.public-nav')
+    @include('partials.public-bean-presence', [
+        'class' => 'public-bean-presence-hero',
+        'status' => 'Tap to wake up',
+        'help' => 'Volume on · allow mic',
+        'ariaLabel' => 'Wake up Bean',
+    ])
 
+    <div class="public-landing-content" data-public-landing-content>
     <main class="wrap hero">
-        @include('partials.public-bean-presence', [
-            'class' => 'public-bean-presence-hero',
-            'status' => 'Tap to wake up',
-            'help' => 'Volume on · allow mic',
-            'ariaLabel' => 'Wake up Bean',
-        ])
         <div class="hero-icons" aria-label="HeyBean tools">
             <span class="hero-icon" aria-label="Calendar">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="3"/></svg>
@@ -238,6 +239,26 @@
     </section>
 
     <footer class="wrap footer"><span>© {{ date('Y') }} HeyBean. AI executive assistance for real life.</span><span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Use</a> · <a href="/support">Support</a> · <a href="/#plans">Pricing</a> · <a href="/login">Log In</a></span></footer>
+    </div>
+
+    <section class="public-landing-signup-flow" data-landing-signup-flow hidden aria-hidden="true" aria-label="HeyBean signup">
+        <div
+            id="heybean-web-app"
+            data-logo="{{ asset('images/bean-logo.png') }}"
+            data-auth-mode="register"
+            data-from-landing-bean="true"
+            data-signup-source="landing_inline"
+            data-selected-plan=""
+            data-selected-billing-interval="monthly"
+        >
+            <div class="hb-loading-screen">
+                <div class="hb-spinner" aria-hidden="true"></div>
+                <p>Loading HeyBean…</p>
+            </div>
+        </div>
+    </section>
+
     @include('partials.public-pricing-script')
+    @vite('resources/js/landingSignup.js')
 </body>
 </html>

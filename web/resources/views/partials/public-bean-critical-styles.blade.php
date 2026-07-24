@@ -60,8 +60,26 @@
         max-width: min(180px, calc(100vw - 40px));
     }
 
-    .public-bean-presence-hero + .hero-icons {
+    body:has(.public-bean-presence-hero) .hero .hero-icons {
         margin-top: 137px;
+    }
+
+
+    .public-landing-content {
+        opacity: 1;
+        transform: translateY(0);
+        transition: opacity .36s ease, transform .42s cubic-bezier(.2, .8, .2, 1), filter .36s ease;
+    }
+
+    .public-landing-signup-flow[hidden] {
+        display: none;
+    }
+
+    body.public-signup-active .public-landing-content {
+        opacity: 0;
+        transform: translateY(-18px);
+        filter: blur(6px);
+        pointer-events: none;
     }
 
     .public-bean-control {
@@ -193,7 +211,7 @@
             max-height: 42px;
         }
 
-        .public-bean-presence-hero + .hero-icons {
+        body:has(.public-bean-presence-hero) .hero .hero-icons {
             margin-top: 133px;
         }
 

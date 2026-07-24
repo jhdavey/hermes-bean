@@ -56,7 +56,7 @@ body.public-bean-landing-compact::before {
     max-width: min(180px, calc(100vw - 40px));
 }
 
-.public-bean-presence-hero + .hero-icons {
+body:has(.public-bean-presence-hero) .hero .hero-icons {
     margin-top: 137px;
 }
 
@@ -227,6 +227,80 @@ body.public-bean-landing-compact::before {
     display: none;
 }
 
+
+.public-landing-content {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity .36s ease, transform .42s cubic-bezier(.2, .8, .2, 1), filter .36s ease;
+}
+
+.public-landing-signup-flow {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    min-height: 100vh;
+    overflow: auto;
+    background: #fff;
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity .42s ease, transform .46s cubic-bezier(.2, .8, .2, 1);
+}
+
+.public-landing-signup-flow[hidden] {
+    display: none;
+}
+
+body.public-signup-transitioning,
+body.public-signup-active {
+    overflow: hidden;
+}
+
+body.public-signup-active .public-landing-content {
+    opacity: 0;
+    transform: translateY(-18px);
+    filter: blur(6px);
+    pointer-events: none;
+}
+
+body.public-signup-active .public-landing-signup-flow {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+body.public-signup-active.public-bean-landing-compact::before {
+    opacity: 0;
+}
+
+body.public-signup-active .public-bean-presence-hero,
+body.public-signup-active .public-bean-presence-signup {
+    top: var(--public-bean-shell-top);
+    left: 50%;
+    width: 112px;
+    max-width: min(260px, calc(100vw - 48px));
+}
+
+body.public-signup-active .public-bean-presence-signup .public-bean-status,
+body.public-signup-active .public-bean-presence-hero .public-bean-status {
+    display: none;
+}
+
+body.public-signup-active .public-bean-presence-hero .public-bean-help,
+body.public-signup-active .public-bean-presence-signup .public-bean-help {
+    display: none;
+}
+
+body.public-signup-active .hb-guided-immersive-shell,
+body.public-signup-active .hb-guided-zero-chrome-shell {
+    padding-top: clamp(330px, 44vh, 372px);
+}
+
+@media (max-width: 640px) {
+    body.public-signup-active .hb-guided-immersive-shell,
+    body.public-signup-active .hb-guided-zero-chrome-shell {
+        padding: clamp(330px, 44vh, 372px) 16px 88px;
+    }
+}
+
 .public-bean-turnstile {
     position: absolute;
     top: calc(100% + 8px);
@@ -280,7 +354,7 @@ body.public-bean-landing-compact::before {
         max-width: min(160px, calc(100vw - 32px));
     }
 
-    .public-bean-presence-hero + .hero-icons {
+    body:has(.public-bean-presence-hero) .hero .hero-icons {
         margin-top: 133px;
     }
 

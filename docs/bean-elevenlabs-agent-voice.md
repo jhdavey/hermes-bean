@@ -28,7 +28,7 @@ Public landing / pricing / legal page
   -> after the visitor confirms yes, Bean gives the normal intro and continues
   -> Agent answers directly with GPT-4.1 Nano and public product/pricing facts
   -> optional action-only client tool: showLandingSection({ destination })
-  -> explicit signup agreement opens /register?from=bean so hard-coded app onboarding continues as Bean and asks for first/last name without repeating “Hi, I’m Bean”
+  -> explicit signup agreement asks the browser to fade the landing page into the embedded Zero Chrome signup flow, updates the URL to /register?from=bean, and keeps the same Bean DOM presence mounted while asking for first/last name without repeating “Hi, I’m Bean”
   -> no authenticated dashboard plugin, account data, private tools, or Hermes turn on the voice hot path
 ```
 
@@ -110,7 +110,7 @@ The landing command creates or updates a separate action-only `showLandingSectio
 
 The landing command also applies provider-side controls: authentication-only conversation tokens, GPT-4.1 Nano without a reasoning layer, a concurrency and daily call cap with bursting disabled, focus and prompt-injection guardrails, no voice recording, and zero-day transcript/audio retention. Laravel independently applies session, IP, global, message, and per-conversation turn limits. Configure both Cloudflare Turnstile keys to require a managed bot challenge before Laravel mints an ElevenLabs token.
 
-The public guide can return only allowlisted browser actions: `command_center`, `calendar_tasks`, `customization`, `features`, `pricing`, `signup`, `onboarding`, and `how_it_works`. Laravel strips fallback `[[BEAN_UI:...]]` markers from spoken answers. The ElevenLabs client-tool destination provides structured voice movement when the landing model calls `showLandingSection`. The browser scrolls to matching public sections; `signup`/`onboarding` are the only conversion actions and navigate directly to `/register?from=bean` so the hard-coded app onboarding can continue as Bean. This is the UI-action boundary for public guided-tour behavior and does not allow arbitrary selectors or URLs.
+The public guide can return only allowlisted browser actions: `command_center`, `calendar_tasks`, `customization`, `features`, `pricing`, `signup`, `onboarding`, and `how_it_works`. Laravel strips fallback `[[BEAN_UI:...]]` markers from spoken answers. The ElevenLabs client-tool destination provides structured voice movement when the landing model calls `showLandingSection`. The browser scrolls to matching public sections; `signup`/`onboarding` are the only conversion actions and start the embedded landing-page signup transition to `/register?from=bean` without a hard page reload. This is the UI-action boundary for public guided-tour behavior and does not allow arbitrary selectors or URLs.
 
 ## Removed legacy voice paths
 

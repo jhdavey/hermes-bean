@@ -16,6 +16,8 @@ const landing = await readFile(new URL('../../resources/views/welcome.blade.php'
 const agentConfig = await readFile(new URL('../../scripts/elevenlabs-landing-agent-configure.mjs', import.meta.url), 'utf8');
 const pricingScriptPartial = await readFile(new URL('../../resources/views/partials/public-pricing-script.blade.php', import.meta.url), 'utf8');
 const publicPricingScript = await readFile(new URL('../../public/js/public-pricing.js', import.meta.url), 'utf8');
+const landingSignup = await readFile(new URL('../../resources/js/landingSignup.js', import.meta.url), 'utf8');
+const viteConfig = await readFile(new URL('../../vite.config.js', import.meta.url), 'utf8');
 
 test('public nav uses Bean brand left, centered nav links, and login on the right', () => {
     assert.match(navigation, /class="brand"/);
@@ -85,6 +87,21 @@ test('home landing Bean is centered in the hero above the feature icons', () => 
     assert.doesNotMatch(landing, /aria-label="Bean"[\s\S]*?images\/bean-logo\.png/);
     assert.doesNotMatch(publicPostbridgeStyles, /hero-icon\.bean/);
 
+    assert.match(landing, /data-public-landing-page/);
+    assert.match(landing, /class="public-landing-content"/);
+    assert.match(landing, /class="public-landing-signup-flow"/);
+    assert.match(landing, /id="heybean-web-app"/);
+    assert.match(landing, /data-auth-mode="register"/);
+    assert.match(landing, /data-from-landing-bean="true"/);
+    assert.match(landing, /resources\/js\/landingSignup\.js/);
+    assert.match(landingSignup, /mountHeyBeanWebApp\(mount\)/);
+    assert.match(viteConfig, /resources\/js\/landingSignup\.js/);
+    assert.match(landingSignup, /a\[href\]/);
+    assert.match(landingSignup, /signupPathPattern/);
+    assert.match(landingSignup, /event\.preventDefault\(\)/);
+    assert.match(landingSignup, /bean:inline-signup-started/);
+    assert.match(landingSignup, /history\.pushState\(\{ inlineSignup: true \}/);
+    assert.match(landingSignup, /public-signup-active/);
     assert.match(landing, /@include\('partials.public-bean-critical-styles'\)/);
     assert.match(appView, /@include\('partials.public-bean-critical-styles'\)/);
     assert.match(criticalStyles, /js\/public-bean-handoff\.js/);
@@ -107,8 +124,13 @@ test('home landing Bean is centered in the hero above the feature icons', () => 
     assert.match(heroPresence, /--public-bean-handoff-top/);
     assert.match(heroPresence, /--public-bean-handoff-left/);
     assert.match(heroPresence, /transform:\s*translateX\(-50%\)/);
-    assert.match(styles, /\.public-bean-presence-hero \+ \.hero-icons \{[\s\S]*?margin-top:\s*137px/);
+    assert.match(styles, /body:has\(\.public-bean-presence-hero\) \.hero \.hero-icons \{[\s\S]*?margin-top:\s*137px/);
     assert.match(styles, /body:has\(\.public-bean-presence-hero\)::before \{[\s\S]*?height:\s*calc\(env\(safe-area-inset-top, 0px\) \+ 154px\)[\s\S]*?opacity:\s*0;[\s\S]*?transition:\s*opacity \.24s ease/);
+    assert.match(styles, /\.public-landing-signup-flow \{[\s\S]*?position:\s*fixed[\s\S]*?opacity:\s*0/);
+    assert.match(styles, /body\.public-signup-active \.public-landing-content \{[\s\S]*?opacity:\s*0[\s\S]*?filter:\s*blur\(6px\)/);
+    assert.match(styles, /body\.public-signup-active \.public-landing-signup-flow \{[\s\S]*?opacity:\s*1/);
+    assert.match(styles, /body\.public-signup-active \.public-bean-presence-hero \.public-bean-help,[\s\S]*?body\.public-signup-active \.public-bean-presence-signup \.public-bean-help \{[\s\S]*?display:\s*none/);
+    assert.match(styles, /body\.public-signup-active \.hb-guided-immersive-shell,[\s\S]*?padding-top:\s*clamp\(330px, 44vh, 372px\)/);
     assert.match(styles, /body\.public-bean-landing-compact::before \{[\s\S]*?opacity:\s*1/);
     const bundledCompactBlock = styles.match(/\.public-bean-presence-hero\[data-landing-scroll="compact"\] \{([\s\S]*?)\n\}/)?.[1] || '';
     assert.match(bundledCompactBlock, /left:\s*50%/);
@@ -143,7 +165,7 @@ test('landing Bean starts voice directly from an explicit tap with a hearing che
     assert.match(source, /You’re in the quick info step/);
     assert.match(agentConfig, /I can give you a quick tour or answer questions/);
     assert.doesNotMatch(agentConfig, /help you start signup whenever you’re ready/);
-    assert.match(source, /firstMessage:\s*pendingFirstMessage \|\| \(signupOnboardingContext \? SIGNUP_WAKE_GREETING : WAKE_GREETING\)/);
+    assert.match(source, /firstMessage:\s*pendingFirstMessage \|\| \(isSignupOnboardingContext\(\) \? SIGNUP_WAKE_GREETING : WAKE_GREETING\)/);
     assert.doesNotMatch(source, /SpeechRecognition|Just say “Hey Bean|createWakeDetector|extractWakeTail|prefetchVoiceSession|restartWakeListening/);
     assert.match(source, /Demo cooldown — try again shortly/);
     assert.doesNotMatch(source, /Demo limit reached/);
@@ -176,7 +198,7 @@ test('register flow keeps one visual Bean while private signup fields stay text-
     assert.doesNotMatch(appView, /Hey! I'm over here!|data-public-bean-cue|public-bean-cue-arrow/);
     assert.match(appView, /resources\/js\/publicBean\.js/);
     assert.match(appView, /Type these quick details\. Bean will chime back in\./);
-    assert.match(source, /publicBeanContext\(root\) === 'signup_onboarding'/);
+    assert.match(source, /const isSignupOnboardingContext = \(\) => publicBeanContext\(root\) === 'signup_onboarding'/);
     assert.match(source, /page_context:\s*publicBeanContext\(root\)/);
     assert.match(source, /bean_public_context:\s*publicBeanContext\(root\)/);
     assert.match(source, /bean_signup_step:\s*currentSignupOnboardingStep\(\)\.key/);
@@ -184,7 +206,7 @@ test('register flow keeps one visual Bean while private signup fields stay text-
     assert.match(source, /function focusSignupOnboardingInput/);
     assert.match(source, /const setHelp = \(text\) =>/);
     assert.match(source, /function privateSignupStepIsActive/);
-    assert.match(source, /signupOnboardingContext && privateSignupStepIsActive\(\)/);
+    assert.match(source, /isSignupOnboardingContext\(\) && privateSignupStepIsActive\(\)/);
     assert.match(source, /Type these quick details\. Bean will chime back in\./);
     assert.doesNotMatch(source, /SIGNUP_PROGRESS_UPDATE:|bean:signup-progress|conversation\.sendUserMessage\(prompt\)|signupProgressPrompt/);
     assert.match(source, /bean:post-signup-chime/);
@@ -326,7 +348,9 @@ test('landing Bean reveals the three-step quick tour plus signup and pricing des
     assert.match(source, /signup:\s*\{ href: '\/register\?from=bean'/);
     assert.match(source, /onboarding:\s*\{ href: '\/register\?from=bean'/);
     assert.match(source, /navigateDelay:\s*2200/);
-    assert.match(source, /navigateWithBeanHandoff\(target\.href\)/);
+    assert.match(source, /requestInlineSignupOrNavigate\(target\.href\)/);
+    assert.match(source, /bean:request-inline-signup/);
+    assert.match(source, /new CustomEvent\('bean:request-inline-signup'/);
     assert.match(source, /mountTourImageZoom\(\)/);
     assert.match(source, /closest\?\.\('\.tour-screenshot-card'\)/);
     assert.match(source, /className = 'tour-image-zoom'/);

@@ -80,9 +80,9 @@ function mountPublicBean(root) {
     const status = root.querySelector('[data-public-bean-status]');
     const help = root.querySelector('[data-public-bean-help]');
     if (!button || !status) return;
-    const signupOnboardingContext = publicBeanContext(root) === 'signup_onboarding';
-    const beanLabel = signupOnboardingContext ? 'Bean signup guide' : 'landing page Bean';
-    if (!signupOnboardingContext && root.classList.contains('public-bean-presence-hero')) {
+    const isSignupOnboardingContext = () => publicBeanContext(root) === 'signup_onboarding';
+    const beanLabel = () => isSignupOnboardingContext() ? 'Bean signup guide' : 'landing page Bean';
+    if (!isSignupOnboardingContext() && root.classList.contains('public-bean-presence-hero')) {
         mountLandingBeanScrollState(root);
     }
 
@@ -111,7 +111,7 @@ function mountPublicBean(root) {
         status.textContent = text;
         status.title = text;
         button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
-        button.setAttribute('aria-label', enabled ? `Mute ${beanLabel}` : `Talk with ${beanLabel}`);
+        button.setAttribute('aria-label', enabled ? `Mute ${beanLabel()}` : `Talk with ${beanLabel()}`);
     };
 
     const setHelp = (text) => {
@@ -184,7 +184,7 @@ function mountPublicBean(root) {
         enabled = true;
         landingWakeDetectedAtMs = Date.now();
         landingWakeToFirstSpeechMs = null;
-        setStatus('starting', signupOnboardingContext ? 'Volume on. Allow mic.' : 'Turn volume on. Allow mic.');
+        setStatus('starting', isSignupOnboardingContext() ? 'Volume on. Allow mic.' : 'Turn volume on. Allow mic.');
         let micAllowed = false;
         try {
             if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone is unavailable.');
@@ -298,7 +298,7 @@ function mountPublicBean(root) {
             userId: session.landing_session_id ? `bean-visitor-${session.landing_session_id}` : undefined,
             overrides: {
                 agent: {
-                    firstMessage: pendingFirstMessage || (signupOnboardingContext ? SIGNUP_WAKE_GREETING : WAKE_GREETING),
+                    firstMessage: pendingFirstMessage || (isSignupOnboardingContext() ? SIGNUP_WAKE_GREETING : WAKE_GREETING),
                 },
             },
             dynamicVariables: {
@@ -311,7 +311,7 @@ function mountPublicBean(root) {
             clientTools: {
                 showLandingSection: async (parameters = {}) => {
                     const destination = parameters.destination || parameters.section || parameters.action;
-                    if (signupOnboardingContext && ['signup', 'onboarding', 'register', 'input'].includes(String(destination || '').toLowerCase())) {
+                    if (isSignupOnboardingContext() && ['signup', 'onboarding', 'register', 'input'].includes(String(destination || '').toLowerCase())) {
                         return focusSignupOnboardingInput(parameters);
                     }
                     lastActivityAt = Date.now();
@@ -428,7 +428,7 @@ function mountPublicBean(root) {
     }
 
     window.addEventListener('bean:post-signup-chime', (event) => {
-        if (!signupOnboardingContext) return;
+        if (!isSignupOnboardingContext()) return;
         const message = String(event.detail?.message || '').trim() || 'Alright, your account is created. Now I can give you a quick tour of the dashboard, help you get started, or you can skip all of that stuff and just dive in.';
         root.dataset.postSignup = 'true';
         pendingFirstMessage = message;
@@ -441,7 +441,7 @@ function mountPublicBean(root) {
             disable();
             return;
         }
-        if (signupOnboardingContext && privateSignupStepIsActive()) {
+        if (isSignupOnboardingContext() && privateSignupStepIsActive()) {
             setHelp('Type these quick details. Bean will chime back in.');
             focusSignupOnboardingInput();
             return;
@@ -449,6 +449,23 @@ function mountPublicBean(root) {
         enable();
     });
 
+
+    window.addEventListener('bean:inline-signup-started', () => {
+        root.dataset.publicBeanContext = 'signup_onboarding';
+        root.classList.remove('public-bean-presence-hero');
+        root.classList.add('public-bean-presence-signup');
+        root.style.removeProperty('--public-bean-scroll-top');
+        delete root.dataset.landingScroll;
+        document.body?.classList.remove('public-bean-landing-compact');
+        setHelp('Type these quick details. Bean will chime back in.');
+        if (enabled || voiceActive || starting) {
+            lifecycleRevision += 1;
+            enabled = false;
+            starting = false;
+            setStatus('disabled', 'Tap to wake up');
+            stopVoiceConversation('inline_signup_start');
+        }
+    });
 
     window.addEventListener('pagehide', () => {
         stopVoiceConversation('pagehide');
@@ -544,7 +561,7 @@ function showLandingUiAction(action) {
         dashboard: { selector: '#tour-customization', href: '/#tour-customization', label: 'dashboard customization', offset: 118 },
         themes: { selector: '#tour-customization', href: '/#tour-customization', label: 'dashboard customization', offset: 118 },
         features: { selector: '#features', href: '/#features', label: 'features', offset: 118 },
-        pricing: { selector: '#plans', scrollSelector: '#plans .plans', href: '/#plans', label: 'pricing', offset: 24 },
+        pricing: { selector: '#plans', scrollSelector: '#plans', href: '/#plans', label: 'pricing', offset: 0 },
         signup: { href: '/register?from=bean', label: 'signup', navigateDelay: 2200 },
         onboarding: { href: '/register?from=bean', label: 'onboarding', navigateDelay: 2200 },
     };
@@ -555,7 +572,7 @@ function showLandingUiAction(action) {
     const section = target.selector ? document.querySelector(target.selector) : null;
     if (!section) {
         if (target.href && target.navigateDelay !== undefined) {
-            window.setTimeout(() => navigateWithBeanHandoff(target.href), target.navigateDelay);
+            window.setTimeout(() => requestInlineSignupOrNavigate(target.href), target.navigateDelay);
         }
         return null;
     }
@@ -578,7 +595,7 @@ function showLandingUiAction(action) {
 
     if (target.navigateDelay !== undefined && target.href) {
         window.setTimeout(() => {
-            navigateWithBeanHandoff(target.href);
+            requestInlineSignupOrNavigate(target.href);
         }, target.navigateDelay);
     }
 
@@ -602,6 +619,16 @@ function captureBeanHandoffState() {
 function navigateWithBeanHandoff(href) {
     captureBeanHandoffState();
     window.location.href = href;
+}
+
+function requestInlineSignupOrNavigate(href) {
+    const event = new CustomEvent('bean:request-inline-signup', {
+        cancelable: true,
+        detail: { href, source: 'bean' },
+    });
+    const handled = !window.dispatchEvent(event);
+    if (handled) return;
+    navigateWithBeanHandoff(href);
 }
 
 async function getTurnstileToken(root) {

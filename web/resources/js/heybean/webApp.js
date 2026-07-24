@@ -49,7 +49,7 @@ export function mountHeyBeanWebApp(mount) {
     const logoUrl = mount.dataset.logo || '/images/bean-logo.png';
     const initialMode = mount.dataset.authMode || 'login';
     const fromLandingBean = mount.dataset.fromLandingBean === 'true';
-    const signupSource = normalizedSignupSource(mount.dataset.signupSource || (fromLandingBean ? 'bean' : 'direct_register'));
+    let signupSource = normalizedSignupSource(mount.dataset.signupSource || (fromLandingBean ? 'bean' : 'direct_register'));
     const initialSelectedPlan = ['base', 'premium', 'pro'].includes(mount.dataset.selectedPlan) ? mount.dataset.selectedPlan : '';
     const initialBillingInterval = mount.dataset.selectedBillingInterval === 'yearly' ? 'yearly' : 'monthly';
     const initialBillingStatus = new URLSearchParams(window.location.search).get('billing') || '';
@@ -289,6 +289,7 @@ export function mountHeyBeanWebApp(mount) {
     let beanEventStatusStartedAt = Date.now();
 
     boot();
+    bindInlineLandingSignupStart();
     bindResponsiveCalendar();
     bindCurrentTimeTicker();
     bindDashboardLiveUpdateFallbacks();
@@ -308,6 +309,30 @@ export function mountHeyBeanWebApp(mount) {
             if (state.phase === 'guidedOnboarding' || state.phase === 'plainSignup') resetGuidedSignupState();
             render();
         }
+    }
+
+
+    function bindInlineLandingSignupStart() {
+        window.addEventListener('bean:inline-signup-started', (event) => {
+            const detail = event.detail || {};
+            const plan = ['base', 'premium', 'pro'].includes(detail.plan) ? detail.plan : '';
+            const billingInterval = detail.billingInterval === 'yearly' ? 'yearly' : 'monthly';
+            signupSource = normalizedSignupSource(detail.source || 'landing_inline');
+            state.authMode = 'register';
+            state.phase = 'guidedOnboarding';
+            state.selectedPlan = plan;
+            state.selectedBillingInterval = billingInterval;
+            state.billingPlanInterval = billingInterval;
+            state.subscriptionCheckoutStatus = '';
+            state.billingCheckoutStatus = '';
+            state.error = '';
+            state.notice = '';
+            resetGuidedSignupState({
+                email: detail.email || '',
+                themeMode: state.guidedSignupThemeMode || 'light',
+            });
+            render();
+        });
     }
 
     function bindNoteAutosaveTeardown() {

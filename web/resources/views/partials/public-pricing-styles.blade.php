@@ -1,7 +1,12 @@
 <style>
     .public-pricing {
-        scroll-margin-top: 48px;
+        scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 190px);
+        padding-top: clamp(144px, 18vh, 184px);
     }
+    .pricing-page .public-pricing {
+        padding-top: clamp(72px, 10vh, 104px);
+    }
+
     .public-pricing .segmented {
         overflow: visible;
     }
