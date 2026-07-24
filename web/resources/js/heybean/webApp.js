@@ -9,6 +9,7 @@ import {
     themeModes,
     themeModesByKey,
 } from './config.js';
+import { centeredMonthGridDays } from './calendarGrid.js';
 
 export function reconcileAllDayEndDateInput(startValue, endValue) {
     const start = String(startValue || '').trim();
@@ -3802,24 +3803,20 @@ export function mountHeyBeanWebApp(mount) {
     }
 
     function monthGridMarkup(selected) {
-        const first = new Date(selected.getFullYear(), selected.getMonth(), 1);
-        const leading = first.getDay();
-        const daysInMonth = new Date(selected.getFullYear(), selected.getMonth() + 1, 0).getDate();
-        const totalCells = Math.ceil((leading + daysInMonth) / 7) * 7;
-        const weekCount = totalCells / 7;
+        const days = centeredMonthGridDays(selected);
+        const centerIndex = Math.floor(days.length / 2);
+        const first = days[0];
+        const weekCount = days.length / 7;
         return `
             <div class="hb-month-view">
-                <div class="hb-month-grid" style="--hb-month-week-count:${weekCount}">
-                    ${Array.from({ length: 7 }, (_, index) => `<div class="hb-month-weekday">${weekdayShort(new Date(2026, 1, index + 1))}</div>`).join('')}
-                    ${Array.from({ length: totalCells }, (_, index) => {
-                        const day = addDays(first, index - leading);
-                        return monthCellMarkup(day, sameMonth(day, first));
-                    }).join('')}
+                <div class="hb-month-grid" style="--hb-month-week-count:${weekCount}" data-month-grid-center="${dateOnly(days[centerIndex])}" aria-label="${escapeAttr(`${calendarRangeLabel(days)} centered calendar grid`)}">
+                    ${Array.from({ length: 7 }, (_, index) => `<div class="hb-month-weekday">${weekdayShort(addDays(first, index))}</div>`).join('')}
+                    ${days.map((day, index) => monthCellMarkup(day, sameMonth(day, selected), index === centerIndex)).join('')}
                 </div>
             </div>`;
     }
 
-    function monthCellMarkup(day, isCurrentMonth = true) {
+    function monthCellMarkup(day, isCurrentMonth = true, isCentered = false) {
         const events = eventsForDay(day);
         const allDayEvents = events.filter((event) => eventAllDay(event));
         const multiDayEvents = events.filter((event) => eventMultiDayTimed(event));
@@ -3831,7 +3828,7 @@ export function mountHeyBeanWebApp(mount) {
             isCurrentMonth ? '' : 'hb-month-cell-adjacent',
         ].filter(Boolean).join(' ');
         return `
-            <div class="${cellClasses}">
+            <div class="${cellClasses}" ${isCentered ? 'data-month-center-day' : ''}>
                 <div class="hb-month-cell-head">
                     <button class="hb-month-date" type="button" data-select-day="${dateOnly(day)}" aria-label="${escapeAttr(dayLabel(day))}">
                         <strong>${escapeHtml(isCurrentMonth ? String(day.getDate()) : monthDayLabel(day))}</strong>

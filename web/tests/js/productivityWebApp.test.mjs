@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { centeredMonthCellCount, centeredMonthGridDays } from '../../resources/js/heybean/calendarGrid.js';
 
 const source = await readFile(new URL('../../resources/js/heybean/webApp.js', import.meta.url), 'utf8');
 const noteEditorSource = await readFile(new URL('../../resources/js/heybean/noteMarkdownEditor.js', import.meta.url), 'utf8');
@@ -168,6 +169,24 @@ test('month event pills fit their text without exceeding the date cell', () => {
     assert.match(calendarSource, /\.hb-month-event\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;[^}]*justify-self:\s*start;/s);
     assert.match(calendarSource, /\.hb-month-all-day-event\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;[^}]*justify-self:\s*start;/s);
     assert.match(calendarSource, /\.hb-month-event-title\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s);
+});
+
+test('month grid uses a five-week rolling window with its anchor in the exact center', () => {
+    const anchor = new Date(2026, 6, 24, 9, 30);
+    const days = centeredMonthGridDays(anchor);
+    const centerIndex = Math.floor(days.length / 2);
+
+    assert.equal(centeredMonthCellCount, 35);
+    assert.equal(days.length, 35);
+    assert.equal(days[centerIndex].getFullYear(), 2026);
+    assert.equal(days[centerIndex].getMonth(), 6);
+    assert.equal(days[centerIndex].getDate(), 24);
+    assert.equal(days[0].getDate(), 7);
+    assert.equal(days.at(-1).getMonth(), 7);
+    assert.equal(days.at(-1).getDate(), 10);
+    assert.match(source, /data-month-grid-center="\$\{dateOnly\(days\[centerIndex\]\)\}"/);
+    assert.match(source, /monthCellMarkup\(day, sameMonth\(day, selected\), index === centerIndex\)/);
+    assert.doesNotMatch(source, /const leading = first\.getDay\(\)/);
 });
 
 test('all-day month events use date-only exclusive end bounds', () => {
